@@ -7,6 +7,8 @@ from pathlib import Path
 import struct
 import time
 
+_controller_context = {**os.environ, **globals().get("_controller_context", {})}
+
 kernel = ctypes.WinDLL("kernel32.dll", use_last_error=True)
 kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel.OpenProcess.restype = wintypes.HANDLE
@@ -68,9 +70,13 @@ def process_fingerprint(pid):
 
 def terminate_cli(pid, force=False):
     fingerprint = process_fingerprint(pid)
-    expected = os.environ.get("CAGE_CLI_BINARY")
+    expected = _controller_context.get("CAGE_CLI_BINARY")
     own = wintypes.DWORD()
-    if not fingerprint or not expected or not kernel.ProcessIdToSessionId(os.getpid(), ctypes.byref(own)) or fingerprint[2] != own.value or fingerprint[1] != os.path.normcase(str(Path(expected).resolve())):
+    try:
+        same_binary = bool(fingerprint and expected and os.path.samefile(fingerprint[1], expected))
+    except OSError:
+        same_binary = False
+    if not same_binary or not kernel.ProcessIdToSessionId(os.getpid(), ctypes.byref(own)) or fingerprint[2] != own.value:
         raise ValueError("原生 Claude 进程身份不匹配，未停止其他程序")
     handle = kernel.OpenProcess(0x1001, False, int(pid))
     if not handle:
@@ -116,7 +122,7 @@ def launch_cli(args, request, connection, state_file):
     # Keep the ConPTY owner alive; state owns the actual native Claude PID.
     import runpy
     import subprocess
-    account = runpy.run_path(os.environ["CAGE_CLI_ACCOUNT_HELPER"])
+    account = runpy.run_path(_controller_context["CAGE_CLI_ACCOUNT_HELPER"])
     base = account["profile"](request.get("account") or "default")
     env = account["cli_environment"](base)
     account["shared_profile_resources"](base)
@@ -125,7 +131,7 @@ def launch_cli(args, request, connection, state_file):
         reading = account["identity"](args[0], env, Path.cwd(), account["settings_flags"](args[1:]))
         if account["subject"](reading) != request["subject"]:
             raise ValueError("项目与所选 Claude 账号身份不一致")
-    child = CliProcess(args, env)
+    child = CliProcess([account['_runtime']['path'](args[0]), *args[1:]], env)
     with state_file(connection) as state:
         state["pid"] = child.pid
     try:
@@ -135,13 +141,13 @@ def launch_cli(args, request, connection, state_file):
         with state_file(connection) as state:
             state["closed"] = True
             state["busy"] = False
-    shell = os.environ.get("CAGE_CLI_SHELL")
+    shell = _controller_context.get("CAGE_CLI_SHELL")
     if not shell:
         return code
     # As on other guests, exiting Claude keeps the existing terminal usable.
     # The fixed function scopes later invocations to the same verified account.
     setup = 'function global:claude { & $env:CAGE_CLI_PYTHON -X utf8 -I $env:CAGE_CLI_ACCOUNT_HELPER run $env:CAGE_CLAUDE_ACCOUNT_ID @args }'
-    return subprocess.call([shell, "-NoLogo", "-NoExit", "-Command", setup], env=env)
+    return subprocess.call([shell, "-NoLogo", "-NoExit", "-Command", setup], env={**os.environ, **env})
 
 
 class CliProcess:
@@ -212,8 +218,8 @@ def launch_ccs_parent(request, channel):
     root = channel['ROOT'] / connection
     root.mkdir(parents=True, exist_ok=True)
     context = {'id':connection, 'session_id':sid, 'profile':profile, 'folder':str(root),
-               'binary':os.environ['CAGE_CLI_BINARY'], 'python':sys.executable,
-               'helper':str(Path(channel['__file__']).resolve()), 'main':os.environ['CAGE_CCS_MAIN'],
+               'binary':_controller_context['CAGE_CLI_BINARY'], 'python':sys.executable,
+               'helper':str(Path(channel['__file__']).resolve()), 'main':_controller_context['CAGE_CCS_MAIN'],
                'resume':bool(request.get('resume'))}
     channel['save'](root / 'ccs-launch.json', context)
     env = dict(os.environ, CAGE_CCS_LAUNCH_FILE=str(root / 'ccs-launch.json'))
@@ -241,6 +247,7 @@ def launch_ccs_parent(request, channel):
 
 
 def launch_ccs_live(filename, channel):
+    runtime = channel["client_runtime"]()
     import json
     import runpy
     import subprocess
@@ -263,9 +270,9 @@ def launch_ccs_live(filename, channel):
     original = metadata['actual_args']
     if not isinstance(original, list) or any(not isinstance(arg, str) for arg in original):
         raise ValueError('CCS 参数无效')
-    binary = os.environ['CAGE_CLI_BINARY']
+    binary = _controller_context['CAGE_CLI_BINARY']
     args = original.copy()
-    identity = runpy.run_path(os.environ['CAGE_CLI_IDENTITY_HELPER'])
+    identity = runpy.run_path(_controller_context['CAGE_CLI_IDENTITY_HELPER'])
     snapshot = tempfile.NamedTemporaryFile(dir=folder, suffix='.settings.json', delete=False)
     verified = False
     notice = '此 CCS 配置尚未通过共享身份核验，终端仍可使用。'
@@ -287,15 +294,17 @@ def launch_ccs_live(filename, channel):
             snapshot.seek(0); settings = json.load(snapshot)
             hooks = settings.setdefault('hooks', {})
             if not isinstance(hooks, dict): raise identity['Unverified']()
-            handler = {'type':'command', 'command':sys.executable, 'args':['-X','utf8','-I',str(Path(channel['__file__']).resolve()),'hook',connection], 'timeout':5}
+            argv = runtime['command'](channel['__file__'], ['hook', connection])
+            handler = {'type':'command', 'command':argv[0], 'args':argv[1:], 'timeout':5}
             for event in ('SessionStart','UserPromptSubmit','MessageDisplay','PreToolUse','PostToolUse','PostToolUseFailure','Stop','StopFailure','SessionEnd'):
                 entries = hooks.setdefault(event, [])
                 if not isinstance(entries, list): raise identity['Unverified']()
                 entries.append({'hooks':[handler.copy()]})
             snapshot.seek(0); snapshot.truncate(); snapshot.write(json.dumps(settings,ensure_ascii=False).encode('utf-8'))
             snapshot.flush()
-            channel['save'](folder/'mcp.json', {'mcpServers':{'cage':{'command':sys.executable,'args':['-X','utf8','-I',str(Path(channel['__file__']).resolve()),'serve',connection]}}})
-            args += ['--mcp-config',str(folder/'mcp.json'),'--dangerously-load-development-channels','server:cage']
+            argv = runtime['command'](channel['__file__'], ['serve', connection])
+            channel['save'](folder/'mcp.json', {'mcpServers':{connection:{'command':argv[0],'args':argv[1:]}}})
+            args += ['--mcp-config',runtime['path'](folder/'mcp.json'),'--dangerously-load-development-channels','server:' + connection]
             disabled = identity['shared_channels_disabled']()
             identity['bind'](sid, context['resume'], material)
             verified = True; notice = ''
@@ -307,7 +316,7 @@ def launch_ccs_live(filename, channel):
             # Unverified identity already prevents channel use. Do not label
             # it as a managed policy that actually disabled Channels.
             args, env, disabled = original, dict(os.environ), False
-        child = CliProcess([binary,*args], env)
+        child = CliProcess([runtime['path'](binary),*args], runtime['environment'](env))
         with channel['state_file'](connection) as state:
             state.update(pid=child.pid, native_ccs_pending=False, native_ccs_unverified=not verified,
                          native_ccs_notice=notice, blocked=disabled,

@@ -8,7 +8,7 @@ keywords: Agent CLI JSON 自动化 配置 接口 安装 诊断 修复 capabiliti
 
 你可以把下面这段话交给自己的 Agent，让它根据你的目标准备 Cage。你只需提供自己的代理来源、选择工作环境，并在操作系统要求时完成授权。Cage 账户密码、Claude 登录、许可证确认和项目共享范围由你决定。
 
-> 请阅读 https://lee-xeo.github.io/Claude-Cage/agent.md ，协助我安装、配置并验证 Cage。先检查本机安装和接口能力，再按实际状态操作；完成后告诉我环境是否就绪、网络是否通过检查，以及还需要我完成什么。保留所有现有账户、项目和虚拟机数据。
+> 请阅读 https://claude-cage.com/agent.md ，协助我安装、配置并验证 Cage。先检查本机安装和接口能力，再按实际状态操作；完成后告诉我环境是否就绪、网络是否通过检查，以及还需要我完成什么。保留所有现有账户、项目和虚拟机数据。
 
 本页是当前源码与开发构建的接口说明。公开 Release 可能尚未包含 `cage agent`。安装后必须先运行能力探测；遇到未知命令时，使用该版本的界面和发行说明，或安装用户授权的较新构建。不要仅凭版本字符串推断接口已存在。
 
@@ -34,7 +34,7 @@ macOS/Linux 也可先获取 `/cage-install.sh` 再运行，参数与下载助手
 
 ```sh
 curl --proto '=https' --proto-redir '=https' -fL \
-  https://lee-xeo.github.io/Claude-Cage/agent-bootstrap.mjs -o agent-bootstrap.mjs
+  https://claude-cage.com/agent-bootstrap.mjs -o agent-bootstrap.mjs
 node agent-bootstrap.mjs plan --platform darwin-arm64
 node agent-bootstrap.mjs download --platform darwin-arm64 \
   --version v0.1.6-alpha-preview --destination /absolute/path/downloads
@@ -151,7 +151,7 @@ cage agent call network.check --wait 5m
 
 打开项目使用 `project.open`：`{"workspace":"用户授权的绝对路径","add":true,"activate":true}`。它会让客机访问这个目录，改动会影响主机文件。返回 `approval` 表示等待系统授权；Agent 可以调用相同的 `/api/macos/project-approval` 查看、操作该窗口。Claude 的服务登录仍在 Cage 内的官方工具中完成；本接口不会导入主机 Claude 凭据。
 
-移除已添加项目使用 `project.remove`，传入 `{"workspace":"项目列表中的路径"}`。关闭该目录的终端、运行中会话和编辑器后可解除共享，原文件与会话历史保留。默认工作区保留，移除当前项目后切回默认工作区。
+移除已添加项目使用 `project.remove`，传入 `{"workspace":"项目列表中的路径"}`。关闭该目录的终端、运行中会话和编辑器后可解除共享，原文件与会话历史保留。移除当前项目后切换到剩余项目；移除最后一个项目后没有当前项目。
 
 ## JSON 结果和异步任务
 

@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
+	"github.com/sylvinus/agent-vm/internal/guestos"
 )
 
 func (s *Server) nativeBrowserClient() *windowsBrowserClient {
@@ -24,8 +25,11 @@ func (s *Server) nativeBrowserClient() *windowsBrowserClient {
 		if s.macosGuest != nil {
 			ctx, cancel := context.WithCancel(s.lifetimeContextLocked())
 			s.windowsBrowserControl = &windowsBrowserClient{ctx: ctx, cancel: cancel, ownsBrowser: true, start: func(ctx context.Context) (*exec.Cmd, error) {
-				const base = "/usr/local/libexec/cage-workbench-browser-4.145.0-pw1.65.0/"
-				return s.macOSSSHCommand(ctx, "-T", s.sshTarget(), "--", "exec "+base+"editor/lib/node "+base+"controller/macos-native-browser.mjs"), nil
+				const base = guestos.MacOSBrowserTools + "/"
+				// Older guests launch their headless browser even on a tabs/health poll.
+				const command = "test -f " + base + "controller/macos-browser-window.mjs || exit 78; exec " +
+					base + "editor/lib/node " + base + "controller/macos-native-browser.mjs"
+				return s.macOSSSHCommand(ctx, "-T", s.sshTarget(), "--", command), nil
 			}}
 		} else {
 			s.windowsBrowserControl = newWindowsBrowserClient(s.lifetimeContextLocked(), s.profile)

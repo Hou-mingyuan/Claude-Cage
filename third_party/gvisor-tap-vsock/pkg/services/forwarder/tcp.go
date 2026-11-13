@@ -52,6 +52,7 @@ func TCP(s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mute
 		ep, tcpErr := r.CreateEndpoint(&wq)
 		r.Complete(false)
 		if tcpErr != nil {
+			_ = outbound.Close()
 			if _, ok := tcpErr.(*tcpip.ErrConnectionRefused); ok {
 				// transient error
 				log.Debugf("r.CreateEndpoint() = %v", tcpErr)

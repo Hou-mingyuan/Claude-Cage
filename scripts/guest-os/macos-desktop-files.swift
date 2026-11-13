@@ -185,6 +185,14 @@ private func clipboardRequest(_ request: [String: Any]) async throws -> [String:
 @MainActor
 final class MacDesktopFiles {
     static let shared = MacDesktopFiles()
+    // Only the active workbench Chrome profile or the signed Claude app may
+    // submit an Open/Save panel. All later operations recheck the exact panel,
+    // frontmost PID and GUI epoch already bound to the attachment batch.
+    private func ownsFileWindow(_ pid: pid_t) -> Bool {
+        if MacChromeWindow.shared.owns(pid) { return true }
+        return (try? claudePIDs().contains(pid)) == true
+    }
+
     private final class Batch {
         let pid: pid_t
         let window: CGWindowID
@@ -269,7 +277,7 @@ final class MacDesktopFiles {
         try consoleUser()
         try MacGUISession.shared.validate(batch.epoch)
         guard AXIsProcessTrusted() else { throw Failure(9, "accessibility_permission") }
-        guard Date().timeIntervalSince(batch.created) < 1800, try claudePIDs().contains(batch.pid),
+        guard Date().timeIntervalSince(batch.created) < 1800, ownsFileWindow(batch.pid),
               NSWorkspace.shared.frontmostApplication?.processIdentifier == batch.pid else { throw Failure(7, "window_changed") }
         if let panel = batch.panel {
             guard filePanelPresent(panel, pid: batch.pid), filePanelFocused(panel, pid: batch.pid) else { throw Failure(7, "file_dialog_changed") }
@@ -299,7 +307,7 @@ final class MacDesktopFiles {
     }
 
     private func key(_ pid: pid_t, _ code: CGKeyCode, flags: CGEventFlags = [], panel: AXUIElement? = nil, epoch: UInt64? = nil) throws {
-        guard AXIsProcessTrusted(), try claudePIDs().contains(pid), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+        guard AXIsProcessTrusted(), ownsFileWindow(pid), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
             throw Failure(7, "window_changed")
         }
         let source = CGEventSource(stateID: .privateState)
@@ -448,7 +456,7 @@ final class MacDesktopFiles {
     private func save(_ panel: AXUIElement, field: AXUIElement, pid: pid_t, path: String, epoch: UInt64) async throws {
         func validate() throws {
             try MacGUISession.shared.validate(epoch)
-            guard AXIsProcessTrusted(), try claudePIDs().contains(pid), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+            guard AXIsProcessTrusted(), ownsFileWindow(pid), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
                   filePanelPresent(panel, pid: pid), filePanelFocused(panel, pid: pid) else { throw Failure(7, "file_dialog_changed") }
         }
         try validate()
@@ -492,7 +500,7 @@ final class MacDesktopFiles {
             batches.removeValue(forKey: id)
             if !value.files.isEmpty { Task { _ = try? await clipboardRequest(["operation": "discard", "files": value.files]) } }
         }
-        guard AXIsProcessTrusted(), let pid = try? claudePIDs().first else {
+        guard AXIsProcessTrusted(), let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier, ownsFileWindow(pid) else {
             return ["available": false, "uploads": [], "downloads": try MacDesktopDownloads.shared.snapshot(), "downloadAck": true, "opens": openSnapshot()]
         }
         if let (panel, field) = saveFilePanel(pid) {

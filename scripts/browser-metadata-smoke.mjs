@@ -153,7 +153,7 @@ try {
     .replaceAll("/home/cage-browser", directory)
     .replace("/etc/claude-cage/browser-control.json", join(directory, "control.json"))
     .replace("/usr/local/lib/cage-split", join(directory, "extension"))
-    .replace('spawn("/usr/bin/chromium", flags', `spawn(${JSON.stringify(executable)}, flags`)
+    .replace('spawn(browserBinary, flags', `spawn(${JSON.stringify(executable)}, flags`)
     .replace('"--start-fullscreen",', '"--headless=new",')
     .replace(listen, 'server.listen(0, "127.0.0.1", () => console.log("CONTROL_PORT=" + server.address().port));')
     .replace(input, testRoute);

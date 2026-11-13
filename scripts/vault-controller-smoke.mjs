@@ -43,7 +43,7 @@ try {
   const marker='const input = JSON.parse(text || "{}");';
   const adapted=original.replaceAll("/home/cage-browser",dir).replace("/etc/claude-cage/browser-control.json",join(dir,"control.json"))
     .replace("/usr/local/lib/cage-split",join(dir,"extension"))
-    .replace('spawn("/usr/bin/chromium", flags',`spawn(${JSON.stringify(process.env.CAGE_TEST_BROWSER_PATH)}, flags`)
+    .replace('spawn(browserBinary, flags',`spawn(${JSON.stringify(process.env.CAGE_TEST_BROWSER_PATH)}, flags`)
     .replace('"--start-fullscreen",','"--headless=new", "--ignore-certificate-errors", "--disable-background-networking",')
     .replace('server.listen(18500, "127.0.0.1");','server.listen(0,"127.0.0.1",()=>console.log("PORT="+server.address().port));')
     .replace(marker,`${marker}\nif (req.url === "/__vault-test") { res.end(JSON.stringify(await cdp(input.method,input.params||{},await session(input.id)))); return; }`);

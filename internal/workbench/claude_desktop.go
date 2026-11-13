@@ -73,7 +73,7 @@ func (s *Server) claudeDesktopStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) claudeDesktopAction(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
-	if action != "install" && action != "start" && action != "stop" {
+	if action != "install" && action != "update" && action != "start" && action != "stop" {
 		http.NotFound(w, r)
 		return
 	}
@@ -89,13 +89,16 @@ func (s *Server) claudeDesktopAction(w http.ResponseWriter, r *http.Request) {
 		s.desktopStatus.invalidate()
 		defer s.desktopStatus.invalidate()
 		if s.windowsGuest != nil {
+			if action == "update" {
+				return errors.New("请使用 Claude Desktop 应用内的更新入口")
+			}
 			if action == "install" {
 				return errors.New("Windows 客机的自动安装尚未接通，请保留已有官方应用")
 			}
 			return s.windowsDesktopRequest(s.operationContext(), action, nil, nil)
 		}
 		switch action {
-		case "install":
+		case "install", "update":
 			s.mu.Lock()
 			allowed := s.toolsNetworkAllowedLocked()
 			s.mu.Unlock()
@@ -127,7 +130,11 @@ func (s *Server) claudeDesktopAction(w http.ResponseWriter, r *http.Request) {
 				<-done
 			}()
 			s.setMessage("正在下载并安装 Claude Desktop，可在操作详情查看进度…")
-			return RunMaintenanceScript(s.operationContext(), s.configPath, cage.ClaudeDesktopInstallScript(), s.jobs.execution(), s.jobs.execution())
+			script := cage.ClaudeDesktopInstallScript()
+			if action == "update" {
+				script = "set -e\nsudo systemctl stop cage-claude-desktop.service\n" + script
+			}
+			return RunMaintenanceScript(s.operationContext(), s.configPath, script, s.jobs.execution(), s.jobs.execution())
 		case "start":
 			return s.startClaudeDesktop()
 		default:

@@ -150,7 +150,6 @@ func exerciseProjectGitWrites(client *sftp.Client, root string) error {
 func TestProjectListComesFromSavedDirectories(t *testing.T) {
 	s := testServer(t)
 	var expected []string
-	expected = append(expected, s.environmentDir())
 	for i := 0; i < 15; i++ {
 		path := t.TempDir()
 		if err := s.rememberSharedProject(path); err != nil {

@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<title>浏览器检测</title>
+<p>正在检查浏览器设置。</p>
+<script>
+(async () => {
+  const args = new URLSearchParams(location.hash.slice(1));
+  const report = new URL(args.get("report"));
+  if (report.protocol !== "http:" || report.hostname !== "127.0.0.1" || !report.port ||
+      report.username || report.password || report.search || report.hash || !/^\/[0-9a-f]{48}$/.test(report.pathname)) return;
+  const result = {
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    expected_timezone: new Intl.DateTimeFormat("en", {timeZone: args.get("zone")}).resolvedOptions().timeZone,
+    language: navigator.language,
+    platform: navigator.platform
+  };
+  if (args.get("network") === "1") {
+    if (location.origin !== "http://198.18.0.254") return;
+    try {
+      const response = await fetch("/egress", {credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(14000)});
+      const {ip} = await response.json();
+      result.network = {status: response.status, ip};
+    } catch { result.network = {status: 0}; }
+  }
+  report.searchParams.set("result", JSON.stringify(result));
+  location.replace(report.href);
+})();
+</script>

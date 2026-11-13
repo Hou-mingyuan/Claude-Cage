@@ -13,6 +13,26 @@ const codes = [...menu.matchAll(/\]\(README(?:\.([\w-]+))?\.md\)/g)].map(m => m[
 assert.equal(codes[0], 'zh');
 assert.ok(!codes.includes('en'));
 const dist = path.join(root,'www/dist');
+const measurementId = process.env.PUBLIC_GA_MEASUREMENT_ID?.trim();
+const htmlFiles = fs.readdirSync(dist, { recursive: true }).filter(file => file.endsWith('.html'));
+for (const file of htmlFiles) {
+  const html = fs.readFileSync(path.join(dist, file), 'utf8');
+  assert.ok(!html.includes('https://lee-xeo.github.io/Claude-Cage/'), `${file}: old website URL remains`);
+  assert.ok(!/(?:src|href)="\/Claude-Cage(?:\/|")/.test(html), `${file}: old project base remains`);
+  if (file !== '404.html') {
+    const route = file.replaceAll(path.sep, '/').replace(/index\.html$/, '');
+    assert.ok(html.includes(`rel="canonical" href="https://claude-cage.com/${route}"`), `${file}: incorrect canonical URL`);
+  }
+  if (file !== path.join('privacy', 'index.html')) {
+    assert.ok(html.includes('href="/privacy/"'), `${file}: analytics disclosure link is missing`);
+  }
+  const tags = [...html.matchAll(/<script\b[^>]*src="https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=([^"]+)"[^>]*>/g)];
+  assert.equal(tags.length, measurementId ? 1 : 0, `${file}: expected one analytics tag only when configured`);
+  if (measurementId) {
+    assert.equal(tags[0][1], measurementId, `${file}: incorrect analytics destination`);
+    assert.ok(/\sasync(?:\s|>)/.test(tags[0][0]), `${file}: analytics must not block page rendering`);
+  }
+}
 const published = JSON.parse(fs.readFileSync(path.join(root, 'www/src/data/release.json'), 'utf8'));
 for (const code of codes) {
   const html = fs.readFileSync(path.join(dist,code === 'zh' ? '' : code,'index.html'),'utf8');
@@ -20,14 +40,14 @@ for (const code of codes) {
   assert.ok(picker, `${code}: missing language picker`);
   const options = [...picker.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(m=>m[1]);
   assert.equal(options.length,codes.length, `${code}: language dropdown missing options`);
-  assert.deepEqual(options, codes.map(locale => `/Claude-Cage/${locale === 'zh' ? '' : locale + '/'}`), `${code}: incorrect language destinations`);
+  assert.deepEqual(options, codes.map(locale => `/${locale === 'zh' ? '' : locale + '/'}`), `${code}: incorrect language destinations`);
   assert.equal([...picker.matchAll(/aria-current="page"/g)].length, 1, `${code}: current language must be marked once`);
   assert.ok(!html.includes('<select'), `${code}: system popup selector remains`);
   assert.ok(!options.some(url=>url.endsWith('/en/')), `${code}: unexpected English route`);
   assert.ok(html.includes('id="site-language"'), `${code}: missing language selector`);
   assert.ok(html.includes(`dir="${['ar','fa','ps','prs'].includes(code)?'rtl':'ltr'}"`), `${code}: incorrect reading direction`);
-  for (const match of html.matchAll(/(?:src|href)="(\/Claude-Cage\/[^"#]+)"/g)) {
-    const relative = decodeURIComponent(match[1].slice('/Claude-Cage/'.length));
+  for (const match of html.matchAll(/(?:src|href)="(\/[^"#]+)"/g)) {
+    const relative = decodeURIComponent(match[1].slice(1));
     const target = path.join(dist,relative.endsWith('/') ? relative+'index.html' : relative);
     assert.ok(fs.existsSync(target), `${code}: broken local asset or link ${match[1]}`);
   }
@@ -48,10 +68,10 @@ for (const code of codes) {
     assert.deepEqual(links, url ? [url, url] : [], `${code}: ${suffix} must match verified metadata`);
   }
   const ios = html.match(/<article\b[^>]*data-platform="iOS"[^>]*>([\s\S]*?)<\/article>/)?.[1];
-  assert.ok(ios?.includes('href="/Claude-Cage/docs/mobile/"'), `${code}: iOS needs its local build guide`);
-  assert.ok(ios?.includes('/Claude-Cage/platforms/apple.svg'), `${code}: iOS platform icon is missing`);
+  assert.ok(ios?.includes('href="/docs/mobile/"'), `${code}: iOS needs its local build guide`);
+  assert.ok(ios?.includes('/platforms/apple.svg'), `${code}: iOS platform icon is missing`);
   const android = html.match(/<article\b[^>]*data-platform="Android"[^>]*>([\s\S]*?)<\/article>/)?.[1];
-  assert.ok(android?.includes('/Claude-Cage/platforms/android.svg'), `${code}: Android platform icon is missing`);
+  assert.ok(android?.includes('/platforms/android.svg'), `${code}: Android platform icon is missing`);
 }
 assert.ok(!fs.existsSync(path.join(dist,'en/index.html')), 'Old English page still present');
 console.log(`Verified ${codes.length} README languages, dropdowns, directions and local assets.`);
@@ -71,12 +91,12 @@ for (const relative of guideFiles) {
   assert.ok(!html.includes('/Users/'), `${relative}: local developer path leaked`);
   assert.ok(!html.includes('<select'), `${relative}: system popup selector remains`);
   assert.equal([...html.matchAll(/<h1\b/g)].length, 1, `${relative}: expected one page title`);
-  const current = `/Claude-Cage/docs/${relative.replace(/index\.html$/, '').replaceAll(path.sep, '/')}`;
+  const current = `/docs/${relative.replace(/index\.html$/, '').replaceAll(path.sep, '/')}`;
   for (const match of html.matchAll(/href="([^\"]+)"/g)) {
     const href = match[1].replaceAll('&amp;', '&');
-    if (!href.startsWith('/Claude-Cage/') && !href.startsWith('#')) continue;
+    if (!href.startsWith('/') && !href.startsWith('#')) continue;
     const url = new URL(href, `https://example.test${current}`);
-    const local = decodeURIComponent(url.pathname.slice('/Claude-Cage/'.length));
+    const local = decodeURIComponent(url.pathname.slice(1));
     const target = path.join(dist, !local || local.endsWith('/') ? local + 'index.html' : local);
     assert.ok(fs.existsSync(target), `${relative}: broken guide link ${href}`);
     if (url.hash) {
@@ -88,7 +108,7 @@ for (const relative of guideFiles) {
 }
 for (const code of codes) {
   const html = fs.readFileSync(path.join(dist, code === 'zh' ? '' : code, 'index.html'), 'utf8');
-  assert.ok(html.includes('href="/Claude-Cage/docs/"'), `${code}: homepage needs a guide entry`);
+  assert.ok(html.includes('href="/docs/"'), `${code}: homepage needs a guide entry`);
 }
 console.log(`Verified ${guideFiles.length} user guide pages, local links, anchors, search and homepage entries.`);
 
@@ -97,6 +117,11 @@ assert.equal(agentGuide, fs.readFileSync(path.join(dist, 'llms-full.txt'), 'utf8
 assert.ok(agentGuide.includes('agent capabilities') && agentGuide.includes('job_not_found'), 'Agent guide lacks discovery or recovery contract');
 assert.ok(!agentGuide.includes('title: 让 Agent'), 'Agent Markdown must omit frontmatter');
 for (const name of ['llms.txt', 'agent-bootstrap.mjs', 'cage-install.sh']) assert.ok(fs.existsSync(path.join(dist, name)), `Missing Agent entry ${name}`);
+for (const name of ['agent.md', 'llms.txt', 'agent-bootstrap.mjs', 'cage-install.sh']) {
+  const text = fs.readFileSync(path.join(dist, name), 'utf8');
+  assert.ok(text.includes('https://claude-cage.com/'), `${name}: new website URL missing`);
+  assert.ok(!text.includes('https://lee-xeo.github.io/'), `${name}: old website URL remains`);
+}
 assert.ok(fs.readFileSync(path.join(dist, 'docs/agent/index.html'), 'utf8').includes('JSON 结果和异步任务'), 'Rendered Agent guide missing');
 console.log('Verified Agent Markdown, discovery, download helper and rendered guide.');
 
@@ -105,7 +130,7 @@ for (const shot of screenshotManifest) {
   assert.ok(shot.version && shot.platform && shot.capturedAt && shot.source, `${shot.id}: screenshot provenance missing`);
   assert.ok(fs.existsSync(path.join(dist, 'docs/screenshots', shot.file)), `${shot.id}: screenshot was not shipped`);
   const article = fs.readFileSync(path.join(guideDir, shot.chapter, 'index.html'), 'utf8');
-  assert.ok(article.includes(`src="/Claude-Cage/docs/screenshots/${shot.file}"`), `${shot.id}: broken screenshot URL`);
+  assert.ok(article.includes(`src="/docs/screenshots/${shot.file}"`), `${shot.id}: broken screenshot URL`);
   assert.ok(article.includes(shot.version), `${shot.id}: version caption missing`);
   assert.ok(article.includes(`width="${shot.width}" height="${shot.height}"`), `${shot.id}: original dimensions missing`);
 }

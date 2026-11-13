@@ -15,6 +15,8 @@ keywords: 多账号 账号池 登录 加入调度 自动分配 接续 切换 分
 
 先启动环境，等待工具就绪，再打开账号面板。账号功能以所用构建为准；没有该面板时先核对版本。
 
+官方客户端启动时会筛除管理用环境变量，状态栏、登录回调和手机渠道只接收运行所需的信息。账户、凭据、历史和项目保留原位；配置和辅助程序通过临时引用访问。客户端仍拥有正常的终端和项目访问能力，这些处理无法保证供应商不能识别运行环境。
+
 <figure class="guide-shot">
   <a href="../../www/public/docs/screenshots/claude-accounts.jpg" target="_blank" rel="noopener" aria-label="查看原图：Claude 账号面板：环境未启动、尚未登记账号"><img src="../../www/public/docs/screenshots/claude-accounts.jpg" alt="Claude 账号面板：环境未启动、尚未登记账号" width="2560" height="1764" loading="lazy" decoding="async" /></a>
   <figcaption>Claude 账号面板：环境未启动、尚未登记账号。截图版本：0.1.6-alpha-preview（开发构建） · macOS 原生应用 · 2026-11-07。<a href="../../www/public/docs/screenshots/claude-accounts.jpg" target="_blank" rel="noopener">查看原图（2560 × 1764） ↗</a></figcaption>
@@ -36,6 +38,10 @@ keywords: 多账号 账号池 登录 加入调度 自动分配 接续 切换 分
 4. 点击项目旁的终端图标，新建 Claude 终端，查看标签所显示的分配账号。
 
 取消登录不会增加可调度账号。同一订阅不会重复参与调度。独立账号需要重新登录时，先关闭仍使用它的终端，再按面板提示处理。
+
+通过“登录新账号”再次授权已有独立账号时，Cage 会按邮箱和组织匹配原账号。macOS 和 Linux 环境中，原目录缺少文件凭据，且该账号没有运行中的终端、手机任务或登录操作时，可以用本次授权恢复原登录；账号目录、已有会话、备注和参与设置保持不变。恢复后需由官方 CLI 确认身份，已有凭据不会被覆盖。
+
+Windows 环境、钥匙串登录、已有凭据或恢复检查失败时，请等待该账号的手机任务结束，关闭使用原账号的终端，再从原账号卡片点击“打开登录终端”或“重新登录”。检查失败会保留已经发布的凭据，避免影响同时进行的其他登录；面板只有在确认身份后才会报告恢复成功。
 
 ## 自动分配什么时候发生
 

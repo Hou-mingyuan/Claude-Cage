@@ -1,10 +1,10 @@
 # Cage 文档入口
 
-首次使用 Cage，从安装与代理配置开始；已有环境遇到问题时，直接查故障恢复。公开安装包与版本验收范围见 [GitHub Releases](https://github.com/Lee-xeo/Claude-Cage/releases)，产品介绍见[项目主页](https://lee-xeo.github.io/Claude-Cage/)。
+首次使用 Cage，从安装与代理配置开始；已有环境遇到问题时，直接查故障恢复。公开安装包与版本验收范围见 [GitHub Releases](https://github.com/Lee-xeo/Claude-Cage/releases)，产品介绍见[项目主页](https://claude-cage.com/)。
 
 ## 使用与反馈
 
-面向日常使用的[官网使用文档](https://lee-xeo.github.io/Claude-Cage/docs/)提供分类目录、全文搜索和章节链接。内容源位于 [guide/](guide/index.md)，包括多账号、浏览器、手机、云端、设置与排障；下表保留安装、平台说明与维护资料的直接入口。
+面向日常使用的[官网使用文档](https://claude-cage.com/docs/)提供分类目录、全文搜索和章节链接。内容源位于 [guide/](guide/index.md)，包括多账号、浏览器、手机、云端、设置与排障；下表保留安装、平台说明与维护资料的直接入口。
 
 | 你要做什么 | 从这里开始 |
 |---|---|
@@ -19,5 +19,6 @@
 | 排查下载、启动、联网与授权问题 | [常见问题与恢复](troubleshooting.md) |
 | 导出故障日志并了解自动清理 | [导出诊断包](troubleshooting.md#导出诊断包) |
 | 报告隔离或凭据安全问题 | [安全报告](../SECURITY.md) |
+| 贡献修复、功能或文档，了解 Issue 审核、协作者邀请与 PR 流程 | [贡献指南](../.github/CONTRIBUTING.md) |
 
 许可材料见 [LICENSE](../LICENSE)、[NOTICE](../NOTICE)和[第三方许可](../THIRD_PARTY_LICENSES)。

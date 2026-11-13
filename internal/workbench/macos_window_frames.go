@@ -117,10 +117,10 @@ func (s *Server) macOSWindowFrames(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { cancel(); input.Close(); output.Close(); _ = cmd.Wait() }()
-	relayMacOSFrames(ctx, ws, input, output)
+	relayMacOSFrames(ctx, ws, input, output, macOSBrowserWindowRoute(r))
 }
 
-func relayMacOSFrames(parent context.Context, ws *websocket.Conn, input io.WriteCloser, output io.ReadCloser) {
+func relayMacOSFrames(parent context.Context, ws *websocket.Conn, input io.WriteCloser, output io.ReadCloser, browser bool) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { input.Close(); output.Close(); ws.Close() })
@@ -185,6 +185,9 @@ func relayMacOSFrames(parent context.Context, ws *websocket.Conn, input io.Write
 		}
 		request := macOSWindowRequest{Action: "frame", Width: config.Width, Height: config.Height, Scale: config.Scale,
 			After: after, KeepAlive: true, Wait: true, Binary: true, Refresh: true}
+		if browser {
+			request.Surface, request.Action = "browser", "browser-frame"
+		}
 		body, _ := json.Marshal(request)
 		timer := time.AfterFunc(12*time.Second, func() { cancel(); output.Close(); ws.Close() })
 		_, err := input.Write(append(body, '\n'))

@@ -183,4 +183,10 @@ for ((index=0; index<${#loaded[@]}; index++)); do
     sudo -Hu "$user" /bin/launchctl bootstrap "gui/$uid" "/Users/$user/Library/LaunchAgents/$label.plist"
 done
 /usr/bin/perl "$kit/native-component-manifest.pl" publish "$manifest" "$kit"
+# The new helpers accept both installation paths. Commit them before migrating
+# Claude so a later rollback cannot restore a helper that only knows the old
+# path. Migration failures retain the old application and can be retried.
+trap - EXIT
+rm -rf "$backup"
+bash "$kit/claude-desktop-macos.sh" migrate "$user"
 printf '%s\n' '原生客机组件已更新并通过文件核验。'

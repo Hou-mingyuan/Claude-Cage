@@ -82,14 +82,21 @@ export const RemoteView = forwardRef(function RemoteView(
     };
     const desktopPrefix = desktop ? "/claude-desktop" : "";
     api(`${desktopPrefix}/vnc-credentials`)
-      .then(({ password, display_scale, dynamic_scale }) => {
+      .then(({ password, display_scale, dynamic_scale, pixel_wheel }) => {
         if (disposed) return;
         // Such a guest renders at the density of the screen showing it.
         let followScreen = dynamic_scale === true;
         client = new RFB(
           container,
           runtimeSocketURL(`${desktopPrefix}/vnc`),
-          { credentials: { password }, cageBrowserDisplay: !desktop, cageCursorFallback: desktop && guestPlatform === "windows" },
+          {
+            credentials: { password }, cageBrowserDisplay: !desktop, cageCursorFallback: desktop && guestPlatform === "windows",
+            // The Linux browser scrolls its page by the distance of a trackpad
+            // gesture. A menu or a second pane declines it and gets wheel steps.
+            cageWheelSink: !desktop && pixel_wheel === true
+              ? wheel => api("/browser/wheel", wheel).then(reply => reply?.handled === true)
+              : undefined,
+          },
         );
         rfb.current = client;
         installLocalCursorFallback(client._cursor,

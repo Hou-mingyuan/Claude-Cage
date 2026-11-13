@@ -33,7 +33,7 @@ try {
       await dialog.getByRole("radio", { name: /alpha/ }).waitFor({ state: "detached" });
       assert.deepEqual(state.status.projects, [defaultProject, other]);
       assert.equal(state.settings.workspace, defaultProject);
-      assert.equal(await dialog.getByRole("button", { name: "从 Cage 移除此项目" }).count(), 0);
+      assert.equal(await dialog.getByRole("button", { name: "从 Cage 移除此项目" }).count(), 1);
       await dialog.getByRole("button", { name: "取消", exact: true }).click();
       await page.getByRole("region", { name: "项目 alpha", exact: true }).waitFor({ state: "detached" });
       Object.assign(state.status, { ready: false, vm_running: false });
@@ -46,8 +46,18 @@ try {
       await dialog.getByRole("button", { name: "确认移除项目" }).click();
       await dialog.getByRole("radio", { name: /beta/ }).waitFor({ state: "detached" });
       assert.deepEqual(state.status.projects, [defaultProject]);
+      await dialog.getByRole("radio", { name: /\.claude-cage-workspace/ }).check();
+      await dialog.getByRole("button", { name: "从 Cage 移除此项目" }).click();
+      await dialog.getByRole("button", { name: "确认移除项目" }).click();
+      await dialog.getByRole("radio").waitFor({ state: "detached" });
+      assert.deepEqual(state.status.projects, []);
+      assert.equal(state.settings.workspace, "");
+      await dialog.getByRole("button", { name: "取消", exact: true }).click();
+      await page.reload();
+      await page.getByRole("button", { name: "添加项目", exact: true }).click();
+      assert.equal(await page.getByRole("radio").count(), 0);
       assert.deepEqual(errors, []);
-      console.log(`PASS ${platform} project removal, cancellation, retry, default selection, stopped environment`);
+      console.log(`PASS ${platform} project removal, cancellation, retry, legacy folder removal, empty list across reload, stopped environment`);
     } finally { await browser.close(); }
   }
 } finally { await vite.close(); }

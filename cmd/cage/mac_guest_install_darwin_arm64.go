@@ -125,7 +125,7 @@ func installMacWorkbench(ctx context.Context, profile, state string, l *vm.Lima)
 	fmt.Fprintln(os.Stdout, "正在将开发组件送入已验证的离线虚拟 Mac…")
 	fmt.Fprintln(os.Stdout, "CAGE_GUEST_STAGE macos tools")
 	// Only the fixed subset of media is transferred. The IPSW stays on the host.
-	tar := exec.CommandContext(ctx, "/usr/bin/tar", "--no-mac-metadata", "-cf", "-", "-C", kit, ".", "-C", cache, "node.tgz", "editor.tgz", "playwright.tgz", "chrome.dmg", "claude.dmg", "cli", "macfuse.pkg", "-C", componentStage, "native-components.json")
+	tar := exec.CommandContext(ctx, "/usr/bin/tar", "--no-mac-metadata", "-cf", "-", "-C", kit, ".", "-C", cache, "node.tgz", "editor.tgz", "chrome.dmg", "claude.dmg", "cli", "macfuse.pkg", "-C", componentStage, "native-components.json")
 	tar.Env = append(os.Environ(), "COPYFILE_DISABLE=1")
 	tar.Stderr = os.Stderr
 	pipe, err := tar.StdoutPipe()

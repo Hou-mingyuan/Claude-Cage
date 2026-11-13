@@ -28,8 +28,8 @@ func (s *Server) removeProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := input.Workspace
-	if path == "" || path == s.environmentDir() || isClientMountPath(path) {
-		http.Error(w, "请选择已添加的项目。默认工作区保留，客户端共享请使用停止共享。", http.StatusBadRequest)
+	if path == "" || isClientMountPath(path) {
+		http.Error(w, "请选择已添加的项目；客户端共享请使用停止共享。", http.StatusBadRequest)
 		return
 	}
 	projects, err := s.projectPaths()
@@ -120,7 +120,13 @@ func (s *Server) removeProject(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		preferences.Workspace = s.environmentDir()
+		preferences.Workspace = ""
+		for _, project := range projects {
+			if project != path && !isClientMountPath(project) {
+				preferences.Workspace = project
+				break
+			}
+		}
 		if err = writePrivate(filepath.Join(s.profile, "workbench.json"), preferences); err != nil {
 			requestError(w, err)
 			return

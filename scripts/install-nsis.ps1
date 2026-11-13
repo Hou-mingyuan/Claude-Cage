@@ -10,11 +10,16 @@ $url = "https://downloads.sourceforge.net/project/nsis/NSIS%203/$version/nsis-$v
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $zip = Join-Path $Destination "nsis-$version.zip"
 
-# SourceForge returns a browser download page (HTTP 200 HTML) for PowerShell's
-# default user agent. Use the command-line downloader it redirects to the ZIP.
-$curl = if ($IsWindows) { 'curl.exe' } else { 'curl' }
-& $curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 120 --output $zip --write-out "NSIS download: HTTP %{http_code}, %{content_type}, %{size_download} bytes\n" $url
-if ($LASTEXITCODE -ne 0) { throw "NSIS download failed (curl exit $LASTEXITCODE)." }
+# CI keeps the ZIP between runs. Reuse it only when it still matches the
+# pinned checksum; anything else is downloaded again and verified below.
+$cached = (Test-Path -LiteralPath $zip -PathType Leaf) -and (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -eq $expectedSHA256
+if (-not $cached) {
+    # SourceForge returns a browser download page (HTTP 200 HTML) for PowerShell's
+    # default user agent. Use the command-line downloader it redirects to the ZIP.
+    $curl = if ($IsWindows) { 'curl.exe' } else { 'curl' }
+    & $curl --fail --location --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 15 --max-time 120 --output $zip --write-out "NSIS download: HTTP %{http_code}, %{content_type}, %{size_download} bytes\n" $url
+    if ($LASTEXITCODE -ne 0) { throw "NSIS download failed (curl exit $LASTEXITCODE)." }
+}
 
 $stream = [IO.File]::OpenRead($zip)
 try {

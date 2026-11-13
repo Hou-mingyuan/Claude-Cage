@@ -31,6 +31,10 @@ type browserInput struct {
 	Right          string  `json:"right,omitempty"`
 	ID             string  `json:"id"`
 	URL            string  `json:"url"`
+	X              int     `json:"x,omitempty"`
+	Y              int     `json:"y,omitempty"`
+	DeltaX         int     `json:"deltaX,omitempty"`
+	DeltaY         int     `json:"deltaY,omitempty"`
 	Width          int     `json:"width,omitempty"`
 	Height         int     `json:"height,omitempty"`
 	Scale          float64 `json:"scale,omitempty"`
@@ -119,6 +123,15 @@ func (s *Server) browserAction(ctx context.Context, action string, input *browse
 		if action == "resize" && !validDisplayDensity(input.Scale) {
 			return nil, browserInputError{errors.New("画面像素密度无效")}
 		}
+		if action == "wheel" {
+			// Only the Linux guest's controller scrolls a page by a distance.
+			// The native displays take it inside their own display stream.
+			if s.macosGuest != nil || s.windowsGuest != nil || !validWheel(input) {
+				return nil, browserInputError{errors.New("滚动位置或距离无效")}
+			}
+			body, _ := json.Marshal(map[string]int{"x": input.X, "y": input.Y, "deltaX": input.DeltaX, "deltaY": input.DeltaY})
+			return s.guestAPI(ctx, token, method, "/wheel", body)
+		}
 		if action == "insert-text" && (input.ID == "" || input.Text == "" || len(input.Text) > 8192) {
 			return nil, browserInputError{errors.New("输入文字或目标标签无效")}
 		}
@@ -186,6 +199,16 @@ func (s *Server) browserAction(ctx context.Context, action string, input *browse
 		return nil, errors.New("浏览器响应超出大小限制")
 	}
 	return data, err
+}
+
+// browserWheelLimit bounds a position and a scrolled distance, both in
+// framebuffer pixels. The display itself is at most this wide and high.
+const browserWheelLimit = 8192
+
+func validWheel(input *browserInput) bool {
+	within := func(value, low int) bool { return value >= low && value <= browserWheelLimit }
+	return within(input.X, 0) && within(input.Y, 0) && within(input.DeltaX, -browserWheelLimit) &&
+		within(input.DeltaY, -browserWheelLimit) && (input.DeltaX != 0 || input.DeltaY != 0)
 }
 
 func validInputToken(value string) bool {

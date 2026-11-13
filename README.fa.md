@@ -8,7 +8,9 @@
 
 [![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![CI](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**[وب سایت پروژه](https://lee-xeo.github.io/Claude-Cage/) · [دانلود برنامه](https://lee-xeo.github.io/Claude-Cage/fa/#download) · [شروع کردن](docs/getting-started.md) · [سوالات متداول](docs/troubleshooting.md) · [راهنمای استفاده (چینی)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
+
+**[وب سایت پروژه](https://claude-cage.com/) · [دانلود برنامه](https://claude-cage.com/fa/#download) · [شروع کردن](docs/getting-started.md) · [سوالات متداول](docs/troubleshooting.md) · [راهنمای استفاده (چینی)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -30,6 +32,8 @@ Claude Cage ترمینال، مرورگر، ویرایشگر و برنامهٔ �
 | بررسی شبکه و جداسازی | بررسی مرورگر توسط جامعهٔ کاربران |
 | :---: | :---: |
 | <a href="assets/network-checks.png"><img src="assets/network-checks.png" alt="بررسی شبکه و جداسازی" width="400" /></a> | <a href="assets/community-browser-check.png"><img src="assets/community-browser-check-cropped.png" alt="بررسی مرورگر توسط جامعهٔ کاربران" width="400" /></a> |
+
+[FuckClaude](https://fuck-claude.vercel.app/) · [LinXiaoTao / GitHub](https://github.com/LinXiaoTao/FuckClaude)
 
 **رابط اصلی Cage:**
 
@@ -61,7 +65,7 @@ Claude Cage ترمینال، مرورگر، ویرایشگر و برنامهٔ �
 
 Cage از macOS، Windows و Linux پشتیبانی می‌کند: Apple Silicon با macOS 14+، Windows 10 22H2 / 11 x64 و Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac، Windows ARM64 و Linux ARM64 فعلاً پشتیبانی نمی‌شوند. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. دانلود برنامه: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/fa/#download).
+1. دانلود برنامه: [macOS / Windows / Linux](https://claude-cage.com/fa/#download).
 2. macOS: بسته نصب را باز کرده و بکشید **Cage** به **برنامه های کاربردی**; سپس آن را از Applications اجرا کنید. Windows: [راهنمای نصب](docs/windows.md#安装并开始工作) · Linux: [راهنمای نصب](docs/linux.md#安装并开始工作).
 3. دستورالعمل های درون برنامه را دنبال کنید تا پروکسی شبکه خود را پیکربندی کنید، محیط را راه اندازی کنید و یک پروژه را باز کنید.
 
@@ -102,16 +106,18 @@ macOS و نسخه‌های امضاشدهٔ Windows از پراکسی انتخا
 
 | وظیفه شماست | از اینجا شروع کنید |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [انتخاب سیستم مهمان](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [انتخاب سیستم مهمان](https://claude-cage.com/docs/guest-systems/) |
 | یک پروکسی شبکه را نصب کنید، پیکربندی کنید و اولین پروژه خود را باز کنید | [شروع کردن](docs/getting-started.md) |
 | عیب‌یابی دانلود، راه‌اندازی، اتصال و ورود به سیستم | [سوالات متداول و بازیابی](docs/troubleshooting.md) |
 | کنترل های صفحه کلید، ظاهر، ماندگاری داده ها و رفتار خروج را بیاموزید | [استفاده روزانه](docs/getting-started.md#日常使用) |
 | یک مشکل قابل تکرار را گزارش کنید | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| مشارکت در اصلاح، قابلیت یا مستندات: بررسی Issue ← دعوت همکار ← PR | [راهنمای مشارکت (چینی)](.github/CONTRIBUTING.md) |
 
 این پروژه به سرعت در حال پیشرفت است. برای به اشتراک گذاشتن بازخورد به گروه جامعه بپیوندید. از نگهبانان جامعه استقبال می شود.
 
 <p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1134250870" width="240" /></a>
+  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a>
+  <br />QQ group · 782087179
 </p>
 
 ## مبدا و مجوز

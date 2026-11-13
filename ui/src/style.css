@@ -691,6 +691,11 @@ button.large {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.status-clock {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .status-feedback {
   max-width: 48vw;
   overflow: hidden;

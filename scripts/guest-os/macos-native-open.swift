@@ -24,7 +24,7 @@ struct MacOpenSender {
     func isOfficialClaude() -> Bool {
         guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated,
               application.bundleIdentifier == "com.anthropic.claudefordesktop",
-              application.bundleURL?.resolvingSymlinksInPath() == URL(fileURLWithPath: "/Applications/Claude.app").resolvingSymlinksInPath(),
+              application.bundleURL?.resolvingSymlinksInPath() == claudeApplicationURL().resolvingSymlinksInPath(),
               let requirement = try? claudeSigningRequirement() else { return false }
         var code: SecCode?
         guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit as String: audit] as CFDictionary, [], &code) == errSecSuccess,

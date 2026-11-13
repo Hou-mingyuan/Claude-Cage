@@ -20,6 +20,7 @@ import (
 	"github.com/lima-vm/sshocker/pkg/reversesshfs"
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/host"
+	"github.com/sylvinus/agent-vm/internal/paths"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
@@ -27,14 +28,17 @@ import (
 const guestHelper = "/usr/local/lib/cage-runtime"
 
 type networkRecord struct {
-	ContainerID    string `json:"container_id"`
-	PID            int    `json:"pid"`
-	RunID          string `json:"run_id"`
-	SSHAddress     string `json:"ssh_address"`
-	BrowserAddress string `json:"browser_address"`
-	VNCAddress     string `json:"vnc_address"`
-	Shared         bool   `json:"shared"`
+	ContainerID     string `json:"container_id"`
+	PID             int    `json:"pid"`
+	RunID           string `json:"run_id"`
+	SSHAddress      string `json:"ssh_address"`
+	BrowserAddress  string `json:"browser_address"`
+	VNCAddress      string `json:"vnc_address"`
+	Shared          bool   `json:"shared"`
+	SharedDirectory string `json:"shared_directory"`
 }
+
+var errSharedDirectoryChanged = errors.New("下载目录与运行中的文件共享不一致，请保存工作后完整停止并重新启动环境；文件和登录状态会保留")
 
 func (r *Runtime) networkState(ctx context.Context, containerID string) (networkRecord, error) {
 	path := filepath.Join(r.InstanceDir(), "network.json")
@@ -48,6 +52,9 @@ func (r *Runtime) networkState(ctx context.Context, containerID string) (network
 	var record networkRecord
 	if json.Unmarshal(data, &record) != nil || record.ContainerID != containerID || record.RunID == "" || !record.Shared {
 		return record, errors.New("容器连接记录不属于当前运行环境")
+	}
+	if record.SharedDirectory == "" || !paths.Equal(record.SharedDirectory, cage.EnvironmentDir(r.profile)) {
+		return record, errSharedDirectoryChanged
 	}
 	for _, address := range []string{record.SSHAddress, record.BrowserAddress, record.VNCAddress} {
 		host, port, err := net.SplitHostPort(address)
@@ -248,7 +255,8 @@ func (r *Runtime) ServeNetwork(ctx context.Context, configPath string) error {
 	defer client.Close()
 	interruptSSH := context.AfterFunc(ctx, func() { _ = client.Close() })
 	defer interruptSSH()
-	shareDone, stopShare, err := r.shareEnvironment(ctx, client)
+	sharedDirectory := cage.EnvironmentDir(r.profile)
+	shareDone, stopShare, err := r.shareEnvironment(ctx, client, sharedDirectory)
 	if err != nil {
 		return err
 	}
@@ -284,7 +292,7 @@ func (r *Runtime) ServeNetwork(ctx context.Context, configPath string) error {
 		return err
 	}
 	defer os.Remove(filepath.Join(r.InstanceDir(), "cage-running.json"))
-	record := networkRecord{ContainerID: inspection.State.ContainerID, PID: os.Getpid(), RunID: network.Gate.Status().RunID, SSHAddress: sshListener.Addr().String(), BrowserAddress: browserListener.Addr().String(), VNCAddress: vncListener.Addr().String(), Shared: true}
+	record := networkRecord{ContainerID: inspection.State.ContainerID, PID: os.Getpid(), RunID: network.Gate.Status().RunID, SSHAddress: sshListener.Addr().String(), BrowserAddress: browserListener.Addr().String(), VNCAddress: vncListener.Addr().String(), Shared: true, SharedDirectory: sharedDirectory}
 	if err := writePrivateJSON(filepath.Join(r.InstanceDir(), "network.json"), record); err != nil {
 		return err
 	}
@@ -385,10 +393,9 @@ func serveGuestService(ctx context.Context, client *ssh.Client, listener net.Lis
 	}
 }
 
-func (r *Runtime) shareEnvironment(ctx context.Context, client *ssh.Client) (<-chan error, func(), error) {
+func (r *Runtime) shareEnvironment(ctx context.Context, client *ssh.Client, workspace string) (<-chan error, func(), error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	workspace := cage.EnvironmentDir(r.profile)
 	if err := host.EnsurePrivateDir(workspace); err != nil {
 		return nil, nil, err
 	}

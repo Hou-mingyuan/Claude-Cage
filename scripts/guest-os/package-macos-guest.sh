@@ -29,7 +29,7 @@ bash "$src/package-macos-browser.sh" "$dest/native-browser"
 for f in prepare-macos-media.sh macos-cli.py prepare-macos-cli-kit.sh install-macos-cli.sh claude-desktop-macos.sh install-macos-browser.sh install-macos-node.sh install-macos-project-tools.sh register-macos-claude-window.sh register-macos-clipboard.sh register-macos-browser.sh macos-browser.mjs cage-macos-editor macos-fuse-media.sh provision-macos-workbench.sh; do
     cp "$src/$f" "$dest/"
 done
-cp "$src/../../internal/cage/claude-account.py" "$src/../../internal/workbench/"{cli_channel.py,cli_channel.resume.md,claude_account_resume.md} "$dest/"
+cp "$src/../../internal/cage/"{claude-account.py,client_runtime.py} "$src/../../internal/workbench/"{cli_channel.py,cli_channel.resume.md,claude_account_resume.md} "$dest/"
 # Shared component maintenance is installed separately from first-run accounts.
 cp "$src/maintain-macos-workbench.sh" "$src/native-component-manifest.pl" "$dest/"
 cp "$src/configure-macos-session.sh" "$dest/"

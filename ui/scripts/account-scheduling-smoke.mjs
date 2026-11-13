@@ -60,14 +60,14 @@ try{
   await phone.route("**/api/**",async route=>{
     const path=new URL(route.request().url()).pathname;const body=route.request().postDataJSON();
     if(path.endsWith("/account"))return account(route,body);
-    if(path.endsWith("/projects"))return route.fulfill({json:{host:"测试电脑",ready:true,shared_sessions:true,projects:[{path:session.workspace,name:"默认工作区"}]}});
+    if(path.endsWith("/projects"))return route.fulfill({json:{host:"测试电脑",ready:true,shared_sessions:true,projects:[{path:session.workspace,name:".claude-cage-workspace"}]}});
     if(path.endsWith("/sessions"))return route.fulfill({json:{sessions:[session]}});
     return route.fulfill({json:session});
   });
   await phone.goto((process.env.CAGE_UI_URL || "http://127.0.0.1:5198")+"/mobile.html");
   const drawer=phone.getByRole("dialog",{name:"工作区侧栏"});
   await drawer.waitFor();
-  const folder=drawer.getByRole("button",{name:"项目 默认工作区",exact:true});
+  const folder=drawer.getByRole("button",{name:"项目 .claude-cage-workspace",exact:true});
   if(await folder.getAttribute("aria-expanded")==="false")await folder.click();
   await phone.getByRole("button",{name:"调度验证",exact:true}).click();
   await phone.getByRole("button",{name:"账号 A · 会话绑定",exact:true}).click();

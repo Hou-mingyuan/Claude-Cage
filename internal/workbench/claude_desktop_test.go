@@ -43,7 +43,7 @@ func TestClaudeDesktopSnapshotFailureReason(t *testing.T) {
 
 func TestClaudeDesktopControlBoundary(t *testing.T) {
 	s := testServer(t)
-	for _, path := range []string{"/api/claude-desktop/install", "/api/claude-desktop/start", "/api/claude-desktop/stop"} {
+	for _, path := range []string{"/api/claude-desktop/install", "/api/claude-desktop/update", "/api/claude-desktop/start", "/api/claude-desktop/stop"} {
 		if w := request(s, "POST", path, s.origin, "{}", false); w.Code != 401 {
 			t.Fatalf("%s without session: %d", path, w.Code)
 		}

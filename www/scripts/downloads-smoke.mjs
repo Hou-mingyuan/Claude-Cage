@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { readFile, mkdir } from 'node:fs/promises';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.CAGE_PLAYWRIGHT_MODULE || 'playwright');
-const origin = process.env.CAGE_SITE_URL || 'http://127.0.0.1:4833/Claude-Cage/';
+const origin = process.env.CAGE_SITE_URL || 'http://127.0.0.1:4833/';
 const output = process.env.CAGE_SITE_REPORT || '_output/platform-publication/site';
 const release = JSON.parse(await readFile(new URL('../src/data/release.json', import.meta.url), 'utf8'));
 const expected = {

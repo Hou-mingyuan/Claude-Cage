@@ -303,6 +303,16 @@ func boundaryProbeInput(port int, nonce, privateFile, sharedFile, challenge stri
 		"private_file":    guestPath(privateFile), "shared_file": guestPath(sharedFile), "challenge": challenge}
 }
 
+func filesystemBoundaryVerified(layout bool, boundary guestObservation, data, challenge string, noHostProjects bool) bool {
+	if !layout || boundary.PrivateFile != "unreachable" {
+		return false
+	}
+	if noHostProjects {
+		return !boundary.SharedFile && data == challenge
+	}
+	return boundary.SharedFile && data == challenge+":guest"
+}
+
 func (s *Server) guestObservation(ctx context.Context, input map[string]any) (guestObservation, error) {
 	if s.windowsGuest != nil {
 		return s.windowsGuestObservation(ctx, input)
@@ -700,6 +710,33 @@ func (s *Server) runSafetyCheck() (returned error) {
 		}
 		s.mu.Unlock()
 	}()
+	if cfg.ExitPolicy.NeedsBinding() {
+		s.setMessage("正在首次绑定此出口节点的 IP 或地区…")
+		loc, err := probeLocation(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		cfg.ExitPolicy = cfg.ExitPolicy.BindMissing(loc.exitLocation())
+		observed := loc.exitLocation()
+		if result, message := cfg.ExitPolicy.Evaluate(loc.IP, &observed); result != cage.CheckPassed {
+			return errors.New(message)
+		}
+		if err := s.saveExitPolicyConfig(cfg); err != nil {
+			return err
+		}
+		// Completing an empty anchor changes the fingerprint. Revoke the first
+		// check and collect all evidence again under the bound configuration.
+		s.safetyOp.Lock()
+		_, err = client.SyncProxyRevision(ctx)
+		if err == nil {
+			state, err = client.BeginCheck(ctx)
+		}
+		s.safetyOp.Unlock()
+		if err != nil {
+			return err
+		}
+		s.publishGate(state)
+	}
 	report := cage.SafetyReport{Policy: cage.SafetyPolicyVersion, ID: randomToken()[:32], RunID: state.RunID, CheckID: state.CheckID, Configuration: cfg.Fingerprint(), CreatedAt: time.Now()}
 	defer func() {
 		// Preserve partial reports too: cancellation or a transport failure must
@@ -747,21 +784,45 @@ func (s *Server) runSafetyCheck() (returned error) {
 	defer os.Remove(private.Name())
 	defer private.Close()
 	shareRoot := s.environmentDir()
+	noHostProjects := false
 	if s.macosGuest != nil {
 		shareRoot = s.workspace()
-		approved, e := s.projectWorkspace(shareRoot)
-		if e != nil || isClientMountPath(approved) {
-			return errors.New("请先在 macOS 工作台连接默认工作区或已授权的主机项目，再验证文件边界")
-		}
-		if e = s.ensureProjectShare(approved); e != nil {
-			set("filesystem_boundary", cage.CheckUnknown, e.Error(), "先完成客机登录、文件系统扩展或工作区访问授权，再重新运行检查")
-			var failure *projectShareError
-			if errors.As(e, &failure) {
-				return &projectShareError{Path: approved, Recovery: failure.Recovery, Message: failure.Message}
-			}
+		projects, e := s.projectPaths()
+		if e != nil {
 			return e
 		}
-		shareRoot = approved
+		if shareRoot == "" || isClientMountPath(shareRoot) {
+			shareRoot = ""
+			for _, project := range projects {
+				if !isClientMountPath(project) {
+					shareRoot = project
+					break
+				}
+			}
+		}
+		noHostProjects = shareRoot == ""
+		if noHostProjects {
+			s.mu.Lock()
+			shares = shares && len(s.projectShares) == 0
+			s.mu.Unlock()
+			// There is no host grant to exercise. Verify the private boundary
+			// and the absence of project transports without requiring a project.
+			shareRoot = s.environmentDir()
+		} else {
+			approved, e := s.projectWorkspace(shareRoot)
+			if e != nil || isClientMountPath(approved) {
+				return errors.New("请先连接已添加的主机项目，再验证文件边界")
+			}
+			if e = s.ensureProjectShare(approved); e != nil {
+				set("filesystem_boundary", cage.CheckUnknown, e.Error(), "先完成客机登录、文件系统扩展或工作区访问授权，再重新运行检查")
+				var failure *projectShareError
+				if errors.As(e, &failure) {
+					return &projectShareError{Path: approved, Recovery: failure.Recovery, Message: failure.Message}
+				}
+				return e
+			}
+			shareRoot = approved
+		}
 	}
 	shared, err := os.CreateTemp(shareRoot, ".cage-share-probe-*")
 	if err != nil {
@@ -823,7 +884,9 @@ func (s *Server) runSafetyCheck() (returned error) {
 		}
 		_, _ = shared.Seek(0, io.SeekStart)
 		sharedData, _ := io.ReadAll(io.LimitReader(shared, 256))
-		if shares && boundary.PrivateFile == "unreachable" && boundary.SharedFile && string(sharedData) == challenge+":guest" {
+		if noHostProjects && filesystemBoundaryVerified(shares, boundary, string(sharedData), challenge, true) {
+			set("filesystem_boundary", cage.CheckPassed, "未授权主机项目，未建立项目共享；宿主私有目录探针不可读；虚拟机无基础目录挂载", "")
+		} else if !noHostProjects && filesystemBoundaryVerified(shares, boundary, string(sharedData), challenge, false) {
 			set("filesystem_boundary", cage.CheckPassed, "共享读写探针往返成功；宿主私有目录探针不可读；环境基础共享目录与明确打开的项目使用受目录约束的传输，项目内允许 Git 读写", "")
 		} else {
 			set("filesystem_boundary", cage.CheckFailed, "共享读写、私有目录探针或挂载范围未符合预期", "检查共享目录；不要共享主目录或 Cage 配置目录")
@@ -1126,7 +1189,13 @@ func (s *Server) monitorSafetyWithProbe(probe func(context.Context, cage.Config)
 			recoverable = e != nil
 		}
 	}
-	if issue == "" {
+	if issue == "" && s.macosGuest != nil {
+		timing.stage("browser_settings_inputs")
+		if !s.recheckMacOSBrowserSettings(ctx, cfg) {
+			issue = "未能确认 Chrome 仍在使用检测过的进程和资料设置，请打开 Chrome 后重新检测"
+			recoverable = false
+		}
+	} else if issue == "" {
 		browser, e := s.browserObservation(ctx, cfg, false)
 		timing.stage("browser_settings")
 		if e != nil {

@@ -388,30 +388,34 @@ func (s *start) ensureRunningLocked() error {
 			return errStop
 		}
 	}
-	base, err := s.get(vmname.Template)
+	inst, err := s.get(s.name)
 	if err != nil {
 		s.warnf("Error: could not query Lima: %v", err)
 		return errStop
 	}
-	if s.configErr(base) {
-		return errStop
-	}
-	if _, merr := os.Stat(s.state.Path(state.BaseVersion)); base == nil || merr != nil {
-		if base != nil {
-			s.warnf("Error: Base VM setup did not complete. Run 'agent-vm setup' again.")
-		} else {
-			s.warnf("Error: Base VM not found. Run 'agent-vm setup' first.")
+	// Existing VMs have their own disks and do not need the template to run.
+	// Check it before a reset can stop or delete the retained environment.
+	if inst == nil || o.Reset {
+		base, err := s.get(vmname.Template)
+		if err != nil {
+			s.warnf("Error: could not query Lima: %v", err)
+			return errStop
 		}
-		return errStop
+		if s.configErr(base) {
+			return errStop
+		}
+		if _, merr := os.Stat(s.state.Path(state.BaseVersion)); base == nil || merr != nil {
+			if base != nil {
+				s.warnf("Error: Base VM setup did not complete. Run 'agent-vm setup' again.")
+			} else {
+				s.warnf("Error: Base VM not found. Run 'agent-vm setup' first.")
+			}
+			return errStop
+		}
 	}
 
 	s.vmUp = !o.Reset && s.running()
 	if !s.checks() {
-		return errStop
-	}
-	inst, err := s.get(s.name)
-	if err != nil {
-		s.warnf("Error: could not query Lima: %v", err)
 		return errStop
 	}
 	if !o.Reset && s.configErr(inst) {
@@ -522,6 +526,16 @@ func (s *start) ensureRunningLocked() error {
 		return errStop
 	}
 	want, _ := s.shares(wantWritable)
+	if cageWritableGit() && wasRunning && !s.opts.Scratch {
+		currentRoot := false
+		for _, mount := range inst.Mounts {
+			currentRoot = currentRoot || paths.Equal(paths.Host(mount.Location), paths.Host(s.dir)) && mount.MountPoint == paths.Guest(s.dir)
+		}
+		if !currentRoot {
+			s.warnf("下载目录与运行中的文件共享不一致。请先保存工作，运行 cage stop 后重新启动；项目文件、会话和登录状态会保留。")
+			return errStop
+		}
+	}
 	wasProtected := len(inst.Mounts) > 0 && unprotected(inst, nil) == ""
 	gitStale := !o.Scratch && wasProtected != s.protect
 	namesStale := s.protect && wasProtected && unprotected(inst, s.names) != ""

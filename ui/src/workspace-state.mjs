@@ -28,12 +28,11 @@ export function rememberClientProjectName(share) {
   catch { /* The mount is usable without browser storage. */ }
 }
 
-export function projectName(path, defaultWorkspace) {
+export function projectName(path) {
   if (clientMount.test(path)) {
     try { return sessionStorage.getItem(path) || "本机共享项目"; }
     catch { return "本机共享项目"; }
   }
-  if (path === defaultWorkspace && path?.endsWith("-workspace")) return "默认工作区";
   return folderName(path) || "新项目";
 }
 

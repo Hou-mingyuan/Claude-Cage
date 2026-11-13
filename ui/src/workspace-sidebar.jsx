@@ -29,7 +29,6 @@ import { GuestSystemIcon } from "./guest-system-icon";
 export function WorkspaceSidebar({
   workspace,
   guestSystem,
-  defaultWorkspace,
   projects,
   tabs,
   sessions = [],
@@ -161,7 +160,7 @@ export function WorkspaceSidebar({
           </div>
         )}
         {projects.map((path) => {
-          const project = projectName(path, defaultWorkspace);
+          const project = projectName(path);
           const rows = projectSessionRows(tabs.filter(tab => tab.kind === "terminal" && tab.workspace === path),
             sessions.filter(session => session.workspace === path), saved, saved.sessionOrder?.[path], sessionBaseline.current);
           const rowMetadata = { ...saved };

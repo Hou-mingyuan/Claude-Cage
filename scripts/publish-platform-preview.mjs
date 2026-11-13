@@ -129,7 +129,7 @@ async function main() {
   mergeReleaseChecksums(release, merged, files, version);
   const marker = `<!-- cage-platform-packages source=${run.head_sha} ci=${runID} -->`;
   if (!release.body.includes(marker)) {
-    const notes = release.body + `\n\n## Windows 与 Linux 下载\n\n${marker}\n\n本版本同时提供三平台安装包，共用 SHA256SUMS。macOS 安装包保持原样；Windows/Linux 包来自完成平台构建修复的源码 [${run.head_sha.slice(0, 7)}](https://github.com/${repo}/commit/${run.head_sha})，与 macOS 标签的构建提交不同。\n\n- **Windows：未签名 x64 预览版**，文件名含 -setup-unsigned.exe，需手动安装和更新，系统可能提示未知发布者；不进入签名自动更新通道。\n- **Linux：Debian 12 / Ubuntu 24.04 x86_64**，下载 .deb 并通过系统包管理器安装、更新。\n- [三平台 CI](https://github.com/${repo}/actions/runs/${runID}) 已通过 Windows 2022/2025 安装器及 Debian 12 容器验收。托管 CI 不代替所有真实设备和硬件虚拟化验收。\n- 随附 Mihomo 与 QEMU 主程序对应源码；升级前保存文件、停止环境并退出 Cage。\n\n[官网三平台下载](https://lee-xeo.github.io/Claude-Cage/#download)\n`;
+    const notes = release.body + `\n\n## Windows 与 Linux 下载\n\n${marker}\n\n本版本同时提供三平台安装包，共用 SHA256SUMS。macOS 安装包保持原样；Windows/Linux 包来自完成平台构建修复的源码 [${run.head_sha.slice(0, 7)}](https://github.com/${repo}/commit/${run.head_sha})，与 macOS 标签的构建提交不同。\n\n- **Windows：未签名 x64 预览版**，文件名含 -setup-unsigned.exe，需手动安装和更新，系统可能提示未知发布者；不进入签名自动更新通道。\n- **Linux：Debian 12 / Ubuntu 24.04 x86_64**，下载 .deb 并通过系统包管理器安装、更新。\n- [三平台 CI](https://github.com/${repo}/actions/runs/${runID}) 已通过 Windows 2022/2025 安装器及 Debian 12 容器验收。托管 CI 不代替所有真实设备和硬件虚拟化验收。\n- 随附 Mihomo 与 QEMU 主程序对应源码；升级前保存文件、停止环境并退出 Cage。\n\n[官网三平台下载](https://claude-cage.com/#download)\n`;
     const notesPath = join(root, 'notes.md'); writeFileSync(notesPath, notes);
     gh(['release', 'edit', tag, '--repo', repo, '--notes-file', notesPath]);
   }

@@ -14,6 +14,7 @@ import { browserCookies } from "./browser-cookies.mjs";
 import { BrowserExtensions, extensionUploadLimit } from "./browser-extensions.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
 import { BrowserVisibility } from "./browser-visibility.mjs";
+import { BrowserWheel, createActivitySignal, createPointerProbe } from "./browser-wheel.mjs";
 import { nativeInput } from "./native-input.mjs";
 import { createDisplaySettings, displayDensity } from "./display-density.mjs";
 import { DownloadManager } from "./browser-downloads.mjs";
@@ -48,7 +49,10 @@ function rememberSelection() {
 }
 const downloadPath = "/home/cage-browser/Downloads";
 mkdirSync(downloadPath, { recursive: true });
-const splitDirectory = "/usr/local/lib/cage-split";
+const snapLauncher = "/usr/local/lib/workbench-browser/chromium";
+const snapBrowser = existsSync(snapLauncher);
+const browserBinary = snapBrowser ? snapLauncher : "/usr/bin/chromium";
+const splitDirectory = snapBrowser ? "/var/snap/chromium/common/workbench-extension" : "/usr/local/lib/cage-split";
 const extensionId = createHash("sha256").update(splitDirectory).digest("hex").slice(0, 32)
   .replace(/./g, c => String.fromCharCode(97 + parseInt(c, 16)));
 const splitURL = `chrome-extension://${extensionId}/control.html`;
@@ -88,7 +92,7 @@ const flags = [
 ];
 const freshProfile = !existsSync("/home/cage-browser/profile/Default/Sessions");
 if (freshProfile) flags.push("about:blank");
-const chrome = spawn("/usr/bin/chromium", flags, {
+const chrome = spawn(browserBinary, flags, {
   stdio: ["ignore", "ignore", "inherit", "pipe", "pipe"],
 });
 let sequence = 0,
@@ -108,6 +112,22 @@ const pending = new Map(),
   targets = new Map(),
   sessions = new Map();
 const closingTargets = new Map();
+// Developer tools share the window with the page they inspect, or cover it.
+const inspectors = new Set();
+const pointerProbe = createPointerProbe();
+const displayActivity = createActivitySignal({ path: "/home/cage-browser/.cache/cage-display/activity.sock" });
+process.on("exit", () => { pointerProbe.close(); displayActivity.close(); });
+// A scrolled distance goes to the one page that fills the window. Two panes,
+// developer tools and a hidden window keep the wheel steps of the display.
+const browserWheel = new BrowserWheel({
+  cdp,
+  pointer: pointerProbe,
+  activity: displayActivity,
+  target: async () => {
+    if (!ready || !targets.has(activeId) || splitView || inspectors.size || !visibility.visible) return null;
+    return session(activeId).catch(() => null);
+  },
+});
 let browserVNCViewers = false;
 function canHideBrowser() {
   // Legacy viewers connect directly to the loopback VNC server. Keep their
@@ -136,7 +156,27 @@ const browserClipboard = new BrowserClipboard(cdp, ({ id, text, context }) => {
   if (id !== activeId || !targets.has(id)) return;
   const payload = "event: clipboard\ndata: " + JSON.stringify({ id, text, context }) + "\n\n";
   for (const stream of events) stream.write(payload);
-});
+}, { source: clipboardSource });
+async function clipboardSource() {
+  const { browserContextId } = await cdp("Target.createBrowserContext", { disposeOnDetach: true });
+  auditExclusions.add(browserContextId);
+  try {
+    const origin = "http://127.0.0.1:18500";
+    await cdp("Browser.grantPermissions", { browserContextId, origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
+    const { targetId } = await cdp("Target.createTarget", { browserContextId, url: origin, hidden: true, background: true });
+    const { sessionId } = await cdp("Target.attachToTarget", { targetId, flatten: true });
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const ready = await cdp("Runtime.evaluate", { expression: "!!navigator.clipboard", returnByValue: true }, sessionId);
+      if (ready.result?.value) return sessionId;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    throw new Error("Clipboard source page unavailable");
+  } catch (error) {
+    await cdp("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+    auditExclusions.delete(browserContextId);
+    throw error;
+  }
+}
 const vault = new BrowserVault({ cdp, active: () => activeId, tab: id => targets.get(id) });
 const downloads = new DownloadManager({
   directory: "/home/cage-browser",
@@ -152,7 +192,7 @@ const downloads = new DownloadManager({
     return JSON.parse(output);
   },
 });
-const uploadDirectory = "/home/cage-browser/.cage-uploads";
+const uploadDirectory = snapBrowser ? "/home/cage-browser/snap/chromium/common/uploads" : "/home/cage-browser/.cage-uploads";
 rmSync(uploadDirectory, { recursive: true, force: true });
 const uploadSessions = new Map();
 const uploads = new UploadManager({ directory: uploadDirectory, cdp, changed: () => broadcastState() });
@@ -176,6 +216,8 @@ function cdp(method, params = {}, sessionId, timeout = 4500) {
 }
 
 function updateTargetInfo(t) {
+  if (t.url.startsWith("devtools://")) inspectors.add(t.targetId);
+  else inspectors.delete(t.targetId);
   if (!isBrowserTab(t)) return;
   const fresh = !targets.has(t.targetId);
   targets.set(t.targetId, privateBrowser.tab(loginBrowser.tab(t, targets.get(t.targetId))));
@@ -262,6 +304,7 @@ chrome.stdio[4].on("data", (chunk) => {
     if (event.method === "Target.targetDestroyed") {
       auditExclusions.delete(p.targetId);
       deferredTargetInfo.delete(p.targetId);
+      inspectors.delete(p.targetId);
       if (p.targetId === splitTarget) {
         splitTarget = null; splitSession = null;
         if (!shuttingDown) void mutate(async () => {
@@ -281,6 +324,7 @@ chrome.stdio[4].on("data", (chunk) => {
       if (splitView && [splitView.left, splitView.right].includes(p.targetId)) splitView = null;
       uploads.cancelTab(p.targetId);
       for (const [sid, tab] of uploadSessions) if (tab === p.targetId) uploadSessions.delete(sid);
+      sessions.get(p.targetId)?.then(sid => browserWheel.forget(sid), () => {});
       sessions.delete(p.targetId);
       if (wasPrivate) void mutate(() => privateBrowser.prune()).catch(() => {});
       if (activeId === p.targetId) {
@@ -790,6 +834,8 @@ const server = http.createServer(async (req, res) => {
       if (text.length > (req.url === "/paste-image" ? 28 * 1024 * 1024 : req.url === "/paste-text" ? 12 * 1024 * 1024 + 4096 : 65536)) throw new Error("Request too large");
     }
     const input = JSON.parse(text || "{}");
+    // Ahead of the queue below: a scroll does not wait for a tab operation.
+    if (req.url === "/wheel") { res.end(JSON.stringify(await browserWheel.deliver(input))); return; }
     if (req.url === "/tailnet") { res.end(JSON.stringify(await tailnet.request(input))); return; }
     if (["/phone-desktop/open", "/phone-desktop/frame", "/phone-desktop/action", "/phone-desktop/close"].includes(req.url)) {
       const { phoneDesktop } = await import("./browser-phone-desktop.mjs");
@@ -800,7 +846,7 @@ const server = http.createServer(async (req, res) => {
     if (["/phone-browser/open", "/phone-browser/action", "/phone-browser/frame", "/phone-browser/close"].includes(req.url)) {
       // Load only for a phone operation, keeping desktop startup independent.
       const { PhoneBrowser } = await import("./browser-phone.mjs");
-      phoneBrowser ??= new PhoneBrowser();
+      phoneBrowser ??= new PhoneBrowser({ binary: browserBinary });
       try {
         res.end(JSON.stringify(await phoneBrowser.run(req.url.slice("/phone-browser/".length), input)));
       } catch (error) {
@@ -997,8 +1043,10 @@ server.listen(18500, "127.0.0.1");
   await cdp("Browser.getVersion", {}, undefined, 30000);
   await cdp("Target.setDiscoverTargets", { discover: true });
   const { targetInfos } = await cdp("Target.getTargets");
-  for (const t of targetInfos)
+  for (const t of targetInfos) {
+    if (t.url.startsWith("devtools://")) inspectors.add(t.targetId);
     if (isBrowserTab(t)) targets.set(t.targetId, t);
+  }
   await cdp("Browser.setDownloadBehavior", {
     behavior: "allowAndName",
     downloadPath,

@@ -66,6 +66,11 @@ func TestMacOSBinaryFramePreservesBytesAndRejectsInvalidRecords(t *testing.T) {
 }
 
 func TestMacOSFrameStreamAcknowledgementResizeAndDisconnect(t *testing.T) {
+	t.Run("Claude", func(t *testing.T) { testMacOSFrameStream(t, false) })
+	t.Run("Chrome", func(t *testing.T) { testMacOSFrameStream(t, true) })
+}
+
+func testMacOSFrameStream(t *testing.T, browser bool) {
 	s := testServer(t)
 	transport, guest := net.Pipe()
 	defer guest.Close()
@@ -99,7 +104,7 @@ func TestMacOSFrameStreamAcknowledgementResizeAndDisconnect(t *testing.T) {
 			return
 		}
 		defer ws.Close()
-		relayMacOSFrames(r.Context(), ws, transport, transport)
+		relayMacOSFrames(r.Context(), ws, transport, transport, browser)
 	}))
 	defer server.Close()
 	s.origin = server.URL
@@ -141,7 +146,11 @@ func TestMacOSFrameStreamAcknowledgementResizeAndDisconnect(t *testing.T) {
 		return header
 	}
 	send(macOSFrameSubscription{Width: 800, Height: 600, Scale: 2, Revision: 1})
-	if first := next(); first.After != "" || first.Width != 800 {
+	wantAction, wantSurface := "frame", ""
+	if browser {
+		wantAction, wantSurface = "browser-frame", "browser"
+	}
+	if first := next(); first.After != "" || first.Width != 800 || first.Action != wantAction || first.Surface != wantSurface {
 		t.Fatalf("bad first request: %+v", first)
 	}
 	header, pixels := macFrameFixture(t)

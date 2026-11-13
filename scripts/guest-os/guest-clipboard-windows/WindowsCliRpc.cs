@@ -25,7 +25,7 @@ internal static class WindowsCliRpc
         try{LoadTools();}catch(Exception){return;}
         GuestOperations.Register("cli",Run);
     }
-    private sealed record Tools(string Python,string Claude,string Bash);
+    private sealed record Tools(string Python,string Claude,string Bash,string? GitHub);
     private sealed record Layout(string Profile,string Root,string Accounts,string State,string Shared,string Code,Tools Tools);
     internal static async Task Run(Stream stream,CancellationToken token,Func<bool> available)
     {
@@ -114,7 +114,7 @@ internal static class WindowsCliRpc
         var accounts=Path.Combine(root,"accounts");var state=Path.Combine(root,"channels");var shared=Path.Combine(root,"shared");
         foreach(var path in new[]{root,accounts,state,shared})PrivateDirectory(path);
         string Read(string resource){using var input=Assembly.GetExecutingAssembly().GetManifestResourceStream(resource)??throw new InvalidDataException("cli_helper_missing");using var reader=new StreamReader(input,Protocol.Utf8);return reader.ReadToEnd();}
-        var files=new Dictionary<string,string>{{"cli_channel.py",Read("Cage.CliChannel")},{"cage-claude-account.py",Read("Cage.CliAccount")},{"windows_cli_platform.py",Read("Cage.CliPlatform")},{"windows_ccs_launch.cjs",Read("Cage.CliCCS")},{"mobile_cli_identity.py",Read("Cage.CliIdentity")},{"cli_channel.resume.md",Read("Cage.CliResume")},{"cli_channel.account-resume.md",Read("Cage.CliAccountResume")}};
+        var files=new Dictionary<string,string>{{"client_runtime.py",Read("Cage.ClientRuntime")},{"cli_channel.py",Read("Cage.CliChannel")},{"cage-claude-account.py",Read("Cage.CliAccount")},{"windows_cli_platform.py",Read("Cage.CliPlatform")},{"windows_ccs_launch.cjs",Read("Cage.CliCCS")},{"mobile_cli_identity.py",Read("Cage.CliIdentity")},{"cli_channel.resume.md",Read("Cage.CliResume")},{"cli_channel.account-resume.md",Read("Cage.CliAccountResume")}};
         var digest=Convert.ToHexString(SHA256.HashData(Protocol.Utf8.GetBytes(string.Join("\n",files.Values)))).ToLowerInvariant();
         var code=Path.Combine(root,"code",digest);PrivateDirectory(code);
         foreach(var file in files){var path=Path.Combine(code,file.Key);if(!File.Exists(path))File.WriteAllText(path,file.Value,Protocol.Utf8);else if(File.ReadAllText(path,Protocol.Utf8)!=file.Value)throw new InvalidDataException("cli_helper_changed");}
@@ -125,7 +125,21 @@ internal static class WindowsCliRpc
     {
         var toolsFile=Path.Combine(AppContext.BaseDirectory,"cli-tools.json");Pairing.PrivateFile(toolsFile);
         var tool=JsonNode.Parse(File.ReadAllBytes(toolsFile))as JsonObject??throw new InvalidDataException("cli_tools_invalid");
-        return new Tools(CheckTool(tool,"python"),CheckTool(tool,"claude"),CheckTool(tool,"git_bash"));
+        return new Tools(CheckTool(tool,"python"),CheckTool(tool,"claude"),CheckTool(tool,"git_bash"),tool["gh"] is null?null:CheckTool(tool,"gh"));
+    }
+    // Used by ordinary terminals as well as Claude, including before a new login.
+    internal static Dictionary<string,string> ToolEnvironment()
+    {
+        var env=Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>().ToDictionary(x=>(string)x.Key,x=>(string)x.Value!,StringComparer.OrdinalIgnoreCase);
+        try { AddToolPath(env,LoadTools()); }
+        catch(Exception error) when(error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException) { }
+        return env;
+    }
+    private static void AddToolPath(Dictionary<string,string> env,Tools tools)
+    {
+        var paths=new List<string>{Path.GetDirectoryName(tools.Claude)!,Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(tools.Bash))!,"cmd")};
+        if(tools.GitHub is not null)paths.Add(Path.GetDirectoryName(tools.GitHub)!);
+        env["PATH"]=string.Join(';',paths)+";"+env.GetValueOrDefault("PATH");
     }
     // Read only fixed tool receipts, without account preparation or execution.
     internal static JsonObject ComponentStatus()
@@ -192,7 +206,7 @@ internal static class WindowsCliRpc
         env["CAGE_CLI_ACCOUNT_HELPER"]=Path.Combine(layout.Code,"cage-claude-account.py");env["CLAUDE_CODE_GIT_BASH_PATH"]=layout.Tools.Bash;
         env["CAGE_CLI_IDENTITY_HELPER"]=Path.Combine(layout.Code,"mobile_cli_identity.py");
         env["CAGE_CLI_PYTHON"]=layout.Tools.Python;env["CAGE_CLI_SHELL"]=TerminalRpc.PowerShellPath();env["CAGE_CLAUDE_ACCOUNT_ID"]=account;
-        env["PATH"]=Path.GetDirectoryName(layout.Tools.Claude)+";"+Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(layout.Tools.Bash))!,"cmd")+";"+env.GetValueOrDefault("PATH");
+        AddToolPath(env,layout.Tools);
         if(account!="default")env["CLAUDE_CONFIG_DIR"]=Path.Combine(layout.Accounts,account,"config");
         else env.Remove("CLAUDE_CONFIG_DIR");
         return env;

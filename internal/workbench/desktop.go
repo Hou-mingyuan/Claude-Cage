@@ -107,6 +107,15 @@ func connectController(profile string) (*controllerClient, error) {
 }
 func (c *controllerClient) close() { c.client.CloseIdleConnections() }
 
+// The private launcher record supplies the same desktop proof used by the
+// local workbench. Protected requests still require a session and unlock.
+func (c *controllerClient) setTrustedViewCookie(origin *url.URL) {
+	c.client.Jar.SetCookies(origin, []*http.Cookie{{
+		Name: cookieName + "_" + origin.Port() + "-desktop", Value: trustedViewProof(c.record.Token),
+		Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode,
+	}})
+}
+
 // Shutdown removes the record before releasing the profile lock. A new window
 // can arrive in that interval; wait for retirement or a ready service without
 // spawning a replacement against an occupied lock.
@@ -347,6 +356,14 @@ func (c *controllerClient) stopAndHandoff() error {
 			}
 			return c.waitForExit()
 		}
+	} else if !legacy && !c.launch.DesktopGateway && !c.launch.ClientOnly &&
+		c.launch.ConfigPath != "" && filepath.Dir(c.launch.ConfigPath) == filepath.Clean(c.profile) &&
+		contextErr == nil && contextStatus == http.StatusOK && !clientContext.DesktopGateway &&
+		clientContext.Mode == "local" && clientContext.ConnectionID == "local" {
+		// A selection change after the context request must not send the
+		// stop request to a remote workload.
+		c.connectionID = clientContext.ConnectionID
+		c.setTrustedViewCookie(u)
 	}
 	var requested Job
 	status, err = c.call("POST", "/api/stop", map[string]any{}, &requested)

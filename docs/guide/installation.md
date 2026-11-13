@@ -7,7 +7,7 @@ keywords: 下载 安装 客机 macOS Windows Debian Apple Silicon Hyper-V WHPX K
 ---
 ## 选择安装包
 
-从[官网下载区](https://lee-xeo.github.io/Claude-Cage/#download)选择平台。公开附件、签名和校验文件以 [GitHub Releases](https://github.com/Lee-xeo/Claude-Cage/releases)为准。源码压缩包用于开发，不能直接安装。
+从[官网下载区](https://claude-cage.com/#download)选择平台。公开附件、签名和校验文件以 [GitHub Releases](https://github.com/Lee-xeo/Claude-Cage/releases)为准。源码压缩包用于开发，不能直接安装。
 
 | 平台 | 要求与安装方式 |
 | --- | --- |
@@ -64,7 +64,11 @@ Git 保护会修改当前主机用户的全局 `safe.bareRepository=explicit`，
 
 Debian 初始虚拟磁盘容量上限为 24 GiB，macOS 和 Windows 需为系统及开发工具留出更多空间。实际占用随安装和使用增加，创建前查看所选版本的要求。Claude Desktop 按需单独下载。随后启动会复用工具、文件与登录资料。
 
-下载中断时查看错误，修复网络或磁盘空间后点“继续安装”。有固定 SHA-256 摘要的 macOS 应用与开发工具包会尝试续传，收齐后校验整份文件。摘要不符或服务器不支持续传时，从头下载该文件。Chrome 使用随版本更新的下载地址，中断后会重新下载整个安装包。不要通过清空 `.claude-cage` 或重建账户解决安装失败。
+应用内准备有固定摘要的 Linux 开发工具包、macOS 应用与开发工具包、Windows 原生工具包时，剩余下载量达到 8 MiB 会尝试最多 4 连接分段下载。小文件、无法取得文件长度或服务器不支持分段时使用单连接。所有连接沿用对应下载任务的代理设置，收齐后校验整份文件，校验成功才用于安装。
+
+Claude Code 和 Claude Desktop 在实际下载安装时查询官方最新版本；已安装的更新版本会保留。环境版本页显示这一下载策略，客机中的版本号以实际安装结果为准。
+
+下载中断时查看错误，修复网络或磁盘空间后点“继续安装”。已有连续进度和已保存的分段会用于续传；即使剩余不足 8 MiB，也会继续复用分段。摘要不符或服务器不支持续传时，从头下载该文件。Claude Desktop 和 Chrome 的官方最新安装包没有预先固定的摘要，中断后可能需要重新下载整个安装包。不要通过清空 `.claude-cage` 或重建账户解决安装失败。
 
 下载时显示已接收字节、可取得的总量与采样速度；校验单独显示处理进度。系统恢复和工具安装没有可测总量时显示阶段。继续安装沿用原安装身份、系统选择和已创建磁盘。
 

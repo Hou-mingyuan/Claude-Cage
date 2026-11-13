@@ -266,7 +266,12 @@ export function SettingsPanel({
                   onConfirm={onConfirm}
                   onApplied={async () => {
                     setProbe(null);
-                    onSaved();
+                    const applied = await api("/settings");
+                    if (JSON.stringify(canonicalExitPolicy(applied.exit_policy)) !==
+                        JSON.stringify(canonicalExitPolicy(current.exit_policy))) {
+                      setDraft(previous => ({ ...previous, exit_policy: applied.exit_policy }));
+                    }
+                    await onSaved();
                   }}
                 />
                 <label>
@@ -580,9 +585,7 @@ export function SettingsPanel({
                 <div className="setting-summary-row">
                   <span>当前项目</span>
                   <strong title={current.workspace}>
-                    {status.environment_workspace
-                      ? "Cage 默认工作区"
-                      : current.workspace || "尚未选择项目"}
+                    {current.workspace || "尚未选择项目"}
                   </strong>
                 </div>
                 <p className="field-help">
@@ -595,7 +598,7 @@ export function SettingsPanel({
                     <p>
                       明确打开的项目文件夹会共享到同一个环境。主机的 Claude
                       登录、SSH 密钥和个人配置不会自动导入。浏览器下载统一保存到
-                      Cage 默认工作区的 Downloads 文件夹。
+                      独立的下载暂存目录，可从下载面板查看或另存为。
                     </p>
                   </div>
                 </div>

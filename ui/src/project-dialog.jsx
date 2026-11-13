@@ -64,7 +64,7 @@ export function ProjectDialog({
     try {
       await api("/client/project-shares/" + item.id, undefined, "DELETE");
       setShares((old) => old.filter((s) => s.id !== item.id));
-      if (path === item.guest_path) setPath(status.environment_directory || "");
+      if (path === item.guest_path) setPath(status.workspace || "");
     } catch (e) { setError(e.message); }
     finally { setSubmitting(false); }
   };
@@ -77,7 +77,8 @@ export function ProjectDialog({
     try {
       const result = await api("/projects/remove", { workspace: removeTarget });
       setRemoved(previous => [...previous, removeTarget]);
-      setPath(result.workspace || status.environment_directory || "");
+      setPath(result.workspace || "");
+      if (!result.workspace) setAdding(true);
       setRemoveTarget("");
       await onRemoved?.(removeTarget, result.workspace);
     } catch (e) { setError(e.message); }
@@ -191,17 +192,17 @@ export function ProjectDialog({
               <input type="radio" name="project" value={project} checked={path === project} onChange={() => { setPath(project); setError(""); }} />
               <FolderOpen size={18} aria-hidden="true" />
               <span>
-                <strong>{project === status.environment_directory ? "默认工作区" : projectName(project)}</strong>
+                <strong>{projectName(project)}</strong>
                 <small>{shares.find((s) => s.guest_path === project)?.path || project}</small>
                 {status.project_errors?.some((item) => item.path === project) && <small>需要重新连接，选择后重试</small>}
               </span>
             </label>)}
           </fieldset>
           {selectedShare && <button type="button" disabled={submitting} onClick={() => revoke(selectedShare)}>停止共享本机项目（{selectedShare.readonly ? "只读" : "读写"}）</button>}
-          {activate && !selectedShare && path && path !== status.environment_directory && !removeTarget && <button type="button" className="quiet-button" disabled={busy} onClick={() => { setRemoveTarget(path); setError(""); setRecovery(""); }}>从 Cage 移除此项目</button>}
+          {activate && !selectedShare && path && !removeTarget && <button type="button" className="quiet-button" disabled={busy} onClick={() => { setRemoveTarget(path); setError(""); setRecovery(""); }}>从 Cage 移除此项目</button>}
           {removeTarget && <section className="project-picker-list" aria-label="确认移除项目">
             <p>移除“{projectName(removeTarget)}”将解除目录共享。原文件和会话历史保留，重新添加相同目录后可继续使用历史。</p>
-            <p className="field-help">请先保存文件，并关闭此项目的终端、运行中会话和编辑器。移除当前项目后会选中默认工作区。</p>
+            <p className="field-help">请先保存文件，并关闭此项目的终端、运行中会话和编辑器。移除当前项目后选中剩余项目；移除最后一个项目后，可重新添加文件夹。</p>
             <button type="button" disabled={busy} onClick={() => { setRemoveTarget(""); setError(""); }}>取消移除</button>
             <button type="button" disabled={busy} onClick={remove}>确认移除项目</button>
           </section>}

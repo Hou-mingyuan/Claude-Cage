@@ -53,7 +53,7 @@ func maintenanceDestination(address string, connect bool) bool {
 	}
 	host = strings.ToLower(host)
 	switch host {
-	case "mirrors.nju.edu.cn", "mirrors.ustc.edu.cn", "cdn.npmmirror.com", "storage.googleapis.com", "codeload.github.com":
+	case "mirrors.nju.edu.cn", "mirrors.ustc.edu.cn", "cdn.npmmirror.com", "api.snapcraft.io", "storage.snapcraftcontent.com", "canonical-lgw01.cdn.snapcraftcontent.com", "canonical-lcy01.cdn.snapcraftcontent.com", "canonical-lcy02.cdn.snapcraftcontent.com", "canonical-bos01.cdn.snapcraftcontent.com", "cloudfront.cdn.snapcraftcontent.com", "codeload.github.com":
 		return connect
 	}
 	return maintenanceOrigins[host]

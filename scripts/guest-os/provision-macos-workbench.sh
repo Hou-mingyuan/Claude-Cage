@@ -60,6 +60,7 @@ bash install-macos-node.sh "$kit/node.tgz"
 bash install-macos-browser.sh "$kit"
 bash cli/install-macos-cli.sh "$kit/cli"
 bash claude-desktop-macos.sh install "$kit/claude.dmg"
+bash claude-desktop-macos.sh migrate "$ordinary"
 install -m 755 cage-macos-ipv6-check /usr/local/libexec/cage-macos-ipv6-check
 app='/Applications/Cage Guest Window.app'
 if [[ ! -e $app ]]; then ditto 'Cage Guest Window.app' "$app"; fi

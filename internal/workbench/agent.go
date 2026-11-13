@@ -248,9 +248,7 @@ func agentConnect(ctx context.Context, configPath string) (*controllerClient, er
 	if err != nil || code != 200 {
 		return fail(agentHTTPError(401))
 	}
-	// Same proof as the existing local desktop transport. Possession is checked
-	// through the private launcher record; account locking still applies.
-	c.client.Jar.SetCookies(u, []*http.Cookie{{Name: cookieName + "_" + u.Port() + "-desktop", Value: trustedViewProof(c.record.Token), Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode}})
+	c.setTrustedViewCookie(u)
 	return c, nil
 }
 

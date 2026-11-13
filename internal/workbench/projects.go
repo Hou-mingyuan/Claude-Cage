@@ -333,8 +333,8 @@ func (s *Server) setProjectError(path string, err error) {
 	}
 }
 
-// The saved directory grants are the project list. Include the default and
-// current directories for profiles created before projects.json existed.
+// The saved directory grants are the project list. Retain a legacy current
+// selection as an ordinary project, without granting the transfer directory.
 func (s *Server) projectPaths() ([]string, error) {
 	var saved sharedProjects
 	if b, err := os.ReadFile(filepath.Join(s.profile, "projects.json")); err == nil {
@@ -344,7 +344,7 @@ func (s *Server) projectPaths() ([]string, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-	paths := []string{s.environmentDir()}
+	paths := []string{}
 	s.mu.Lock()
 	current := s.preferences.Workspace
 	s.mu.Unlock()
@@ -380,9 +380,6 @@ func (s *Server) projectWorkspace(path string) (string, error) {
 }
 
 func (s *Server) rememberSharedProject(path string) error {
-	if path == s.environmentDir() {
-		return nil
-	}
 	var saved sharedProjects
 	if b, err := os.ReadFile(filepath.Join(s.profile, "projects.json")); err == nil {
 		if err = json.Unmarshal(b, &saved); err != nil {
@@ -404,13 +401,10 @@ func (s *Server) restoreProjectShares() {
 	if b, err := os.ReadFile(filepath.Join(s.profile, "projects.json")); err == nil {
 		_ = json.Unmarshal(b, &saved)
 	}
-	if s.macosGuest != nil {
-		saved.Paths = append([]string{s.environmentDir()}, saved.Paths...)
-	}
 	s.mu.Lock()
 	current := s.preferences.Workspace
 	s.mu.Unlock()
-	if current != "" && current != s.environmentDir() {
+	if current != "" {
 		found := false
 		for _, p := range saved.Paths {
 			found = found || p == current

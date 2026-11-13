@@ -1,0 +1,37 @@
+name: 文档问题
+description: 报告文档错误、过时内容、缺失步骤或翻译问题。
+title: "[Docs] "
+labels: [documentation]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: 文档位置
+      description: 填写网页链接或仓库文件路径，并注明章节；翻译问题请同时注明语言。
+      placeholder: README.md 的安装说明 / docs/guide/maintenance.md / 网页链接
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 文档存在的问题
+      description: 指出错误、歧义或缺失内容。若按教程操作失败，请附相关步骤及实际结果。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望补充或修正的内容
+      description: 说明你希望文档讲清什么；有确定的修正内容或依据时也请提供。
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 相关版本或提交号
+      description: 如与某个 Cage 版本或文档提交有关，请填写版本号、提交号或固定到该提交的文档链接。
+  - type: textarea
+    id: environment
+    attributes:
+      label: 相关系统与补充材料
+      description: 如涉及安装或操作步骤，请注明主机、客机系统及版本；可附截图或参考链接，上传前请移除敏感信息。

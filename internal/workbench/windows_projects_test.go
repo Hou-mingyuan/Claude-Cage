@@ -122,6 +122,9 @@ func TestWindowsDefaultEnvironmentRequiresLiveShare(t *testing.T) {
 	if err := os.MkdirAll(s.environmentDir(), 0700); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.rememberSharedProject(s.environmentDir()); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.ensureProjectShare(s.environmentDir()); err == nil {
 		t.Fatal("default host environment became guest home without sharing")
 	}

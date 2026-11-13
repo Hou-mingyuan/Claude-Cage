@@ -289,6 +289,7 @@ def resolve(prefix, args, id_index, snapshot):
 
 def resolve_actual_context(binary, prefix, args, env, settings, snapshot):
     config, settings, route_env, route_settings, flags, policies = freeze_settings(env, settings, snapshot)
+    env = {key: value for key, value in env.items() if not key.upper().startswith("CAGE_")}
     effective = {**route_env, **route_settings}
     fd = snapshot.fileno()
     status = subprocess.run([binary, *flags, "auth", "status"], env=env, pass_fds=() if os.name == "nt" else (fd,),
@@ -345,7 +346,7 @@ def official_turn(helper_path, account, args, snapshot, sid, resume, verify_only
                     raise Changed()
             elif key.startswith(("ANTHROPIC_", "CLAUDE_")) and key not in harmless_env:
                 raise Unverified()
-    subject = env.get("CAGE_CLAUDE_SUBJECT")
+    subject = os.environ.get("CAGE_CLAUDE_SUBJECT")
     if not subject:
         raise Unverified()
     def bind_subscription(reading):
@@ -418,7 +419,7 @@ def main():
                 raise Unverified()
             bind(sid, False, None)
             single_turn_notice()
-            os.execvp(prefix[0], [*prefix, *args])
+            os.execvpe(prefix[0], [*prefix, *args], {key: value for key, value in os.environ.items() if not key.upper().startswith("CAGE_")})
         bind(sid, resume, material)
         if verify_only:
             raise Verified(Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").resolve())

@@ -81,7 +81,7 @@ export function EnvironmentStorage({ status, onConfirm }) {
     <p className="field-help">系统镜像、下载缓存和虚拟磁盘可以放在另一块本地磁盘。项目文件保存在各自的项目文件夹。</p>
     <div className="setting-summary-row"><span>当前环境目录</span><strong>{location?.directory || "正在读取…"}</strong></div>
     {status.environment_identity_directory && status.environment_identity_directory !== status.environment_directory &&
-      <p className="field-help">升级前的默认项目文件位于 <code>{status.environment_identity_directory}</code>，当前默认项目位于 <code>{status.environment_directory}</code>。如需使用旧目录中的项目，请在主机文件管理器中将项目移到 Cage 配置目录之外，再从工作台打开。</p>}
+      <p className="field-help">原工作目录中的文件保留在 <code>{status.environment_identity_directory}</code>。需要使用时可从工作台添加该文件夹；位于 Cage 私有配置目录中的项目需先移到配置目录之外。</p>}
     {location?.backup && <p className="field-help">迁移前的备份保存在 <code>{location.backup}</code>。确认新环境能正常启动、文件和登录状态齐全后，可自行清理备份。</p>}
     <label>新存储位置
       <input value={directory} onChange={(e) => { setDirectory(e.target.value); setError(""); }} spellCheck="false"

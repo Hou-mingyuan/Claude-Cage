@@ -24,9 +24,18 @@ const diagnostics = [
   },
   {
     name: "浏览器信息",
-    source: "fuck-claude.com",
-    url: "https://fuck-claude.com/",
+    source: "fuck-claude.vercel.app",
+    url: "https://fuck-claude.vercel.app/",
     description: "查看时区、语言、字体等浏览器信号的社区评估。",
+    attribution: "原项目 FuckClaude 由 LinXiaoTao 创建并持续维护。",
+    links: [
+      { label: "原项目官网", url: "https://fuck-claude.vercel.app/" },
+      { label: "开源仓库", url: "https://github.com/LinXiaoTao/FuckClaude" },
+      {
+        label: "初始提交",
+        url: "https://github.com/LinXiaoTao/FuckClaude/commit/420c79bb0531b12ea2788e726ffbf81075111737",
+      },
+    ],
   },
 ];
 
@@ -252,6 +261,24 @@ export function SafetyPanel({
                 在 Cage 中打开
                 <ArrowUpRight size={14} />
               </button>
+              {site.attribution && (
+                <div className="safety-scope">
+                  <p>{site.attribution}</p>
+                  <div className="safety-sources">
+                    {site.links.map((link) => (
+                      <button
+                        key={link.url}
+                        className="text-button"
+                        disabled={!online || busy}
+                        onClick={() => open(link.url)}
+                      >
+                        {link.label}
+                        <ArrowUpRight size={12} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -79,6 +79,11 @@ func (s *Server) guestFiles(ctx context.Context, target, method, path string, bo
 		default:
 			return nil, errors.New("虚拟 Mac 文件操作无效")
 		}
+		if input.Surface == "browser" && input.Action == "files-start" {
+			input.Action = "browser-files-start"
+		} else {
+			input.Surface = ""
+		}
 		input.Files = nil
 		return s.macOSDesktopFileCall(ctx, input)
 	}
@@ -212,6 +217,7 @@ func (s *Server) fileInputAction(w http.ResponseWriter, r *http.Request) {
 		Kind      string  `json:"kind"`
 		X         float64 `json:"x"`
 		Y         float64 `json:"y"`
+		Surface   string  `json:"surface,omitempty"`
 		Workspace string  `json:"workspace"`
 		Window    uint32  `json:"window,omitempty"`
 		PID       int32   `json:"pid,omitempty"`

@@ -95,6 +95,7 @@ func (s *Server) windowsVMLayout() (bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	allowed := make(map[string]bool, len(projects))
+	allowed[s.environmentDir()] = true // Internal download and boundary transport.
 	for _, path := range projects {
 		allowed[path] = true
 	}

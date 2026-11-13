@@ -19,6 +19,9 @@ func TestMobileCLIRecoveryDoesNotReplayAndChangesEpoch(t *testing.T) {
 	if err := writePrivate(filepath.Join(s.profile, "environment.json"), map[string]string{"directory": project}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.rememberSharedProject(project); err != nil {
+		t.Fatal(err)
+	}
 	id := uuid.NewString()
 	old, err := s.mobileCLI.create(s.profile, project, id)
 	if err != nil {
@@ -110,6 +113,9 @@ func TestMobileCLILaunchScopeAndOldApproval(t *testing.T) {
 	if err := writePrivate(filepath.Join(s.profile, "environment.json"), map[string]string{"directory": project}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.rememberSharedProject(project); err != nil {
+		t.Fatal(err)
+	}
 	id := uuid.NewString()
 	if _, err := s.mobileCLI.create(s.profile, project, id); err != nil {
 		t.Fatal(err)
@@ -168,6 +174,9 @@ func TestMobileCLIStopFromPreviousUnlock(t *testing.T) {
 	s := testServer(t)
 	project, _ := filepath.EvalSymlinks(t.TempDir())
 	if err := writePrivate(filepath.Join(s.profile, "environment.json"), map[string]string{"directory": project}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.rememberSharedProject(project); err != nil {
 		t.Fatal(err)
 	}
 	id, turnID := uuid.NewString(), uuid.NewString()

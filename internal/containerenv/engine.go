@@ -179,6 +179,9 @@ func (r *Runtime) State(ctx context.Context) (State, error) {
 			state.Ready = state.ResourcesVerified && state.MountsReady
 			state.BrowserAddress = record.BrowserAddress
 			state.VNCAddress = record.VNCAddress
+		} else if errors.Is(err, errSharedDirectoryChanged) {
+			state.MountsReady = false
+			state.MountError = err.Error()
 		}
 	}
 	return state, nil
@@ -327,6 +330,9 @@ func (r *Runtime) Inspect(ctx context.Context) (Inspection, error) {
 			result.NetworkConfined = true
 			result.FilesystemConfined = mounts.Ready()
 			result.Evidence = "实际 rootless 容器无默认网络或宿主目录挂载；当前外置网络门槛身份已验证，唯一 TAP 通道由宿主接收；默认项目经受限 SFTP 共享并完成双端读写验证"
+		} else if errors.Is(err, errSharedDirectoryChanged) {
+			result.State.MountsReady = false
+			result.State.MountError = err.Error()
 		}
 	}
 	return result, nil

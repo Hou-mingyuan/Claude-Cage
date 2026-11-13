@@ -2,220 +2,108 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
 
-test("clipboard events require a live default context and private binding token", async () => {
-  const copies = [];
-  const observer = new BrowserClipboard(
-    async () => ({}),
-    (value) => copies.push(value),
-  );
-  await observer.attach("session", "tab");
-  const state = observer.sessions.get("session");
-  const event = (method, params) =>
-    observer.event({ sessionId: "session", method, params });
-  const copied = (
-    text,
-    token = state.token,
-    executionContextId = 3,
-    context = "context-a",
-  ) =>
-    event("Runtime.bindingCalled", {
-      name: state.name,
-      executionContextId,
-      payload: JSON.stringify({ token, text, context }),
-    });
-  copied("before context");
-  event("Runtime.executionContextCreated", {
-    context: { id: 3, auxData: { isDefault: true, frameId: "frame" } },
-  });
-  event("Runtime.executionContextCreated", {
-    context: { id: 4, auxData: { isDefault: false, frameId: "frame" } },
-  });
-  copied("forged", "wrong token");
-  copied("isolated", state.token, 4);
-  copied("x".repeat(65537));
-  copied("invalid context", state.token, 3, null);
-  copied("invalid context", state.token, 3, "x".repeat(65));
-  copied("exact🙂");
-  assert.deepEqual(copies, [
-    { id: "tab", text: "exact🙂", context: "context-a" },
-  ]);
-  event("Page.frameNavigated", { frame: { id: "frame" } });
-  copied("old document");
-  event("Runtime.executionContextCreated", {
-    context: { id: 5, auxData: { isDefault: true, frameId: "frame" } },
-  });
-  copied("new document", state.token, 5);
-  observer.detachTab("tab");
-  copied("closed tab", state.token, 5);
-  assert.deepEqual(
-    copies.map((value) => value.text),
-    ["exact🙂", "new document"],
-  );
-});
-
-test("host copy context reaches every existing frame and newly attached child", async () => {
-  const calls = [];
-  const observer = new BrowserClipboard(
-    async (method, params, sessionId) => {
-      calls.push({ method, params, sessionId });
-      if (method === "Runtime.enable" && sessionId === "child")
-        observer.event({
-          sessionId,
-          method: "Runtime.executionContextCreated",
-          params: {
-            context: {
-              id: 3,
-              auxData: { isDefault: true, frameId: "cross-process-frame" },
-            },
-          },
-        });
-      return {};
-    },
-    () => {},
-  );
-  await observer.attach("root", "tab");
-  observer.event({
-    sessionId: "root",
-    method: "Runtime.executionContextCreated",
-    params: {
-      context: { id: 1, auxData: { isDefault: true, frameId: "root-frame" } },
-    },
-  });
+const settle = () => new Promise(resolve => setImmediate(resolve));
+async function fixture(options = {}) {
+  const calls = [], copies = [];
+  const observer = new BrowserClipboard(async (method, params, session) => {
+    calls.push({ method, params, session });
+    return { result: { value: true } };
+  }, value => copies.push(value), { source: async () => "source", ...options });
+  await observer.attach("tab-session", "tab");
+  const state = observer.sessions.get("tab-session");
+  const context = (id = 3, name = state.world) => observer.event({ sessionId: "tab-session", method: "Runtime.executionContextCreated",
+    params: { context: { id, name, auxData: { frameId: "frame", isDefault: name === "" } } } });
+  context();
   await observer.setContext("tab", "context-a");
-  observer.sessions.get("root").contexts.set(2, "same-process-frame");
-  await observer.attach("child", "tab");
-  assert.ok(
-    calls.some(
-      (call) =>
-        call.sessionId === "child" &&
-        call.method === "Runtime.evaluate" &&
-        call.params.expression.includes('"context-a"'),
-    ),
-  );
-  const before = calls.length;
-  await observer.setContext("tab", "context-b");
-  const updates = calls
-    .slice(before)
-    .filter((call) => call.method === "Runtime.evaluate");
-  assert.deepEqual(
-    updates.map((call) => [call.sessionId, call.params.contextId]),
-    [
-      ["root", 1],
-      ["root", 2],
-      ["child", 3],
-    ],
-  );
-  assert.ok(
-    updates.every((call) => call.params.expression.includes('"context-b"')),
-  );
-  observer.detachTab("tab");
-  assert.equal(observer.copyContexts.has("tab"), false);
-  assert.equal(observer.sessions.size, 0);
+  const gesture = (token = state.token, executionContextId = 3) => observer.event({ sessionId: "tab-session", method: "Runtime.bindingCalled",
+    params: { name: state.binding, executionContextId, payload: JSON.stringify({ token, context: "context-a", epoch: 0 }) } });
+  let serial = 0;
+  const copied = (value = { text: "exact🙂" }, token = observer.clipboardSource.token, sessionId = "source") =>
+    { const sequence = ++serial;
+      for (const payload of [{ token, serial: sequence, begin: true }, { token, serial: sequence, ...value }])
+        observer.event({ sessionId, method: "Runtime.bindingCalled", params: { name: observer.clipboardSource.name, payload: JSON.stringify(payload) } });
+    };
+  return { observer, state, calls, copies, context, gesture, copied };
+}
+
+test("clipboard input code and binding are restricted to an isolated world", async () => {
+  const { state, calls } = await fixture();
+  const injection = calls.find(call => call.method === "Page.addScriptToEvaluateOnNewDocument");
+  assert.equal(injection.params.worldName, state.world);
+  assert.equal(calls.find(call => call.method === "Runtime.addBinding" && call.session === "tab-session").params.executionContextName, state.world);
+  assert.ok(!injection.params.source.includes("defineProperty"));
+  assert.ok(!calls.some(call => call.method === "Browser.grantPermissions"));
 });
 
-test("private clipboard format notifications require an enabled receiver and the binding token", async () => {
+test("copies require both a private source and trusted input from a live isolated context", async () => {
+  const f = await fixture();
+  f.context(4, "");
+  f.copied();
+  await settle();
+  assert.deepEqual(f.copies, []);
+  f.gesture("wrong");
+  f.gesture(f.state.token, 4);
+  f.copied();
+  await settle();
+  assert.deepEqual(f.copies, []);
+  f.gesture();
+  f.copied({}, "wrong");
+  f.copied({ text: "forged" }, f.observer.clipboardSource.token, "tab-session");
+  f.copied({ text: "x".repeat(65537) });
+  f.copied();
+  await settle();
+  assert.deepEqual(f.copies, [{ id: "tab", context: "context-a", text: "exact🙂" }]);
+  f.observer.event({ sessionId: "tab-session", method: "Page.frameNavigated", params: { frame: { id: "frame" } } });
+  f.copied();
+  await settle();
+  assert.equal(f.copies.length, 1);
+});
+
+test("navigation or tab closure during source validation cancels the result", async () => {
+  const f = await fixture();
+  let release;
+  f.observer.cdp = () => new Promise(resolve => { release = resolve; });
+  f.gesture();
+  f.copied();
+  f.observer.detachTab("tab");
+  release({ result: { value: true } });
+  await settle();
+  assert.deepEqual(f.copies, []);
+  assert.equal(f.observer.copyContexts.size, 0);
+  assert.equal(f.observer.sessions.size, 0);
+});
+
+test("native format changes require an enabled receiver", async () => {
   for (const includeChanges of [false, true]) {
-    const copies = [];
-    const observer = new BrowserClipboard(async () => ({}), value => copies.push(value), { includeChanges });
-    await observer.attach("session", "tab");
-    const state = observer.sessions.get("session");
-    observer.event({ sessionId: "session", method: "Runtime.executionContextCreated", params: { context: { id: 1, auxData: { isDefault: true, frameId: "frame" } } } });
-    for (const token of ["wrong", state.token]) observer.event({ sessionId: "session", method: "Runtime.bindingCalled", params: {
-      name: state.name, executionContextId: 1, payload: JSON.stringify({ token, context: "gesture", changed: true }),
-    } });
-    assert.deepEqual(copies, includeChanges ? [{ id: "tab", context: "gesture", changed: true }] : []);
+    const f = await fixture({ includeChanges });
+    f.gesture();
+    f.copied({ changed: true });
+    await settle();
+    assert.deepEqual(f.copies, includeChanges ? [{ id: "tab", context: "context-a", changed: true }] : []);
   }
 });
 
-test("failed setup removes the session and allows retry", async () => {
-  let fail = true;
-  const observer = new BrowserClipboard(
-    async () => {
-      if (fail) throw new Error("CDP unavailable");
-      return {};
-    },
-    () => {},
-  );
-  await assert.rejects(observer.attach("s", "t"), /CDP unavailable/);
-  assert.equal(observer.sessions.size, 0);
-  fail = false;
-  assert.deepEqual(await observer.attach("s", "t"), { skipped: [] });
+test("new frames inherit the host context and setup failures permit retry", async () => {
+  const f = await fixture();
+  const before = f.calls.length;
+  f.context(9);
+  await settle();
+  assert.ok(f.calls.slice(before).some(call => call.method === "Runtime.evaluate" && call.params.contextId === 9 && call.params.expression.includes('"context-a"')));
+  const cdp = f.observer.cdp;
+  f.observer.cdp = async () => { throw new Error("CDP unavailable"); };
+  await assert.rejects(f.observer.attach("child", "tab"), /CDP unavailable/);
+  assert.equal(f.observer.sessions.has("child"), false);
+  f.observer.cdp = cdp;
+  await f.observer.attach("child", "tab");
+  f.observer.sessions.get("child").contexts.set(10, "child-frame");
+  await f.observer.setContext("tab", "context-b");
+  assert.ok(f.calls.some(call => call.session === "child" && call.params.contextId === 10 && call.params.expression.includes('"context-b"')));
 });
 
-test("copy context waits for pending frame installation and frames discovered during the wait", async () => {
-  const calls = [];
-  const gates = new Map();
-  for (const id of ["child", "nested"]) {
-    let release, entered;
-    const pending = new Promise((resolve) => {
-      release = resolve;
-    });
-    const reached = new Promise((resolve) => {
-      entered = resolve;
-    });
-    gates.set(id, { pending, reached, release, entered });
-  }
-  const observer = new BrowserClipboard(
-    async (method, params, sessionId) => {
-      calls.push({ method, params, sessionId });
-      if (method === "Runtime.enable")
-        observer.event({
-          sessionId,
-          method: "Runtime.executionContextCreated",
-          params: {
-            context: {
-              id: 1,
-              auxData: { isDefault: true, frameId: sessionId + "-frame" },
-            },
-          },
-        });
-      if (
-        method === "Page.addScriptToEvaluateOnNewDocument" &&
-        gates.has(sessionId)
-      ) {
-        gates.get(sessionId).entered();
-        await gates.get(sessionId).pending;
-      }
-      return {};
-    },
-    () => {},
-  );
-  await observer.attach("root", "tab");
-  const child = observer.attach("child", "tab");
-  await gates.get("child").reached;
-  let completed = false;
-  const update = observer.setContext("tab", "context-a").then(() => {
-    completed = true;
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(completed, false, "the handshake must wait for the child hook");
-  assert.equal(
-    calls.some(
-      (call) =>
-        call.sessionId === "child" && call.method === "Runtime.evaluate",
-    ),
-    false,
-  );
-  const nested = observer.attach("nested", "tab");
-  await gates.get("nested").reached;
-  gates.get("child").release();
-  await child;
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(
-    completed,
-    false,
-    "the handshake must include a newly discovered frame",
-  );
-  gates.get("nested").release();
-  await Promise.all([nested, update]);
-  assert.equal(completed, true);
-  for (const id of ["child", "nested"])
-    assert.ok(
-      calls.some(
-        (call) =>
-          call.sessionId === id &&
-          call.method === "Runtime.evaluate" &&
-          call.params.expression.includes('"context-a"'),
-      ),
-    );
+test("unavailable native notifications leave ordinary input usable", async () => {
+  const observer = new BrowserClipboard(async () => ({}), () => {});
+  await observer.attach("session", "tab");
+  await observer.setContext("tab", "context");
+  assert.equal(observer.available, false);
+  assert.equal(observer.copyContexts.get("tab"), "context");
 });

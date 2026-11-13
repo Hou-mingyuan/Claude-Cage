@@ -48,7 +48,8 @@ func browserHomeURL(p Preferences) string {
 	return p.BrowserHomeURL
 }
 
-// The environment workspace is separate from the private control profile.
+// The environment directory identifies the VM and stores download transfers.
+// It is independent of project selection and never grants a project by itself.
 func environmentWorkspace(profile string) string { return cage.EnvironmentDir(profile) }
 
 func guestPath(path string) string { return paths.Guest(paths.Host(path)) }
@@ -71,37 +72,35 @@ func (s *Server) prepareEnvironment() error {
 			}
 		}
 	}
+	// Keep the original naming input so an existing virtual disk is reused.
+	// Project files remain at their original path; only transfers use this root.
+	if path != cage.DefaultEnvironmentDir(s.profile) {
+		if info, e := os.Stat(path); e == nil && !info.IsDir() {
+			return errors.New("环境目录被文件占用，请保留原数据并恢复目录后重试")
+		} else if e != nil && !os.IsNotExist(e) {
+			return e
+		}
+		if record.IdentityDirectory == "" {
+			record.IdentityDirectory = path
+		}
+		path = cage.DefaultEnvironmentDir(s.profile)
+	}
 	if err := os.MkdirAll(path, 0700); err != nil {
 		return err
 	}
-	previous := path
 	path, err = validateWorkspace(path, s.profile)
 	if err != nil {
-		// Older independent profiles generated their default workspace inside
-		// the default profile. Keep its files and VM identity while selecting a
-		// shareable workspace through the same admission used for every project.
-		path, err = validateWorkspace(p.Workspace, s.profile)
-		if p.Workspace == "" || err != nil {
-			path = cage.DefaultEnvironmentDir(s.profile)
-			if err = os.MkdirAll(path, 0700); err != nil {
-				return err
-			}
-			path, err = validateWorkspace(path, s.profile)
-			if err != nil {
-				return err
-			}
-		}
-		if record.IdentityDirectory == "" {
-			record.IdentityDirectory = previous
-		}
+		return err
 	}
 	record.Directory = path
 	if err = writePrivate(filepath.Join(s.profile, "environment.json"), record); err != nil {
 		return err
 	}
-	if p.Workspace == "" || paths.Equal(paths.Host(p.Workspace), paths.Host(previous)) ||
-		record.IdentityDirectory != "" && paths.Equal(paths.Host(p.Workspace), paths.Host(record.IdentityDirectory)) {
-		p.Workspace = path
+	if p.Workspace != "" && record.IdentityDirectory != "" && paths.Equal(paths.Host(p.Workspace), paths.Host(record.IdentityDirectory)) {
+		// A private legacy directory cannot remain an authorized project.
+		if _, err := validateWorkspace(p.Workspace, s.profile); err != nil {
+			p.Workspace = ""
+		}
 	}
 	if err := writePrivate(filepath.Join(s.profile, "workbench.json"), p); err != nil {
 		return err

@@ -27,7 +27,7 @@ class ChannelTests(unittest.TestCase):
         # macOS /var and /private/var identify one directory. Match the
         # production config resolver so catalog order cannot duplicate it.
         self.home = Path(temporary.name).resolve()
-        self.env = {**os.environ, "HOME": str(self.home), "CLAUDE_CONFIG_DIR": str(self.home / ".claude")}
+        self.env = {**os.environ, "HOME": str(self.home), "CLAUDE_CONFIG_DIR": str(self.home / ".claude"), "TMPDIR": str(self.home)}
         environment = patch.dict(os.environ, self.env)
         environment.start()
         self.addCleanup(environment.stop)
@@ -49,6 +49,7 @@ class ChannelTests(unittest.TestCase):
         request = str(uuid.uuid4())
         body = "show </channel> literally\n<channel cage_request=\"other\">example</channel>"
         self.assertEqual(channel.channel_message('<channel source="cage" cage_request="' + request + '">\n' + body + '\n</channel>'), (request, body))
+        self.assertEqual(channel.channel_message('<channel source="session" request_id="' + request + '">\n' + body + '\n</channel>'), (request, body))
         self.assertEqual(channel.clip_text("你好abc", 4), "你")
 
     def test_account_switch_preserves_tools_and_receipt(self):
@@ -127,6 +128,20 @@ class ChannelTests(unittest.TestCase):
             channel.launch({"id":connection,"resume":self.session,"prefix":["claude"],"config":config})
         self.assertEqual(execute.call_args.args[1][-2:],["--permission-mode","manual"])
         self.assertTrue(channel.read_json(self.root / connection / "state.json")["resume_task"])
+
+    def test_launch_selects_the_configured_session_channel(self):
+        connection = str(uuid.uuid4())
+        with patch.object(channel, "migrate_cage_policy"), patch.object(channel.os, "execvpe") as execute:
+            channel.launch({"id": connection, "prefix": ["claude"]})
+        args = execute.call_args.args[1]
+        config = channel.read_json(Path(args[args.index("--mcp-config") + 1]))
+        selected = args[args.index("--dangerously-load-development-channels") + 1]
+        self.assertEqual(selected, "server:" + connection)
+        self.assertEqual(list(config["mcpServers"]), [connection])
+        settings = channel.read_json(Path(args[args.index("--settings") + 1]))
+        self.assertNotIn("cage", json.dumps(config).lower())
+        self.assertNotIn("cage", json.dumps(settings).lower())
+        self.assertFalse(any(key.upper().startswith("CAGE_") for key in execute.call_args.args[2]))
 
     def test_handoff_preserves_executing_tools(self):
         request = {"cli_id":self.session, "config":str(self.home / ".claude"), "workspace":self.project}
@@ -302,7 +317,10 @@ class ChannelTests(unittest.TestCase):
             process.stdin.write(json.dumps({"jsonrpc": "2.0", **message}) + "\n")
             process.stdin.flush()
         event({"id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}})
-        self.assertIn("claude/channel/permission", json.loads(process.stdout.readline())["result"]["capabilities"]["experimental"])
+        handshake = json.loads(process.stdout.readline())["result"]
+        self.assertIn("claude/channel/permission", handshake["capabilities"]["experimental"])
+        self.assertNotIn("cage", json.dumps(handshake).lower())
+        self.assertNotIn("guest", json.dumps(handshake).lower())
         event({"method": "notifications/initialized"})
         def rpc(**fields):
             result = subprocess.run([sys.executable, "-I", str(source), "rpc", "-"], env=self.env, text=True,
@@ -313,7 +331,7 @@ class ChannelTests(unittest.TestCase):
             replies = list(workers.map(lambda _: rpc(action="send", request_id=request, text="once"), range(2)))
         self.assertEqual(replies, [{"ok": True}, {"ok": True}])
         sent = json.loads(process.stdout.readline())
-        self.assertEqual(sent["params"]["meta"]["cage_request"], request)
+        self.assertEqual(sent["params"]["meta"]["request_id"], request)
         self.assertFalse(select.select([process.stdout], [], [], 0.1)[0])
         self.assertIn("error", rpc(action="send", request_id=request, text="changed"))
         event({"method": "notifications/claude/channel/permission_request", "params": {
@@ -332,7 +350,7 @@ class ChannelTests(unittest.TestCase):
         self.assertEqual(rpc(action="resume"), {"ok":True})
         self.assertEqual(rpc(action="resume"), {"ok":True})
         resumed = json.loads(process.stdout.readline())
-        self.assertEqual(resumed["params"]["meta"], {"cage_resume":"true"})
+        self.assertEqual(resumed["params"]["meta"], {"resume":"true"})
         self.assertFalse(select.select([process.stdout], [], [], 0.1)[0], "resume was injected twice")
 
 

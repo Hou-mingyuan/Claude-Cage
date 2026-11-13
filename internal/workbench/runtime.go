@@ -145,6 +145,9 @@ func (s *Server) attach() error {
 	if s.macosGuest != nil {
 		return s.attachMacOSGuest()
 	}
+	if err := s.requireCurrentLinuxTransferMount(); err != nil {
+		return err
+	}
 	ctx, cancel := s.controlContext()
 	defer cancel()
 	if containerenv.Configured(s.profile) {
@@ -164,7 +167,9 @@ func (s *Server) attach() error {
 			s.ready = false
 			s.mu.Unlock()
 			if !state.MountsReady {
-				return errors.New("容器项目共享需要初始化，请保存工作后完整停止并重新启动环境")
+				failure := &projectShareError{Recovery: "environment-restart", Message: "容器文件共享需要重新连接，请保存工作后完整停止并重新启动环境；文件和登录状态会保留。"}
+				_ = s.closeProxyGate(failure.Message)
+				return failure
 			}
 			if !state.ResourcesVerified {
 				return errors.New("容器资源限制尚未通过核验，请检查服务器资源配置")
@@ -266,6 +271,11 @@ func (s *Server) monitor(ctx context.Context) {
 }
 
 func (s *Server) runCage(args ...string) error {
+	if len(args) > 0 && args[0] == "up" {
+		if err := s.requireCurrentLinuxTransferMount(); err != nil {
+			return err
+		}
+	}
 	ctx := s.operationContext()
 	// Setup and startup can both install dependencies. Downloads own their
 	// inactivity timeouts; the operation context still permits an explicit stop.
@@ -279,6 +289,10 @@ func (s *Server) runCage(args ...string) error {
 	cmd.Dir = s.environmentDir()
 	if cmd.Dir == "" {
 		cmd.Dir = s.profile
+	} else if len(args) > 0 && args[0] == "stop" {
+		if info, err := os.Stat(cmd.Dir); err != nil || !info.IsDir() {
+			cmd.Dir = s.profile
+		}
 	}
 	cmd.Env = append(os.Environ(), cage.ConfigEnv+"="+s.configPath)
 	execution := s.jobs.execution()
@@ -325,6 +339,9 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 	if s.windowsGuest != nil {
 		return s.startWindowsGuest()
 	}
+	if err := s.requireCurrentLinuxTransferMount(); err != nil {
+		return err
+	}
 	pending, err := guestos.LoadInstallation(s.profile)
 	if err != nil || (pending != nil && !hostimage.IsLinux(pending.System)) {
 		return errors.New("请从首次安装入口继续原生客户机安装")
@@ -360,7 +377,9 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 			s.mu.Lock()
 			s.ready = false
 			s.mu.Unlock()
-			return errors.New("容器项目共享需要初始化，请保存工作后先停止环境，再重新启动；项目和登录数据会保留")
+			failure := &projectShareError{Recovery: "environment-restart", Message: "容器文件共享需要重新连接，请保存工作后完整停止并重新启动环境；文件和登录状态会保留。"}
+			_ = s.closeProxyGate(failure.Message)
+			return failure
 		}
 	}
 	cfg, err := loadConfig(s.configPath)
@@ -437,7 +456,7 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 		bound := cfg.ExitPolicy.BindMissing(loc.exitLocation())
 		if bound != cfg.ExitPolicy {
 			cfg.ExitPolicy = bound
-			if err = writePrivate(s.configPath, cfg); err != nil {
+			if err = s.saveExitPolicyConfig(cfg); err != nil {
 				return err
 			}
 		}
@@ -525,9 +544,6 @@ func (s *Server) stopEnvironment() (returned error) {
 	s.terminals.closeAll()
 	s.mobileCLI.stopAll()
 	s.closeProjectShares()
-	if s.workspace() == "" {
-		return nil
-	}
 	if _, err := os.Stat(filepath.Join(s.instanceDir(), "lima.yaml")); !containerenv.Configured(s.profile) && os.IsNotExist(err) {
 		return nil
 	}
@@ -608,7 +624,12 @@ func (s *Server) apply(v savedProfile, validate bool) error {
 			return err
 		}
 	}
-	if err = writePrivate(s.configPath, v.Config); err != nil {
+	if v.Config.RequireManagedProxy(s.profile) == nil {
+		err = s.saveExitPolicyConfig(v.Config)
+	} else {
+		err = writePrivate(s.configPath, v.Config)
+	}
+	if err != nil {
 		return err
 	}
 	if err = writePrivate(filepath.Join(s.profile, "workbench.json"), v.Preferences); err != nil {

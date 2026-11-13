@@ -27,6 +27,9 @@ func windowsMobileFixture(t *testing.T) (*Server, *mobileRecord, func()) {
 	if err := writePrivate(filepath.Join(s.profile, "environment.json"), map[string]string{"directory": workspace}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.rememberSharedProject(workspace); err != nil {
+		t.Fatal(err)
+	}
 	id := uuid.NewString()
 	if _, err := s.mobileCLI.create(s.profile, workspace, id); err != nil {
 		t.Fatal(err)

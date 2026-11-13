@@ -52,7 +52,7 @@ export function useDownloadNotifications(
         if (item.state === "downloading")
           onStatus(`正在下载“${item.name}”，可在侧栏“下载”查看`);
         if (item.state === "saved")
-          onStatus(`“${item.name}”已保存到默认工作区的 Downloads`);
+          onStatus(`“${item.name}”已保存到下载暂存目录`);
       }
       if (item.openError && previous.current.get(item.id)?.openError !== item.openError)
         onStatus(`“${item.name}”${item.openError}`);

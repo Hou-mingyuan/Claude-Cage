@@ -1,0 +1,99 @@
+name: Windows build toolchain and verified runtime
+description: >-
+  Shared by development and release Windows jobs so both use the same tools,
+  caches, QEMU runtime and corresponding-source collection.
+inputs:
+  corresponding-sources:
+    description: Collect and verify the QEMU corresponding sources ('true' or 'false')
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: ui/package-lock.json
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.403
+    - uses: astral-sh/setup-uv@v10.3.3
+    - uses: msys2/setup-msys2@v2
+      id: msys2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          make patch diffutils git findutils curl
+          mingw-w64-ucrt-x86_64-gcc
+          mingw-w64-ucrt-x86_64-glib2
+          mingw-w64-ucrt-x86_64-pixman
+          mingw-w64-ucrt-x86_64-libslirp
+          mingw-w64-ucrt-x86_64-dtc
+          mingw-w64-ucrt-x86_64-ninja
+          mingw-w64-ucrt-x86_64-python
+          mingw-w64-ucrt-x86_64-pkgconf
+    - name: Share the MSYS2 location with later steps
+      shell: pwsh
+      env:
+        MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+      run: '"CAGE_MSYS2_ROOT=$env:MSYS2_LOCATION" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8'
+    # The installer compiler comes from SourceForge, which is slow and
+    # sometimes answers with an HTML page. Keep the checksum-pinned ZIP.
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/nsis-*.zip
+        key: windows-nsis-${{ hashFiles('scripts/install-nsis.ps1') }}
+    - name: Install the verified installer compiler
+      shell: pwsh
+      run: ./scripts/install-nsis.ps1 -Destination $env:RUNNER_TEMP
+    - uses: actions/cache/restore@v4
+      id: deps_cache
+      with:
+        path: _output/windows-deps
+        key: windows-deps-v2-${{ hashFiles('packaging/windows/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
+        restore-keys: |
+          windows-deps-v2-
+          cage-windows-deps-
+    - name: Build and verify QEMU runtime and package identity
+      id: qemu_build
+      shell: pwsh
+      env:
+        CAGE_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+      run: |
+        ./scripts/build-qemu-windows.ps1
+        $identity = Get-Content '_output/windows-deps/qemu-cage/cage-build.json' -Raw | ConvertFrom-Json
+        "fingerprint=$($identity.fingerprint)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        "manifest=$((Get-FileHash '_output/windows-deps/qemu-cage/cage-build.json' -Algorithm SHA256).Hash)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        $collectorHash = (Get-FileHash 'scripts/bundle-qemu-sources.sh' -Algorithm SHA256).Hash + (Get-FileHash 'scripts/prepare-qemu-release.ps1' -Algorithm SHA256).Hash
+        "collector=$collectorHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+    - name: Download and verify bundled dependencies
+      shell: pwsh
+      run: ./scripts/fetch-windows-dependencies.ps1
+    - name: Preserve only the completed verified dependency cache
+      if: steps.deps_cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: _output/windows-deps
+        key: windows-deps-v2-${{ hashFiles('packaging/windows/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
+    - uses: actions/cache/restore@v4
+      if: inputs.corresponding-sources == 'true'
+      id: qemu_sources
+      with:
+        path: _output/windows-qemu-sources
+        key: cage-qemu-sources-${{ steps.qemu_build.outputs.fingerprint }}-${{ steps.qemu_build.outputs.manifest }}-${{ steps.qemu_build.outputs.collector }}
+    - name: Collect and verify corresponding sources before signing
+      if: inputs.corresponding-sources == 'true'
+      shell: pwsh
+      env:
+        CAGE_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+      run: ./scripts/prepare-qemu-release.ps1
+    - name: Preserve only the completed verified source cache
+      if: inputs.corresponding-sources == 'true' && steps.qemu_sources.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: _output/windows-qemu-sources
+        key: cage-qemu-sources-${{ steps.qemu_build.outputs.fingerprint }}-${{ steps.qemu_build.outputs.manifest }}-${{ steps.qemu_build.outputs.collector }}

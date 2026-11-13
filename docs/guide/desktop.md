@@ -44,7 +44,18 @@ Desktop Code 请求选择目录时，Cage 显示“选择工作项目”。选�
 
 ## 关闭、更新与恢复
 
-切换到终端或浏览器时 Desktop 保持运行。应用上方的“关闭应用”释放其运行资源，登录资料继续保留；关闭后可选“更新 / 修复安装”。
+切换到终端或浏览器时 Desktop 保持运行。应用上方的“关闭应用”释放其运行资源，登录资料继续保留。
+
+macOS 和 Windows 使用 Claude Desktop 应用内的更新入口，下载完成后可按应用提示重启。macOS 的应用目录由使用账户管理，无需管理员密码；已有环境请先在“设置 → 环境”更新组件，让安装权限与窗口连接组件生效。Windows 沿用官方 MSIX 的自动更新机制，更新后的窗口会重新连接。应用更新不清除登录资料、项目和历史。
+
+Linux 版由 Anthropic 官方 apt 软件源更新，应用内的更新入口可能打开官方说明页。在 Cage 的 Desktop 顶部点击“更新应用”，保存工作后确认，Cage 会关闭应用、安装软件源中的可用版本并重新打开。关闭应用后也可选择“更新 / 修复安装”。需要通过终端操作时，先关闭 Desktop，再在 Cage 终端运行：
+
+```sh
+sudo apt update
+sudo apt install --only-upgrade claude-desktop
+```
+
+安装完成后从侧栏重新打开 Desktop。使用相同软件源重复更新会保留当前已安装版本。Linux 更新方式见 [Anthropic 安装说明](https://support.claude.com/en/articles/10065433-install-claude-desktop)。
 
 Cage 为内部系统密钥环创建和解锁所需凭据，不必再设一份密钥环密码。修改 Cage 密码会保留 Desktop 登录数据。
 

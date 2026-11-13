@@ -130,7 +130,7 @@ func TestMaintenanceClosesTLSConnectionsAndRefusesBusinessHosts(t *testing.T) {
 			t.Fatal("business or non-HTTPS destination accepted", address)
 		}
 	}
-	for _, host := range []string{"mirrors.nju.edu.cn", "mirrors.ustc.edu.cn", "cdn.npmmirror.com", "storage.googleapis.com", "codeload.github.com"} {
+	for _, host := range []string{"mirrors.nju.edu.cn", "mirrors.ustc.edu.cn", "cdn.npmmirror.com", "api.snapcraft.io", "storage.snapcraftcontent.com", "canonical-lgw01.cdn.snapcraftcontent.com", "canonical-lcy01.cdn.snapcraftcontent.com", "canonical-lcy02.cdn.snapcraftcontent.com", "canonical-bos01.cdn.snapcraftcontent.com", "cloudfront.cdn.snapcraftcontent.com", "codeload.github.com"} {
 		if !maintenanceDestination(host+":443", true) || maintenanceDestination(host+":80", false) || maintenanceDestination(host+".evil.test:443", true) {
 			t.Fatalf("unexpected mirror policy for %s", host)
 		}

@@ -15,23 +15,18 @@ umask 022
 verify() {
     [[ $(shasum -a 256 "$1" | cut -d' ' -f1) == "$2" ]] || { echo "Unexpected package digest: $1" >&2; exit 1; }
 }
-if [[ ! -x $tools/editor/lib/node || ! -f $tools/playwright/package.json ]]; then
-    mkdir -p "$stage/tools/editor" "$stage/tools/playwright"
-    cp "$media/editor.tgz" "$media/playwright.tgz" "$stage/"
+if [[ ! -x $tools/editor/lib/node ]]; then
+    mkdir -p "$stage/tools/editor" "$tools"
+    cp "$media/editor.tgz" "$stage/"
     verify "$stage/editor.tgz" a79774d8d34eed785c1f831bc0125f7534bc21a0039bef8e8a2aa32463f9421a
-    verify "$stage/playwright.tgz" 315247c55a793ca760b2f05bdcee0e6a53fd65b1f22d1d3de8323c8c9395add3
     tar -xzf "$stage/editor.tgz" -C "$stage/tools/editor" --no-same-owner --strip-components 1
-    tar -xzf "$stage/playwright.tgz" -C "$stage/tools/playwright" --no-same-owner --strip-components 1
     "$stage/tools/editor/lib/node" --version
-    mkdir -p "$tools"
-    for component in editor playwright; do
-        [[ ! -L $tools/$component ]]
-        if [[ -e $tools/$component ]]; then mv "$tools/$component" "$stage/previous-$component"; fi
-        if ! mv "$stage/tools/$component" "$tools/$component"; then
-            if [[ -d $stage/previous-$component ]]; then mv "$stage/previous-$component" "$tools/$component"; fi
-            exit 1
-        fi
-    done
+    [[ ! -L $tools/editor ]]
+    if [[ -e $tools/editor ]]; then mv "$tools/editor" "$stage/previous-editor"; fi
+    if ! mv "$stage/tools/editor" "$tools/editor"; then
+        if [[ -d $stage/previous-editor ]]; then mv "$stage/previous-editor" "$tools/editor"; fi
+        exit 1
+    fi
 fi
 app='/Applications/Google Chrome.app'
 requirement='anchor apple generic and identifier "com.google.Chrome" and certificate leaf[subject.OU] = "EQHXZ8M8AV"'
@@ -69,8 +64,7 @@ if [[ -f "$media/native-browser/macos-native-browser.mjs" ]]; then
 else
     "$sources/package-macos-browser.sh" "$stage/controller"
 fi
-install -d "$tools/controller" "$tools/controller/modules" "$tools/controller/split-extension"
-install -m 644 "$stage/controller/"*.mjs "$tools/controller/"
+install -d "$tools/controller" "$tools/controller/modules"
+install -m 644 "$stage/controller/"*.mjs "$stage/controller/browser-check.html" "$tools/controller/"
 install -m 755 "$stage/controller/cage-tailnet" "$tools/controller/cage-tailnet"
 install -m 644 "$stage/controller/modules/"*.mjs "$tools/controller/modules/"
-install -m 644 "$stage/controller/split-extension/"* "$tools/controller/split-extension/"

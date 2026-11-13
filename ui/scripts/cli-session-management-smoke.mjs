@@ -76,7 +76,7 @@ try {
   phone.on("pageerror",error => phoneErrors.push(error.message));
   await phone.route("**/api/**",async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/mobile/cli","/cli");
-    if (path.endsWith("/projects")) return route.fulfill({json:{host:"测试电脑",ready:true,shared_sessions:true,projects:[{path:workspace,name:"默认工作区"},{path:otherProject,name:"mobile"}]}});
+    if (path.endsWith("/projects")) return route.fulfill({json:{host:"测试电脑",ready:true,shared_sessions:true,projects:[{path:workspace,name:".claude-cage-workspace"},{path:otherProject,name:"mobile"}]}});
     return handle(route,path,route.request().postDataJSON());
   });
   await phone.goto(base+"/mobile.html");

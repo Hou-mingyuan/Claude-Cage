@@ -45,6 +45,11 @@ func claudeSigningRequirement() throws -> SecRequirement {
     return requirement
 }
 
+func claudeApplicationURL() -> URL {
+    let writable = URL(fileURLWithPath: "/Applications/Claude/Claude.app")
+    return FileManager.default.fileExists(atPath: writable.path) ? writable : URL(fileURLWithPath: "/Applications/Claude.app")
+}
+
 func claudePIDs() throws -> Set<pid_t> {
     var console = stat()
     var attributes: SessionAttributeBits = []
@@ -53,11 +58,11 @@ func claudePIDs() throws -> Set<pid_t> {
           attributes.contains(.sessionHasGraphicAccess) else {
         throw Failure(4, "requires_gui_login: Run as the logged-in guest desktop user in their GUI session.")
     }
-    let path = URL(fileURLWithPath: "/Applications/Claude.app").resolvingSymlinksInPath()
+    let path = claudeApplicationURL().resolvingSymlinksInPath()
     let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).filter {
         $0.bundleURL?.resolvingSymlinksInPath() == path && !$0.isTerminated
     }
-    guard !apps.isEmpty else { throw Failure(3, "not_running: Launch /Applications/Claude.app in the guest.") }
+    guard !apps.isEmpty else { throw Failure(3, "not_running: Open Claude Desktop.") }
     let requirement = try claudeSigningRequirement()
     let validPIDs = apps.compactMap { app -> pid_t? in
         let attributes = [kSecGuestAttributePid: app.processIdentifier] as CFDictionary

@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 import importlib.util
 import json
 import os
+import runpy
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -30,6 +32,7 @@ class ClaudeAccountTests(unittest.TestCase):
         # Emulate the documented status shape of the official CLI. Its response
         # deliberately includes fields that must never cross the guest boundary.
         fake.write_text("""#!/bin/sh
+if [ -n "$TEST_CAPTURE_ENV" ]; then env > "$TEST_CAPTURE_ENV"; fi
 original_settings="$2"
 if [ "$1" = --settings ]; then shift 2; fi
 if [ "$1" = auth ] && [ "$2" = status ]; then
@@ -44,7 +47,7 @@ printf '%s\\n' "$@"
         self.email = "owner@example.test"
         self.subject = hashlib.sha256((self.email + "\ntest-org").encode()).hexdigest()
         self.env = {"HOME": str(self.home), "PATH": os.defpath, "TEST_EMAIL": self.email,
-                    "CAGE_CLAUDE_SUBJECT": self.subject, "PYTHONDONTWRITEBYTECODE": "1"}
+                    "CAGE_CLAUDE_SUBJECT": self.subject, "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": str(self.home)}
 
     def run_helper(self, mode, account, *args, data=None, env=None, check=True):
         return subprocess.run([sys.executable, str(source), mode, account, *args], env=env or self.env,
@@ -80,6 +83,140 @@ printf '%s\\n' "$@"
         self.assertNotEqual(self.run_helper("run", FIRST, env=other_env, check=False).returncode, 0)
         self.assertNotEqual(self.run_helper("quotas", "../outside", check=False).returncode, 0)
 
+    def recovery_profiles(self):
+        with patch.dict(os.environ, self.env):
+            target, source = helper.profile(FIRST), helper.profile(SECOND)
+        for base in (target, source):
+            base.mkdir(mode=0o700, parents=True)
+            (base / "config").mkdir(mode=0o700)
+        credential = source / "config/.credentials.json"
+        credential.write_bytes(b"opaque-private-fixture")
+        credential.chmod(0o600)
+        reading = {"logged_in": True, "email": self.email, "organization": "test-org", "plan": "pro"}
+        return target, source, credential, reading
+
+    def test_duplicate_login_recovers_missing_credentials_without_moving_history(self):
+        target, source, credential, reading = self.recovery_profiles()
+        history = target / "config/history.jsonl"
+        history.write_bytes(b"original private conversation\n")
+        with patch.dict(os.environ, self.env), patch.object(helper, "identity", side_effect=[{"logged_in": False}, reading, reading]):
+            result = helper.recover_login("claude", target, SECOND, self.subject)
+        destination = target / "config/.credentials.json"
+        self.assertEqual(result, reading)
+        self.assertEqual(destination.read_bytes(), credential.read_bytes())
+        self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(history.read_bytes(), b"original private conversation\n")
+        self.assertNotIn("opaque-private-fixture", json.dumps(result))
+        self.assertEqual(set(p.name for p in destination.parent.iterdir()), {".credentials.json", "history.jsonl"})
+
+    def test_duplicate_login_recovery_refuses_other_identities_and_existing_credentials(self):
+        target, source, credential, reading = self.recovery_profiles()
+        destination = target / "config/.credentials.json"
+        other = {**reading, "email": "other@example.test"}
+        for observations in ([other], [{"logged_in": False}, other], [{"logged_in": False}, {**reading, "organization": "another-org"}]):
+            with self.subTest(observations=observations), patch.dict(os.environ, self.env), patch.object(helper, "identity", side_effect=observations):
+                self.assertFalse(helper.recover_login("claude", target, SECOND, self.subject)["logged_in"])
+                self.assertFalse(destination.exists())
+        destination.write_bytes(b"concurrent original login")
+        with patch.dict(os.environ, self.env), patch.object(helper, "identity", side_effect=[{"logged_in": False}, reading]):
+            with self.assertRaises(FileExistsError):
+                helper.recover_login("claude", target, SECOND, self.subject)
+        self.assertEqual(destination.read_bytes(), b"concurrent original login")
+
+    def test_duplicate_login_recovery_preserves_credentials_on_failed_verification(self):
+        target, source, credential, reading = self.recovery_profiles()
+        with patch.dict(os.environ, self.env), patch.object(helper, "identity", side_effect=[{"logged_in": False}, reading, {"logged_in": False}]):
+            self.assertFalse(helper.recover_login("claude", target, SECOND, self.subject)["logged_in"])
+        self.assertEqual((target / "config/.credentials.json").read_bytes(), credential.read_bytes())
+
+    def test_duplicate_login_recovery_preserves_credentials_on_verification_error(self):
+        target, source, credential, reading = self.recovery_profiles()
+        with patch.dict(os.environ, self.env), patch.object(helper, "identity", side_effect=[{"logged_in": False}, reading, ValueError("unexpected auth status")]):
+            with self.assertRaises(ValueError):
+                helper.recover_login("claude", target, SECOND, self.subject)
+        self.assertEqual((target / "config/.credentials.json").read_bytes(), credential.read_bytes())
+
+    def test_duplicate_login_recovery_preserves_replacement_at_publication(self):
+        target, source, credential, reading = self.recovery_profiles()
+        destination = target / "config/.credentials.json"
+        original_link = os.link
+
+        def publish_then_replace(src, dst):
+            original_link(src, dst)
+            replacement = target / "concurrent-login"
+            replacement.write_bytes(b"concurrent login credentials")
+            replacement.chmod(0o600)
+            replacement.replace(dst)
+
+        with patch.dict(os.environ, self.env), patch.object(helper.os, "link", side_effect=publish_then_replace), patch.object(helper, "identity", side_effect=[{"logged_in": False}, reading, {"logged_in": False}]):
+            self.assertFalse(helper.recover_login("claude", target, SECOND, self.subject)["logged_in"])
+        self.assertEqual(destination.read_bytes(), b"concurrent login credentials")
+        self.assertEqual(credential.read_bytes(), b"opaque-private-fixture")
+
+    def test_duplicate_login_recovery_does_not_remove_a_concurrent_replacement(self):
+        target, source, credential, reading = self.recovery_profiles()
+        destination = target / "config/.credentials.json"
+        def changed_login(*args, **kwargs):
+            replacement = target / "replacement"
+            replacement.write_bytes(b"another login finished meanwhile")
+            replacement.replace(destination)
+            return {"logged_in": False}
+        observations = iter([{"logged_in": False}, reading])
+        def observe(*args, **kwargs):
+            return next(observations, None) or changed_login()
+        with patch.dict(os.environ, self.env), patch.object(helper, "identity", side_effect=observe):
+            self.assertFalse(helper.recover_login("claude", target, SECOND, self.subject)["logged_in"])
+        self.assertEqual(destination.read_bytes(), b"another login finished meanwhile")
+
+    def test_duplicate_login_recovery_preserves_valid_original_and_rejects_unsafe_source(self):
+        target, source, credential, reading = self.recovery_profiles()
+        with patch.dict(os.environ, self.env), patch.object(helper, "identity", return_value=reading) as probe:
+            self.assertEqual(helper.recover_login("claude", target, SECOND, self.subject), reading)
+            self.assertEqual(probe.call_count, 1)
+        self.assertFalse((target / "config/.credentials.json").exists())
+        credential.chmod(0o644)
+        with patch.dict(os.environ, self.env), patch.object(helper, "identity", side_effect=[{"logged_in": False}, reading]):
+            with self.assertRaises(ValueError):
+                helper.recover_login("claude", target, SECOND, self.subject)
+        credential.chmod(0o600)
+        credential.rename(source / "private-backup")
+        credential.symlink_to(source / "private-backup")
+        with patch.dict(os.environ, self.env), patch.object(helper, "identity", side_effect=[{"logged_in": False}, reading]):
+            with self.assertRaises(ValueError):
+                helper.recover_login("claude", target, SECOND, self.subject)
+
+    def test_duplicate_login_recovery_command_exports_only_status(self):
+        result = self.run_helper("recover-login", FIRST, SECOND, self.subject)
+        status = json.loads(result.stdout)
+        self.assertTrue(status["logged_in"])
+        self.assertEqual(status["email"], self.email)
+        self.assertNotIn("must-not-appear", result.stdout + result.stderr)
+        self.assertNotEqual(self.run_helper("recover-login", FIRST, FIRST, self.subject, check=False).returncode, 0)
+        self.assertNotEqual(self.run_helper("recover-login", FIRST, "../outside", self.subject, check=False).returncode, 0)
+
+    def test_duplicate_login_recovery_command_copies_missing_login(self):
+        target, source, credential, reading = self.recovery_profiles()
+        fake = self.home / ".local/bin/claude"
+        original = fake.read_text()
+        fake.write_text(original.replace(
+            '  method=claude.ai;',
+            '''  if [ ! -f "$CLAUDE_CONFIG_DIR/.credentials.json" ]; then
+    printf '{"configDirectory":"%s","loggedIn":false}' "$CLAUDE_CONFIG_DIR"
+    exit 1
+  fi
+  method=claude.ai;''',
+        ))
+        history = target / "config/history.jsonl"
+        history.write_bytes(b"original conversation\n")
+        result = self.run_helper("recover-login", FIRST, SECOND, self.subject)
+        self.assertEqual(json.loads(result.stdout), reading)
+        destination = target / "config/.credentials.json"
+        self.assertEqual(destination.read_bytes(), credential.read_bytes())
+        self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(history.read_bytes(), b"original conversation\n")
+        self.assertNotIn("opaque-private-fixture", result.stdout + result.stderr)
+        self.assertNotIn("must-not-appear", result.stdout + result.stderr)
+
     def test_missing_window_keeps_its_observation_time(self):
         now = int(time.time())
         with patch.dict(os.environ, self.env):
@@ -107,6 +244,44 @@ printf '%s\\n' "$@"
         args = self.run_helper("run", FIRST, "--model", "sonnet").stdout.splitlines()
         self.assertEqual(args[-2:], ["--model", "sonnet"])
         self.assertEqual((config / "settings.json").read_text(), original)
+
+    def test_official_process_receives_no_controller_flags_and_callbacks_still_work(self):
+        capture = self.home / "child-environment"
+        env = {**self.env, "CAGE_LANGUAGE": "en-US", "CAGE_WORKBENCH": "1", "TEST_CAPTURE_ENV": str(capture)}
+        args = self.run_helper("run", FIRST, "--model", "sonnet", env=env).stdout.splitlines()
+        child_env = dict(line.split("=", 1) for line in capture.read_text().splitlines())
+        self.assertFalse(any(key.upper().startswith("CAGE_") for key in child_env))
+        self.assertNotIn("cage", child_env["CLAUDE_CONFIG_DIR"].lower())
+        self.assertNotIn("cage", args[1].lower())
+        settings = json.loads(Path(args[1]).read_text())
+        command = settings["statusLine"]["command"]
+        self.assertNotIn("cage", command.lower())
+        window = {"used_percentage": 20, "resets_at": int(time.time()) + 3600}
+        callback = subprocess.run(shlex.split(command), env=child_env, cwd=self.home,
+                                  input=json.dumps({"rate_limits": {"five_hour": window}}), text=True, capture_output=True, check=True)
+        self.assertEqual(callback.stdout.strip(), "Claude")
+        result = json.loads(self.run_helper("snapshot", FIRST, env=env).stdout)
+        self.assertEqual(result["quota"]["five_hour"]["used_percentage"], 20)
+
+    def test_callback_state_does_not_enter_its_process_environment(self):
+        runtime = runpy.run_path(source.with_name("client_runtime.py"), init_globals={"_controller_context": self.env})
+        probe = self.home / "probe.py"
+        probe.write_text('import json,os\nprint(json.dumps({"flags":[k for k in os.environ if k.startswith("CAGE_")],"subject":globals()["_controller_context"]["CAGE_CLAUDE_SUBJECT"]}))\n')
+        result = subprocess.run(runtime["command"](probe), env=runtime["environment"](self.env),
+                                text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), {"flags": [], "subject": self.subject})
+
+    def test_installed_account_symlink_finds_its_versioned_runtime(self):
+        installed = self.home / "version"
+        (installed / "bin").mkdir(parents=True)
+        account = installed / "bin/cage-claude-account"
+        account.write_bytes(source.read_bytes())
+        (installed / "client_runtime.py").write_bytes(source.with_name("client_runtime.py").read_bytes())
+        entry = self.home / "cage-claude-account"
+        entry.symlink_to(account)
+        result = subprocess.run([sys.executable, str(entry), "snapshot", FIRST], env=self.env,
+                                cwd=self.home, text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout)["email"], self.email)
 
     def test_default_reuses_the_existing_configuration_and_pin(self):
         home_config = self.home / ".claude"
@@ -189,7 +364,7 @@ printf '%s\\n' "$@"
             self.assertTrue(original.is_symlink())
             backup=self.home/".local/share/cage/claude-shared/backups"/FIRST/"projects"/key/"memory/MEMORY.md"
             self.assertEqual(backup.read_text(),"account learning")
-            self.assertTrue(Path(flags[1]).is_relative_to(base))
+            self.assertTrue(Path(flags[1]).resolve().is_relative_to(base.resolve()))
 
     def test_mobile_settings_remain_anonymous_when_adding_shared_defaults(self):
         with patch.dict(os.environ,self.env,clear=True),patch.object(helper.Path,"cwd",return_value=self.home),tempfile.TemporaryFile() as snapshot:
@@ -211,8 +386,24 @@ printf '%s\\n' "$@"
                 patch.object(helper.subprocess, "run") as run:
             with self.assertRaises(KeyboardInterrupt):
                 helper.main(["login", FIRST])
-            self.assertEqual(run.call_args.args[0], ["/bin/true", "--finish-login"])
-            self.assertEqual(run.call_args.kwargs["env"]["CAGE_CLAUDE_LOGIN"], FIRST)
+            self.assertEqual(run.call_args.args[0], ["/bin/true", "--login-id", FIRST, "--finish-login"])
+
+    def test_login_callback_retains_account_without_passing_controller_flags(self):
+        opener = self.home / "cage-open"
+        opener.write_text('#!/bin/sh\n[ "$1" = --login-id ] || exit 2\nlogin="$2"; shift 2\nprintf "%s:%s\\n" "$login" "$1" >> "$HOME/opened"\n')
+        opener.chmod(0o700)
+        capture = self.home / "login-environment"
+        fake = self.home / ".local/bin/claude"
+        fake.write_text('#!/bin/sh\nenv > "$TEST_CAPTURE_ENV"\n"$BROWSER" "https://claude.ai/oauth/authorize"\n')
+        env = {**self.env, "TEST_CAPTURE_ENV": str(capture)}
+        with patch.dict(os.environ, env, clear=True), patch.object(helper, "OPEN", str(opener)):
+            self.assertEqual(helper.main(["login", FIRST]), 0)
+        self.assertEqual((self.home / "opened").read_text().splitlines(),
+                         [FIRST + ":https://claude.ai/oauth/authorize", FIRST + ":--finish-login"])
+        child_env = dict(line.split("=", 1) for line in capture.read_text().splitlines())
+        self.assertFalse(any(key.upper().startswith("CAGE_") for key in child_env))
+        self.assertNotIn("cage", child_env["BROWSER"].lower())
+        self.assertNotIn("cage", child_env["CLAUDE_CONFIG_DIR"].lower())
 
     def install_usage_fixture(self):
         cli = self.home / ".local/bin/claude"

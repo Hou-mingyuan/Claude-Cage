@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { mkdir } from 'node:fs/promises';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.CAGE_PLAYWRIGHT_MODULE || 'playwright');
-const origin = process.env.CAGE_SITE_URL || 'http://127.0.0.1:4822/Claude-Cage/';
+const origin = process.env.CAGE_SITE_URL || 'http://127.0.0.1:4822/';
 const output = process.env.CAGE_SITE_REPORT || '_output/docs-website-20261107/shots';
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });

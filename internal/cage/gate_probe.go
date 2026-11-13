@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,9 @@ import (
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/usererror"
 )
+
+//go:embed browser-check.html
+var browserCheckPage []byte
 
 // ProbeExitIP sends a fixed request through the configured proxy. It does not
 // include user headers, credentials, a report or arbitrary guest data.
@@ -156,8 +160,12 @@ func (g *EgressGate) serveDiagnostic(parent context.Context, conn net.Conn, faul
 	defer req.Body.Close()
 	host := strings.TrimSuffix(strings.ToLower(req.Host), ":80")
 	if req.Method != "GET" || host != DiagnosticHost || req.URL.IsAbs() || req.URL.RawQuery != "" || req.ContentLength > 0 || len(req.TransferEncoding) != 0 ||
-		(req.URL.Path != "/" && req.URL.Path != "/egress" && req.URL.Path != "/dns") {
+		(req.URL.Path != "/" && req.URL.Path != "/egress" && req.URL.Path != "/dns" && req.URL.Path != "/browser-check") {
 		writeDiagnostic(conn, 400, map[string]string{"error": "fixed_probe_only"})
+		return
+	}
+	if req.URL.Path == "/browser-check" {
+		writeDiagnosticResponse(conn, 200, "text/html; charset=utf-8", browserCheckPage)
 		return
 	}
 	if req.URL.Path == "/" {
@@ -207,8 +215,12 @@ func (g *EgressGate) serveDiagnostic(parent context.Context, conn net.Conn, faul
 
 func writeDiagnostic(conn net.Conn, status int, value any) {
 	body, _ := json.Marshal(value)
+	writeDiagnosticResponse(conn, status, "application/json", body)
+}
+
+func writeDiagnosticResponse(conn net.Conn, status int, contentType string, body []byte) {
 	resp := http.Response{StatusCode: status, Status: fmt.Sprintf("%d %s", status, http.StatusText(status)), ProtoMajor: 1, ProtoMinor: 1,
-		Header: http.Header{"Content-Type": {"application/json"}, "Cache-Control": {"no-store"}, "Access-Control-Allow-Origin": {"*"}, "Connection": {"close"}},
+		Header: http.Header{"Content-Type": {contentType}, "X-Content-Type-Options": {"nosniff"}, "Referrer-Policy": {"no-referrer"}, "Cache-Control": {"no-store"}, "Access-Control-Allow-Origin": {"*"}, "Connection": {"close"}},
 		Body:   io.NopCloser(bytes.NewReader(body)), ContentLength: int64(len(body)), Close: true}
 	_ = resp.Write(conn)
 }

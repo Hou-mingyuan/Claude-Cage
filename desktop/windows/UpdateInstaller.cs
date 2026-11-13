@@ -26,7 +26,7 @@ internal static class UpdateInstaller
     {
         InstallPlan? plan = null;
         string? backup = null;
-        var replaced = false;
+        var installerStarted = false;
         var committed = false;
         var succeeded = false;
         Process? launched = null;
@@ -41,6 +41,9 @@ internal static class UpdateInstaller
                 string.Equals(Path.GetPathRoot(plan.Target), plan.Target, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("安装目标无效");
             UpdatePolicy.PlainPath(plan.Target); UpdatePolicy.PlainPath(AppUpdater.Root);
+            // Also release an inherited install-directory lock when this helper
+            // is invoked by a launcher that did not choose a safe directory.
+            Directory.SetCurrentDirectory(AppUpdater.Root);
             if (File.ReadAllText(Path.Combine(plan.Target, "Cage.install-id")).Trim() != "io.github.lee-xeo.claude-cage")
                 throw new IOException("请先使用 Cage 安装程序安装应用，再自动更新");
             var original = Path.Combine(plan.Target, "Cage.exe");
@@ -76,7 +79,7 @@ internal static class UpdateInstaller
                 WorkingDirectory = Path.GetDirectoryName(plan.Archive),
             }) ?? throw new IOException("无法启动 Windows 安装器"))
             {
-                replaced = true;
+                installerStarted = true;
                 try { await installer.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(10)); }
                 catch (TimeoutException) { if (!installer.HasExited) installer.Kill(true); await installer.WaitForExitAsync(); throw; }
                 if (installer.ExitCode != 0) throw new IOException("Windows 安装程序未完成安装");
@@ -119,7 +122,7 @@ internal static class UpdateInstaller
             if (succeeded) return 0;
             var detail = error.Message;
             var recoveryIncomplete = false;
-            if (replaced && plan != null && backup != null)
+            if (committed && plan != null && backup != null)
             {
                 try
                 {
@@ -128,6 +131,15 @@ internal static class UpdateInstaller
                     using var installationLock = new Mutex(false, "Global\\Cage.Installation", out var ownsInstallation);
                     if (!ownsInstallation) throw new IOException("另一个安装或卸载正在进行，已保留更新备份，请等待完成后恢复。");
                     EnsureInstallationComplete(plan.Target);
+                    if (UpdateRecovery.OriginalIntact(plan.Target, backup))
+                    {
+                        Authenticode.SamePublisher(Path.Combine(plan.Target, "Cage.exe"), plan.Publisher);
+                        Result(false, "更新未完成，原应用已保留：" + detail);
+                        Process.Start(new ProcessStartInfo(Path.Combine(plan.Target, "Cage.exe")) { UseShellExecute = false, WorkingDirectory = plan.Target });
+                        UpdateRecovery.CleanupDirectory(backup); backup = null;
+                        return 1;
+                    }
+                    if (!installerStarted) throw new IOException("原应用在安装前发生变化，备份已保留，请核对安装目录后重试。");
                     // Stop the exact new controller through its lifecycle API before
                     // restoring files. Never kill other Cage instances by name.
                     Authenticode.SamePublisher(UpdateRecovery.BackendPath(backup), plan.Publisher);
@@ -169,16 +181,6 @@ internal static class UpdateInstaller
             }
             Result(false, "更新未完成：" + detail);
             if (recoveryIncomplete && OperatingSystem.IsWindows()) MessageBoxW(IntPtr.Zero, detail, "Cage 更新需要恢复", 0x00010010);
-            if (committed && !replaced && plan != null)
-            {
-                try
-                {
-                    var original = Path.Combine(plan.Target, "Cage.exe");
-                    Authenticode.SamePublisher(original, plan.Publisher);
-                    Process.Start(new ProcessStartInfo(original) { UseShellExecute = false, WorkingDirectory = plan.Target });
-                }
-                catch (Exception restart) when (restart is IOException or System.ComponentModel.Win32Exception) { }
-            }
             return 1;
         }
         finally
@@ -186,7 +188,7 @@ internal static class UpdateInstaller
             launched?.Dispose();
             if (succeeded && plan != null && backup != null)
                 UpdateRecovery.CleanupAfterSuccess(backup, Path.GetDirectoryName(plan.Archive)!, Path.Combine(AppUpdater.Root, "launch-" + plan.Confirmation + ".json"));
-            else if (!replaced) UpdateRecovery.CleanupDirectory(backup);
+            else if (!committed) UpdateRecovery.CleanupDirectory(backup);
         }
     }
 

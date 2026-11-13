@@ -21,5 +21,10 @@ func hostDownload(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 6 {
 		cache, digest = args[4], args[5]
 	}
+	ctx, cancel, err := hostDownloadContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	return hostproxy.Download(ctx, args[0], args[1], args[2], accept, cache, digest, out)
 }

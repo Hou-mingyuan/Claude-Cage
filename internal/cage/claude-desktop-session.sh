@@ -89,7 +89,7 @@ test -S "$XDG_RUNTIME_DIR/files.sock"
 export GTK_USE_PORTAL=1
 # Openbox is not auto-detected as a libsecret desktop by Electron. Select the
 # unlocked keyring explicitly so OAuth tokens survive application restarts.
-/usr/local/bin/cage-input-session claude-desktop "${scale_args[@]}" --password-store=gnome-libsecret --xdg-portal-required-version=3 &
+/usr/local/bin/cage-input-session /usr/bin/python3 -I /usr/local/bin/client_runtime.py claude-desktop "${scale_args[@]}" --password-store=gnome-libsecret --xdg-portal-required-version=3 &
 app_pid=$!
 # The service becomes ready only after the application has opened a window.
 for i in $(seq 1 200); do

@@ -19,9 +19,13 @@ func (s *Server) registerMacOSClaudeRoutes(mux routeRegistrar) {
 	mux.HandleFunc("POST /api/macos/claude/window", s.macOSClaudeWindow)
 	mux.HandleFunc("GET /api/macos/claude/connection", s.macOSWindowConnection)
 	mux.HandleFunc("GET /api/macos/claude/frames", s.macOSWindowFrames)
+	mux.HandleFunc("POST /api/macos-browser/window", s.macOSClaudeWindow)
+	mux.HandleFunc("GET /api/macos-browser/connection", s.macOSWindowConnection)
+	mux.HandleFunc("GET /api/macos-browser/frames", s.macOSWindowFrames)
 }
 
 type macOSWindowRequest struct {
+	Surface    string             `json:"surface,omitempty"`
 	Action     string             `json:"action"`
 	Project    string             `json:"project,omitempty"`
 	Nonce      string             `json:"nonce,omitempty"`
@@ -67,6 +71,10 @@ type macOSWindowRequest struct {
 	PhoneToken string             `json:"phone_token,omitempty"`
 }
 
+func macOSBrowserWindowRoute(r *http.Request) bool {
+	return strings.HasPrefix(r.URL.Path, "/api/macos-browser/")
+}
+
 func (s *Server) macOSClaudeWindow(w http.ResponseWriter, r *http.Request) {
 	if s.macosGuest == nil {
 		http.NotFound(w, r)
@@ -80,7 +88,7 @@ func (s *Server) macOSClaudeWindow(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "客机窗口操作或尺寸无效", http.StatusBadRequest)
 		return
 	}
-	s.macOSWindowRPC(w, r, macOSWindowClientRequest(input, false))
+	s.macOSWindowRPC(w, r, macOSWindowClientRequest(input, false, macOSBrowserWindowRoute(r)))
 }
 
 var (
@@ -120,7 +128,7 @@ func (s *Server) macOSWindowRPC(w http.ResponseWriter, r *http.Request, input ma
 func (s *Server) macOSWindowCall(parent context.Context, input macOSWindowRequest) ([]byte, error) {
 	body, err := json.Marshal(input)
 	limit := 8000
-	if strings.HasPrefix(input.Action, "phone-") || input.Action == "text" || input.Action == "ime" {
+	if strings.HasPrefix(input.Action, "phone-") || input.Action == "text" || input.Action == "ime" || input.Action == "browser-text" || input.Action == "browser-ime" {
 		// An 8 KiB UTF-8 message can expand sixfold when JSON escapes controls.
 		limit = 64 << 10
 	}
@@ -130,7 +138,7 @@ func (s *Server) macOSWindowCall(parent context.Context, input macOSWindowReques
 
 	timeout := 12 * time.Second
 	socketWait := "9"
-	if input.Action == "launch" || input.Action == "phone-open" {
+	if input.Action == "launch" || input.Action == "browser-launch" || input.Action == "phone-open" {
 		// On a cold guest disk macOS verifies the signed Electron bundle
 		// before LaunchServices reports success.
 		timeout = 55 * time.Second

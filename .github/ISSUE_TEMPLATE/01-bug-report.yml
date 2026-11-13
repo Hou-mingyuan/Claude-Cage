@@ -1,0 +1,110 @@
+name: 问题反馈
+description: 报告报错、异常行为或无法正常使用的功能。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有 Issue，并填写发生问题时的版本与环境，便于复现。
+        日志和截图可以附在下方；上传前请移除密码、令牌、订阅链接等敏感信息。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述与实际表现
+      description: 你在做什么操作？发生了什么？如有报错，请保留原文。
+      placeholder: 点击启动后出现……，界面显示……
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Cage 版本号
+      description: 填写发生问题时使用的完整版本号，包括预发行或开发版本后缀。
+      placeholder: 例如 v0.1.7 或 v0.1.7-rc.1
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: 提交号（Commit SHA）
+      description: 源码构建请填写构建所用的提交号，可在源码目录运行 git rev-parse HEAD；使用安装包且不知道提交号时，请填写“未知（安装包）”，并在下方注明下载来源。
+      placeholder: 完整或短提交号；未知（安装包）
+    validations:
+      required: true
+  - type: input
+    id: installation
+    attributes:
+      label: 安装或构建来源
+      description: 填写 Release 链接、安装包文件名、CI 构建链接或源码构建方式；若问题发生在更新后，请补充更新前的版本。
+      placeholder: GitHub Releases 安装包 / CI 构建 / 本地源码构建
+    validations:
+      required: true
+  - type: dropdown
+    id: host-system
+    attributes:
+      label: 主机系统
+      description: 主机是运行 Cage 的电脑。Issue 会按所选系统添加标签，交给对应平台的维护者。
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: host-os
+    attributes:
+      label: 主机版本与架构
+      description: 填写系统名称、完整版本（Windows 请含构建号）及处理器架构；远程连接时也请注明远程主机系统。
+      placeholder: macOS 26.4 arm64 / Windows 11 24H2（26100.x）x64 / Ubuntu 24.04 x86_64
+    validations:
+      required: true
+  - type: dropdown
+    id: guest-system
+    attributes:
+      label: 客机系统
+      description: 客机是 Cage 内运行的系统。尚未安装或无法启动时，选择安装时所选的系统。
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - 不涉及或不确定
+    validations:
+      required: true
+  - type: input
+    id: guest-os
+    attributes:
+      label: 客机版本与架构
+      description: 填写系统名称、版本及架构；尚未安装或无法启动时，注明当前阶段。
+      placeholder: Ubuntu 24.04 arm64 / Windows 11 x64 / macOS 26.4 arm64；未安装，停在……
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从打开 Cage 开始按顺序说明，包含相关设置和必要前提。偶发问题请说明已知触发条件与出现频率。
+      placeholder: |
+        1. 打开 Cage，选择……
+        2. 设置……
+        3. 点击……
+        4. 出现……（每次出现 / 偶尔出现）
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期表现
+      description: 按上述步骤操作后，你期望发生什么？
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志、截图或录屏
+      description: 可粘贴相关报错和日志，或拖入截图、录屏。请保留问题发生前后的信息，并移除敏感内容。
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 如涉及 Claude Code、Claude Desktop、浏览器或手机，请注明对应版本；也可补充已尝试的处理方法、最近的配置变化及此前可用的版本。

@@ -63,6 +63,13 @@ func testClaudeAccountSwitchThroughSharedSession(t *testing.T, automatic bool) {
 	if err := os.WriteFile(helper, original, 0700); err != nil {
 		t.Fatal(err)
 	}
+	runtimeHelper, err := os.ReadFile("../cage/client_runtime.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "client_runtime.py"), runtimeHelper, 0600); err != nil {
+		t.Fatal(err)
+	}
 	var resumed atomic.Bool
 	model := mobileTestModel(t, &resumed)
 	t.Cleanup(model.Close)
@@ -72,17 +79,17 @@ func testClaudeAccountSwitchThroughSharedSession(t *testing.T, automatic bool) {
 			body, _ := io.ReadAll(r.Body)
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			if strings.Contains(string(body), "follow-up") {
-				sharedContext.Store(strings.Contains(string(body), "GLOBAL_SHARED_INSTRUCTION") && strings.Contains(string(body), "PROJECT_SHARED_INSTRUCTION") && strings.Contains(string(body), "shared-cage-test-skill") && strings.Contains(string(body), "PROJECT_SHARED_MEMORY"))
+				sharedContext.Store(strings.Contains(string(body), "GLOBAL_SHARED_INSTRUCTION") && strings.Contains(string(body), "PROJECT_SHARED_INSTRUCTION") && strings.Contains(string(body), "shared-example-skill") && strings.Contains(string(body), "PROJECT_SHARED_MEMORY"))
 			}
 		}
 		model.Config.Handler.ServeHTTP(w, r)
 	}))
 	t.Cleanup(observed.Close)
 	proxy, ca := mobileOfficialTestProxy(t, observed)
-	if err := os.MkdirAll(filepath.Join(home, ".claude/skills/shared-cage-test-skill"), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".claude/skills/shared-example-skill"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.WriteFile(filepath.Join(home, ".claude/skills/shared-cage-test-skill/SKILL.md"), []byte("---\nname: shared-cage-test-skill\ndescription: Fixture shared skill\n---\nUse for the fixture.\n"), 0600)
+	_ = os.WriteFile(filepath.Join(home, ".claude/skills/shared-example-skill/SKILL.md"), []byte("---\nname: shared-example-skill\ndescription: Fixture shared skill\n---\nUse for the fixture.\n"), 0600)
 	_ = os.WriteFile(filepath.Join(home, ".claude/CLAUDE.md"), []byte("GLOBAL_SHARED_INSTRUCTION"), 0600)
 	_ = os.WriteFile(filepath.Join(project, "CLAUDE.md"), []byte("PROJECT_SHARED_INSTRUCTION"), 0600)
 	memory := filepath.Join(home, ".claude/projects", regexp.MustCompile(`[^a-zA-Z0-9]`).ReplaceAllString(project, "-"), "memory")

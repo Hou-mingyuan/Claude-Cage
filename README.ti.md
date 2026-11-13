@@ -8,7 +8,9 @@
 
 [![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![CI](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**[መርበብ ሓበሬታ ፕሮጀክት](https://lee-xeo.github.io/Claude-Cage/) · [ነቲ መተግበሪ ኣውርድ](https://lee-xeo.github.io/Claude-Cage/ti/#download) · [ምጅማር](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [መምርሒ ኣጠቓቕማ (ብቻይንኛ)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
+
+**[መርበብ ሓበሬታ ፕሮጀክት](https://claude-cage.com/) · [ነቲ መተግበሪ ኣውርድ](https://claude-cage.com/ti/#download) · [ምጅማር](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [መምርሒ ኣጠቓቕማ (ብቻይንኛ)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -30,6 +32,8 @@ Claude Cage ተርሚናል፣ መርበብ መዳህሰሲ፣ ኣርታዒን �
 | መርመራ መርበብን ምፍላይን | ናይ ማሕበረሰብ መርመራ መርበብ መዳህሰሲ |
 | :---: | :---: |
 | <a href="assets/network-checks.png"><img src="assets/network-checks.png" alt="መርመራ መርበብን ምፍላይን" width="400" /></a> | <a href="assets/community-browser-check.png"><img src="assets/community-browser-check-cropped.png" alt="ናይ ማሕበረሰብ መርመራ መርበብ መዳህሰሲ" width="400" /></a> |
+
+[FuckClaude](https://fuck-claude.vercel.app/) · [LinXiaoTao / GitHub](https://github.com/LinXiaoTao/FuckClaude)
 
 **ቀንዲ መተሓላለፊ Cage፤**
 
@@ -61,7 +65,7 @@ Claude Cage ተርሚናል፣ መርበብ መዳህሰሲ፣ ኣርታዒን �
 
 Cage macOS፣ Windows እና Linux ይድግፍ፦ Apple Silicon ምስ macOS 14+፣ Windows 10 22H2 / 11 x64 እና Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac፣ Windows ARM64 እና Linux ARM64 ገና ኣይድገፉን። [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. ነቲ መተግበሪ ኣውርድ: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/ti/#download).
+1. ነቲ መተግበሪ ኣውርድ: [macOS / Windows / Linux](https://claude-cage.com/ti/#download).
 2. macOS: ነቲ ናይ ምትካል ፓCage ከፊትካ ጎተቶ **Cage** ናብ... **መመልከቲታት**; ድሕሪኡ ካብ Applications ጀምር። Windows: [መምርሒ ምትካል](docs/windows.md#安装并开始工作) · Linux: [መምርሒ ምትካል](docs/linux.md#安装并开始工作).
 3. ናይ ገዛእ ርእስኻ ኔትወርክ ፕሮክሲ ንምውቃር፣ ነቲ ከባቢ ንምጅማርን ፕሮጀክት ንምኽፋትን ኣብ ውሽጢ ኣፕ ዘሎ መምርሒታት ተኸተል።
 
@@ -102,16 +106,18 @@ macOS እና ዝተፈረሙ Windows ስሪቶች ብዝተመርጸ ፕሮክ�
 
 | ዕማምካ | ካብዚ ጀምር |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [ናይ ጋሻ ስርዓት ምምራጽ](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [ናይ ጋሻ ስርዓት ምምራጽ](https://claude-cage.com/docs/guest-systems/) |
 | ኔትወርክ ፕሮክሲ ምትካል፡ ምውቃር፡ ናይ መጀመርታ ፕሮጀክትካ ድማ ክፈት | [ምጅማር](docs/getting-started.md) |
 | ናይ ምውራድ፣ ምጅማር፣ ምትእስሳርን ምእታውን ጸገማት ምፍታሕ | [FAQን ምሕዋይን](docs/troubleshooting.md) |
 | ቁጽጽር ቁልፊ ሰሌዳ፡ መልክዕ፡ ጽንዓት ዳታን ናይ ምውጻእ ባህሪን ተማሃር | [መዓልታዊ ኣጠቓቕማ](docs/getting-started.md#日常使用) |
 | ክባዛሕ ዝኽእል ጉዳይ ሪፖርት ግበሩ | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| ምእራም፣ ባህሪ ወይ ሰነድ ንምብርካት፦ Issue ግምገማ → ዕድመ ተሓባባሪ → PR | [መምርሒ ኣበርክቶ (ቻይንኛ)](.github/CONTRIBUTING.md) |
 
 እቲ ፕሮጀክት ብቕልጡፍ ይምዕብል ኣሎ። ርእይቶ ንምክፋል ኣብቲ ናይ ማሕበረሰብ ጉጅለ ​​ተጸንበሩ፤ ሕብረተሰብ ዝሕልዉ ሰባት ድሉዋት እዮም።
 
 <p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1134250870" width="240" /></a>
+  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a>
+  <br />QQ group · 782087179
 </p>
 
 ## መበቆልን ፍቓድን ምሃብ

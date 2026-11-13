@@ -222,6 +222,7 @@ try {
     $null=Get-LocalDirectory $cache
     $packages=Get-Content -LiteralPath (Join-Path $payload 'windows-workbench-packages.json') -Raw | ConvertFrom-Json
     $cli=Get-Content -LiteralPath (Join-Path $payload 'cli-dependencies.json') -Raw | ConvertFrom-Json
+    Resolve-ClaudePackages $packages $cli $cache
     $files=@{}
     Write-Output 'CAGE_GUEST_STAGE windows-11 media'
     foreach ($spec in @($packages.PSObject.Properties)+@($cli.PSObject.Properties)) {
@@ -251,7 +252,7 @@ try {
 
     $extras=Join-Path $scratch 'extras'
     $null=New-Item -ItemType Directory $extras
-    foreach ($name in @('modules','split-extension','windows-browser.mjs','windows-browser-extensions.mjs','windows-phone-browser.mjs','install-windows-workbench-user-tools.ps1','install-cli.ps1','cli-dependencies.json')) {
+    foreach ($name in @('modules','split-extension','windows-browser.mjs','browser-protocol.mjs','windows-browser-extensions.mjs','windows-phone-browser.mjs','install-windows-workbench-user-tools.ps1','install-cli.ps1','cli-dependencies.json','claude-desktop-windows.ps1')) {
         Copy-Item -LiteralPath (Join-Path $payload $name) -Destination $extras -Recurse
     }
     if ($componentManifest) {
@@ -285,7 +286,7 @@ try {
         else { $null=New-Item -ItemType Directory $path }
         $path
     }
-    foreach ($file in @($zipPath,$files.desktop,$files.winfsp,$files.sshfs,$files.uv,$files.python,$files.claude,$files.git)) {
+    foreach ($file in @($zipPath,$files.desktop,$files.winfsp,$files.sshfs,$files.uv,$files.python,$files.claude,$files.git,$files.gh)) {
         Copy-Item -LiteralPath $file -Destination $guestStage -ToSession $session -Force
     }
     $installer=Join-Path $PSScriptRoot 'install-windows-workbench-components.ps1'

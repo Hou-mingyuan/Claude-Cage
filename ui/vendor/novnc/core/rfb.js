@@ -10,13 +10,13 @@
 import { toUnsigned32bit, toSigned32bit } from './util/int.js';
 import * as Log from './util/logging.js';
 import { encodeUTF8, decodeUTF8 } from './util/strings.js';
-import { dragThreshold, supportsWebCodecsH264Decode } from './util/browser.js';
+import { dragThreshold, isMac, supportsWebCodecsH264Decode } from './util/browser.js';
 import { clientToElement } from './util/element.js';
 import { setCapture } from './util/events.js';
 import EventTargetMixin from './util/eventtarget.js';
 import Display from "./display.js";
 import CageBrowserDisplay from "./cage-browser-display.js";
-import CageWheel, { cageWheelCapability, cageWheelEncoding, cageWheelPacket } from "./cage-wheel.js";
+import CageWheel, { cageWheelCapability, cageWheelEncoding, cageWheelNotched, cageWheelPacket } from "./cage-wheel.js";
 import Inflator from "./inflator.js";
 import Deflator from "./deflator.js";
 import Keyboard from "./input/keyboard.js";
@@ -199,6 +199,12 @@ export default class RFB extends EventTargetMixin {
         // Offered to Cage's own display server, which confirms it in a fence.
         this._cageBrowserDisplay = !!options.cageBrowserDisplay;
         this._cagePixelWheel = false;
+        // A display server that knows no distance leaves it to this function,
+        // which resolves to whether the guest scrolled by it.
+        this._cageWheelSink = options.cageWheelSink || null;
+        this._cageWheelAt = -Infinity;
+        this._cageWheelRetry = -Infinity;
+        this._cageWheelSteps = false;
         this._cageWheel = new CageWheel((x, y, dx, dy) => this._cageSendWheel(x, y, dx, dy));
 
         // Gesture state
@@ -1258,6 +1264,13 @@ export default class RFB extends EventTargetMixin {
             return;
         }
 
+        // Cage: the same through the sink, in framebuffer pixels.
+        if (bmask === 0 && this._cageSinkTakes(ev)) {
+            const ratio = this._cageWheelRatio();
+            this._cageWheel.add(pos.x, pos.y, dX * ratio.x, dY * ratio.y);
+            return;
+        }
+
         // Pixel units unless it's non-zero.
         // Note that if deltamode is line or page won't matter since we aren't
         // sending the mouse wheel delta to the server anyway.
@@ -1267,6 +1280,56 @@ export default class RFB extends EventTargetMixin {
             dX *= WHEEL_LINE_HEIGHT;
             dY *= WHEEL_LINE_HEIGHT;
         }
+
+        this._cageStepWheel(pos.x, pos.y, bmask, dX, dY);
+    }
+
+    // Cage: framebuffer pixels per pixel of the canvas as it is shown.
+    _cageWheelRatio() {
+        const shown = this._canvas.getBoundingClientRect();
+        return { x: shown.width ? this._fbWidth / shown.width : 1,
+                 y: shown.height ? this._fbHeight / shown.height : 1 };
+    }
+
+    // Cage: whether this event goes to the sink as a distance. A gesture keeps
+    // the way it started with. A notched wheel names steps, which the guest
+    // animates itself, and a held modifier means zoom or the other axis there.
+    // macOS turns the notches of a wheel into a distance before they arrive.
+    _cageSinkTakes(ev) {
+        if (!this._cageWheelSink || ev.deltaMode !== 0) return false;
+        const now = performance.now(), continuing = now - this._cageWheelAt < 200;
+        this._cageWheelAt = now;
+        if (!continuing) {
+            this._cageWheelSteps = (!isMac() && cageWheelNotched(ev)) || now < this._cageWheelRetry;
+        }
+        if (this._cageModifiers && this._cageModifiers.size) this._cageWheelSteps = true;
+        return !this._cageWheelSteps;
+    }
+
+    _cageSinkWheel(x, y, dx, dy) {
+        const sink = this._cageWheelSink;
+        // What the guest did not scroll by goes to the display as steps,
+        // together with the distance that arrived in the meantime.
+        const steps = () => {
+            const rest = this._cageWheel.take(), ratio = this._cageWheelRatio();
+            this._cageWheelSteps = true;
+            if (this._rfbConnectionState !== 'connected' || this._viewOnly) return;
+            this._cageStepWheel(x, y, 0, (dx + rest.dx) / ratio.x, (dy + rest.dy) / ratio.y);
+        };
+        return sink({ x: this._display.absX(x), y: this._display.absY(y), deltaX: dx, deltaY: dy }).then((handled) => {
+            if (handled) return;
+            // A menu, a second pane or developer tools: ask again in a moment.
+            this._cageWheelRetry = performance.now() + 1000;
+            steps();
+        }, () => {
+            // A guest without this ability keeps the steps for good.
+            if (this._cageWheelSink === sink) this._cageWheelSink = null;
+            steps();
+        });
+    }
+
+    _cageStepWheel(x, y, bmask, dX, dY) {
+        const pos = { x, y };
 
         // Mouse wheel events are sent in steps over VNC. This means that the VNC
         // protocol can't handle a wheel event with specific distance or speed.
@@ -1302,6 +1365,10 @@ export default class RFB extends EventTargetMixin {
     }
 
     _cageSendWheel(x, y, dx, dy) {
+        if (!this._cagePixelWheel) {
+            if (!this._cageWheelSink || this._rfbConnectionState !== 'connected' || this._viewOnly) return undefined;
+            return this._cageSinkWheel(x, y, dx, dy);
+        }
         const send = () => {
             if (this._rfbConnectionState !== 'connected' || this._viewOnly) return;
             this._sock.sQpushBytes(cageWheelPacket(this._display.absX(x), this._display.absY(y), dx, dy));

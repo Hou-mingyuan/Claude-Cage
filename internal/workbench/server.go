@@ -454,7 +454,9 @@ func (s *Server) handler() http.Handler {
 			http.Error(w, "环境尚未就绪", 409)
 			return
 		}
-		jsonReply(w, map[string]any{"password": s.credentials.VNCPassword, "display_scale": s.credentials.DisplayScale, "dynamic_scale": s.credentials.DynamicScale})
+		// A Linux guest scrolls its page by the viewer's distance, outside the
+		// display stream. The native guests negotiate it inside theirs.
+		jsonReply(w, map[string]any{"password": s.credentials.VNCPassword, "display_scale": s.credentials.DisplayScale, "dynamic_scale": s.credentials.DynamicScale, "pixel_wheel": s.macosGuest == nil && s.windowsGuest == nil})
 	})
 	mux.HandleFunc("GET /api/vnc", s.vnc)
 	mux.HandleFunc("GET /api/claude-desktop", s.claudeDesktopStatus)
@@ -662,7 +664,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	}
 	view := map[string]any{
 		"projects": projects, "ready": s.ready, "vm_running": running,
-		"workspace": s.workspaceLocked(), "environment_workspace": s.workspaceLocked() == s.environmentDir(), "environment_directory": s.environmentDir(),
+		"workspace": s.workspaceLocked(), "environment_directory": s.environmentDir(),
 		"environment_identity_directory": cage.EnvironmentIdentityDir(s.profile),
 		"local_vm_storage":               s.localVMStorage(), "project_error": projectError, "project_errors": s.projectErrors,
 		"storage_recovery": s.storageRecoveryStatusLocked(),

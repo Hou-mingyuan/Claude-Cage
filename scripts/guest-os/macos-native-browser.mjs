@@ -5,19 +5,23 @@ import { randomBytes } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { chromium, request } from "/usr/local/libexec/cage-workbench-browser-4.145.0-pw1.65.0/playwright/index.mjs";
-import { createNativeBrowserService } from "./windows-browser.mjs";
+import { browserCallback, browserSettingsInputs, nativeBrowserDispatch, windowRequest } from "./macos-browser-window.mjs";
+import { createTailnetClient } from "./tailnet-client.mjs";
 import { relayMacOSBrowser, serveMacOSBrowser } from "./macos-browser-service.mjs";
 import { lstat, readFile } from "node:fs/promises";
 
 const data = path.join(homedir(), "Library", "Application Support", "Cage");
 const editors = new Map();
 
-async function openEditor(id, restart) {
+async function openEditor(id, restart, launch) {
   if (!/^[a-f0-9]{24}$/.test(id)) throw new Error("项目标识无效");
   const folder = path.join(homedir(), "Cage", "Projects", id);
   let editor = editors.get(id);
-  if (restart && editor) { editor.child.kill(); editor = null; }
+  if (restart && editor) {
+    editors.delete(id);
+    editor.child.kill();
+    editor = null;
+  }
   if (!editor) {
     const password = randomBytes(32).toString("hex");
     const directory = path.join(data, "EditorSessions");
@@ -31,7 +35,7 @@ async function openEditor(id, restart) {
     child.once("exit", () => {
       if (editors.get(id) === editor) { editors.delete(id); void rm(config, { force: true }).catch(() => {}); }
     });
-    editor.address = await new Promise((resolve, reject) => {
+    editor.address = new Promise((resolve, reject) => {
       let recent = "";
       const failed = () => finish();
       const read = chunk => {
@@ -51,47 +55,23 @@ async function openEditor(id, restart) {
       child.once("error", failed); child.once("exit", failed);
     });
   }
-  const client = await request.newContext();
-  try {
-    const login = await client.post(editor.address + "/login", { form: { password: editor.password }, maxRedirects: 0, timeout: 7000 });
-    if (![302, 303].includes(login.status())) throw new Error("客机编辑器登录失败");
-    const hostname = id + ".cage-editor.localhost";
-    const url = new URL(editor.address);
-    url.hostname = hostname;
-    url.searchParams.set("folder", folder);
-    const { cookies } = await client.storageState();
-    return { url: url.href, folder, cookies: cookies.map(cookie => ({ ...cookie, domain: hostname })) };
-  } finally { await client.dispose(); }
-}
-
-async function audit(context, { timezone, network }) {
-  // Sample the real workbench tab in a fresh isolated world. Page scripts
-  // cannot replace navigator or Intl in this execution context.
-  const tab = context.pages().find(p => !p.url().startsWith("chrome-extension:"));
-  const cdp = await context.newCDPSession(tab);
-  let result;
-  try {
-    const {frameTree} = await cdp.send("Page.getFrameTree");
-    const {executionContextId} = await cdp.send("Page.createIsolatedWorld", {frameId: frameTree.frame.id, worldName: "cage-workbench-settings"});
-    const observed = await cdp.send("Runtime.evaluate", {contextId: executionContextId, returnByValue: true,
-      expression: `({timezone:Intl.DateTimeFormat().resolvedOptions().timeZone, expected_timezone:new Intl.DateTimeFormat("en",{timeZone:${JSON.stringify(timezone)}}).resolvedOptions().timeZone,language:navigator.language,platform:navigator.platform})`});
-    result = observed.result.value;
-    if (!result?.platform) throw new Error("无法读取客机浏览器设置");
-  } finally { await cdp.detach(); }
-  if (!network) return result;
-  const isolated = await context.browser().newContext({ serviceWorkers: "block" });
-  try {
-    const page = await isolated.newPage();
-    await page.goto("http://198.18.0.254/", { waitUntil: "domcontentloaded", timeout: 12000 });
-      result.network = await page.evaluate(async () => {
-        if (location.origin !== "http://198.18.0.254") throw new Error("无效的诊断地址");
-        try {
-          const response = await fetch("/egress", { cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(14000) });
-          return { ...(await response.json()), status: response.status };
-        } catch { return { status: 0 }; }
-      });
-    return result;
-  } finally { await isolated.close(); }
+  const address = new URL(await editor.address);
+  const login = await fetch(new URL("/login", address), {
+    method: "POST", body: new URLSearchParams({ password: editor.password }),
+    redirect: "manual", signal: AbortSignal.timeout(7000),
+  });
+  const cookies = login.headers.getSetCookie();
+  if (![302, 303].includes(login.status) || !cookies.length) throw new Error("客机编辑器登录失败");
+  // Cookies are scoped by hostname, independently of port. Deliver the editor's
+  // own cookie only to this project's localhost alias, then open its server.
+  const hostname = id + ".localhost";
+  address.hostname = hostname;
+  address.searchParams.set("folder", folder);
+  const callback = await browserCallback(hostname, (_, response) => {
+    response.writeHead(303, { "Set-Cookie": cookies, Location: address.href }).end();
+  });
+  try { await launch(callback.url); await callback.result; }
+  finally { callback.close(); }
 }
 
 const marker = await lstat("/var/db/cage-guest-os");
@@ -105,18 +85,15 @@ if (process.argv[2] !== "--service") {
   // service and receive ownership capability metadata with the first reply.
   await relayMacOSBrowser(directory);
 } else {
-  const service = createNativeBrowserService({
-    platform: "darwin", chromium, editor: openEditor, audit,
-    directory: path.join(data, "BrowserWorkbench"),
-    profileDirectory: path.join(data, "Browser"),
-    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  });
-  await service.request({ operation: "configure", input: { networkMode: "packet", displayScale: 1 } });
-  const closeBrowser = async () => {
+  const socket = path.join(homedir(), "Library", "Caches", "dev.cage.GuestClaudeWindow", "window.sock");
+  const tailnet = createTailnetClient();
+  void tailnet.restore().catch(() => {});
+  const dispatch = nativeBrowserDispatch({ settingsInputs: info => browserSettingsInputs(info, path.join(data, "Browser")), window: (action, fields, signal) => windowRequest(socket, action, fields, signal), editor: openEditor, tailnet });
+  const close = async () => {
     for (const { child } of editors.values()) child.kill();
-    await service.close();
+    tailnet.close();
   };
-  const server = await serveMacOSBrowser({ directory, dispatch: (request, options) => service.request(request, options), disconnect: signal => service.releaseInput(signal), close: closeBrowser });
+  const server = await serveMacOSBrowser({ directory, dispatch, close });
   let closeLogin;
   try { closeLogin = await installMacOSCLIBrowser(data, message => server.request(message)); }
   catch (error) { await server.close(); throw error; }

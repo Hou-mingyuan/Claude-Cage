@@ -19,13 +19,15 @@ func TestDesktopCallbackFocusAfterHandoff(t *testing.T) {
 	for _, identity := range []string{"cage", "cage-browser"} {
 		for _, tc := range []struct {
 			name, url, path, login string
-			fail                   bool
+			fail, parameter        bool
 		}{
-			{"callback", "claude://login?code=private-test-value", "/desktop-focus", "", false},
-			{"failed-callback", "claude://login?code=private-test-value", "", "", true},
-			{"web-link", "https://example.com/login", "/new", "", false},
-			{"cli-login", "https://claude.ai/oauth/authorize?state=private-test-value", "/login-open", "1234567890abcdef", false},
-			{"finish-cli-login", "--finish-login", "/login-finish", "1234567890abcdef", false},
+			{"callback", "claude://login?code=private-test-value", "/desktop-focus", "", false, false},
+			{"failed-callback", "claude://login?code=private-test-value", "", "", true, false},
+			{"web-link", "https://example.com/login", "/new", "", false, false},
+			{"cli-login", "https://claude.ai/oauth/authorize?state=private-test-value", "/login-open", "1234567890abcdef", false, false},
+			{"finish-cli-login", "--finish-login", "/login-finish", "1234567890abcdef", false, false},
+			{"cli-login-argument", "https://claude.ai/oauth/authorize?state=private-test-value", "/login-open", strings.Repeat("a", 24), false, true},
+			{"finish-cli-login-argument", "--finish-login", "/login-finish", strings.Repeat("a", 24), false, true},
 		} {
 			t.Run(identity+"/"+tc.name, func(t *testing.T) {
 				dir := t.TempDir()
@@ -61,8 +63,15 @@ func TestDesktopCallbackFocusAfterHandoff(t *testing.T) {
 				if tc.fail {
 					code = "1"
 				}
-				cmd := exec.Command("sh", "-c", script, "cage-open", tc.url)
-				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "TEST_NODE="+node, "TEST_IDENTITY="+identity, "CALLBACK_EXIT="+code, "CAGE_CLAUDE_LOGIN="+tc.login)
+				args := []string{"-c", script, "open"}
+				login := tc.login
+				if tc.parameter {
+					args = append(args, "--login-id", tc.login)
+					login = ""
+				}
+				args = append(args, tc.url)
+				cmd := exec.Command("sh", args...)
+				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "TEST_NODE="+node, "TEST_IDENTITY="+identity, "CALLBACK_EXIT="+code, "CAGE_CLAUDE_LOGIN="+login)
 				out, err := cmd.CombinedOutput()
 				if tc.fail {
 					if err == nil {
