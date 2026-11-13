@@ -109,8 +109,19 @@ install_app() {
     if [[ -e $target || -L $target ]]; then
         [[ ! -L $target && -d $target ]] || fail "Unexpected application at $target"
         codesign --verify --strict -R "=$requirement" "$target"
-        if diff -qr "$source" "$target" >/dev/null; then return; fi
-        fail "A different verified build is already installed at $target. Stop and update that application before retrying."
+        # A resumed pending installation may carry a differently signed build
+        # of the same verified identifier. Replace it atomically with this
+        # kit's verified copy so the published component manifest matches.
+        stage=$(mktemp -d /Applications/.cage-project-install.XXXXXXXX)
+        if ditto "$source" "$stage/app" && chmod -R a+rX,go-w "$stage/app" &&
+            codesign --verify --strict -R "=$requirement" "$stage/app"; then
+            rm -rf "$target"
+            mv "$stage/app" "$target"
+            rmdir "$stage"
+            return
+        fi
+        rm -rf "$stage"
+        fail "Could not refresh $target with this kit's verified build"
     fi
     stage=$(mktemp -d /Applications/.cage-project-install.XXXXXXXX)
     if ditto "$source" "$stage/app" && chmod -R a+rX,go-w "$stage/app" &&

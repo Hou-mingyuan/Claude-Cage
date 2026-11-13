@@ -62,12 +62,15 @@ bash claude-desktop-macos.sh install "$kit/claude.dmg"
 bash claude-desktop-macos.sh migrate "$ordinary"
 install -m 755 cage-macos-ipv6-check /usr/local/libexec/cage-macos-ipv6-check
 app='/Applications/Cage Guest Window.app'
-if [[ ! -e $app ]]; then ditto 'Cage Guest Window.app' "$app"; fi
+# A pending installation may resume with a rebuilt kit whose ad-hoc signatures
+# differ from the first attempt. Refresh the installed copy so the published
+# component manifest matches this kit; the incoming app is verified below.
+ditto 'Cage Guest Window.app' "$app"
 codesign --verify --strict -R '=identifier "dev.cage.GuestClaudeWindow"' "$app"
 chmod -R a+rX,go-w "$app"
 install -m 755 register-macos-claude-window.sh /usr/local/libexec/cage-register-claude-window
 clipboard_app='/Applications/Cage Guest Clipboard.app'
-if [[ ! -e $clipboard_app ]]; then ditto 'Cage Guest Clipboard.app' "$clipboard_app"; fi
+ditto 'Cage Guest Clipboard.app' "$clipboard_app"
 codesign --verify --deep --strict -R '=identifier "dev.cage.GuestClipboard"' "$clipboard_app"
 chmod -R a+rX,go-w "$clipboard_app"
 install -m 755 register-macos-clipboard.sh /usr/local/libexec/cage-register-clipboard
