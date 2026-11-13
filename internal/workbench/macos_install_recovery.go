@@ -3,6 +3,7 @@ package workbench
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/guestos"
 )
 
@@ -41,6 +43,14 @@ func macOSInstallRecoveryRoute(method, path string) bool {
 	return false
 }
 
+// recordInstallRecovery keeps the precise, sanitized cause of a refused
+// recovery operation in the local diagnostics log. Client messages stay
+// generic on purpose: they never reveal the guest account or machine
+// identity that the recovery record protects.
+func (s *Server) recordInstallRecovery(detail string) {
+	_ = diagnostics.New(s.profile).Record("warn", "macos-install-recovery", detail)
+}
+
 // macOSInstallRecovery exposes only the pending VM's setup screen and fixed
 // lifecycle operations. It never creates or substitutes a MacOSProfile.
 func (s *Server) macOSInstallRecovery(w http.ResponseWriter, r *http.Request) {
@@ -49,8 +59,14 @@ func (s *Server) macOSInstallRecovery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	recovery, err := guestos.LoadMacOSInstallRecovery(s.profile)
-	if err != nil || s.macosGuest != nil {
-		http.Error(w, "安装恢复身份不可用，原磁盘和安装记录已保留", http.StatusConflict)
+	if err != nil {
+		s.recordInstallRecovery("恢复入口身份校验未通过：" + err.Error())
+		http.Error(w, "安装恢复入口身份校验未通过，原磁盘和安装记录已保留；请稍后重试，仍失败时可在“日志与诊断”导出诊断包排查", http.StatusConflict)
+		return
+	}
+	if s.macosGuest != nil {
+		s.recordInstallRecovery("已有绑定的 macOS 客机，安装恢复入口停用")
+		http.Error(w, "已有绑定的 macOS 客机，无需恢复安装；原磁盘和安装记录已保留", http.StatusConflict)
 		return
 	}
 	if recovery == nil {
@@ -61,7 +77,8 @@ func (s *Server) macOSInstallRecovery(w http.ResponseWriter, r *http.Request) {
 				canPrepare, loadErr = guestos.CanRecoverMacOSInstall(s.profile, install.ID)
 			}
 			if loadErr != nil {
-				http.Error(w, "无法确认原客机身份，现有数据已保留", http.StatusConflict)
+				s.recordInstallRecovery("确认原安装记录可恢复性失败：" + loadErr.Error())
+				http.Error(w, "暂时无法确认原安装记录是否可恢复，请稍后重试；现有数据已保留，可在“日志与诊断”导出诊断包排查", http.StatusConflict)
 				return
 			}
 			jsonReply(w, map[string]bool{"available": false, "can_prepare": canPrepare})
@@ -73,18 +90,36 @@ func (s *Server) macOSInstallRecovery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		install, loadErr := guestos.LoadInstallation(s.profile)
-		if loadErr != nil || install == nil || install.System != guestos.MacOS {
-			http.Error(w, "原安装记录不可用", http.StatusConflict)
+		if loadErr != nil {
+			s.recordInstallRecovery("读取原安装记录失败：" + loadErr.Error())
+			http.Error(w, "暂时无法读取原安装记录，请稍后重试；现有数据已保留，可在“日志与诊断”导出诊断包排查", http.StatusConflict)
+			return
+		}
+		if install == nil || install.System != guestos.MacOS {
+			s.recordInstallRecovery("准备恢复入口被拒绝：没有对应的 macOS 安装记录")
+			http.Error(w, "没有可恢复的 macOS 安装记录，请回到初始化页重新确认", http.StatusConflict)
 			return
 		}
 		credential, loadErr := s.account.macGuestCredentials(r.Context(), install.ID)
-		if loadErr != nil || !guestos.ValidMacOSAccountName(credential.Username) || credential.Password == "" {
-			http.Error(w, "原客机凭据不可用", http.StatusConflict)
+		if loadErr != nil {
+			s.recordInstallRecovery("读取原客机凭据失败：" + loadErr.Error())
+			http.Error(w, "暂时无法读取原客机凭据，请确认 Cage 账密后重试；原账户和磁盘已保留", http.StatusConflict)
+			return
+		}
+		if !guestos.ValidMacOSAccountName(credential.Username) || credential.Password == "" {
+			s.recordInstallRecovery("准备恢复入口被拒绝：原客机凭据不完整")
+			http.Error(w, "原客机凭据不完整，请在设置中确认 Cage 账密后重试；原账户和磁盘已保留", http.StatusConflict)
 			return
 		}
 		canRecover, loadErr := guestos.CanRecoverMacOSInstall(s.profile, install.ID)
-		if loadErr != nil || !canRecover {
-			http.Error(w, "无法确认原客机身份，磁盘和安装记录已保留", http.StatusConflict)
+		if loadErr != nil {
+			s.recordInstallRecovery("核对原客机磁盘身份失败：" + loadErr.Error())
+			http.Error(w, "暂时无法核对原客机磁盘身份，请稍后重试；磁盘和安装记录已保留", http.StatusConflict)
+			return
+		}
+		if !canRecover {
+			s.recordInstallRecovery("准备恢复入口被拒绝：原客机磁盘或机器标识尚未就绪")
+			http.Error(w, "原客机磁盘或机器标识尚未就绪，暂时无法准备恢复入口；磁盘和安装记录已保留", http.StatusConflict)
 			return
 		}
 		s.launch(w, "macos-install-recovery", func() error {
@@ -131,13 +166,20 @@ func (s *Server) macOSInstallRecovery(w http.ResponseWriter, r *http.Request) {
 	var dial net.Dialer
 	conn, err := dial.DialContext(ctx, "unix", filepath.Join(s.profile, "state", "lima", "mac", "cage-login.sock"))
 	if err != nil {
+		s.recordInstallRecovery("连接恢复画面失败：" + err.Error())
 		http.Error(w, "请先启动恢复客机", http.StatusConflict)
 		return
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
+	if err := json.NewEncoder(conn).Encode(input); err != nil {
+		s.recordInstallRecovery(fmt.Sprintf("发送恢复画面请求失败：%v", err))
+		http.Error(w, "恢复画面无法响应", http.StatusServiceUnavailable)
+		return
+	}
 	var result guestos.MacLoginReply
-	if json.NewEncoder(conn).Encode(input) != nil || json.NewDecoder(io.LimitReader(conn, 6<<20)).Decode(&result) != nil {
+	if err := json.NewDecoder(io.LimitReader(conn, 6<<20)).Decode(&result); err != nil {
+		s.recordInstallRecovery(fmt.Sprintf("读取恢复画面响应失败：%v", err))
 		http.Error(w, "恢复画面无法响应", http.StatusServiceUnavailable)
 		return
 	}
