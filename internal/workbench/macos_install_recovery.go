@@ -151,13 +151,16 @@ func (s *Server) macOSInstallRecovery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	epoch, _ := s.account.accessFor(true)
+	// lifetimeContext takes s.mu; resolve it before the lease critical section
+	// below takes the same lock.
+	lifetime := s.lifetimeContext()
 	if input.Action == "open" && result.Session != "" {
 		lease := &macLoginLease{request: guestos.MacLoginRequest{Action: "close", Session: result.Session, Setup: true}, socket: filepath.Join(s.profile, "state", "lima", "mac", "cage-login.sock")}
 		s.mu.Lock()
 		previous := s.macLoginLease
 		s.macLoginLease = lease
 		lease.stopAccount = context.AfterFunc(epoch, func() { s.revokeMacLogin(result.Session) })
-		lease.stopService = context.AfterFunc(s.lifetimeContext(), func() { s.revokeMacLogin(result.Session) })
+		lease.stopService = context.AfterFunc(lifetime, func() { s.revokeMacLogin(result.Session) })
 		s.mu.Unlock()
 		previous.stop()
 	} else if input.Action == "close" || result.Closed {
