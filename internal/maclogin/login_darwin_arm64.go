@@ -48,8 +48,9 @@ func init() {
 		if !filepath.IsAbs(config) || !sameGuestDirectory(dir, filepath.Join(filepath.Dir(config), "state", "lima", "mac")) {
 			return false
 		}
-		profile, err := guestos.LoadMacOSProfile(filepath.Dir(config))
-		return err == nil && profile != nil
+		profile := filepath.Dir(config)
+		identity, err := guestos.LoadMacOSProfileOrRecovery(profile)
+		return err == nil && identity != nil
 	}
 	driver.OffscreenView = run
 }
@@ -78,9 +79,9 @@ func (s *loginSession) currentScreen() string {
 		}
 		return "maintenance-" + surface.Session
 	}
-	// Check via the separate provisioning account. Guest development files
-	// and the standard user's shell initialization cannot grant this view.
-	bound, err := guestos.LoadMacOSProfile(s.profile)
+	// Check via the separate provisioning account. Guest development files and
+	// the standard user's shell initialization cannot grant this view.
+	bound, err := guestos.LoadMacOSProfileOrRecovery(s.profile)
 	if err != nil || bound == nil {
 		return ""
 	}

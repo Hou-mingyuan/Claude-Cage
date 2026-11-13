@@ -14,7 +14,8 @@ import (
 	"github.com/sylvinus/agent-vm/internal/hostimage"
 )
 
-// Installation persists only the media choice and private instance identity.
+// Installation persists the media choice and private instance identity.
+// macOS recovery state is stored separately so it cannot enable the workbench.
 // macOS secrets live separately in the Cage account's encrypted vault.
 type Installation struct {
 	Version     int            `json:"version"`

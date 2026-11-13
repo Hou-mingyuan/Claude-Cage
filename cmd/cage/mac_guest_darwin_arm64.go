@@ -85,7 +85,7 @@ func runMacGuest(ctx context.Context, profile, state string, args []string) erro
 		if len(args) != 1 {
 			return errors.New("unexpected macOS guest lifecycle argument")
 		}
-		m, err := guestos.LoadMacOSProfile(profile)
+		m, err := guestos.LoadMacOSProfileOrRecovery(profile)
 		if err != nil {
 			return err
 		}
@@ -95,7 +95,23 @@ func runMacGuest(ctx context.Context, profile, state string, args []string) erro
 		if args[0] == "stop" {
 			return lima.Stop(ctx, m.Instance)
 		}
-		if err := lima.CheckMacOSGuest(ctx, m.Instance); err != nil {
+		recovery, err := guestos.LoadMacOSInstallRecovery(profile)
+		if err != nil {
+			return err
+		}
+		if recovery != nil {
+			install, err := guestos.LoadInstallation(profile)
+			if err != nil || install == nil {
+				return errors.New("macOS 恢复缺少原安装记录")
+			}
+			media := install.Media
+			if media == "" {
+				media = filepath.Join(state, "guest-media", install.System, "MacOS.ipsw")
+			}
+			if err := lima.MatchMacOSInstallSource(ctx, m.Instance, media); err != nil {
+				return err
+			}
+		} else if err := lima.CheckMacOSGuest(ctx, m.Instance); err != nil {
 			return err
 		}
 		return lima.Start(ctx, m.Instance, os.Stderr)

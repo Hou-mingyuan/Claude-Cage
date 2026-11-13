@@ -60,6 +60,7 @@ function Initialization({ initial, onComplete }) {
   const [choice, setChoice] = useState(undefined);
   const [storage, setStorage] = useState(null);
   const [pending, setPending] = useState(null);
+  const [macRecovery, setMacRecovery] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [connectionError, setConnectionError] = useState("");
@@ -104,6 +105,10 @@ function Initialization({ initial, onComplete }) {
         else setConnectionError(results[0].reason.message);
         if (results[1].status === "fulfilled") {
           const install = results[1].value;
+          if (install?.pending?.system === "macos" && !install?.activate) {
+            try { setMacRecovery(await api("/macos/install-recovery")); }
+            catch { setMacRecovery(null); }
+          } else setMacRecovery(null);
           setPending(install?.pending || null);
           if (!restored.current) {
             restored.current = true;
@@ -262,6 +267,16 @@ function Initialization({ initial, onComplete }) {
             {exitCandidate && <section className="initialization-notice" aria-label="确认固定出口"><p>客机终端、浏览器和代理已测得一致出口。请确认是否将它绑定为固定出口。</p><button disabled={busy || Boolean(connectionError)} onClick={bindExit}>绑定检测到的固定出口 {exitCandidate}</button></section>}
             {needsExitRestart && <section className="initialization-notice" aria-label="固定出口已保存"><p>固定出口已保存。重启客机并重新检测后才能进入工作台。</p><button className="primary" disabled={busy || Boolean(connectionError)} onClick={restart}>{status.vm_running ? "重启客机并重新检测" : "启动客机并重新检测"}</button></section>}
             {progress ? <SetupProgress job={progress} onDetails={() => setDetails(true)} onStop={stop} onRetry={needsExitRestart ? restart : install} disconnected={Boolean(connectionError) || submitting} /> : (busy || status.guest_system !== "macos" || !networkPending) && <div className="initialization-operation" role="status">{busy && <LoaderCircle size={22} className="spin" />}<p>{job.message || (status.vm_running ? "请完成客机连接和网络检查。" : "准备继续原安装，已有文件和磁盘会保留。")}</p>{!busy && !job.error && !needsExitRestart && <button className="primary" disabled={Boolean(connectionError)} onClick={install}>{status.ready ? "重新启动并检查" : "继续安装"}</button>}{busy && <button onClick={stop} disabled={submitting}>停止安装</button>}</div>}
+            {pending?.system === "macos" && macRecovery?.available && <section className="initialization-notice" aria-label="恢复 macOS 组件安装">
+			  <h2>继续安装 macFUSE</h2>
+			  <p>客机磁盘和安装进度已保留。启动客机后打开恢复画面，在 Apple Installer 中完成管理员认证和系统配置文件访问授权。</p>
+              {!macRecovery.running && <button disabled={busy} onClick={() => run(() => api("/macos/install-recovery", { action: "start" }))}>启动恢复客机</button>}
+              {macRecovery.running && <MacOSLogin initialSetup installRecovery label="打开恢复画面" setupHint="在 Apple Installer 中完成认证和系统配置文件访问授权。" setupStatus="安装完成后返回 Cage 继续置备。" setupActions={<button disabled={busy} onClick={() => run(() => api("/macos/install-recovery", { action: "resume" }))}>打开 Apple Installer</button>} />}
+			</section>}
+			{pending?.system === "macos" && macRecovery && !macRecovery.available && macRecovery.can_prepare && <section className="initialization-notice" aria-label="macOS 安装恢复">
+			  <p>检测到未完成的 macOS 安装；后续恢复将沿用原客机磁盘。</p>
+			  <button disabled={busy} onClick={() => run(async () => { await api("/macos/install-recovery", { action: "prepare" }); pollNow.current?.(); })}>准备恢复入口</button>
+			</section>}
             {job.error && !progress && !(status.guest_system === "macos" && networkPending) && <div className="initialization-notice" role="alert"><SafetyMessage message={job.error} />{!networkPending && !needsExitRestart && <button className="primary" disabled={busy || Boolean(connectionError)} onClick={install}>继续安装</button>}</div>}
             {status.guest_system === "macos" && status.vm_running && !status.ready && !busy && <section className="initialization-notice"><h2>连接虚拟 Mac</h2><p>{status.environment_update_error || "客机已经启动，尚未建立工作台连接。请先检查客机是否停在登录画面。"}</p><MacOSLogin onSessionClosed={() => pollNow.current?.()} /><button disabled={Boolean(connectionError)} onClick={install}>重新连接并检查</button></section>}
             {status.ready && network.mode !== "open" && !busy && !needsExitRestart && <>

@@ -65,6 +65,9 @@ func TestMacFirstSetupCanOnlySealItsNewGuest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "vz-identifier"), []byte("new-mac"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "disk"), []byte("published"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +83,14 @@ func TestMacFirstSetupCanOnlySealItsNewGuest(t *testing.T) {
 	}
 	if err = SaveInstallation(profile, Installation{Version: 1, System: MacOS, ID: id}); err != nil {
 		t.Fatal(err)
+	}
+	if err = CreateMacOSInstallRecovery(profile, "cageuser", id); err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []string{MacOSInstallComponentsVerified, MacOSInstallAccountVerified, MacOSInstallServicesPrepared} {
+		if err = SetMacOSInstallRecoveryPhase(profile, id, phase, nil); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err = BindNewMacOSProfile(profile, "cageuser", hostKey, id); err != nil {
 		t.Fatal(err)

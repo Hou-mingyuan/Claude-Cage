@@ -4,7 +4,12 @@
 set -euo pipefail
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 fail() { printf '%s\n' "$*" >&2; exit 1; }
-[[ $# == 1 && $1 == /* ]] || fail 'Usage: install-macos-project-tools.sh /path/to/root-owned-guest-project-kit'
+[[ $# == 1 || $# == 2 ]] || fail 'Usage: install-macos-project-tools.sh /path/to/root-owned-guest-project-kit [--gui-authorize]'
+kit_arg=$1
+gui_authorize=no
+[[ ${2:-} == "" || ${2:-} == --gui-authorize ]] || fail 'Unknown installer mode.'
+[[ ${2:-} == --gui-authorize ]] && gui_authorize=yes
+[[ $kit_arg == /* ]] || fail 'Usage: install-macos-project-tools.sh /path/to/root-owned-guest-project-kit'
 [[ $(uname -sm) == 'Darwin arm64' && $(sysctl -n hw.model) =~ ^VirtualMac[0-9]+,[0-9]+$ && $(id -u) == 0 ]] ||
     fail 'Run this installer in the target arm64 Cage guest as administrator.'
 marker=/var/db/cage-guest-os
@@ -51,15 +56,53 @@ if [[ -e $driver ]]; then
     codesign --verify --strict -R "=$macfuse_requirement" "$vendor_app"
     installed=$(plutil -extract CFBundleShortVersionString raw -o - "$driver/Contents/Info.plist")
 fi
+normalize_version() {
+    local version=$1 major minor patch
+    [[ $version =~ ^([0-9]+)\.([0-9]+)(\.([0-9]+))?$ ]] || return 1
+    major=$((10#${BASH_REMATCH[1]}))
+    minor=$((10#${BASH_REMATCH[2]}))
+    patch=${BASH_REMATCH[4]:-0}
+    patch=$((10#$patch))
+    printf '%d.%d.%d' "$major" "$minor" "$patch"
+}
+is_supported_version() {
+    local normalized major minor patch
+    normalized=$(normalize_version "$1") || return 1
+    IFS=. read -r major minor patch <<<"$normalized"
+    (( major > 5 || (major == 5 && minor >= 5) ))
+}
 up_to_date=no
 if [[ -n $installed ]]; then
-    [[ $installed =~ ^([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]] || fail 'Unrecognized installed macFUSE version.'
-    if (( 10#${BASH_REMATCH[1]} > 5 || (10#${BASH_REMATCH[1]} == 5 && 10#${BASH_REMATCH[2]} >= 5) )); then up_to_date=yes; fi
+    is_supported_version "$installed" || fail 'The installed macFUSE version is too old or unrecognized.'
+    up_to_date=yes
 fi
 if [[ $up_to_date == no ]]; then
-    installer -pkg "$pkg" -target /
+    if [[ $gui_authorize == yes ]]; then
+        gui_uid=$(stat -f '%u' /dev/console)
+        (( gui_uid >= 500 )) || fail 'Log in to the intended guest account before authorizing macFUSE.'
+        launchctl print "gui/$gui_uid" >/dev/null 2>&1 || fail 'The intended guest GUI session is unavailable.'
+        [[ $(stat -f '%Su' /dev/console) == "${CAGE_MACOS_GUI_USER:-}" ]] ||
+            fail 'The guest GUI account does not match the pending installation.'
+        chmod 755 "$work"
+        chmod 644 "$pkg"
+        launchctl asuser "$gui_uid" sudo -n -H -u "#$gui_uid" -- /usr/bin/open -W -a /System/Library/CoreServices/Installer.app "$pkg" ||
+            fail 'Apple Installer was cancelled or failed. Installation can be retried.'
+    else
+        installer -pkg "$pkg" -target /
+    fi
 fi
-codesign --verify --strict -R "=$macfuse_requirement" "$vendor_app"
+if ! codesign --verify --strict -R "=$macfuse_requirement" "$vendor_app"; then
+    fail 'Apple Installer did not complete the verified macFUSE installation. Installation can be retried.'
+fi
+installed=$(plutil -extract CFBundleShortVersionString raw -o - "$driver/Contents/Info.plist") ||
+    fail 'Apple Installer did not complete the verified macFUSE installation. Installation can be retried.'
+is_supported_version "$installed" || fail 'The installed macFUSE version is too old or unrecognized.'
+receipt=$(pkgutil --pkg-info-plist io.macfuse.installer.components.core | plutil -extract pkg-version raw -o - -) ||
+    fail 'The macFUSE installation receipt is missing. Installation can be retried.'
+normalized_installed=$(normalize_version "$installed") || fail 'Unrecognized installed macFUSE version.'
+normalized_receipt=$(normalize_version "$receipt") || fail 'Unrecognized macFUSE installation receipt version.'
+[[ $normalized_receipt == "$normalized_installed" ]] ||
+    fail 'The macFUSE installation receipt has the wrong version. Installation can be retried.'
 
 install_app() {
     local source=$1 target=$2 requirement=$3 stage

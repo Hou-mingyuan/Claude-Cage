@@ -187,7 +187,24 @@ func (s *Server) installedWindowsVMOwner(install guestos.Installation) (string, 
 	return "windows/" + binding.VMID.String() + "/Running", nil
 }
 
+func (s *Server) resumePendingMacOSInstall(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	if !s.hasTrustedView(r) || s.macosGuest != nil || s.windowsGuest != nil || !s.localVMStorage() {
+		http.Error(w, "请在本机 Cage 窗口恢复原 macOS 安装", http.StatusForbidden)
+		return
+	}
+	recovery, err := guestos.LoadMacOSInstallRecovery(s.profile)
+	if err != nil || recovery == nil || recovery.InstallationID != id {
+		http.Error(w, "请先准备与原客机身份匹配的恢复入口", http.StatusConflict)
+		return
+	}
+	s.beginGuestInstallMode(w, r, guestInstallRequest{System: guestos.MacOS}, true, recovery.User)
+}
+
 func (s *Server) beginGuestInstall(w http.ResponseWriter, r *http.Request, in guestInstallRequest) {
+	s.beginGuestInstallMode(w, r, in, false, "")
+}
+
+func (s *Server) beginGuestInstallMode(w http.ResponseWriter, r *http.Request, in guestInstallRequest, guiAuthorize bool, recoveryUser string) {
 	if in.System == guestos.MacOS && !s.account.view().MacOSCredentialsReady {
 		http.Error(w, "请先注册或确认 Cage 账密，再安装 macOS 客机", http.StatusConflict)
 		return
@@ -325,6 +342,13 @@ func (s *Server) beginGuestInstall(w http.ResponseWriter, r *http.Request, in gu
 			if err != nil {
 				return err
 			}
+			if guiAuthorize {
+				recovery, err := guestos.LoadMacOSInstallRecovery(s.profile)
+				if err != nil || recovery == nil || recovery.InstallationID != install.ID ||
+					recovery.User != credential.Username || recovery.User != recoveryUser {
+					return errors.New("客机凭据与原安装恢复记录不匹配")
+				}
+			}
 		}
 		if err := s.prepareEnvironment(); err != nil {
 			return err
@@ -344,6 +368,9 @@ func (s *Server) beginGuestInstall(w http.ResponseWriter, r *http.Request, in gu
 		if install.System == guestos.MacOS {
 			cmd = exec.CommandContext(s.operationContext(), s.exe, "guest-os", "macos", "install")
 			cmd.Env = append(os.Environ(), cage.ConfigEnv+"="+s.configPath, "CAGE_MACOS_ACCOUNT="+credential.Username)
+			if guiAuthorize {
+				cmd.Env = append(cmd.Env, "CAGE_MACOS_GUI_AUTHORIZE=1")
+			}
 			cmd.Stdin = strings.NewReader(credential.Password)
 		} else {
 			cmd, err = guestos.WindowsInstallCommand(s.operationContext(), s.profile, filepath.Join(filepath.Dir(s.exe), "guest-os"), install)

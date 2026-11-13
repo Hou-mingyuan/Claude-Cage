@@ -79,8 +79,8 @@ function closeSession(session, endpoint, maintenance) {
   if (session) api(endpoint, { action: "close", session, ...(maintenance ? { maintenance } : {}) }).catch(() => {});
 }
 
-export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", label, setupActions, setupHint, setupStatus, setupError, autoOpen = false, managedCredential = false, onSessionClosed, onSettings }) {
-  const endpoint = initialSetup ? "/macos/first-setup" : maintenance ? "/macos/maintenance" : "/macos/login";
+export function MacOSLogin({ disabled, initialSetup = false, installRecovery = false, maintenance = "", label, setupActions, setupHint, setupStatus, setupError, autoOpen = false, managedCredential = false, onSessionClosed, onSettings }) {
+  const endpoint = installRecovery ? "/macos/install-recovery" : initialSetup ? "/macos/first-setup" : maintenance ? "/macos/maintenance" : "/macos/login";
   const scope = maintenance ? { maintenance } : {};
   const [opened, setOpened] = useState(false);
   const [session, setSession] = useState("");

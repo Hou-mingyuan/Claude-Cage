@@ -55,7 +55,6 @@ if dscl . -read /Groups/com.apple.access_ssh >/dev/null 2>&1; then
     /usr/sbin/dseditgroup -o edit -a $ordinary -t user com.apple.access_ssh
 fi
 cd "$kit"
-bash install-macos-project-tools.sh "$kit/project"
 bash install-macos-node.sh "$kit/node.tgz"
 bash install-macos-browser.sh "$kit"
 bash cli/install-macos-cli.sh "$kit/cli"
@@ -79,3 +78,10 @@ cd /
 sudo -Hu $ordinary /usr/local/libexec/cage-register-claude-window --prepare
 sudo -Hu $ordinary /usr/local/libexec/cage-register-clipboard --prepare
 sudo -Hu $ordinary /usr/local/libexec/cage-register-browser --prepare
+cd "$kit"
+project_args=("$kit/project")
+if [[ ${CAGE_MACOS_GUI_AUTHORIZE:-0} == 1 ]]; then
+    project_args+=(--gui-authorize)
+    export CAGE_MACOS_GUI_USER=$ordinary
+fi
+bash install-macos-project-tools.sh "${project_args[@]}"
