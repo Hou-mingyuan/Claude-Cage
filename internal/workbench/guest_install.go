@@ -188,13 +188,13 @@ func (s *Server) installedWindowsVMOwner(install guestos.Installation) (string, 
 }
 
 func (s *Server) resumePendingMacOSInstall(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	if !s.hasTrustedView(r) || s.macosGuest != nil || s.windowsGuest != nil || !s.localVMStorage() {
-		http.Error(w, "请在本机 Cage 窗口恢复原 macOS 安装", http.StatusForbidden)
-		return
-	}
 	recovery, err := guestos.LoadMacOSInstallRecovery(s.profile)
 	if err != nil || recovery == nil || recovery.InstallationID != id {
 		http.Error(w, "请先准备与原客机身份匹配的恢复入口", http.StatusConflict)
+		return
+	}
+	if !s.hasTrustedView(r) || s.macosGuest != nil || s.windowsGuest != nil || !s.localVMStorage() {
+		http.Error(w, "请在本机 Cage 窗口恢复原 macOS 安装", http.StatusForbidden)
 		return
 	}
 	s.beginGuestInstallMode(w, r, guestInstallRequest{System: guestos.MacOS}, true, recovery.User)
