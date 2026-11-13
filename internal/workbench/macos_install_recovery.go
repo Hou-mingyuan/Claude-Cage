@@ -40,6 +40,12 @@ func macOSInstallRecoveryRoute(method, path string) bool {
 			return true
 		}
 	}
+	// Re-selection of the guest system is the one destructive call the recovery
+	// mode needs: an unstarted installation has no disk to protect yet, and the
+	// DELETE handler still refuses once any partial VM exists.
+	if method == http.MethodDelete {
+		return path == "/api/environment/guest-systems"
+	}
 	return false
 }
 

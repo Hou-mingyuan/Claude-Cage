@@ -152,3 +152,74 @@ func TestGuestInstallFailureMessagePointsToDetailsAndDiagnostics(t *testing.T) {
 		t.Fatalf("install failure told every case to use the recovery screen: %s", other)
 	}
 }
+
+func trustedRecoveryAPIRequest(s *Server, method, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, s.origin+path, strings.NewReader(body))
+	req.Header.Set("Origin", s.origin)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: s.cookieName(), Value: s.session})
+	req.AddCookie(&http.Cookie{Name: s.cookieName() + "-desktop", Value: trustedViewProof(s.token)})
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, req)
+	return w
+}
+
+// The recovery mode must let an unstarted installation be re-selected from the
+// recovery page, while every other destructive guest-system call stays gated.
+func TestMacOSInstallRecoveryRouteAllowsOnlyUnstartedReselect(t *testing.T) {
+	if !macOSInstallRecoveryRoute(http.MethodDelete, "/api/environment/guest-systems") {
+		t.Fatal("recovery mode must allow re-selecting an unstarted guest system")
+	}
+	for _, give := range []struct{ method, path string }{
+		{http.MethodDelete, "/api/environment/guest-systems/activate"},
+		{http.MethodDelete, "/api/account"},
+		{http.MethodPut, "/api/environment/guest-systems"},
+		{http.MethodPost, "/api/environment"},
+	} {
+		if macOSInstallRecoveryRoute(give.method, give.path) {
+			t.Fatalf("recovery mode must refuse %s %s", give.method, give.path)
+		}
+	}
+}
+
+// Re-selection from the recovery page only works while no partial VM exists:
+// once the installation has started, the same call must be refused and keep
+// the pending record and disk for the recovery flow.
+func TestRecoveryReselectRefusesStartedInstallations(t *testing.T) {
+	s := testServer(t)
+	started := uuid.New()
+	if err := guestos.SaveInstallation(s.profile, guestos.Installation{Version: 1, System: guestos.MacOS, ID: started}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(s.profile, "state", "lima", "mac"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"id":"` + started.String() + `"}`
+	refused := trustedRecoveryAPIRequest(s, http.MethodDelete, "/api/environment/guest-systems", body)
+	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "请继续原安装") {
+		t.Fatalf("started installation reselect refusal: %d %s", refused.Code, refused.Body.String())
+	}
+	pending, err := guestos.LoadInstallation(s.profile)
+	if err != nil || pending == nil || pending.ID != started {
+		t.Fatalf("started installation must keep its pending record: %v %v", pending, err)
+	}
+}
+
+// An installation that never started has no disk to protect: the recovery page
+// can clear the choice, and the pending record disappears with it.
+func TestRecoveryReselectClearsUnstartedInstallations(t *testing.T) {
+	s := testServer(t)
+	unstarted := uuid.New()
+	if err := guestos.SaveInstallation(s.profile, guestos.Installation{Version: 1, System: guestos.MacOS, ID: unstarted}); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"id":"` + unstarted.String() + `"}`
+	cleared := trustedRecoveryAPIRequest(s, http.MethodDelete, "/api/environment/guest-systems", body)
+	if cleared.Code != http.StatusOK || !strings.Contains(cleared.Body.String(), `"cleared":true`) {
+		t.Fatalf("unstarted installation reselect: %d %s", cleared.Code, cleared.Body.String())
+	}
+	pending, err := guestos.LoadInstallation(s.profile)
+	if err != nil || pending != nil {
+		t.Fatalf("unstarted installation must be cleared: %v %v", pending, err)
+	}
+}
