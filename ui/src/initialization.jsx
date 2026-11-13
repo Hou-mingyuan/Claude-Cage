@@ -270,7 +270,7 @@ function Initialization({ initial, onComplete }) {
             {progress ? <SetupProgress job={progress} onDetails={() => setDetails(true)} onStop={stop} onRetry={needsExitRestart ? restart : install} disconnected={Boolean(connectionError) || submitting} /> : (busy || status.guest_system !== "macos" || !networkPending) && <div className="initialization-operation" role="status">{busy && <LoaderCircle size={22} className="spin" />}<p>{job.message || (status.vm_running ? "请完成客机连接和网络检查。" : "准备继续原安装，已有文件和磁盘会保留。")}</p>{!busy && !job.error && !needsExitRestart && <button className="primary" disabled={Boolean(connectionError)} onClick={install}>{status.ready ? "重新启动并检查" : "继续安装"}</button>}{busy && <button onClick={stop} disabled={submitting}>停止安装</button>}</div>}
             {pending?.system === "macos" && macRecovery?.available && <section className="initialization-notice" aria-label="恢复 macOS 组件安装">
               <h2>继续安装 macFUSE</h2>
-              <p>客机磁盘和安装进度已保留。请按以下顺序操作：</p>
+              <p>macOS 27 需要你在客机中完成一次管理员授权，这是正常流程。客机磁盘和安装进度已保留。请按以下顺序操作：</p>
               <ol>
                 <li>启动恢复客机。</li>
                 <li>打开恢复画面，先登录安装时创建的客机普通账户。</li>
@@ -283,11 +283,11 @@ function Initialization({ initial, onComplete }) {
               {macRecovery.running && <MacOSLogin initialSetup installRecovery label="打开恢复画面" setupHint="先登录安装时创建的客机普通账户，再点击「打开 Apple Installer」。管理员认证用户名填 cagesetup，密码与 Cage 账户相同；系统提示时选择允许。" setupStatus="安装完成后返回 Cage 继续置备。" setupActions={<button disabled={busy} onClick={() => run(() => api("/macos/install-recovery", { action: "resume" }))}>打开 Apple Installer</button>} onSettings={() => setHelp(true)} />}
             </section>}
             {pending?.system === "macos" && macRecovery && !macRecovery.available && macRecovery.can_prepare && <section className="initialization-notice" aria-label="macOS 安装恢复">
-              <p>检测到未完成的 macOS 安装；后续恢复将沿用原客机磁盘。准备完成后，这里会出现继续安装的指引。</p>
+              <p>检测到未完成的 macOS 安装；macOS 27 需要你在客机中完成一次管理员授权，这是正常流程。后续恢复将沿用原客机磁盘。准备完成后，这里会出现继续安装的指引。</p>
               <button disabled={busy} onClick={() => run(async () => { await api("/macos/install-recovery", { action: "prepare" }); pollNow.current?.(); })}>准备恢复入口</button>
             </section>}
             {pending?.system === "macos" && macRecovery && !macRecovery.available && !macRecovery.can_prepare && <section className="initialization-notice" aria-label="macOS 恢复入口不可用">
-              <p>检测到未完成的 macOS 安装；恢复入口尚未就绪，可能仍在准备中。可查看操作详情了解进度，或继续原安装；现有数据会保留。</p>
+              <p>检测到未完成的 macOS 安装；macOS 27 需要你在客机中完成一次管理员授权，这是正常流程。恢复入口尚未就绪，可能仍在准备中。可查看操作详情了解进度，或继续原安装；现有数据会保留。</p>
               <button disabled={busy} onClick={() => setDetails(true)}>查看操作详情</button>
               <button className="primary" disabled={busy || Boolean(connectionError)} onClick={install}>继续原安装</button>
             </section>}

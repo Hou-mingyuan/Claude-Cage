@@ -3,7 +3,7 @@ title: 故障排查
 description: 从你看到的现象开始，检查原因、恢复使用，再收集足够的诊断信息。
 group: 设置与维护
 order: 11
-keywords: 错误 失败 白屏 断网 137 OOM 代理 账号 配对 SSH 损坏 超时 下载 日志
+keywords: 错误 失败 白屏 断网 137 OOM 代理 账号 配对 SSH 损坏 超时 下载 日志 macFUSE
 ---
 先核对当前主机、Cage 版本和报错原文。操作结果不确定时先读取最新状态，再决定重试。不要用清空个人目录、删除虚拟磁盘或重建账户作为常规排障手段。
 
@@ -20,6 +20,7 @@ keywords: 错误 失败 白屏 断网 137 OOM 代理 账号 配对 SSH 损坏 �
 | Windows 未知发布者 | 确认是否为明确标注的未签名预览，阅读对应发行说明；不能把它当作已签名发行。 |
 | Windows 启动虚拟机失败 | 检查 BIOS/UEFI 虚拟化和“Windows 虚拟机监控程序平台”，启用后重启。保留 WHPX 错误原文供定位。 |
 | Linux 无法启动 | 确认 x86_64、支持发行版与 KVM 权限，使用 APT 补齐安装依赖。 |
+| macOS 27 客机安装 macFUSE 报 `PKInstallErrorDomain Code=120` 或 `shove deny /Library/Filesystems/macfuse.fs` | 属预期现象：macOS 27 不允许后台安装写入系统配置文件，需在恢复画面完成授权。在初始化页面启动恢复客机，用 Cage 账户登录客机普通账户，点击「打开 Apple Installer」继续；管理员认证填 `cagesetup` 和 Cage 账户密码，系统提示时选择允许。取消或失败不会丢失安装进度和磁盘，可重新进入恢复流程重试。 |
 | 缺少代理核心 | 重装对应平台完整应用，不要只复制单个命令行文件。 |
 
 ## 准备环境卡住或反复下载
