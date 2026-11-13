@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 // The installer only runs as root inside a Cage macOS guest, so the tests
@@ -153,3 +154,107 @@ test('an existing installation cannot be touched without the GUI installer mode'
     assert.match(result.stdout, /--gui-authorize/);
   }
 });
+
+// Component replacement must never delete the only usable bundle. The swap
+// helpers are sourced from both guest scripts and exercised through real mv
+// calls (overridden to fail or die at chosen points) in a scratch directory.
+const provisionPath = resolve('scripts/guest-os/provision-macos-workbench.sh');
+const provisionSource = readFileSync(provisionPath, 'utf8');
+
+function extractSwapDir(source, marker) {
+  const start = source.indexOf('swap_dir() {');
+  assert.ok(start > 0, `swap_dir not found in ${marker}`);
+  const end = source.indexOf('\n}', start);
+  assert.ok(end > start, `swap_dir end not found in ${marker}`);
+  return source.slice(start, end + 2);
+}
+
+const swapHelpers = [
+  ['install-macos-project-tools.sh', extractSwapDir(source, 'installer'), '.cage-project-old'],
+  ['provision-macos-workbench.sh', extractSwapDir(provisionSource, 'provisioner'), '.cage-workbench-old'],
+];
+
+function runSwapDir(helpers, snippet) {
+  const dir = mkdtempSync(join(tmpdir(), 'cage-swap-'));
+  const script = ['set -euo pipefail', helpers, snippet].join('\n');
+  const result = spawnSync('/bin/bash', ['-c', script], { cwd: dir, encoding: 'utf8' });
+  return { result, dir };
+}
+
+for (const [name, helpers, oldPrefix] of swapHelpers) {
+  test(`${name}: a verified replacement lands and its move-aside copy is removed`, () => {
+    const { result, dir } = runSwapDir(helpers, `
+      mkdir app staged
+      echo previous > app/file
+      echo replacement > staged/file
+      swap_dir "$PWD/staged" "$PWD/app"
+      cat app/file`);
+    try {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), 'replacement');
+      assert.equal(readdirSync(dir).filter((n) => n.startsWith(oldPrefix)).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test(`${name}: a replacement that cannot land rolls the installed copy back`, () => {
+    const { result, dir } = runSwapDir(helpers, `
+      mkdir app staged
+      echo previous > app/file
+      echo replacement > staged/file
+      calls=0
+      mv() {
+        calls=$((calls + 1))
+        if (( calls == 2 )); then return 1; fi
+        command mv "$@"
+      }
+      if swap_dir "$PWD/staged" "$PWD/app"; then exit 9; fi
+      cat app/file`);
+    try {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), 'previous');
+      assert.equal(readdirSync(dir).filter((n) => n.startsWith(oldPrefix)).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test(`${name}: a move-aside that cannot start leaves the installed copy alone`, () => {
+    const { result, dir } = runSwapDir(helpers, `
+      mkdir app staged
+      echo previous > app/file
+      echo replacement > staged/file
+      mv() { return 1; }
+      if swap_dir "$PWD/staged" "$PWD/app"; then exit 9; fi
+      cat app/file`);
+    try {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), 'previous');
+      assert.equal(readdirSync(dir).filter((n) => n.startsWith(oldPrefix)).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test(`${name}: an interrupted replacement keeps the previous copy on disk`, () => {
+    const { result, dir } = runSwapDir(helpers, `
+      mkdir app staged
+      echo previous > app/file
+      echo replacement > staged/file
+      mv() {
+        command mv "$@"
+        exit 77
+      }
+      swap_dir "$PWD/staged" "$PWD/app"`);
+    try {
+      assert.equal(result.status, 77, result.stderr);
+      assert.equal(existsSync(join(dir, 'app')), false, 'target must be vacated by the move-aside');
+      const kept = readdirSync(dir).filter((n) => n.startsWith(oldPrefix));
+      assert.equal(kept.length, 1, `expected one move-aside copy, got ${kept.join(', ')}`);
+      assert.equal(readFileSync(join(dir, kept[0], 'app', 'file'), 'utf8').trim(), 'previous');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}

@@ -164,19 +164,37 @@ normalized_receipt=$(normalize_version "$receipt") ||
 [[ $normalized_receipt == "$normalized_installed" ]] ||
     fail "The macFUSE installation receipt reports $normalized_receipt but macFUSE $normalized_installed is installed. Rerun the installation; if the mismatch persists, keep the installation and report diagnostics from: pkgutil --pkg-info-plist io.macfuse.installer.components.core and plutil -p $driver/Contents/Info.plist"
 
+# Move a verified staged bundle into place. The installed copy is moved aside
+# first and rolls back if the new bundle cannot land, so a failed replacement
+# never destroys the only usable bundle; an interruption between the two moves
+# leaves the previous copy in the move-aside directory.
+swap_dir() { # staged_dir target
+    local new=$1 target=$2 old
+    old=$(mktemp -d "$(dirname "$target")/.cage-project-old.XXXXXXXX")
+    if mv "$target" "$old/app"; then
+        if mv "$new" "$target"; then
+            rm -rf "$old"
+            return 0
+        fi
+        if mv "$old/app" "$target" 2>/dev/null; then rm -rf "$old"; fi
+        return 1
+    fi
+    rm -rf "$old"
+    return 1
+}
+
 install_app() {
     local source=$1 target=$2 requirement=$3 stage
     if [[ -e $target || -L $target ]]; then
         [[ ! -L $target && -d $target ]] || fail "Unexpected application at $target"
         codesign --verify --strict -R "=$requirement" "$target"
         # A resumed pending installation may carry a differently signed build
-        # of the same verified identifier. Replace it atomically with this
-        # kit's verified copy so the published component manifest matches.
+        # of the same verified identifier. Replace it with this kit's verified
+        # copy so the published component manifest matches.
         stage=$(mktemp -d /Applications/.cage-project-install.XXXXXXXX)
         if ditto "$source" "$stage/app" && chmod -R a+rX,go-w "$stage/app" &&
-            codesign --verify --strict -R "=$requirement" "$stage/app"; then
-            rm -rf "$target"
-            mv "$stage/app" "$target"
+            codesign --verify --strict -R "=$requirement" "$stage/app" &&
+            swap_dir "$stage/app" "$target"; then
             rmdir "$stage"
             return
         fi
@@ -194,6 +212,9 @@ install_app() {
 }
 install_app "$vendor_app" /Applications/macFUSE.app "$macfuse_requirement"
 install_app "$work/CageProjectAccess.app" /Applications/CageProjectAccess.app "identifier \"$access_id\""
+# Staging and move-aside directories left by an interrupted earlier run are
+# removed only now that both applications are verified in place.
+rm -rf /Applications/.cage-project-install.* /Applications/.cage-project-old.*
 libexec=/usr/local/libexec
 mkdir -p "$libexec"
 for file in cage-sshfs cage-macos-terminal; do

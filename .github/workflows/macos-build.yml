@@ -55,7 +55,7 @@ jobs:
       - name: Application version consistency
         run: |
           node scripts/check-version.mjs
-          node --test scripts/macos-sshfs-sources.test.mjs
+          node --test scripts/macos-sshfs-sources.test.mjs scripts/guest-os/tests/install-macos-project-tools.test.mjs
       - name: Install SSHFS build dependencies
         run: |
           brew install glib gettext pcre2
