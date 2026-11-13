@@ -116,9 +116,12 @@ func startUsernet(ctx context.Context, inst *limatype.Instance, s *usernetSocket
 		Endpoint: s.endpoint,
 		Async:    true,
 		DefaultLeases: map[string]string{
-			networks.SlirpIPAddress: limayaml.MACAddress(inst.Dir),
+			networks.SlirpIPAddress: limayaml.GuestMACAddress(inst.Config, inst.Dir),
 		},
 		Subnet: networks.SlirpNetwork,
+	}
+	if inst.Config.GuestIdentity != nil {
+		opts.GatewayMACAddress = inst.Config.GuestIdentity.GatewayMACAddress
 	}
 	if viaDgram {
 		opts.DgramConn = s.dgramConn

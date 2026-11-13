@@ -5,6 +5,7 @@ package instance
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,11 +16,13 @@ import (
 
 	continuityfs "github.com/containerd/continuity/fs"
 
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
 	"github.com/lima-vm/lima/v2/pkg/limatype"
 	"github.com/lima-vm/lima/v2/pkg/limatype/dirnames"
 	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
 	"github.com/lima-vm/lima/v2/pkg/osutil"
 	"github.com/lima-vm/lima/v2/pkg/store"
+	"github.com/lima-vm/lima/v2/pkg/yqutil"
 )
 
 func CloneOrRename(ctx context.Context, oldInst *limatype.Instance, newInstName string, rename bool) (*limatype.Instance, error) {
@@ -53,6 +56,25 @@ func CloneOrRename(ctx context.Context, oldInst *limatype.Instance, newInstName 
 			newInstName, maxSockName, osutil.UnixPathMax, len(maxSockName))
 	}
 
+	var clonedConfig []byte
+	if !rename {
+		identity, err := guestidentity.New()
+		if err != nil {
+			return nil, err
+		}
+		data, err := json.Marshal(identity)
+		if err != nil {
+			return nil, err
+		}
+		original, err := os.ReadFile(filepath.Join(oldInst.Dir, filenames.LimaYAML))
+		if err != nil {
+			return nil, err
+		}
+		clonedConfig, err = yqutil.EvaluateExpression(ctx, ".guestIdentity = "+string(data), original)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err = os.Mkdir(newInstDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -78,6 +100,9 @@ func CloneOrRename(ctx context.Context, oldInst *limatype.Instance, newInstName 
 		if d.IsDir() {
 			return os.MkdirAll(dst, d.Type().Perm())
 		}
+		if !rename && pathRel == filenames.LimaYAML {
+			return os.WriteFile(dst, clonedConfig, 0600)
+		}
 		// NullifyOnClone contains VzIdentifier.
 		// VzIdentifier file must not be just removed here, as pkg/limayaml depends on
 		// the existence of VzIdentifier for resolving the VM type.
@@ -94,6 +119,7 @@ func CloneOrRename(ctx context.Context, oldInst *limatype.Instance, newInstName 
 	if err = filepath.WalkDir(oldInst.Dir, walkDirFn); err != nil {
 		return nil, err
 	}
+
 	if rename {
 		if err = os.RemoveAll(oldInst.Dir); err != nil {
 			return nil, err

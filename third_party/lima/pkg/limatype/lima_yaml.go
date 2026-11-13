@@ -7,6 +7,8 @@ import (
 	"net"
 	"runtime"
 
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
+
 	"github.com/lima-vm/go-qcow2reader/image"
 	"github.com/opencontainers/go-digest"
 	"github.com/sirupsen/logrus"
@@ -60,6 +62,9 @@ type LimaYAML struct {
 	User                 User    `yaml:"user,omitempty" json:"user,omitempty"`
 	TPM                  *bool   `yaml:"tpm,omitempty" json:"tpm,omitempty" jsonschema:"nullable"`
 	OsOpts               OsOpts  `yaml:"osOpts,omitempty" json:"osOpts,omitempty"`
+
+	// GuestIdentity is optional; absent identities retain upstream defaults.
+	GuestIdentity *guestidentity.Identity `yaml:"guestIdentity,omitempty" json:"guestIdentity,omitempty"`
 }
 
 type BaseTemplates []LocatorWithDigest

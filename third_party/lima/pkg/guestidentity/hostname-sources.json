@@ -1,0 +1,40 @@
+{
+  "snapshot_date": "2026-11-13",
+  "catalog_sha256": "8f7257d7aa1f3a1865c4de69995387ca880434c64de1e869f65163d27d00053f",
+  "models": 1593,
+  "unique_prefixes": 1181,
+  "by_vendor": {
+    "ASRock": 37,
+    "Dell": 499,
+    "HP": 551,
+    "Lenovo": 506
+  },
+  "by_kind": {
+    "desktop": 410,
+    "laptop": 960,
+    "motherboard": 37,
+    "workstation": 186
+  },
+  "sources": [
+    {
+      "vendor": "Lenovo",
+      "url": "https://download.lenovo.com/cdrt/td/catalogv2.xml",
+      "xml_sha256": "38ab0f58de5950d85b29b5f50ca1dbc451b3ab819d6d1ccd26586ace185c2fb2"
+    },
+    {
+      "vendor": "Dell",
+      "url": "https://downloads.dell.com/catalog/DriverPackCatalog.cab",
+      "xml_sha256": "58f5a5b5e4af803c977125c9453be6f20f5566cfb86a2e1f42a72d8d90c703ca"
+    },
+    {
+      "vendor": "HP",
+      "url": "https://hpia.hpcloud.hp.com/downloads/driverpackcatalog/HPClientDriverPackCatalog.cab",
+      "xml_sha256": "0e5aba2a1f55457566879106c36233dc075d7d8af954d32829cbdc93a819d2d8"
+    },
+    {
+      "vendor": "ASRock",
+      "url": "https://www.asrock.com/mb/index.asp",
+      "input_sha256": "c89132c3634ebfe923183e93e3581fb075330f368a94928b1ed3aefda7335b3e"
+    }
+  ]
+}

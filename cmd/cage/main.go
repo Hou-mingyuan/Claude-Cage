@@ -250,12 +250,12 @@ func run() int {
 		return 0
 	}
 	if args[0] == "container-tap" {
-		if len(args) != 1 {
+		if len(args) > 2 {
 			return 2
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
-		if err := containerenv.RunTAP(ctx, os.Stdin, os.Stdout); err != nil {
+		if err := containerenv.RunTAP(ctx, os.Stdin, os.Stdout, args[1:]...); err != nil {
 			return fail(err)
 		}
 		return 0

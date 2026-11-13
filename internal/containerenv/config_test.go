@@ -1,6 +1,7 @@
 package containerenv
 
 import (
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,12 +93,16 @@ func TestCreateResolvesHostnameWithinContainerLoopback(t *testing.T) {
 		config := fixtureConfig()
 		config.Engine = engine
 		runtime := newRuntime(t.TempDir(), config)
-		args := runtime.createArguments()
+		identity, err := guestidentity.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := runtime.createArguments(identity)
 		found := false
 		for i, arg := range args {
 			if arg == "--add-host" && i+1 < len(args) {
-				if args[i+1] != "cage:127.0.1.1" {
-					t.Fatalf("%s resolves cage outside its loopback: %q", engine, args[i+1])
+				if args[i+1] != identity.Hostname+":127.0.1.1" {
+					t.Fatalf("%s resolves the guest hostname outside its loopback: %q", engine, args[i+1])
 				}
 				found = true
 			}

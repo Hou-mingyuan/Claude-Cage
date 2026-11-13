@@ -8,6 +8,6 @@ import (
 	"io"
 )
 
-func RunTAP(context.Context, io.Reader, io.Writer) error {
+func RunTAP(context.Context, io.Reader, io.Writer, ...string) error {
 	return errors.New("Cage 容器运行环境仅支持 Linux 服务器")
 }
