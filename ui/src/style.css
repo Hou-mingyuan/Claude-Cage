@@ -1515,6 +1515,21 @@ svg {
   padding: 0 0 0 8px;
   border-left: 1px solid var(--line);
 }
+.project-session-toggle {
+  width: calc(100% - 25px);
+  margin: 0 0 5px 25px;
+  padding: 8px 8px 8px 35px;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9286rem;
+  font-weight: 400;
+}
+.project-session-toggle:hover {
+  color: var(--strong);
+  background: var(--hover);
+}
 .project-children .sidebar-empty {
   padding-left: 36px;
 }

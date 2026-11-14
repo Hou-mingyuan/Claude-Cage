@@ -26,6 +26,8 @@ import { AccountMenu } from "./account";
 import { useSSHNavigation } from "./remote-hosts";
 import { GuestSystemIcon } from "./guest-system-icon";
 
+const SESSION_PREVIEW_LIMIT = 5;
+
 export function WorkspaceSidebar({
   workspace,
   guestSystem,
@@ -76,6 +78,7 @@ export function WorkspaceSidebar({
 }) {
   const ssh = useSSHNavigation();
   const [collapsed, setCollapsed] = useState({});
+  const [allSessionsShown, setAllSessionsShown] = useState({});
   const sessionBaseline = useRef(new Map());
   const activeWorkspace = tabs.find((tab) => tab.id === active)?.workspace;
   useEffect(() => {
@@ -166,6 +169,8 @@ export function WorkspaceSidebar({
           const rowMetadata = { ...saved };
           for (const row of rows) rowMetadata[row.id] = { ...saved[row.id], pinned: row.sessionPinned };
           const expanded = !collapsed[path];
+          const showAllSessions = Boolean(allSessionsShown[path]);
+          const visibleRows = showAllSessions ? rows : rows.slice(0, SESSION_PREVIEW_LIMIT);
           return (
             <section
               className="sidebar-project"
@@ -184,6 +189,7 @@ export function WorkspaceSidebar({
                       ...previous,
                       [path]: expanded,
                     }));
+                    setAllSessionsShown((previous) => ({ ...previous, [path]: false }));
                     onProjectSelect(path);
                   }}
                 >
@@ -225,7 +231,7 @@ export function WorkspaceSidebar({
                 <div>
                   {!!rows.length && (
                     <WorkspaceTabs
-                      tabs={rows}
+                      tabs={visibleRows}
                       saved={rowMetadata}
                       openingSession={openingSession}
                       sessionOpenError={sessionOpenError}
@@ -253,6 +259,18 @@ export function WorkspaceSidebar({
                       }}
                       splitDrag={splitDrag}
                     />
+                  )}
+                  {rows.length > SESSION_PREVIEW_LIMIT && (
+                    <button
+                      className="project-session-toggle"
+                      aria-expanded={showAllSessions}
+                      onClick={() => setAllSessionsShown((previous) => ({
+                        ...previous,
+                        [path]: !showAllSessions,
+                      }))}
+                    >
+                      {showAllSessions ? "收起显示" : "展开显示"}
+                    </button>
                   )}
                   {!rows.length && !running && (
                     <p className="sidebar-empty">启动后可新建终端</p>
