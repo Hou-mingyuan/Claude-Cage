@@ -9,7 +9,7 @@ keywords: 移动端 手机 Android iOS iPhone 扫码 二维码 配对码 审批 
 
 在 Android 或 iPhone 安装 Cage 手机客户端，再与电脑配对。Android 需要 8.0 及更新的 arm64 设备和现代 System WebView；iPhone 需要 iOS 17+ 与 Secure Enclave。手机与电脑应使用匹配版本。
 
-Android 用户在[官网下载入口](https://lee-xeo.github.io/Claude-Cage/#download)选择 Android，下载 APK 后按系统提示允许该下载来源安装应用。后续使用同一签名的新版 APK 覆盖安装，保留手机上的配对记录。
+Android 用户在[官网下载入口](https://claude-cage.com/#download)选择 Android，下载 APK 后按系统提示允许该下载来源安装应用。后续使用同一签名的新版 APK 覆盖安装，保留手机上的配对记录。
 
 iOS 用户在自己的 Mac 上构建并为设备签名，步骤见下文。
 

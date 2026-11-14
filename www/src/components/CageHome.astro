@@ -1,5 +1,6 @@
 ---
 import '@fontsource-variable/inter';
+import GoogleAnalytics from './GoogleAnalytics.astro';
 import '../styles/cage.css';
 import { cageCopy, languages, type CageLocale } from '../i18n/cage';
 import releaseData from '../data/release.json';
@@ -21,7 +22,7 @@ const guideLabels: Record<CageLocale, string> = {
   ps: 'لارښود · 中文', prs: 'راهنما · 中文', am: 'መመሪያ · 中文', so: 'Hagaha · 中文', ti: 'መምርሒ · 中文', fr: 'Documentation · 中文',
 };
 const guideLabel = guideLabels[locale];
-const docHref = (href: string) => href.replace('https://lee-xeo.github.io/Claude-Cage/docs/', `${base}docs/`);
+const docHref = (href: string) => href.replace('https://claude-cage.com/docs/', `${base}docs/`);
 const platforms = [
   { name: 'macOS', icon: 'apple', requirements: 'Apple Silicon · macOS 14+', format: '.dmg',
     url: published.downloadURL, version: published.version, notes: published.releaseURL, guideURL: `${repo}/blob/main/docs/getting-started.md` },
@@ -49,6 +50,7 @@ const canonical = new URL(pathFor(locale), Astro.site);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <GoogleAnalytics />
   <meta name="description" content={c.description} />
   <meta name="theme-color" content="#faf8f4" />
   <title>{c.title}</title>
@@ -93,7 +95,7 @@ const canonical = new URL(pathFor(locale), Astro.site);
 
     <section class="license wrap"><h2>{c.licenseTitle}</h2><p>{c.licenseText}</p></section>
   </main>
-  <footer class="wrap"><a class="brand" href={pathFor(locale)}><img src={`${base}cage-icon.png`} width="28" height="28" alt="" />Claude Cage</a><div><a href={`${base}docs/`}>{guideLabel}</a><a href={repo}>GitHub ↗</a><a href={`${repo}/blob/main/${locale === 'zh' ? 'README.md' : `README.${locale}.md`}`}>README ↗</a></div><small>{c.independent}</small></footer>
+  <footer class="wrap"><a class="brand" href={pathFor(locale)}><img src={`${base}cage-icon.png`} width="28" height="28" alt="" />Claude Cage</a><div><a href={`${base}docs/`}>{guideLabel}</a><a href={repo}>GitHub ↗</a><a href={`${repo}/blob/main/${locale === 'zh' ? 'README.md' : `README.${locale}.md`}`}>README ↗</a><a href={`${base}privacy/`}>{locale === 'zh' || locale === 'zh-TW' ? '统计与隐私' : 'Privacy'}</a></div><small>{c.independent}</small></footer>
   <dialog class="download-dialog" aria-labelledby="platform-title">
     <div class="dialog-heading"><h2 id="platform-title">{c.platformLabel}</h2><form method="dialog"><button class="dialog-close" aria-label={c.closeLabel}>×</button></form></div>
     <div class="platform-options">{platforms.map(platform => <article class="platform-option" data-platform={platform.name}>

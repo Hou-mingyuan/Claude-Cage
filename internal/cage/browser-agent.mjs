@@ -49,7 +49,10 @@ function rememberSelection() {
 }
 const downloadPath = "/home/cage-browser/Downloads";
 mkdirSync(downloadPath, { recursive: true });
-const splitDirectory = "/usr/local/lib/cage-split";
+const snapLauncher = "/usr/local/lib/workbench-browser/chromium";
+const snapBrowser = existsSync(snapLauncher);
+const browserBinary = snapBrowser ? snapLauncher : "/usr/bin/chromium";
+const splitDirectory = snapBrowser ? "/var/snap/chromium/common/workbench-extension" : "/usr/local/lib/cage-split";
 const extensionId = createHash("sha256").update(splitDirectory).digest("hex").slice(0, 32)
   .replace(/./g, c => String.fromCharCode(97 + parseInt(c, 16)));
 const splitURL = `chrome-extension://${extensionId}/control.html`;
@@ -89,7 +92,7 @@ const flags = [
 ];
 const freshProfile = !existsSync("/home/cage-browser/profile/Default/Sessions");
 if (freshProfile) flags.push("about:blank");
-const chrome = spawn("/usr/bin/chromium", flags, {
+const chrome = spawn(browserBinary, flags, {
   stdio: ["ignore", "ignore", "inherit", "pipe", "pipe"],
 });
 let sequence = 0,
@@ -189,7 +192,7 @@ const downloads = new DownloadManager({
     return JSON.parse(output);
   },
 });
-const uploadDirectory = "/home/cage-browser/.cage-uploads";
+const uploadDirectory = snapBrowser ? "/home/cage-browser/snap/chromium/common/uploads" : "/home/cage-browser/.cage-uploads";
 rmSync(uploadDirectory, { recursive: true, force: true });
 const uploadSessions = new Map();
 const uploads = new UploadManager({ directory: uploadDirectory, cdp, changed: () => broadcastState() });
@@ -843,7 +846,7 @@ const server = http.createServer(async (req, res) => {
     if (["/phone-browser/open", "/phone-browser/action", "/phone-browser/frame", "/phone-browser/close"].includes(req.url)) {
       // Load only for a phone operation, keeping desktop startup independent.
       const { PhoneBrowser } = await import("./browser-phone.mjs");
-      phoneBrowser ??= new PhoneBrowser();
+      phoneBrowser ??= new PhoneBrowser({ binary: browserBinary });
       try {
         res.end(JSON.stringify(await phoneBrowser.run(req.url.slice("/phone-browser/".length), input)));
       } catch (error) {

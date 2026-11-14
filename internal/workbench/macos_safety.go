@@ -223,6 +223,17 @@ func (s *Server) macOSBrowserObservation(ctx context.Context, cfg cage.Config, n
 	return observation, nil
 }
 
+// A full safety check samples the live Chrome page. Between checks, the
+// monitor verifies that the sampled process, active profile, and its language
+// and timezone settings still match without opening a tab in the user's window.
+func (s *Server) recheckMacOSBrowserSettings(ctx context.Context, cfg cage.Config) bool {
+	data, err := s.nativeBrowserClient().request(ctx, "POST", "/audit-recheck", map[string]string{"timezone": cfg.Timezone, "language": cfg.BrowserLanguage})
+	var result struct {
+		Unchanged bool `json:"unchanged"`
+	}
+	return err == nil && json.Unmarshal(data, &result) == nil && result.Unchanged
+}
+
 func macOSIPv6LinkVerified(v guestObservation, before, after cage.GateStatus) bool {
 	if !after.PolicyVerified || before.Mode != cage.GateChecking || after.Mode != cage.GateChecking || before.RunID == "" || after.RunID != before.RunID || before.CheckID == "" || after.CheckID != before.CheckID || after.IPv6LinkProbeCheck != before.CheckID {
 		return false

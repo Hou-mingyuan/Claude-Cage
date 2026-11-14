@@ -31,7 +31,7 @@ import { useCLISessions, sessionsChanged } from "./cli-sessions";
 import { TerminalMenu } from "./terminal-menu";
 import { InitializationGate } from "./initialization";
 import { MacOSLogin } from "./macos-login";
-import { MacOSClaudeWindow } from "./macos-claude-window";
+import { MacOSAppWindow } from "./macos-claude-window";
 import { ProjectRecovery } from "./project-recovery";
 import { ClaudeDesktop } from "./claude-desktop";
 import { ClaudeAccountsPanel, useClaudeAccounts } from "./claude-accounts";
@@ -64,8 +64,6 @@ import { stopAndExit } from "./quit";
 
 function App() {
   const { account } = useAccount();
-  const macGuest = account?.guest_system === "macos";
-  const nativeGuestLabel = {macos: "macOS", "windows-11": "Windows"}[account?.guest_system];
   const [, refreshClientPreferences] = useState(0);
   useEffect(() => {
     const refresh = () => refreshClientPreferences((value) => value + 1);
@@ -128,6 +126,9 @@ function App() {
   const status = clientStatus && startRequest
     ? { ...clientStatus, job: { running: true, kind: "start", message: "正在启动 Cage 环境…" } }
     : clientStatus;
+  const system = status?.guest_system || account?.guest_system;
+  const macGuest = system === "macos";
+  const nativeGuestLabel = {macos: "macOS", "windows-11": "Windows"}[system];
   const { active } = layout;
   const setActive = id => setLayout(previous => focusTab(previous, id));
   const workspaceBox = useRef(null);
@@ -166,7 +167,7 @@ function App() {
   const panes = !split ? [current].filter(Boolean)
     : layout.side === "left" ? [current, other] : [other, current];
   const webPanes = panes.filter(tab => tab.kind !== "terminal");
-  const passwordVault = usePasswordVault(Boolean(status?.ready), browser.active);
+  const passwordVault = usePasswordVault(Boolean(status?.ready && !macGuest), browser.active);
   const dualBrowser = split && webPanes.length === 2;
   const leftId = dualBrowser ? panes[0].id : "";
   const rightId = dualBrowser ? panes[1].id : "";
@@ -546,6 +547,7 @@ function App() {
     }
   };
   const closeTab = async (tab, anchor) => {
+    if (macGuest && tab.native_window) { closeBrowser(); return; }
     if (tab.cli_session_id) return archiveSession({id:tab.cli_session_id, title:tab.title}, anchor);
     if (tab.kind === "terminal") {
       if (
@@ -678,13 +680,15 @@ function App() {
           if (next.job.error) notify(next.job.error);
         }
         if (next.ready) {
-          const fetchBrowser = !browserStreamReady.current || !initialized.current;
+          // A guest waiting for a component update cannot serve browser tabs;
+          // the update banner replaces a request that fails on every poll.
+          const fetchBrowser = (!browserStreamReady.current || !initialized.current) && !next.environment_update_required;
           const [browserResult, t] = await Promise.all([
             fetchBrowser ? api("/browser/tabs").then(result => {
               if (live) setBrowserError("");
               return result;
             }).catch(error => {
-              if (live) setBrowserError(error.message);
+              if (live) setBrowserError(next.guest_system === "macos" ? "请在环境设置中同步 macOS 组件，并确认已登录客机图形账户。" : error.message);
               return null;
             }) : null,
             api("/terminals"),
@@ -801,7 +805,7 @@ function App() {
     if (!status?.ready) return;
     const stream = new EventSource(runtimeURL("/browser/events"));
     stream.addEventListener("clipboard", (event) => {
-      remote.current?.receiveCopy(JSON.parse(event.data));
+      remote.current?.receiveCopy?.(JSON.parse(event.data));
     });
     stream.onopen = () => { browserStreamReady.current = true; };
     stream.onerror = () => { browserStreamReady.current = false; };
@@ -831,6 +835,8 @@ function App() {
           ...b.tabs.filter((t) => !previous.some((p) => p.id === t.id)),
         ];
       });
+      const focusLogin = b.focus && b.tabs.some(tab => tab.native_window && tab.login);
+      if (focusLogin) browserDismissed.current = false;
       if (!browserDismissed.current && b.active && b.focus) {
         setDesktopOpen(false);
         setHome(false);
@@ -906,6 +912,8 @@ function App() {
         }
         return;
       }
+      // The guest owns Chrome's address bar, tabs and browser shortcuts.
+      if (macGuest && !showHome && !desktopOpen && !terminal && event.target.closest?.(".mac-claude-frame")) return;
       let handle;
       if (k === "o") {
         event.preventDefault();
@@ -1030,6 +1038,7 @@ function App() {
         )
           document.dispatchEvent(new Event("cage-close-modal"));
         else if (desktopOpen) setDesktopOpen(false);
+        else if (macGuest && current && !terminal && !showHome) remote.current?.closeNativeTab?.();
         else if (current) await closeTab(current);
       }
       if (command === "quit") {
@@ -1090,6 +1099,7 @@ function App() {
     showHome,
     savedTabs,
     selectedProject,
+    macGuest,
     desktopOpen,
     terminalChoice,
   ]);
@@ -1431,7 +1441,7 @@ function App() {
           <main className={`workspace ${split ? "workspace-split" : ""}`} ref={workspaceBox}
             style={{ "--split-left": `${100 * (dualBrowser && nativeSplit?.fraction || 0.5)}%` }}>
             {dropSide && <div aria-hidden="true" className={`split-drop split-${dropSide}`}>{dropSide === "left" ? "放到左侧" : "放到右侧"}</div>}
-            {!storageRecovery && desktopOpen && macGuest && <MacOSClaudeWindow uploads={desktopFiles.uploads} keyboard={status.keyboard} remoteRef={remote}
+            {!storageRecovery && desktopOpen && macGuest && <MacOSAppWindow key="claude-desktop" uploads={desktopFiles.uploads} keyboard={status.keyboard} remoteRef={remote}
               onStatus={notify} onFallback={(text, message) => setTransfer({ text, message })} visible={!settingsOpen} onConfirm={confirm}
               sidebarCollapsed={sidebarCollapsed} onExpand={() => persist("cage-sidebar-collapsed", false, setSidebarCollapsed)} />}
             {!storageRecovery && desktopOpen && !macGuest && <ClaudeDesktop
@@ -1451,7 +1461,15 @@ function App() {
             )}
             {!storageRecovery && (status.vm_running || terminal) && (
               <>
-                {!desktopOpen && !showHome && webPanes.length > 0 && (
+                {macGuest && !desktopOpen && !showHome && webPanes.length > 0 && (
+                  <section className={`pane-lane browser-lane split-${paneSide(webPanes[0].id)}`}>
+                    {status.ready && <MacOSAppWindow key="chrome" browser onOpenPage={openBrowserPage} visible={!settingsOpen} uploads={desktopFiles.uploads}
+                      keyboard={status.keyboard} remoteRef={remote} onStatus={notify}
+                      sidebarCollapsed={sidebarCollapsed} onExpand={() => persist("cage-sidebar-collapsed", false, setSidebarCollapsed)}
+                      onFallback={(text, message) => setTransfer({ text, message })} />}
+                  </section>
+                )}
+                {!macGuest && !desktopOpen && !showHome && webPanes.length > 0 && (
                   <section className={`pane-lane browser-lane ${browserTabLayout === "vertical" ? "vertical-browser" : ""} ${dualBrowser ? "" : "split-" + paneSide(webPanes[0].id)}`}>
                     {browserTabLayout === "vertical" && <BrowserTabRail tabs={browserTabs} metadata={metadata}
                       active={liveBrowser?.id} ready={status.ready} busy={busy} splitDrag={splitDrag}

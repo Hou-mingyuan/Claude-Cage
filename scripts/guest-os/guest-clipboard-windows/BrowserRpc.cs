@@ -254,8 +254,18 @@ internal static class BrowserRpc
                 }
                 var proof = await Control(new JsonObject { ["method"] = "GET", ["path"] = "/frame-proof" }, timeout.Token);
                 AssertEditorTab(proof["id"]?.GetValue<string>());
-                if(BrowserWindowCapture.FocusRenderer(browser!,proof))
-                {proof=await Control(new JsonObject{["method"]="GET",["path"]="/frame-proof"},timeout.Token);AssertEditorTab(proof["id"]?.GetValue<string>());}
+                if (BrowserWindowCapture.NeedsPageActivation(browser!, proof, input))
+                {
+                    var resultAfterActivation = await Control(new JsonObject {
+                        ["operation"] = "input-focus-page", ["input"] = new JsonObject {
+                            ["id"] = proof["id"]!.DeepClone(), ["document"] = proof["document"]!.DeepClone(),
+                            ["target"] = proof["target"]!.DeepClone(),
+                        },
+                    }, timeout.Token);
+                    if (resultAfterActivation["error"] is not null) return resultAfterActivation;
+                    proof = resultAfterActivation;
+                    AssertEditorTab(proof["id"]?.GetValue<string>());
+                }
                 if (pagePointerOwner != lease && BrowserWindowCapture.SelectPane(browser!, lease, input, proof))
                 {
                     await Control(new JsonObject { ["operation"] = "input-select-pane", ["input"] = new JsonObject { ["target"] = proof["target"]!.DeepClone(), ["x"] = input["x"]!.DeepClone() } }, timeout.Token);
@@ -455,7 +465,7 @@ internal static class BrowserRpc
     internal static JsonObject Status()
     {
         var root = AppContext.BaseDirectory;
-        var installed = new[] { "node.exe", "windows-browser.mjs", "windows-browser-extensions.mjs", "playwright/index.mjs", "modules/browser-clipboard.mjs", "modules/browser-uploads.mjs", "modules/browser-downloads.mjs", "modules/browser-cookies.mjs", "modules/browser-extensions.mjs", "modules/browser-vault.mjs", "split-extension/manifest.json", "split-extension/control.html", "split-extension/control.js" }.All(file => File.Exists(Path.Combine(root, file)));
+        var installed = new[] { "node.exe", "windows-browser.mjs", "browser-protocol.mjs", "windows-browser-extensions.mjs", "playwright/index.mjs", "modules/browser-clipboard.mjs", "modules/browser-uploads.mjs", "modules/browser-downloads.mjs", "modules/browser-cookies.mjs", "modules/browser-extensions.mjs", "modules/browser-vault.mjs", "split-extension/manifest.json", "split-extension/control.html", "split-extension/control.js" }.All(file => File.Exists(Path.Combine(root, file)));
         installed &= BrowserExecutableInstalled();
         var network = false;var phoneNetwork = false;
         try

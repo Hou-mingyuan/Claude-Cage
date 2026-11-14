@@ -104,6 +104,43 @@ def subject(summary):
     return hashlib.sha256(f"{email}\n{organization}".encode()).hexdigest()
 
 
+def recover_login(binary, target, source_id, expected):
+    """Recover a missing file-backed login without moving an account's history."""
+    if target.name == DEFAULT or source_id == DEFAULT or source_id == target.name:
+        raise ValueError("recovery requires distinct private profiles")
+    source = profile(source_id)
+    env = cli_environment(target)
+    current = identity(binary, env, Path.home())
+    if subject(current) == expected:
+        return current
+    if subject(current) is not None:
+        return {"logged_in": False}
+    authenticated = identity(binary, cli_environment(source), Path.home())
+    if not expected or subject(authenticated) != expected:
+        return {"logged_in": False}
+    credential = config_directory(source) / ".credentials.json"
+    destination = config_directory(target) / ".credentials.json"
+    for path in (source, target, config_directory(source), config_directory(target), credential):
+        info = path.lstat()
+        if path.is_symlink() or (os.name != "nt" and (info.st_uid != os.getuid() or info.st_mode & 0o077)):
+            raise ValueError("unexpected login file permissions")
+    if not credential.is_file():
+        raise ValueError("file-backed login required")
+    # Publish opaque bytes only inside the guest. The hard link is atomic and
+    # refuses to overwrite a credential created by a concurrent original login.
+    with tempfile.NamedTemporaryFile(dir=destination.parent) as temporary:
+        with credential.open("rb") as stream:
+            shutil.copyfileobj(stream, temporary)
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        os.link(temporary.name, destination)
+    # The CLI can refresh or replace this path independently of the controller.
+    # Retain published credentials on failure: checking file identity before an
+    # unlink cannot prevent deleting a concurrent login's replacement.
+    recovered = identity(binary, env, Path.home())
+    return recovered if subject(recovered) == expected else {"logged_in": False}
+
+
 def json_file(path):
     try:
         return json.loads(path.read_text())
@@ -577,6 +614,11 @@ def main(args, *, mobile_settings_fd=None, verify_mobile=None):
     binary = os.environ.get("CAGE_CLI_BINARY") if os.name == "nt" else shutil.which("claude", path=env["PATH"])
     if not binary:
         raise ValueError("Claude is not installed")
+    if mode == "recover-login":
+        if len(rest) != 2:
+            raise ValueError("recovery requires source and expected identity")
+        print(json.dumps(recover_login(binary, base, *rest)))
+        return 0
     if mode == "usage":
         if len(rest) != 1:
             raise ValueError("usage requires an expected account")

@@ -10,7 +10,7 @@ export async function sendFiles(content, target, id, { valid = () => true, onPro
   const files = content.files || [];
   if (!content.fileSelection && (!files.length || files.length > 100 || files.some(file => file.size > 2 * 1024 ** 3)))
     throw new Error("每个文件不能超过 2 GB；一次最多 100 个文件。");
-  const request = await api("/input/files/start", { target, id, kind: content.kind || "paste", x: content.x, y: content.y, pid: windowTarget?.pid, window: windowTarget?.window });
+  const request = await api("/input/files/start", { target, id, kind: content.kind || "paste", x: content.x, y: content.y, pid: windowTarget?.pid, window: windowTarget?.window, surface: windowTarget?.surface });
   const paths = [];
   try {
     check();

@@ -3,7 +3,7 @@ title: 网络与代理
 description: 导入节点与订阅、配置多次中转，理解联网检查、时区和出口变化规则。
 group: 开始使用
 order: 2
-keywords: Clash Mihomo YAML SOCKS5 住宅 IP DNS DoH 暂停 断网 代理链 订阅
+keywords: Clash Mihomo YAML SOCKS5 SSH 私钥 住宅 IP DNS DoH 暂停 断网 代理链 订阅
 ---
 <figure class="guide-shot">
   <a href="../../www/public/docs/screenshots/proxy-subscription.jpg" target="_blank" rel="noopener" aria-label="查看原图：添加订阅链接与首次主机下载选项"><img src="../../www/public/docs/screenshots/proxy-subscription.jpg" alt="添加订阅链接与首次主机下载选项" width="2560" height="1764" loading="lazy" decoding="async" /></a>
@@ -18,7 +18,7 @@ keywords: Clash Mihomo YAML SOCKS5 住宅 IP DNS DoH 暂停 断网 代理链 订
 | --- | --- |
 | 订阅链接 | 输入名称和 HTTPS 节点订阅地址。首次没有可用节点时，可明确勾选“通过主机网络下载这份订阅”。 |
 | 本地 YAML | 拖入或点击选择导出的 YAML、YML、JSON 文件（单个不超过 8 MiB），也可直接粘贴 Clash/Mihomo YAML 内容。读取后可编辑，点击“导入并验证”完成导入。 |
-| 手动节点 | 填写 HTTP 或 SOCKS5 服务器、端口和对应认证字段。 |
+| 手动节点 | 选择 HTTP、SOCKS5 或 SSH，填写服务器、端口和认证信息。SSH 默认端口为 22，用户名必填；可选择密码或私钥认证。私钥认证须粘贴完整私钥内容，加密私钥还需填写私钥口令。 |
 
 点击“导入并验证”，进入“节点”，选最终出口，再点“应用代理”。“保存设置”用于其他设置，不能替代应用代理。未应用的选择只是草稿。
 
@@ -29,6 +29,25 @@ keywords: Clash Mihomo YAML SOCKS5 住宅 IP DNS DoH 暂停 断网 代理链 订
 VMess、VLESS 和 Trojan 的 WebSocket 节点可以导入旧字段 `ws-path`、`ws-headers`。节点须明确设置 `network: ws`，Cage 会将路径和请求头转换为 `ws-opts.path`、`ws-opts.headers`，已保存的旧节点在应用代理时也会转换。新旧字段可同时存在，路径须一致，请求头按名称合并并忽略名称的字母大小写。相同请求头的值冲突、字段写法重复或旧字段用于其他传输方式时，来源会显示具体原因，需要修改该节点后重新导入。
 
 Hysteria2 节点可使用 `mport` 指定端口跳跃范围、`pinSHA256` 指定证书指纹，导入时会转换为核心支持的字段并保留功能。若节点使用不支持的协议、引用本机文件或网卡、管理字段重复、别名参数冲突或代理链不可用，会跳过该节点，并在来源下显示导入数量、跳过数量和原因。点击「查看原因」可展开具体节点；依赖失败节点的代理链也会跳过。若所有节点均被跳过，导入失败；更新影响当前出口或中转节点时保留原配置，请先应用其他节点再更新。其余节点还须整体通过核心配置校验，校验失败时原配置保持不变，可在设置的「日志与诊断」中导出诊断包查看校验记录。
+
+手动添加 SSH 节点时，可在“服务器公钥”中填写可信公钥，每行一条；留空时不校验服务器身份。
+
+SSH 节点（`type: ssh`）可以把自己的 VPS 直接作为固定出口，服务器上只需开启 SSH，无需另外部署代理服务。可用 `password` 或 `private-key` 认证；`private-key` 须直接填写 PEM 私钥内容（含 `-----BEGIN ... PRIVATE KEY-----`），引用本机私钥文件路径的节点会被跳过，加密私钥可配合 `private-key-passphrase`。建议用 `host-key` 固定服务器公钥（`ssh-keyscan` 输出中的 `ssh-ed25519 AAAA...` 部分），未填写时核心不校验服务器身份。SSH 节点仅转发 TCP。示例：
+
+```yaml
+proxies:
+  - name: my-vps
+    type: ssh
+    server: 203.0.113.10
+    port: 22
+    username: root
+    private-key: |
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      ...
+      -----END OPENSSH PRIVATE KEY-----
+    host-key:
+      - "ssh-ed25519 AAAA..."
+```
 
 同一个订阅地址可能按请求的客户端身份返回不同格式。Cage 下载时使用 Clash 客户端身份，服务商返回 YAML 时可以导入；若返回 Base64 或分享链接列表，仍需向服务商获取 Clash/Mihomo YAML。
 

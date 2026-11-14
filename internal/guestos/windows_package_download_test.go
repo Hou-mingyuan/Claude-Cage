@@ -33,7 +33,11 @@ func TestWindowsPackageDownloadUsesBundledHostDownloader(t *testing.T) {
 import("encoding/json";"os";"path/filepath";"fmt")
 func main(){
  a:=os.Args
- if len(a)!=8 || a[1]!="host-download" || a[2]!="https://example.invalid/package" || a[4]!="package.zip" || a[5]!="*/*" || filepath.Base(a[6])!=".downloads" || len(a[7])!=64 {fmt.Println("bad native arguments");os.Exit(91)}
+ if len(a)>2 && a[2]=="https://example.invalid/metadata" {
+  if len(a)!=6 || a[1]!="host-download" || a[4]!="metadata" || a[5]!="*/*" {fmt.Printf("bad metadata arguments: %q\n",a);os.Exit(92)}
+  os.WriteFile(a[3],[]byte("release metadata"),0600);return
+ }
+ if len(a)!=8 || a[1]!="host-download" || a[2]!="https://example.invalid/package" || a[4]!="package.zip" || a[5]!="*/*" || filepath.Base(a[6])!=".downloads" || len(a[7])!=64 {fmt.Printf("bad native arguments: %q\n",a);os.Exit(91)}
  file,e:=os.OpenFile(os.Getenv("PACKAGE_FIXTURE_LOG"),os.O_CREATE|os.O_WRONLY|os.O_APPEND,0600);if e!=nil{panic(e)};json.NewEncoder(file).Encode(a[1:]);file.Close()
  os.WriteFile(a[3],[]byte("verified package"),0600)
  fmt.Println("CAGE_HOST_BYTES package.zip 16 16")
@@ -71,6 +75,9 @@ Remove-Item Env:PACKAGE_FIXTURE_FAIL
 $failed=$false
 try{$null=Get-PinnedPackage $spec $cache}catch{$failed=$_.Exception.Message -like 'Package verification failed:*'}
 if(!$failed){throw 'Package checksum mismatch was accepted.'}
+$metadata=Join-Path $Root 'metadata.txt'
+Invoke-WorkbenchDownload 'https://example.invalid/metadata' $metadata 'metadata' $cache
+if([IO.File]::ReadAllText($metadata) -cne 'release metadata'){throw 'Metadata download changed the native argument contract.'}
 Write-Output 'Passed bundled downloader arguments, cache reuse, progress isolation, failure preservation and checksum rejection.'
 `
 	path := filepath.Join(root, "test.ps1")

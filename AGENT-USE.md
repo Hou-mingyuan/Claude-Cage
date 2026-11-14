@@ -6,6 +6,6 @@ Run `<installed Cage CLI> agent capabilities` to discover the protocol and suppo
 
 The Agent uses the same configuration, account checks, native operations and client preferences as the user interface. Use `agent routes` for the live HTTP route list, `agent request METHOD /api/PATH` for JSON or file operations, and `agent socket /api/PATH` for WebSocket NDJSON. Desktop configuration and selected workloads require an explicit scope and connection generation as described in the guide. Native credential operations stay inside the existing OS bridge.
 
-Website entry points: [agent.md](https://lee-xeo.github.io/Claude-Cage/agent.md), [llms.txt](https://lee-xeo.github.io/Claude-Cage/llms.txt), [download helper](https://lee-xeo.github.io/Claude-Cage/agent-bootstrap.mjs).
+Website entry points: [agent.md](https://claude-cage.com/agent.md), [llms.txt](https://claude-cage.com/llms.txt), [download helper](https://claude-cage.com/agent-bootstrap.mjs).
 
 `AGENTS.md` contains repository contributor instructions. Product users and their agents should follow the usage guide above.

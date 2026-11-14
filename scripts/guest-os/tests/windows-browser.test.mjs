@@ -5,11 +5,11 @@ import net from "node:net";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { applyWindowsEditorHTMLDefault, checkedBrowserURL, checkedLoopbackProxy, createWindowsBrowserService, validWindowsBrowserFileName } from "../windows-browser.mjs";
+const { applyWindowsEditorHTMLDefault, checkedBrowserURL, checkedLoopbackProxy, createWindowsBrowserService, validWindowsBrowserFileName } = await import(process.env.CAGE_BROWSER_TEST_CONTROLLER ? pathToFileURL(process.env.CAGE_BROWSER_TEST_CONTROLLER) : new URL("../windows-browser.mjs", import.meta.url));
 import { fixtureZip } from "./windows-browser-fixtures.mjs";
 import { serveMacOSBrowser } from "../macos-browser-service.mjs";
 const moduleURL = file => process.env.CAGE_BROWSER_TEST_MODULE_DIRECTORY ? pathToFileURL(path.join(process.env.CAGE_BROWSER_TEST_MODULE_DIRECTORY, file)) : new URL("../../../internal/cage/" + file, import.meta.url);
@@ -45,7 +45,7 @@ test("Cage editor changes only its fixed low-priority trust default in the offic
 const playwrightPath = process.env.CAGE_BROWSER_TEST_PLAYWRIGHT;
 const executablePath = process.env.CAGE_BROWSER_TEST_CHROMIUM;
 const integration = playwrightPath && executablePath ? test : test.skip;
-async function fixture(t, configured = {}) {
+async function fixture(t, configured = {}, overrides = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "cage-windows-browser-"));
   const payload = Buffer.alloc((128 << 10) + 37);
   for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
@@ -74,6 +74,7 @@ async function fixture(t, configured = {}) {
     modules: { BrowserClipboard, UploadManager, DownloadManager, browserCookies, BrowserVault, ...(process.env.CAGE_BROWSER_TEST_EXTENSIONS === "1" ? { BrowserExtensions } : {}) }, displayScale: 2,
     splitDirectory: process.env.CAGE_BROWSER_TEST_SPLIT_DIRECTORY,
     editor: async workspace => ({ url: `http://${workspace.slice(0, 16)}.cage-editor.localhost:${server.address().port}/editor-` + workspace }),
+    ...overrides,
   };
   let service = createWindowsBrowserService(options);
   const settings = { proxy: configured.diagnostic ? url : "http://127.0.0.1:18501", ...configured };
@@ -218,6 +219,25 @@ actualFocus("a native page activation updates the private document proof and the
   assert.notEqual(frame.target, before.target);
 });
 
+actualFocus("a focus request restores a background page only for its displayed document and geometry", async t => {
+  const f = await fixture(t);
+  const first = await f.open("/first"), second = await f.open("/second");
+  const frame = await f.call("frame", {}, "GET");
+  const separateWindow = await f.context().browser().newContext();
+  const otherPage = await separateWindow.newPage();
+  await otherPage.bringToFront();
+  assert.equal(await second.page.evaluate(() => document.hasFocus()), false);
+  const activate = input => f.privateRequest({ operation: "input-focus-page", input });
+  const receipt = { id: second.id, document: frame.document, target: frame.target };
+  for (const mismatch of [{ id: first.id }, { document: "old-document" }, { target: "old-geometry" }])
+    await assert.rejects(activate({ ...receipt, ...mismatch }), { code: "target_changed" });
+  assert.equal(await second.page.evaluate(() => document.hasFocus()), false);
+  const proof = await activate(receipt);
+  assert.equal(proof.id, second.id);
+  assert.equal(proof.documentFocused, true);
+  assert.equal((await f.call("tabs", {}, "GET")).active, second.id);
+});
+
 integration("private window popups are tracked and closing one tab retains its sibling", async t => {
   const f = await fixture(t), one = await f.open("/private-one", true);
   const created = one.page.context().waitForEvent("page");
@@ -228,6 +248,56 @@ integration("private window popups are tracked and closing one tab retains its s
   const second=snapshot.tabs.find(t=>t.url.endsWith("/private-two"));assert(second?.incognito);
   await f.call("close",{id:one.id});
   assert.equal(two.isClosed(),false);assert.equal((await f.call("tabs",{},"GET")).tabs.some(t=>t.id===second.id),true);
+});
+
+integration("a login popup receives clicks from its own frame and closes with its login", async t => {
+  const f = await fixture(t);
+  await f.call("health", {}, "GET");
+  const browser = f.context().browser();
+  const login = "a".repeat(24), origin = "https://claude.com";
+  const url = origin + "/cai/oauth/authorize?state=fixture";
+  browser.once("context", context => {
+    const pages = new Map([
+      [url, `<button onclick="window.open('/verify?state=fixture','verify','popup,width=500,height=400')">Open verification</button>`],
+      [origin + "/verify?state=fixture", '<iframe src="https://verify.example.test/check"></iframe>'],
+      ["https://verify.example.test/check", `<button onclick="this.textContent='Verified'">Verify</button>`],
+    ]);
+    void context.route("**/*", route => route.fulfill({
+      contentType: "text/html", body: pages.get(route.request().url()) || "",
+    }));
+  });
+  const { id } = await f.call("login-open", { login, url });
+  const opener = browser.contexts().flatMap(context => context.pages()).find(page => page.url() === url);
+  assert(opener);
+  const popupEvent = opener.waitForEvent("popup");
+  await f.click(id, opener, "button");
+  const popup = await popupEvent;
+  const verify = popup.frameLocator("iframe").getByRole("button");
+  await verify.waitFor();
+  await t.waitFor(async () => (await f.call("tabs", {}, "GET")).active !== id);
+  // A frame already in flight when the popup opens can be rejected once.
+  // Use the same bounded read retries as the display transport.
+  let frame;
+  for (let attempt = 0; ; attempt++) {
+    try { frame = await f.call("frame", {}, "GET"); break; }
+    catch (error) {
+      if (error.code !== "target_changed" || attempt >= 5) throw error;
+      await new Promise(resolve => setTimeout(resolve, 80));
+    }
+  }
+  assert.notEqual(frame.id, id);
+  assert.equal(frame.native.id, frame.id);
+  const state = await f.call("tabs", {}, "GET");
+  const tab = state.tabs.find(tab => tab.id === frame.id);
+  assert(tab.login);
+  assert.equal(tab.url, origin);
+  const box = await verify.boundingBox();
+  const x = Math.round((box.x + box.width / 2) * frame.scale);
+  const y = Math.round((box.y + box.height / 2) * frame.scale);
+  for (const mask of [1, 0]) await f.call("input", { kind: "pointer", target: frame.target, mask, x, y });
+  await popup.frameLocator("iframe").getByRole("button", { name: "Verified" }).waitFor();
+  await f.call("login-finish", { login });
+  assert(opener.isClosed() && popup.isClosed());
 });
 
 integration("native page copy completion carries current context and ignores a synthetic copy", async t => {
@@ -341,9 +411,15 @@ integration("physical frame geometry, RFB key/pointer and composition reject lat
   assert.equal(await one.page.locator("#first").inputValue(), "ab");
   const status = await f.call("ime", { id: one.id, target: "browser", mode: "status" }); assert(status.available); assert(status.rect[3] > 0);
   const session = "d".repeat(32), common = { id: one.id, target: "browser", session };
-  await f.call("ime", { ...common, mode: "begin", sequence: 0, context: status.context });
-  await f.call("ime", { ...common, mode: "update", sequence: 1, text: "nihao", selectionStart: 5, selectionEnd: 5 });
-  await f.call("ime", { ...common, mode: "commit", sequence: 2, text: "你好🙂" });
+  for (const value of [
+    { mode: "begin", sequence: 0, context: status.context },
+    { mode: "update", sequence: 1, text: "nihao", selectionStart: 5, selectionEnd: 5 },
+    { mode: "commit", sequence: 2, text: "你好🙂" },
+  ]) {
+    const reply = await f.call("ime", { ...common, ...value });
+    assert.equal(reply.available, true, "the viewer requires an explicit focused-input receipt");
+    assert.equal(reply.context, status.context);
+  }
   assert.equal(await one.page.locator("#first").inputValue(), "ab你好🙂");
   const next = await f.call("ime", { id: one.id, target: "browser", mode: "status" });
   await f.call("ime", { ...common, mode: "begin", sequence: 3, context: next.context });
@@ -382,7 +458,7 @@ integration("split panes resize actual pages and route physical input to the cli
 });
 
 integration("screencast retains HiDPI pixels, skips static frames and resumes after its viewer leaves", async t => {
-  const f = await fixture(t), one = await f.open("/still");
+  const f = await fixture(t, {}, { continuousFrames: false }), one = await f.open("/still");
   await one.page.evaluate(() => { document.body.style.background = "rgb(245, 240, 230)"; });
   const screenshot = one.page.screenshot.bind(one.page);
   one.page.screenshot = async options => {
@@ -484,6 +560,50 @@ integration("pixel wheel preserves distance and still rejects stale targets and 
   await assert.rejects(f.call("input", { ...wheel, deltaY: 2049 }), /滚动距离/);
   await assert.rejects(f.call("input", { ...wheel, mask: 17 }), /滚动距离/);
   assert.equal(await page.evaluate(() => scrollY), 360);
+});
+
+integration("HiDPI screenshot frames preserve pixels, click coordinates and resize with continuous capture requested", async t => {
+  const f = await fixture(t, {}, { continuousFrames: true }), { id, page } = await f.open();
+  await page.evaluate(() => {
+    document.body.innerHTML = '<style>body{margin:0}section{height:240px;border-bottom:1px solid #aaa}button{margin:24px;width:200px;height:40px}</style>' +
+      Array.from({ length: 40 }, (_, i) => `<section style="background:${i % 2 ? '#cef' : '#fed'}"><button onclick="this.textContent='clicked'">Marker ${i}</button></section>`).join('');
+    scrollTo(0, 1100);
+  });
+  const reference = (await page.screenshot({ type: 'jpeg', quality: 85, caret: 'initial' })).toString('base64');
+  let frame = await f.call('frame', {}, 'GET');
+  // Initial compositor damage may still be in flight. Compare the settled
+  // screenshot with the full-density reference.
+  await new Promise(resolve => setTimeout(resolve, 100));
+  frame = await f.call('frame', {}, 'GET');
+  if (process.env.CAGE_CAPTURE_DIAG_DIR) {
+    await writeFile(path.join(process.env.CAGE_CAPTURE_DIAG_DIR, 'stream-test.jpg'), Buffer.from(frame.jpeg, 'base64'));
+    await writeFile(path.join(process.env.CAGE_CAPTURE_DIAG_DIR, 'reference-test.jpg'), Buffer.from(reference, 'base64'));
+  }
+  const comparison = await page.evaluate(async ({ actual, reference }) => {
+    const images = await Promise.all([actual, reference].map(async jpeg => { const image = new Image(); image.src = 'data:image/jpeg;base64,' + jpeg; await image.decode(); return image; }));
+    const pixels = images.map(image => { const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height; const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0); return ctx.getImageData(0, 0, canvas.width, canvas.height).data; });
+    let total = 0; for (let i = 0; i < pixels[0].length; i += 4) for (let j = 0; j < 3; j++) total += Math.abs(pixels[0][i+j] - pixels[1][i+j]);
+    return { sizes: images.map(i => [i.width, i.height]), error: total / (pixels[0].length / 4 * 3), dpr: devicePixelRatio, scroll: scrollY };
+  }, { actual: frame.jpeg, reference });
+  assert.deepEqual(comparison.sizes, [[2280, 1400], [2280, 1400]]);
+  assert.equal(comparison.dpr, 2); assert.equal(comparison.scroll, 1100);
+  assert(comparison.error < 3, JSON.stringify(comparison));
+  const button = await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find(b => b.getBoundingClientRect().y > 30); const r = b.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 }; });
+  for (const mask of [1, 0]) await f.call('input', { kind: 'pointer', target: frame.target, x: button.x*2, y: button.y*2, mask });
+  assert.equal(await page.evaluate(() => !![...document.querySelectorAll('button')].find(b => b.textContent === 'clicked')), true);
+  await f.call('resize', { width: 2000, height: 1300 });
+  await assert.rejects(f.call('input', { kind: 'pointer', target: frame.target, x: 100, y: 100, mask: 1 }), /target changed/);
+  frame = await f.call('frame', {}, 'GET');
+  assert.equal(frame.width, 2000); assert.equal(frame.height, 1300);
+  await f.call('input', { kind: 'pointer', target: frame.target, x: 300, y: 400, mask: 16, deltaX: 0, deltaY: 120 });
+  await page.waitForFunction(() => scrollY === 1220);
+  const stats = (await f.call('health', {}, 'GET')).capture;
+  assert(stats.screenshots > 0); assert.equal(stats.streamed_frames, 0);
+  await new Promise(resolve => setTimeout(resolve, 1700));
+  const resumed = await f.call('frame', {}, 'GET');
+  assert.equal(resumed.width, 2000);
+  assert((await f.call('health', {}, 'GET')).capture.screenshots > stats.screenshots);
+  t.diagnostic(JSON.stringify({ imageMeanError: comparison.error, screenshots: stats.screenshots, streamedFrames: stats.streamed_frames }));
 });
 
 integration("audit reads configured browser state separately from expected values and preserves actual HTTP failures", async t => {
@@ -754,4 +874,177 @@ nativeUI("headed Chrome exposes owned window proof and CDP shortcuts alone do no
   assert.equal(after.native.window.windowId, before.native.window.windowId);
   assert.equal(after.native.document, before.native.document);
   assert.equal(after.native.id, one.id);
+});
+
+function interceptCapture(context, mutate) {
+  const create = context.newCDPSession.bind(context);
+  context.newCDPSession = async (...args) => {
+    const session = await create(...args), on = session.on.bind(session), off = session.off.bind(session);
+    const listeners = new Map();
+    session.on = (event, callback) => {
+      if (event !== "Page.screencastFrame") return on(event, callback);
+      const wrapped = frame => callback(mutate(frame));
+      listeners.set(callback, wrapped);
+      return on(event, wrapped);
+    };
+    session.off = (event, callback) => off(event, listeners.get(callback) || callback);
+    return session;
+  };
+}
+
+integration("slow viewers bound compositor encoding during continuous animation", async t => {
+  const f = await fixture(t, {}, { continuousFrames: true, displayScale: 1 }), { page } = await f.open();
+  await f.call("resize", { width: 800, height: 600 });
+  await page.evaluate(() => {
+    let n = 0;
+    window.animation = setInterval(() => document.body.style.backgroundColor = "hsl(" + (n++ * 19 % 360) + " 80% 50%)", 16);
+  });
+  await f.call("frame", {}, "GET");
+  const start = performance.now(), before = (await f.call("health", {}, "GET")).capture;
+  for (let i = 0; i < 8; i++) {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await f.call("frame", {}, "GET");
+  }
+  const after = (await f.call("health", {}, "GET")).capture;
+  const frames = after.damage_frames - before.damage_frames;
+  assert(frames <= 20, "encoding must follow the eight viewer requests, not the 60 Hz animation: " + frames);
+  assert.equal(after.fallbacks, 0);
+  t.diagnostic(JSON.stringify({ viewerRequests: 8, elapsedMs: Math.round(performance.now()-start), encodedFrames: frames, encodedBytes: after.encoded_bytes - before.encoded_bytes }));
+});
+
+integration("mismatched compositor frames fall back and restore input on resize and reconnect", async t => {
+  const f = await fixture(t, {}, { continuousFrames: true, displayScale: 1 }), { id, page } = await f.open();
+  let corrupt = false;
+  interceptCapture(f.context(), frame => corrupt ? { ...frame, data: Buffer.from("bad jpeg").toString("base64") } : frame);
+  await f.call("frame", {}, "GET");
+  corrupt = true;
+  await page.evaluate(() => document.body.style.background = "red");
+  await new Promise(resolve => setTimeout(resolve, 120));
+  let frame = await f.call("frame", {}, "GET");
+  let stats = (await f.call("health", {}, "GET")).capture;
+  assert.equal(stats.fallbacks, 1);
+  assert(stats.invalid_frames > 0);
+  assert(stats.screenshots > 0);
+  await f.click(id, page, "#first");
+  await page.keyboard.insertText("restored");
+  assert.equal(await page.locator("#first").inputValue(), "restored");
+  await f.call("resize", { width: 1800, height: 1000 });
+  frame = await f.call("frame", {}, "GET");
+  assert.equal(frame.width, 1800); assert.equal(frame.height, 1000);
+  await new Promise(resolve => setTimeout(resolve, 1700));
+  frame = await f.call("frame", {}, "GET");
+  assert.equal(frame.width, 1800);
+  await f.click(id, page, "#second");
+  await page.keyboard.insertText("reconnected");
+  assert.equal(await page.locator("#second").inputValue(), "reconnected");
+});
+
+integration("stopping continuous capture restores ordinary input before the next viewer", async t => {
+  const f = await fixture(t, {}, { continuousFrames: true, displayScale: 1 }), { id, page } = await f.open();
+  await f.call("frame", {}, "GET");
+  await new Promise(resolve => setTimeout(resolve, 1800));
+  assert.equal((await f.call("health", {}, "GET")).resources.captures, 0);
+  await f.click(id, page, "#second");
+  await page.keyboard.insertText("after expiry");
+  assert.equal(await page.locator("#second").inputValue(), "after expiry");
+  await f.call("frame", {}, "GET");
+  await f.click(id, page, "#first");
+  await page.keyboard.insertText("after reconnect");
+  assert.equal(await page.locator("#first").inputValue(), "after reconnect");
+});
+
+integration("HiDPI capture retains full-density screenshots regardless of continuous capture preference", async t => {
+  for (const continuousFrames of [undefined, false, true]) {
+    const f = await fixture(t, {}, { continuousFrames }), { page } = await f.open();
+    const frame = await f.call("frame", {}, "GET");
+    const stats = (await f.call("health", {}, "GET")).capture;
+    assert.equal(stats.streamed_frames, 0);
+    assert(stats.screenshots > 0);
+    assert.equal(await page.evaluate(() => devicePixelRatio), 2);
+    assert.equal(frame.width, 2280); assert.equal(frame.height, 1400);
+    const dimensions = await page.evaluate(async jpeg => {
+      const image = new Image(); image.src = "data:image/jpeg;base64," + jpeg; await image.decode();
+      return [image.naturalWidth, image.naturalHeight];
+    }, frame.jpeg);
+    assert.deepEqual(dimensions, [2280, 1400]);
+  }
+});
+
+integration("default one-to-one frames stream without screenshot polling", async t => {
+  const f = await fixture(t, {}, { displayScale: 1 }), { id, page } = await f.open();
+  const frame = await f.call("frame", {}, "GET");
+  assert.equal(frame.width, 1140); assert.equal(frame.height, 700);
+  const stats = (await f.call("health", {}, "GET")).capture;
+  assert.equal(stats.screenshots, 0); assert(stats.streamed_frames > 0);
+  await f.click(id, page, "#first");
+  await page.keyboard.insertText("native pixels");
+  assert.equal(await page.locator("#first").inputValue(), "native pixels");
+});
+
+
+integration("startup invalid frames have a bounded recovery window", async t => {
+  for (const persistent of [false, true]) {
+    const f = await fixture(t, {}, { continuousFrames: true, displayScale: 1 }), { page } = await f.open();
+    let count = 0;
+    interceptCapture(f.context(), frame => (++count <= 2 || persistent) ?
+      { ...frame, data: Buffer.from("bad jpeg").toString("base64") } : frame);
+    await page.evaluate(() => {
+      let n = 0;
+      window.animation = setInterval(() => document.body.style.backgroundColor = "hsl(" + (n++ * 19 % 360) + " 80% 50%)", 16);
+    });
+    const frame = await f.call("frame", {}, "GET");
+    assert(frame.width > 0);
+    const stats = (await f.call("health", {}, "GET")).capture;
+    assert.equal(stats.fallbacks, persistent ? 1 : 0);
+    assert.equal(stats.invalid_frames, persistent ? 3 : 2);
+    assert(persistent ? stats.screenshots > 0 : stats.streamed_frames > 0);
+  }
+});
+
+integration("startup stale sizes recover beyond two frames and remain bounded", async t => {
+  for (const persistent of [false, true]) {
+    const f = await fixture(t, {}, { continuousFrames: true, displayScale: 1 }), { page } = await f.open();
+    const old = (await page.screenshot({ type: "jpeg", quality: 85 })).toString("base64");
+    await f.call("resize", { width: 800, height: 600 });
+    let count = 0;
+    interceptCapture(f.context(), frame => (++count <= 4 || persistent) ? { ...frame, data: old } : frame);
+    await page.evaluate(() => {
+      let n = 0;
+      window.animation = setInterval(() => document.body.style.backgroundColor = "hsl(" + (n++ * 19 % 360) + " 80% 50%)", 16);
+    });
+    const started = performance.now();
+    const frame = await f.call("frame", {}, "GET");
+    assert.equal(frame.width, 800); assert.equal(frame.height, 600);
+    const stats = (await f.call("health", {}, "GET")).capture;
+    assert.equal(stats.fallbacks, persistent ? 1 : 0);
+    assert(stats.invalid_frames >= 4 && stats.invalid_frames <= 17);
+    assert(performance.now() - started < 5000, "startup size recovery must finish before the frame deadline");
+    assert(persistent ? stats.screenshots > 0 : stats.streamed_frames > 0);
+  }
+});
+
+integration("a late native resize during startup retains the last valid image", { timeout: 10000 }, async t => {
+  const f = await fixture(t, {}, { continuousFrames: true, displayScale: 1 }), { page } = await f.open();
+  const old = (await page.screenshot({ type: "jpeg", quality: 85 })).toString("base64");
+  await f.call("resize", { width: 800, height: 600 });
+  let valid = false, stale = 0, signal;
+  const observed = new Promise(resolve => { signal = resolve; });
+  interceptCapture(f.context(), frame => {
+    if (!valid) return frame;
+    if (stale++ < 2) { if (stale === 2) signal(); return { ...frame, data: old }; }
+    return frame;
+  });
+  await page.evaluate(() => {
+    let n = 0;
+    window.animation = setInterval(() => document.body.style.backgroundColor = "hsl(" + (n++ * 19 % 360) + " 80% 50%)", 16);
+  });
+  await f.call("frame", {}, "GET");
+  valid = true;
+  await observed;
+  const frame = await f.call("frame", {}, "GET");
+  assert.equal(frame.width, 800); assert.equal(frame.height, 600);
+  const stats = (await f.call("health", {}, "GET")).capture;
+  assert(stats.invalid_frames >= 2);
+  assert.equal(stats.fallbacks, 0);
+  assert.equal(stats.screenshots, 0);
 });

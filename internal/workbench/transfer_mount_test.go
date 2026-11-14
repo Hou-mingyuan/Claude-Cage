@@ -21,11 +21,11 @@ func transferMountServer(t *testing.T, running bool, mounted string) *Server {
 		t.Fatal(err)
 	}
 	if mounted == "current" {
-		mounted = guestPath(transfer)
+		mounted = transfer
 	} else if mounted == "old" {
-		mounted = guestPath(old)
+		mounted = old
 	}
-	config := map[string]any{"mountType": "reverse-sshfs", "mounts": []any{map[string]any{"location": mounted, "mountPoint": mounted, "writable": true, "sshfs": map[string]any{"sftpDriver": "builtin"}}}, "networks": []any{}}
+	config := map[string]any{"mountType": "reverse-sshfs", "mounts": []any{map[string]any{"location": mounted, "mountPoint": guestPath(mounted), "writable": true, "sshfs": map[string]any{"sftpDriver": "builtin"}}}, "networks": []any{}}
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestTransferMountMigrationRequiresRestartAtEveryEntry(t *testing.T) {
 
 func TestStoppingEnvironmentWithNoSelectedProjectStillStopsInstance(t *testing.T) {
 	s := transferMountServer(t, false, "current")
-	s.exe = filepath.Join(t.TempDir(), "missing-stop-program")
+	s.exe = filepath.Join(t.TempDir(), "missing-stop-program.exe")
 	if s.workspace() != "" {
 		t.Fatal("fixture unexpectedly has a project")
 	}

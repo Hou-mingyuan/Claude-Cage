@@ -1,0 +1,40 @@
+name: Build and verify the website
+description: Check the site and package the Pages artifact
+inputs:
+  release_tag:
+    description: Published release to verify when building its download page
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: www/package-lock.json
+    - shell: bash
+      run: npm ci --prefix www
+    - shell: bash
+      run: node --test www/scripts/sync-release.test.mjs
+    - name: Agent package discovery and verification
+      shell: bash
+      run: node --test scripts/agent-bootstrap.test.mjs
+    - name: Resolve the public download version
+      shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.release_tag }}
+      run: |
+        if [[ -n "$RELEASE_TAG" ]]; then
+          node www/scripts/sync-release.mjs --tag "$RELEASE_TAG"
+        else
+          node www/scripts/sync-release.mjs
+        fi
+    - shell: bash
+      run: npm run --prefix www check
+    - shell: bash
+      run: npm run --prefix www build
+    - shell: bash
+      run: node www/scripts/check-site.mjs
+    - uses: actions/upload-pages-artifact@v4
+      with:
+        path: www/dist

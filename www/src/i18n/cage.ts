@@ -64,8 +64,8 @@ function readCopy(language: typeof languages[number]) {
     boundaryTitle: boundaries.title, boundaries: bullets(boundaries.body).map(pair),
     downloadTitle: installation.title, downloadText: installParagraphs[1],
     downloadNote: installParagraphs[0], updateNote: installParagraphs.at(-1) || '',
-    communityTitle: contribution.title, communityText: paragraphs(contribution.body).at(-1) || '',
-    group: 'QQ · 1127457578', docsTitle: contribution.title, docs,
+    communityTitle: contribution.title, communityText: paragraphs(contribution.body.replace(/<p\b[^>]*>[\s\S]*?<\/p>/g, '')).at(-1) || '',
+    group: isChinese ? 'QQ 群 · 782087179' : 'QQ group · 782087179', docsTitle: contribution.title, docs,
     licenseTitle: license.title, licenseText: paragraphs(license.body).slice(0,-1).join('\n\n'),
     independent: paragraphs(license.body).at(-1) || '',
   };

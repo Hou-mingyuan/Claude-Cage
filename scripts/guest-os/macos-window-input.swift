@@ -118,12 +118,18 @@ final class MacWindowInputSession {
         event.postToPid(target.pid)
     }
 
+    // A window-targeted NSEvent carries AppKit-local coordinates. Chrome
+    // consumes Quartz mouse positions instead. Route a physical-style event
+    // only when the intended signed window is still under that screen point.
     func pointer(_ input: Request, target: MacInputWindow, window: SCWindow, canvas: ClaudeCanvas?) throws {
         try Self.requirePointerOwner(self)
         guard let phase = input.phase, ["down", "move", "up"].contains(phase),
               let x = input.x, let y = input.y, x.isFinite, y.isFinite, (0..<1).contains(x), (0..<1).contains(y) else { throw Failure(8, "invalid_input") }
         let crop = canvas?.cropTop ?? 0
         let point = CGPoint(x: target.origin.x + target.extent.width * x, y: target.origin.y + crop + (target.extent.height - crop) * y)
+        if input.surface == "browser", try !MacChromeWindow.shared.ownsPoint(point, pid: target.pid, window: window.windowID) {
+            throw Failure(7, "window_changed")
+        }
         let button = phase == "move" ? buttons.keys.sorted().first : input.button
         let types: [NSEvent.EventType]
         if phase == "move" { types = [.leftMouseDragged, .otherMouseDragged, .rightMouseDragged] }
@@ -146,10 +152,23 @@ final class MacWindowInputSession {
         }
         let type = button.map { types[$0] } ?? .mouseMoved
         let count = input.clicks ?? button.flatMap { buttons[$0]?.3 } ?? 0
-        let local = CGPoint(x: point.x - target.origin.x, y: target.extent.height - (point.y - target.origin.y))
-        guard let event = NSEvent.mouseEvent(with: type, location: local, modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(flags(input).rawValue)),
-            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: Int(window.windowID), context: nil,
-            eventNumber: 0, clickCount: count, pressure: phase == "up" ? 0 : 1)?.cgEvent else { throw Failure(8, "input_failed") }
+        let event: CGEvent
+        if input.surface == "browser" {
+            guard let cgType = CGEventType(rawValue: UInt32(type.rawValue)),
+                  let pointer = CGEvent(mouseEventSource: source, mouseType: cgType, mouseCursorPosition: point,
+                                        mouseButton: button == 1 ? .center : button == 2 ? .right : .left) else {
+                throw Failure(8, "input_failed")
+            }
+            pointer.flags = flags(input)
+            pointer.setIntegerValueField(.mouseEventClickState, value: Int64(count))
+            event = pointer
+        } else {
+            let local = CGPoint(x: point.x - target.origin.x, y: target.extent.height - (point.y-target.origin.y))
+            guard let pointer = NSEvent.mouseEvent(with: type, location: local, modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(flags(input).rawValue)),
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: Int(window.windowID), context: nil,
+                eventNumber: 0, clickCount: count, pressure: phase == "up" ? 0 : 1)?.cgEvent else { throw Failure(8, "input_failed") }
+            event = pointer
+        }
         event.location = point
         event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowID))
         event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowID))
@@ -158,12 +177,13 @@ final class MacWindowInputSession {
         if phase == "move" { for button in Array(buttons.keys) { buttons[button] = (target.pid, window.windowID, point, count) } }
         // Preserve the existing AX activation for Electron buttons. A real
         // drag flushes the deferred down before its first dragged event.
-        if phase == "down", button == 0, count == 1, buttons.count == 1, flags(input).isEmpty,
+        if input.surface != "browser", phase == "down", button == 0, count == 1, buttons.count == 1, flags(input).isEmpty,
            let element = macPressTarget(target, point: point) {
             press = (element, event, point, target.pid, window.windowID)
             return
         }
-        event.postToPid(target.pid)
+        if input.surface == "browser" { event.post(tap: .cghidEventTap) }
+        else { event.postToPid(target.pid) }
     }
 
     private func stillOwnsWindow(_ pid: pid_t, _ window: CGWindowID) -> Bool {

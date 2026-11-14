@@ -2,6 +2,7 @@ package containerenv
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
 	"github.com/sylvinus/agent-vm/internal/host"
 )
 
@@ -22,8 +24,9 @@ mount -t cgroup2 none /sys/fs/cgroup
 exec /sbin/init
 `
 
-func (r *Runtime) createArguments() []string {
-	args := []string{"create", "--name", r.Name(), "--label", profileLabel + "=" + r.identity, "--network", "none", "--cgroupns", "private", "--cgroup-parent", r.resourceSlice(), "--ipc", "private", "--hostname", "cage", "--add-host", "cage:127.0.1.1", "--cpus", strconv.Itoa(r.config.CPUs), "--memory", strconv.FormatInt(r.config.MemoryBytes, 10), "--pids-limit", strconv.Itoa(PIDLimit), "--device", "/dev/fuse", "--device", "/dev/net/tun", "--cap-add", "SYS_ADMIN", "--cap-add", "NET_ADMIN", "--tmpfs", "/run", "--tmpfs", "/tmp", "--stop-signal", "SIGRTMIN+3", "--stop-timeout", "30"}
+func (r *Runtime) createArguments(identity *guestidentity.Identity) []string {
+	data, _ := json.Marshal(identity)
+	args := []string{"create", "--name", r.Name(), "--label", profileLabel + "=" + r.identity, "--network", "none", "--cgroupns", "private", "--cgroup-parent", r.resourceSlice(), "--ipc", "private", "--label", guestIdentityLabel + "=" + string(data), "--hostname", identity.Hostname, "--add-host", identity.Hostname + ":127.0.1.1", "--env", "container_uuid=" + identity.UUID, "--cpus", strconv.Itoa(r.config.CPUs), "--memory", strconv.FormatInt(r.config.MemoryBytes, 10), "--pids-limit", strconv.Itoa(PIDLimit), "--device", "/dev/fuse", "--device", "/dev/net/tun", "--cap-add", "SYS_ADMIN", "--cap-add", "NET_ADMIN", "--tmpfs", "/run", "--tmpfs", "/tmp", "--stop-signal", "SIGRTMIN+3", "--stop-timeout", "30"}
 	if r.config.Engine == "podman" {
 		return append(args, "--http-proxy=false", "--systemd", "always", "--pull", "never", "--entrypoint", "/sbin/init", r.config.Image)
 	}
@@ -79,7 +82,11 @@ func (r *Runtime) Prepare(ctx context.Context, log io.Writer) error {
 	if !imageIDPattern.MatchString(strings.TrimSpace(string(image))) {
 		return errors.New("容器基础镜像没有有效 SHA-256 标识")
 	}
-	if _, err := r.output(ctx, r.createArguments()...); err != nil {
+	identity, err := guestidentity.New()
+	if err != nil {
+		return err
+	}
+	if _, err := r.output(ctx, r.createArguments(identity)...); err != nil {
 		return err
 	}
 	container, err = r.inspectContainer(ctx)

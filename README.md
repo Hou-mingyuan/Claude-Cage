@@ -10,7 +10,7 @@
 
 <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
 
-**[项目主页](https://lee-xeo.github.io/Claude-Cage/) · [下载应用](https://lee-xeo.github.io/Claude-Cage/#download) · [使用文档](https://lee-xeo.github.io/Claude-Cage/docs/) · [常见问题](https://lee-xeo.github.io/Claude-Cage/docs/troubleshooting/)**
+**[项目主页](https://claude-cage.com/) · [下载应用](https://claude-cage.com/#download) · [使用文档](https://claude-cage.com/docs/) · [常见问题](https://claude-cage.com/docs/troubleshooting/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -43,7 +43,7 @@ Claude Cage 让你在熟悉的系统里与 Claude 一起工作：Mac 上用 macO
 
 - **在一个窗口里完成工作。** 用终端运行 Claude Code，用编辑器查看改动，用 Cage 浏览器预览服务和完成登录。
 - **用熟悉的系统开发。** 选择 macOS、Windows 或 Linux 客机，使用对应平台的工具；也可自动匹配本机系统版本，下载官方镜像并创建独立环境。 [选择客机系统](docs/guide/guest-systems.md)
-- **控制共享范围。** 项目共享只限明确打开的文件夹；主机的 Claude 登录、浏览器配置和 SSH 密钥不会自动导入。
+- **控制共享范围。** 只共享默认工作区和明确打开的项目文件夹；主机的 Claude 登录、浏览器配置和 SSH 密钥不会自动导入。
 - **看清网络状态。** 内置代理管理支持导入订阅、选择节点和检查出口。关键检查未通过时，环境保持离线；代理不可用时没有直连回退。
 - **下次继续使用。** 工具、文件和登录状态保存在虚拟磁盘里，关闭窗口可以保留后台任务。
 - **管理多个 Claude Code 订阅。** 查看额度、为新会话分配账号，并在明确授权后切换账号接续历史。 [Claude Code](docs/guide/accounts.md)
@@ -51,7 +51,7 @@ Claude Cage 让你在熟悉的系统里与 Claude 一起工作：Mac 上用 macO
 - **把环境放到自己的服务器。** 通过 SSH 部署或连接 Linux VPS，工具、任务和数据留在服务器，无需 KVM。[云端部署与 SSH](docs/guide/cloud.md)
 - **通过私网连接设备。** 在 Cage 内登录 Tailscale，查看网络中的设备，使用 SSH、Web 与其他 TCP 服务。 [Tailscale 私网](docs/guide/tailscale.md)
 
-浏览器收藏、无痕会话、Cookie、扩展、密码保险箱，以及外观、资源、存储和工具更新，见[完整使用文档](https://lee-xeo.github.io/Claude-Cage/docs/)。
+浏览器收藏、无痕会话、Cookie、扩展、密码保险箱，以及外观、资源、存储和工具更新，见[完整使用文档](https://claude-cage.com/docs/)。
 
 ## 快速开始
 
@@ -67,7 +67,7 @@ Claude Cage 让你在熟悉的系统里与 Claude 一起工作：Mac 上用 macO
 
 Cage 支持 macOS、Windows 和 Linux：macOS 14+ 的 Apple Silicon Mac、Windows 10 22H2 / 11 x64，以及 Debian 12 / Ubuntu 22.04 / 24.04 x86_64。Windows 11 客机需要支持 Hyper-V 的 Windows 11 专业版、企业版或教育版主机；其他受支持的 Windows 主机可使用 Debian 或 Ubuntu 22.04。Intel Mac、Windows ARM64 和 Linux ARM64 暂不支持。 [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md)。
 
-1. 打开[项目主页](https://lee-xeo.github.io/Claude-Cage/#download)，点击“下载应用”并选择平台。
+1. 打开[项目主页](https://claude-cage.com/#download)，点击“下载应用”并选择平台。
 2. macOS：打开安装包，将 **Cage** 拖入 **Applications（应用程序）**，再从“应用程序”启动。Windows：[安装说明](docs/windows.md#安装并开始工作) · Linux：[安装说明](docs/linux.md#安装并开始工作)。
 3. 按应用内引导配置自己的代理，启动环境后打开项目。
 
@@ -91,7 +91,7 @@ macOS 和已签名 Windows 版本支持通过所选代理更新；Windows 未签
 
 ### 3. 打开项目，运行 Claude
 
-点击“打开项目”选择本机上的文件夹，再新建终端，输入 `claude`，在 Cage 浏览器中完成自己的账户授权。没有项目时可先使用浏览器和 Claude Desktop；终端和文件编辑器需要先添加项目。完整步骤见[开始使用](docs/getting-started.md)。
+点击“打开项目”选择本机上的文件夹，再新建终端，输入 `claude`，在 Cage 浏览器中完成自己的账户授权。也可以先使用默认工作区，无需提前准备项目。完整步骤见[开始使用](docs/getting-started.md)。
 
 ## 使用前了解这些边界
 
@@ -104,26 +104,30 @@ macOS 和已签名 Windows 版本支持通过所选代理更新；Windows 未签
 
 ## 文档与贡献
 
-面向用户的[官网使用文档](https://lee-xeo.github.io/Claude-Cage/docs/)支持按功能浏览、搜索与章节直达。各项操作见[使用文档导航](docs/README.md)。
+面向用户的[官网使用文档](https://claude-cage.com/docs/)支持按功能浏览、搜索与章节直达。各项操作见[使用文档导航](docs/README.md)。
 
 | 你要做什么 | 从这里开始 |
 |---|---|
-| 让自己的 Agent 下载、安装、配置和排查 Cage | [Agent 使用指南](https://lee-xeo.github.io/Claude-Cage/docs/agent/) |
-| 第一次安装、配置代理、打开项目 | [安装与首次启动](https://lee-xeo.github.io/Claude-Cage/docs/installation/) |
-| 选择 macOS、Windows、Debian 或 Ubuntu 22.04 客机，使用原生开发工具 | [选择客机系统](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
-| 添加多个订阅、查看额度和分配终端 | [多账号与额度](https://lee-xeo.github.io/Claude-Cage/docs/accounts/) |
-| 手机扫码、工具审批、远程浏览器 | [手机连接与远程会话](https://lee-xeo.github.io/Claude-Cage/docs/mobile/) |
-| 在自己的 VPS 部署和连接环境 | [云端部署与 SSH](https://lee-xeo.github.io/Claude-Cage/docs/cloud/) |
-| 了解每一项设置及何时生效 | [设置参考](https://lee-xeo.github.io/Claude-Cage/docs/settings/) |
-| 维护存储、资源、更新与备份 | [维护、资源与数据](https://lee-xeo.github.io/Claude-Cage/docs/maintenance/) |
-| 处理下载、启动、联网和登录问题 | [故障排查](https://lee-xeo.github.io/Claude-Cage/docs/troubleshooting/) |
-| 了解文件、按键和关闭与退出行为 | [项目、终端与文件](https://lee-xeo.github.io/Claude-Cage/docs/workbench/) |
+| 让自己的 Agent 下载、安装、配置和排查 Cage | [Agent 使用指南](https://claude-cage.com/docs/agent/) |
+| 第一次安装、配置代理、打开项目 | [安装与首次启动](https://claude-cage.com/docs/installation/) |
+| 选择 macOS、Windows、Debian 或 Ubuntu 22.04 客机，使用原生开发工具 | [选择客机系统](https://claude-cage.com/docs/guest-systems/) |
+| 添加多个订阅、查看额度和分配终端 | [多账号与额度](https://claude-cage.com/docs/accounts/) |
+| 手机扫码、工具审批、远程浏览器 | [手机连接与远程会话](https://claude-cage.com/docs/mobile/) |
+| 在自己的 VPS 部署和连接环境 | [云端部署与 SSH](https://claude-cage.com/docs/cloud/) |
+| 了解每一项设置及何时生效 | [设置参考](https://claude-cage.com/docs/settings/) |
+| 维护存储、资源、更新与备份 | [维护、资源与数据](https://claude-cage.com/docs/maintenance/) |
+| 处理下载、启动、联网和登录问题 | [故障排查](https://claude-cage.com/docs/troubleshooting/) |
+| 了解文件、按键和关闭与退出行为 | [项目、终端与文件](https://claude-cage.com/docs/workbench/) |
 | 报告可复现问题 | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| 提交修复、功能实现或文档改进 | [贡献指南](.github/CONTRIBUTING.md) |
+
+代码与文档贡献采用“`contribution` Issue 审核 → 邀请成为协作者 → 提交 PR → 审查合入”的流程。请先提交[方案贡献 Issue](https://github.com/Lee-xeo/Claude-Cage/issues/new?template=05-contribution.yml)；维护者审核通过并添加 `accepted` 标签后，自动化会发送协作者邀请。接受邀请后再创建 PR，详细步骤与权限说明见[贡献指南](.github/CONTRIBUTING.md)。
 
 本项目仍在快速迭代中，欢迎加入交流群提意见，欢迎社区大佬一起维护
 
 <p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="Claude Cage QQ 交流群二维码（群号：1127457578）" width="240" /></a>
+  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ 群 · 782087179" width="240" /></a>
+  <br />QQ 群 · 782087179
 </p>
 
 ## 来源与许可

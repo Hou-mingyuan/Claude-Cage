@@ -300,8 +300,10 @@ if [[ "$INSTALL_CHROMIUM" == "1" ]]; then
   # sans-serif and serif to Liberation Mono.
   # Disposable browser contexts use the application locale's language defaults.
   # Debian ships the non-English locale resources in this separate package.
+  chromium_binary=/usr/bin/chromium
   if [[ "${CLAUDE_CAGE:-}" == 1 ]] && cage_is_ubuntu; then
     cage_install_chromium
+    chromium_binary=/usr/local/lib/workbench-browser/chromium
   else
     chromium_packages=(chromium chromium-l10n fonts-liberation fonts-dejavu-core xvfb xauth)
     if [[ "${CLAUDE_CAGE:-}" == 1 ]]; then
@@ -309,10 +311,12 @@ if [[ "$INSTALL_CHROMIUM" == "1" ]]; then
     fi
     apt_get install -y --no-install-recommends "${chromium_packages[@]}"
   fi
-  sudo ln -sf /usr/bin/chromium /usr/bin/google-chrome
-  sudo ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable
   sudo mkdir -p /opt/google/chrome
-  sudo ln -sf /usr/bin/chromium /opt/google/chrome/chrome
+  for alias in /usr/bin/google-chrome /usr/bin/google-chrome-stable /opt/google/chrome/chrome; do
+    if [[ ! -e $alias && ! -L $alias ]]; then
+      sudo ln -s "$chromium_binary" "$alias"
+    fi
+  done
 fi
 
 if [[ "$INSTALL_GH" == "1" ]]; then
@@ -333,7 +337,7 @@ fi
 if [[ "$INSTALL_CLAUDE" == "1" ]]; then
   echo "Installing Claude Code..."
   if [[ "${CLAUDE_CAGE:-}" == "1" ]]; then
-    # Official npm distribution; lock the first cage release to a known version.
+    # Resolve the official npm latest version when the guest installs it.
     # npm retries interrupted package transfers and verifies registry integrity.
     cage_install_tool claude
   else
@@ -724,7 +728,7 @@ if [[ "$INSTALL_MCP_PLAYWRIGHT" == "1" ]] && any_agent_installed; then
   if [[ "$INSTALL_NODE" == "1" && "$INSTALL_CHROMIUM" == "1" ]]; then
     configure_mcp playwright env PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
       npx -y @playwright/mcp@latest --headless --isolated \
-      --executable-path /usr/bin/chromium
+      --executable-path "$chromium_binary"
   else
     echo "Skipping Playwright MCP config: requires Node.js and Chromium." >&2
   fi

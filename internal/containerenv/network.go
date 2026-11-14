@@ -14,6 +14,7 @@ import (
 
 	"github.com/containers/gvisor-tap-vsock/pkg/types"
 	"github.com/containers/gvisor-tap-vsock/pkg/virtualnetwork"
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
 	"github.com/sylvinus/agent-vm/internal/cage"
 )
 
@@ -30,16 +31,21 @@ const (
 // The caller must close the process endpoint when Run returns. A gate starts
 // closed; connecting SSH does not authorize any guest outbound traffic.
 type Network struct {
-	Gate  *cage.EgressGate
-	stack *virtualnetwork.VirtualNetwork
+	Gate     *cage.EgressGate
+	stack    *virtualnetwork.VirtualNetwork
+	guestMAC net.HardwareAddr
 }
 
-func networkConfiguration(gate *cage.EgressGate) types.Configuration {
+func networkConfiguration(gate *cage.EgressGate, identity *guestidentity.Identity) types.Configuration {
+	guestMAC, gatewayMAC := GuestMAC, GatewayMAC
+	if identity != nil {
+		guestMAC, gatewayMAC = identity.MACAddress, identity.GatewayMACAddress
+	}
 	return types.Configuration{
 		MTU:    NetworkMTU,
 		Subnet: "192.168.64.0/24", GatewayIP: GatewayIP,
-		GatewayMacAddress: GatewayMAC,
-		DHCPStaticLeases:  map[string]string{GuestIP: GuestMAC},
+		GatewayMacAddress: gatewayMAC,
+		DHCPStaticLeases:  map[string]string{GuestIP: guestMAC},
 		// No NAT-to-host entries and no automatically published ports.
 		NAT: map[string]string{}, Forwards: map[string]string{},
 		Ec2MetadataAccess: false,
@@ -48,18 +54,26 @@ func networkConfiguration(gate *cage.EgressGate) types.Configuration {
 	}
 }
 
-func NewNetwork(cfg cage.Config) (*Network, error) {
+func NewNetwork(cfg cage.Config) (*Network, error) { return newNetwork(cfg, nil) }
+
+func newNetwork(cfg cage.Config, identity *guestidentity.Identity) (*Network, error) {
+	if identity != nil {
+		if err := identity.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	gate, err := cage.NewEgressGate(cfg)
 	if err != nil {
 		return nil, err
 	}
-	configuration := networkConfiguration(gate)
+	configuration := networkConfiguration(gate, identity)
 	stack, err := virtualnetwork.New(&configuration)
 	if err != nil {
 		gate.Close("容器网络初始化失败")
 		return nil, err
 	}
-	return &Network{Gate: gate, stack: stack}, nil
+	guestMAC, _ := net.ParseMAC(configuration.DHCPStaticLeases[GuestIP])
+	return &Network{Gate: gate, stack: stack, guestMAC: guestMAC}, nil
 }
 
 // Run consumes the documented four-byte big-endian frame length followed by
@@ -69,7 +83,7 @@ func (n *Network) Run(ctx context.Context, endpoint net.Conn) error {
 	defer stop()
 	defer n.Gate.Close("容器网络连接已断开")
 	defer endpoint.Close()
-	return n.stack.AcceptQemu(ctx, &boundedFrameConnection{Conn: endpoint})
+	return n.stack.AcceptQemu(ctx, &boundedFrameConnection{Conn: endpoint, sourceMAC: n.guestMAC})
 }
 
 // ServeSSH only accepts the listener supplied by the host. It never listens

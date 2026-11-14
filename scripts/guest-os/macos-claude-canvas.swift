@@ -42,7 +42,7 @@ private func liveBounds(_ id: CGWindowID, _ pid: pid_t) throws -> CGRect {
     return rect
 }
 
-private func owningAXWindow(_ pid: pid_t, _ frame: CGRect) -> AXUIElement? {
+func owningAXWindow(_ pid: pid_t, _ frame: CGRect) -> AXUIElement? {
     guard AXIsProcessTrusted(), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
           let raw = axAttribute(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute),
           CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
@@ -72,6 +72,23 @@ private func titleBarHeight(_ window: AXUIElement, _ frame: CGRect) -> CGFloat {
 @MainActor
 final class ClaudeCanvasSession {
     static let shared = ClaudeCanvasSession()
+    static let browser = ClaudeCanvasSession(browser: true)
+    private let browser: Bool
+    let stream: MacWindowStream
+    init(browser: Bool = false) {
+        self.browser = browser
+        self.stream = browser ? MacWindowStream() : .shared
+    }
+
+    private func owns(_ pid: pid_t) throws -> Bool {
+        if browser { return MacChromeWindow.shared.owns(pid) }
+        return try claudePIDs().contains(pid)
+    }
+
+    private func cropHeight(_ ax: AXUIElement, _ rect: CGRect) -> CGFloat {
+        browser ? 0 : titleBarHeight(ax, rect)
+    }
+
     private var last: ClaudeCanvas?
     private var token = ""
     private var requested: (id: CGWindowID, pid: pid_t, size: CGSize, observed: CGSize, time: Date)?
@@ -83,7 +100,7 @@ final class ClaudeCanvasSession {
         var bounds = try liveBounds(window.windowID, pid)
         var crop: CGFloat = 0, resized = false
         if let ax = owningAXWindow(pid, bounds) {
-            crop = titleBarHeight(ax, bounds)
+            crop = cropHeight(ax, bounds)
             if canSet(ax, kAXSizeAttribute) {
                 let display = CGDisplayBounds(CGMainDisplayID())
                 let wanted = CGSize(width: min(CGFloat(width), display.width),
@@ -109,7 +126,7 @@ final class ClaudeCanvasSession {
                     requested = (window.windowID, pid, wanted, bounds.size, Date())
                 }
                 resized = abs(bounds.width-wanted.width) < 2 && abs(bounds.height-wanted.height) < 2
-                crop = titleBarHeight(ax, bounds)
+                crop = cropHeight(ax, bounds)
             }
         }
         return ClaudeCanvas(id: window.windowID, pid: pid, frame: bounds, cropTop: crop,
@@ -124,7 +141,7 @@ final class ClaudeCanvasSession {
     func inputGeometry(_ requested: String, window: SCWindow) throws -> ClaudeCanvas {
         guard let last, token == requested, last.id == window.windowID, last.pid == window.owningApplication?.processID,
               try liveBounds(last.id, last.pid) == last.frame,
-              let ax = owningAXWindow(last.pid, last.frame), titleBarHeight(ax,last.frame) == last.cropTop else {
+              let ax = owningAXWindow(last.pid, last.frame), cropHeight(ax,last.frame) == last.cropTop else {
             throw Failure(7, "window_changed")
         }
         return last
@@ -136,17 +153,17 @@ final class ClaudeCanvasSession {
         config.height = max(1, Int((layout.frame.height*layout.scale).rounded()))
         config.captureResolution = .best
         config.ignoreShadowsSingleWindow = true; config.showsCursor = false
-        if #available(macOS 14.2, *) { config.includeChildWindows = false }
+        if #available(macOS 14.2, *) { config.includeChildWindows = browser }
         let geometry = record(layout)
-        let (updated, sequence) = try await MacWindowStream.shared.frame(filter: filter, configuration: config, identity: geometry, after: after, wait: wait)
+        let (updated, sequence) = try await stream.frame(filter: filter, configuration: config, identity: geometry, after: after, wait: wait)
         guard try liveBounds(layout.id, layout.pid) == layout.frame,
-              try claudePIDs().contains(layout.pid) else { throw Failure(7, "window_changed") }
+              try owns(layout.pid) else { throw Failure(7, "window_changed") }
         guard let image = updated else { return ["unchanged": true, "sequence": sequence, "geometry": geometry] }
         let top = Int((layout.cropTop * CGFloat(image.height) / layout.frame.height).rounded())
         guard top >= 0, top < image.height,
               let content = image.cropping(to: CGRect(x:0,y:top,width:image.width,height:image.height-top)),
               try liveBounds(layout.id, layout.pid) == layout.frame,
-              try claudePIDs().contains(layout.pid) else { throw Failure(7, "window_changed") }
+              try owns(layout.pid) else { throw Failure(7, "window_changed") }
         var data = phoneJPEG ? try phoneDesktopJPEG(content) : try pngData(content)
         var mime = phoneJPEG ? "image/jpeg" : "image/png"
         if data.count >= 8<<20 {

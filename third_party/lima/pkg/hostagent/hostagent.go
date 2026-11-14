@@ -39,7 +39,6 @@ import (
 	hostagentapi "github.com/lima-vm/lima/v2/pkg/hostagent/api"
 	"github.com/lima-vm/lima/v2/pkg/hostagent/dns"
 	"github.com/lima-vm/lima/v2/pkg/hostagent/events"
-	"github.com/lima-vm/lima/v2/pkg/instance/hostname"
 	"github.com/lima-vm/lima/v2/pkg/limatype"
 	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
 	"github.com/lima-vm/lima/v2/pkg/limayaml"
@@ -418,7 +417,7 @@ func (a *HostAgent) Run(ctx context.Context) error {
 			hosts = make(map[string]string)
 		}
 		hosts["host.lima.internal"] = networks.SlirpGateway
-		name := hostname.FromInstName(a.instName) // TODO: support customization
+		name := limayaml.GuestHostname(a.instConfig, a.instName)
 		hosts[name] = networks.SlirpIPAddress
 		// The guest reaches this server on the host's loopback, past any
 		// usernet.Outbound policy.

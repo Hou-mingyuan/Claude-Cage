@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location('display_governor', Path(__file__).with_name('display-governor.py'))
 governor = importlib.util.module_from_spec(spec)
@@ -19,6 +20,16 @@ try:
     from Xlib.ext import xtest
 except ImportError:
     display = None
+
+
+def stop_process(process):
+    process.terminate()
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=3)
+        raise AssertionError('fixture process did not stop gracefully')
 
 
 class PolicyTests(unittest.TestCase):
@@ -89,6 +100,19 @@ class PolicyTests(unittest.TestCase):
         self.assertIsNone(governor.raw_key(b'short'))
         self.assertIsNone(governor.raw_key(None))
 
+    @unittest.skipUnless(display, 'needs python3-xlib')
+    def test_requires_xi21_for_grab_safe_events(self):
+        from Xlib.ext import xinput
+        connection = mock.Mock()
+        connection.display.get_extension_major.return_value = 131
+        for minor, supported in [(0, False), (1, True), (4, True)]:
+            with self.subTest(minor=minor), mock.patch.object(xinput, 'XIQueryVersion') as query:
+                query.return_value.major_version = 2
+                query.return_value.minor_version = minor
+                self.assertEqual(governor.negotiate_input(connection), supported)
+                query.assert_called_once_with(display=connection.display, opcode=131,
+                                              major_version=2, minor_version=1)
+
 
 @unittest.skipUnless(display and shutil.which('Xtigervnc') and shutil.which('xrandr'), 'needs Xtigervnc, xrandr and python3-xlib')
 class DisplayTests(unittest.TestCase):
@@ -104,8 +128,7 @@ class DisplayTests(unittest.TestCase):
         server = subprocess.Popen(['Xtigervnc', f':{number}', '-geometry', '800x600', '-depth', '24', '-rfbport', '-1',
                                    '-rfbunixpath', self.temp.name + '/d.sock', '-nolisten', 'tcp', '-SecurityTypes', 'None'],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.addCleanup(server.wait)
-        self.addCleanup(server.terminate)
+        self.addCleanup(stop_process, server)
         for attempt in range(100):
             if os.path.exists(f'/tmp/.X11-unix/X{number}'):
                 break
@@ -120,20 +143,26 @@ class DisplayTests(unittest.TestCase):
                   f'g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)\n'
                   f'g.ACTIVE_HOLD, g.IDLE_AFTER = .5, 1.5\nsys.exit(g.main())\n')
         process = subprocess.Popen([sys.executable, '-c', script], env=self.env)
-        self.addCleanup(process.wait)
-        self.addCleanup(process.terminate)
+        self.addCleanup(stop_process, process)
         self.process = process
 
     def current(self):
-        resources = self.root.xrandr_get_screen_resources()
-        output = self.conn.xrandr_get_output_info(resources.outputs[0], resources.config_timestamp)
-        crtc = self.conn.xrandr_get_crtc_info(output.crtc, resources.config_timestamp)
-        position = 0
-        for mode in resources.modes:
-            name = resources.mode_names[position:position + mode.name_length]
-            position += mode.name_length
-            if mode.id == crtc.mode:
-                return name, round(mode.dot_clock / (mode.h_total * mode.v_total)), (mode.width, mode.height)
+        # The governor may create/switch/remove a mode between these replies.
+        # Read one atomic snapshot, like the production apply() path does.
+        self.conn.grab_server()
+        try:
+            resources = self.root.xrandr_get_screen_resources()
+            output = self.conn.xrandr_get_output_info(resources.outputs[0], resources.config_timestamp)
+            crtc = self.conn.xrandr_get_crtc_info(output.crtc, resources.config_timestamp)
+            position = 0
+            for mode in resources.modes:
+                name = resources.mode_names[position:position + mode.name_length]
+                position += mode.name_length
+                if mode.id == crtc.mode:
+                    return name, round(mode.dot_clock / (mode.h_total * mode.v_total)), (mode.width, mode.height)
+        finally:
+            self.conn.ungrab_server()
+            self.conn.sync()
 
     def modes(self):
         return subprocess.check_output(['xrandr', '--query'], env=self.env, text=True)
@@ -156,6 +185,10 @@ class DisplayTests(unittest.TestCase):
                                    '+HSync', '-VSync'], env=self.env)
             subprocess.check_call(['xrandr', '--addmode', 'VNC-0', name], env=self.env)
         subprocess.check_call(['xrandr', '--output', 'VNC-0', '--mode', name], env=self.env)
+
+    def release_pointer(self):
+        self.conn.ungrab_pointer(X.CurrentTime)
+        self.conn.sync()
 
     def test_unattended_display_slows_and_input_restores_it(self):
         original = self.current()[0]
@@ -211,6 +244,77 @@ class DisplayTests(unittest.TestCase):
             time.sleep(.2)
             self.assertEqual(self.current()[1], 20)
 
+    def test_pointer_grab_does_not_hide_scroll_activity(self):
+        # Menus, scrollbar drags and other clients may own an active grab.
+        result = self.root.grab_pointer(False, X.ButtonPressMask | X.ButtonReleaseMask | X.PointerMotionMask,
+                                        X.GrabModeAsync, X.GrabModeAsync, X.NONE, X.NONE, X.CurrentTime)
+        self.assertEqual(result, X.GrabSuccess)
+        self.addCleanup(self.release_pointer)
+        self.conn.sync()
+        self.wait(20)
+        xtest.fake_input(self.conn, X.ButtonPress, 4)
+        xtest.fake_input(self.conn, X.ButtonRelease, 4)
+        self.conn.sync()
+        self.wait(60, timeout=1)
+
+    @unittest.skipUnless(shutil.which('X0tigervnc'), 'needs X0tigervnc')
+    def test_real_remote_scroll_restores_full_rate(self):
+        self.remote_scroll()
+
+    @unittest.skipUnless(shutil.which('X0tigervnc'), 'needs X0tigervnc')
+    def test_real_remote_scroll_during_pointer_grab(self):
+        self.remote_scroll(grab=True)
+
+    def remote_scroll(self, grab=False):
+        path = self.temp.name + '/viewer.sock'
+        server = subprocess.Popen(['X0tigervnc', '-display', self.env['DISPLAY'], '-rfbport', '-1',
+                                   '-rfbunixpath', path, '-rfbunixmode', '0600', '-SecurityTypes', 'None', '-AlwaysShared'],
+                                  env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(stop_process, server)
+        for attempt in range(100):
+            if os.path.exists(path):
+                break
+            self.assertIsNone(server.poll())
+            time.sleep(.02)
+        client = socket.socket(socket.AF_UNIX)
+        self.addCleanup(client.close)
+        client.settimeout(2)
+        client.connect(path)
+        def receive(size):
+            data = b''
+            while len(data) < size:
+                block = client.recv(size - len(data))
+                self.assertTrue(block)
+                data += block
+            return data
+        self.assertEqual(receive(12), b'RFB 003.008\n')
+        client.sendall(b'RFB 003.008\n')
+        types = receive(receive(1)[0])
+        self.assertIn(1, types)
+        client.sendall(b'\x01')
+        self.assertEqual(receive(4), b'\0' * 4)
+        client.sendall(b'\x01')
+        header = receive(24)
+        receive(struct.unpack('>I', header[20:24])[0])
+        # RandR refresh changes notify viewers like a resize. A bare RFB
+        # client without DesktopSize support is disconnected by TigerVNC.
+        client.sendall(struct.pack('>BBHi', 2, 0, 1, -223))
+        client.sendall(struct.pack('>BBHH', 5, 0, 40, 40))
+        if grab:
+            result = self.root.grab_pointer(False, X.ButtonPressMask | X.ButtonReleaseMask | X.PointerMotionMask,
+                                            X.GrabModeAsync, X.GrabModeAsync, X.NONE, X.NONE, X.CurrentTime)
+            self.assertEqual(result, X.GrabSuccess)
+            self.addCleanup(self.release_pointer)
+            self.conn.sync()
+        self.wait(20)
+        # Exact RFB wheel input used by noVNC, not an XTest stand-in.
+        # Keep the coordinates unchanged so motion cannot mask a lost wheel.
+        for _ in range(4):
+            client.sendall(struct.pack('>BBHH', 5, 8, 40, 40) + struct.pack('>BBHH', 5, 0, 40, 40))
+            self.wait(60, timeout=.4)
+            time.sleep(.3)
+            self.assertEqual(self.current()[1], 60)
+
     def test_resize_keeps_its_size_and_removes_earlier_modes(self):
         self.wait(30)
         self.resize(1024, 700)
@@ -236,6 +340,30 @@ class DisplayTests(unittest.TestCase):
         self.process.terminate()
         self.assertEqual(self.process.wait(timeout=3), 0)
         self.assertEqual(self.current()[:2], (original, 60))
+
+    def test_stopping_idle_governor_wakes_and_restores(self):
+        original = self.current()[0]
+        self.wait(20)
+        self.process.terminate()
+        self.assertEqual(self.process.wait(timeout=3), 0)
+        self.assertEqual(self.current()[:2], (original, 60))
+
+    def test_stopping_during_input_bursts_restores_full_rate(self):
+        original = self.current()[0]
+        self.wait(20)
+        for x in range(30, 80):
+            xtest.fake_input(self.conn, X.MotionNotify, x=x, y=40)
+        self.conn.sync()
+        self.process.terminate()
+        self.assertEqual(self.process.wait(timeout=3), 0)
+        self.assertEqual(self.current()[:2], (original, 60))
+
+    def test_stopping_after_resize_preserves_new_size(self):
+        self.wait(30)
+        self.resize(1024, 700)
+        self.process.terminate()
+        self.assertEqual(self.process.wait(timeout=3), 0)
+        self.assertEqual(self.current()[1:], (60, (1024, 700)))
 
 
 if __name__ == '__main__':

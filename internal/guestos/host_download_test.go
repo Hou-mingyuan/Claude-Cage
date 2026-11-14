@@ -38,16 +38,27 @@ func TestMacMediaUsesHostDownloaderForEveryPackage(t *testing.T) {
 	body := `#!/bin/sh
 set -eu
 test "$1" = host-download
-test "$6" = "$FIXTURE_MEDIA/.downloads"
-case "$4" in chrome.dmg) test -z "$7";; *) test "$7" = "$FIXTURE_DIGEST";; esac
+case "$4" in chrome.dmg|macos-cli-latest|macos-cli-manifest.json) test "$#" = 5;; *) test "$6" = "$FIXTURE_MEDIA/.downloads"; test "$7" = "$FIXTURE_DIGEST";; esac
 printf '%s %s %s\n' "$2" "$4" "${5:-}" >> "$FIXTURE_DOWNLOADS"
 case "$4" in macos-cli-git.tar.gz) test ! -f "$FIXTURE_MEDIA/fail-git" || exit 1;; esac
 case "$2" in https://github.com/*) exit 1;; esac
 case "$2" in https://api.github.com/*) test "$5" = application/octet-stream;; esac
-printf fixture > "$3"
+case "$4" in
+  macos-cli-latest) printf 2.1.322 > "$3";;
+  macos-cli-manifest.json) printf '{"version":"2.1.322","platforms":{"darwin-arm64":{"binary":"claude","checksum":"%s"}}}' "$FIXTURE_DIGEST" > "$3";;
+  *) printf fixture > "$3";;
+esac
 printf 'CAGE_HOST_BYTES %s 7 7\n' "$4"
 `
 	if err := os.WriteFile(helper, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	environment := filepath.Join(dir, "environment.sh")
+	if err := os.WriteFile(environment, []byte(`codesign() { :; }
+plutil() {
+  case "$2" in version) printf 2.1.322;; platforms.darwin-arm64.binary) printf claude;; platforms.darwin-arm64.checksum) printf '%s' "$FIXTURE_DIGEST";; *) return 1;; esac
+}
+`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	media := filepath.Join(dir, "media")
@@ -60,7 +71,7 @@ printf 'CAGE_HOST_BYTES %s 7 7\n' "$4"
 	}
 	run := func() ([]byte, error) {
 		cmd := exec.CommandContext(t.Context(), "bash", filepath.Join(dir, "prepare-macos-media.sh"), media)
-		cmd.Env = append(os.Environ(), "CAGE_HOST_DOWNLOADER="+helper, "CAGE_REFRESH_TOOLS=1", "FIXTURE_MEDIA="+media, "FIXTURE_DIGEST="+digest, "FIXTURE_DOWNLOADS="+filepath.Join(dir, "requests"))
+		cmd.Env = append(os.Environ(), "BASH_ENV="+environment, "CAGE_HOST_DOWNLOADER="+helper, "CAGE_REFRESH_TOOLS=1", "FIXTURE_MEDIA="+media, "FIXTURE_DIGEST="+digest, "FIXTURE_DOWNLOADS="+filepath.Join(dir, "requests"))
 		return cmd.CombinedOutput()
 	}
 	output, err := run()
@@ -79,7 +90,7 @@ printf 'CAGE_HOST_BYTES %s 7 7\n' "$4"
 	if strings.Count(string(requests), " macos-cli-claude ") != 1 {
 		t.Fatal("completed CLI package was fetched again on retry")
 	}
-	for _, name := range []string{"editor.tgz", "playwright.tgz", "node.tgz", "chrome.dmg", "macos-cli-claude", "macos-cli-uv.tar.gz", "macos-cli-python.tar.gz", "macos-cli-git.tar.gz"} {
+	for _, name := range []string{"editor.tgz", "node.tgz", "chrome.dmg", "macos-cli-claude", "macos-cli-uv.tar.gz", "macos-cli-python.tar.gz", "macos-cli-git.tar.gz"} {
 		if !strings.Contains(string(requests), " "+name+" ") || !strings.Contains(string(output), "CAGE_HOST_BYTES "+name+" 7 7") {
 			t.Fatalf("component bypassed host download helper: %s\n%s", name, requests)
 		}

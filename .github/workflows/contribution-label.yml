@@ -1,0 +1,26 @@
+name: Label contribution issues
+# Issues created through the CLI or API skip the form's labels, and authors
+# without triage access cannot add them. The title prefix is the fallback.
+on:
+  issues:
+    types: [opened, edited, reopened]
+permissions:
+  issues: write
+concurrency:
+  group: contribution-label-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  label:
+    if: >-
+      github.event.issue.state == 'open' &&
+      startsWith(github.event.issue.title, '[Contribution]') &&
+      !contains(github.event.issue.labels.*.name, 'contribution')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Add the contribution label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: gh issue edit "$ISSUE_NUMBER" --add-label contribution

@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
+	"github.com/sylvinus/agent-vm/internal/guestos"
 )
 
 func (s *Server) nativeBrowserClient() *windowsBrowserClient {
@@ -24,8 +25,11 @@ func (s *Server) nativeBrowserClient() *windowsBrowserClient {
 		if s.macosGuest != nil {
 			ctx, cancel := context.WithCancel(s.lifetimeContextLocked())
 			s.windowsBrowserControl = &windowsBrowserClient{ctx: ctx, cancel: cancel, ownsBrowser: true, start: func(ctx context.Context) (*exec.Cmd, error) {
-				const base = "/usr/local/libexec/cage-workbench-browser-4.145.0-pw1.65.0/"
-				return s.macOSSSHCommand(ctx, "-T", s.sshTarget(), "--", "exec "+base+"editor/lib/node "+base+"controller/macos-native-browser.mjs"), nil
+				const base = guestos.MacOSBrowserTools + "/"
+				// Older guests launch their headless browser even on a tabs/health poll.
+				const command = "test -f " + base + "controller/macos-browser-window.mjs || exit 78; exec " +
+					base + "editor/lib/node " + base + "controller/macos-native-browser.mjs"
+				return s.macOSSSHCommand(ctx, "-T", s.sshTarget(), "--", command), nil
 			}}
 		} else {
 			s.windowsBrowserControl = newWindowsBrowserClient(s.lifetimeContextLocked(), s.profile)
@@ -366,7 +370,12 @@ func (s *Server) nativeBrowserVNC(w http.ResponseWriter, r *http.Request) {
 func recoverBrowserInputFocus(ctx context.Context, request func(context.Context, string, string, any) ([]byte, error), input map[string]any, release func()) ([]byte, error) {
 	data, err := request(ctx, "POST", "/input", input)
 	var failure windowsBrowserFailure
-	if release == nil || !errors.As(err, &failure) || (failure.code != "browser_focus_required" && failure.code != "browser_target_changed" && failure.code != "target_changed") {
+	if release == nil || !errors.As(err, &failure) {
+		return data, err
+	}
+	switch failure.code {
+	case "browser_focus_required", "browser_window_unavailable", "browser_target_changed", "target_changed":
+	default:
 		return data, err
 	}
 	// End this viewer's input lease so a rejected key-up cannot leave a held

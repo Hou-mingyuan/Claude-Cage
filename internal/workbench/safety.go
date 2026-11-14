@@ -1189,7 +1189,13 @@ func (s *Server) monitorSafetyWithProbe(probe func(context.Context, cage.Config)
 			recoverable = e != nil
 		}
 	}
-	if issue == "" {
+	if issue == "" && s.macosGuest != nil {
+		timing.stage("browser_settings_inputs")
+		if !s.recheckMacOSBrowserSettings(ctx, cfg) {
+			issue = "未能确认 Chrome 仍在使用检测过的进程和资料设置，请打开 Chrome 后重新检测"
+			recoverable = false
+		}
+	} else if issue == "" {
 		browser, e := s.browserObservation(ctx, cfg, false)
 		timing.stage("browser_settings")
 		if e != nil {

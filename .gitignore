@@ -46,9 +46,12 @@ __pycache__/
 
 # Local development material; public docs describe installation and use.
 /AGENTS.md
+/.scratch/
+/.out-of-scope/
 /CONTRIBUTING.md
 /RELEASING.md
 /CHANGELOG.md
+/docs/agents/
 /docs/design/
 /docs/research/
 /docs/BACKLOG.md

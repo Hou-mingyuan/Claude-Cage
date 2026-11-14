@@ -10,7 +10,7 @@
 
 <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
 
-**[ပရောဂျက်ဝက်ဘ်ဆိုက်](https://lee-xeo.github.io/Claude-Cage/) · [အက်ပ်ကို ဒေါင်းလုဒ်လုပ်ရန်](https://lee-xeo.github.io/Claude-Cage/my/#download) · [စတင်လုပ်ဆောင်ခြင်း။](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [အသုံးပြုမှုလမ်းညွှန် (တရုတ်ဘာသာ)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+**[ပရောဂျက်ဝက်ဘ်ဆိုက်](https://claude-cage.com/) · [အက်ပ်ကို ဒေါင်းလုဒ်လုပ်ရန်](https://claude-cage.com/my/#download) · [စတင်လုပ်ဆောင်ခြင်း။](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [အသုံးပြုမှုလမ်းညွှန် (တရုတ်ဘာသာ)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -65,7 +65,7 @@ Claude Cage သည် terminal၊ browser၊ editor နှင့် တရား
 
 Cage သည် macOS၊ Windows နှင့် Linux ကို ပံ့ပိုးသည်။ macOS 14+ ရှိ Apple Silicon Mac၊ Windows 10 22H2 / 11 x64 နှင့် Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac၊ Windows ARM64 နှင့် Linux ARM64 ကို မပံ့ပိုးသေးပါ။ [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. အက်ပ်ကို ဒေါင်းလုဒ်လုပ်ရန်: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/my/#download).
+1. အက်ပ်ကို ဒေါင်းလုဒ်လုပ်ရန်: [macOS / Windows / Linux](https://claude-cage.com/my/#download).
 2. macOS: တပ်ဆင်မှုပက်ကေ့ချ်ကိုဖွင့်ပြီး ဆွဲယူပါ။ **Cage** ထဲသို့ **အသုံးချမှု**; ထို့နောက် ၎င်းကို Applications မှ စတင်လိုက်ပါ။ Windows: [တပ်ဆင်နည်း](docs/windows.md#安装并开始工作) · Linux: [တပ်ဆင်နည်း](docs/linux.md#安装并开始工作).
 3. သင့်ကိုယ်ပိုင်ကွန်ရက်ပရောက်စီကို စီစဉ်သတ်မှတ်ရန်၊ ပတ်ဝန်းကျင်ကို စတင်ရန်နှင့် ပရောဂျက်တစ်ခုဖွင့်ရန် အက်ပ်အတွင်း ညွှန်ကြားချက်များကို လိုက်နာပါ။
 
@@ -106,16 +106,18 @@ macOS နှင့် လက်မှတ်ထိုးထားသော Window
 
 | မင်းရဲ့တာဝန် | ဤနေရာတွင် စတင်ပါ။ |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [Guest စနစ်ရွေးချယ်ခြင်း](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [Guest စနစ်ရွေးချယ်ခြင်း](https://claude-cage.com/docs/guest-systems/) |
 | ထည့်သွင်းပါ၊ ကွန်ရက်ပရောက်စီကို စီစဉ်သတ်မှတ်ပါ၊ သင်၏ပထမဆုံးပရောဂျက်ကိုဖွင့်ပါ။ | [စတင်လုပ်ဆောင်ခြင်း။](docs/getting-started.md) |
 | ဒေါင်းလုဒ်များ၊ စတင်ခြင်း၊ ချိတ်ဆက်မှုနှင့် လက်မှတ်ထိုးဝင်ခြင်းတို့ကို ပြဿနာဖြေရှင်းပါ။ | [FAQ နှင့် ပြန်လည်ရယူခြင်း။](docs/troubleshooting.md) |
 | ကီးဘုတ်ထိန်းချုပ်မှုများ၊ အသွင်အပြင်၊ ဒေတာ ခိုင်မြဲမှုနှင့် ထွက်ပေါက်အပြုအမူတို့ကို လေ့လာပါ။ | [နေ့စဉ်အသုံးပြုခြင်း။](docs/getting-started.md#日常使用) |
 | မျိုးပွားနိုင်သော ပြဿနာကို သတင်းပို့ပါ။ | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| ပြင်ဆင်ချက်၊ လုပ်ဆောင်ချက် သို့မဟုတ် စာရွက်စာတမ်း ပံ့ပိုးရန်: Issue စစ်ဆေးမှု → ပူးပေါင်းသူဖိတ်ခေါ်မှု → PR | [ပံ့ပိုးမှုလမ်းညွှန် (တရုတ်ဘာသာ)](.github/CONTRIBUTING.md) |
 
 ပရောဂျက်က အရှိန်အဟုန်နဲ့ တိုးတက်နေတယ်။ တုံ့ပြန်ချက်မျှဝေရန် ကွန်မြူနတီအဖွဲ့သို့ ဝင်ရောက်ပါ။ ရပ်ရွာထိန်းသိမ်းသူ များကို ကြိုဆိုပါတယ်။
 
 <p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1127457578" width="240" /></a>
+  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a>
+  <br />QQ group · 782087179
 </p>
 
 ## မူရင်းနှင့်လိုင်စင်

@@ -84,6 +84,7 @@ try {
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
         $child = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
         try {
+            $null = $child.Handle
             $forwarded = @(Wait-CageWindowsInstaller $child $progressFile)
             Assert-Check ($child.ExitCode -eq 0) ('Encoded installer wrapper failed. '+[IO.File]::ReadAllText($stderr))
             Assert-Check ($forwarded[-1] -ceq 'CAGE_GUEST_STAGE windows-11 oobe') 'The actual child could not publish its final stage.'

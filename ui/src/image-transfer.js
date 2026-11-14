@@ -88,7 +88,7 @@ export async function readClipboardContent() {
 
 export function prepareClipboardPaste(target, id, { windowTarget, valid = () => true } = {}) {
   let disposed = false, sent = false;
-  const destination = { target, id, pid: windowTarget?.pid, window: windowTarget?.window };
+  const destination = { target, id, pid: windowTarget?.pid, window: windowTarget?.window, surface: windowTarget?.surface };
   const check = () => {
     if (disposed || !valid()) throw new Error("粘贴接收位置已切换，请重新粘贴");
   };

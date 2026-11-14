@@ -178,7 +178,7 @@ test "$(stat -f %OLp /etc/kcpassword)" = 600`)
 	}
 	if kit, media := os.Getenv("CAGE_TEST_MACOS_WORKBENCH_KIT"), os.Getenv("CAGE_TEST_MACOS_WORKBENCH_MEDIA"); kit != "" && media != "" {
 		// Exercise the shipped provisioning script in this disposable fresh VM.
-		tar := exec.CommandContext(ctx, "/usr/bin/tar", "--no-mac-metadata", "-cf", "-", "-C", kit, ".", "-C", media, "node.tgz", "editor.tgz", "playwright.tgz", "chrome.dmg", "claude.dmg", "cli", "macfuse.pkg")
+		tar := exec.CommandContext(ctx, "/usr/bin/tar", "--no-mac-metadata", "-cf", "-", "-C", kit, ".", "-C", media, "node.tgz", "editor.tgz", "chrome.dmg", "claude.dmg", "cli", "macfuse.pkg")
 		pipe, err := tar.StdoutPipe()
 		if err != nil {
 			t.Fatal(err)

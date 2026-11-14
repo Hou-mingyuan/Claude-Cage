@@ -50,6 +50,18 @@ const emptyForm = {
   interval_hours: 24,
   host_download: false,
 };
+const emptyManual = {
+  name: "",
+  type: "socks5",
+  server: "",
+  port: "1080",
+  username: "",
+  password: "",
+  sshAuth: "password",
+  privateKey: "",
+  passphrase: "",
+  hostKey: "",
+};
 export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializing = false }) {
   const [proxy, setProxy] = useState(null),
     [tab, setTab] = useState("nodes"),
@@ -65,14 +77,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
     [logs, setLogs] = useState([]),
     [port, setPort] = useState("17896"),
     [rates, setRates] = useState({ up: 0, down: 0 });
-  const [manual, setManual] = useState({
-    name: "",
-    type: "socks5",
-    server: "",
-    port: "1080",
-    username: "",
-    password: "",
-  });
+  const [manual, setManual] = useState(emptyManual);
   const [routeDraft, setRouteDraft] = useState(null);
   const [hostRefresh, setHostRefresh] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -172,6 +177,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
       if (current.error) throw new Error(current.error);
       if (alive.current) {
         setForm(null);
+        setManual(emptyManual);
         if (action === "route" || action === "select") setRouteDraft(null);
         const importedSource =
           action === "import"
@@ -243,10 +249,25 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
       host_download: form.host_download,
     };
     if (mode === "manual" && !form.id) {
-      const node = { ...manual, port: Number(manual.port) };
+      if (!manualValid) return;
+      const node = {
+        name: manual.name.trim(),
+        type: manual.type,
+        server: manual.server.trim(),
+        port: Number(manual.port),
+        username: manual.username.trim(),
+      };
+      if (manual.type === "ssh" && manual.sshAuth === "private-key") {
+        node["private-key"] = manual.privateKey;
+        if (manual.passphrase) node["private-key-passphrase"] = manual.passphrase;
+      } else {
+        node.password = manual.password;
+      }
+      if (manual.type === "ssh" && manual.hostKey.trim())
+        node["host-key"] = manual.hostKey.split(/\r?\n/).map((key) => key.trim()).filter(Boolean);
       value = {
         ...form,
-        name: form.name || manual.name,
+        name: form.name || node.name,
         url: "",
         content: JSON.stringify({ proxies: [node] }),
         interval_hours: 0,
@@ -261,6 +282,13 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
       : [""];
   const route = routeDraft ?? savedRoute;
   const routeChanged = JSON.stringify(route) !== JSON.stringify(savedRoute);
+  const manualSSH = manual.type === "ssh";
+  const manualValid = Boolean(
+    manual.name.trim() && manual.server.trim() &&
+    Number.isInteger(Number(manual.port)) && Number(manual.port) > 0 && Number(manual.port) <= 65535 &&
+    (!manualSSH || manual.username.trim() &&
+      (manual.sshAuth === "password" ? manual.password : manual.privateKey.includes("PRIVATE KEY"))),
+  );
   useEffect(() => {
     onDirty?.(routeChanged || initializing && Boolean(form));
     return () => onDirty?.(false);
@@ -329,8 +357,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
                   YAML 配置，再点击「导入并验证」。可从已有代理客户端导出配置。
                 </li>
                 <li>
-                  <strong>手动节点：</strong>适用于 HTTP CONNECT 或
-                  SOCKS5。填写节点名称、服务器地址、端口，以及服务商提供的用户名和密码（如有），再点击「导入并验证」。
+                  <strong>手动节点：</strong>支持 HTTP CONNECT、SOCKS5 和 SSH。填写节点名称、服务器地址、端口及认证信息；SSH 可选择密码或私钥认证，再点击「导入并验证」。
                 </li>
               </ul>
             </li>
@@ -956,14 +983,22 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
                     <label>
                       协议
                       <InlineSelect
+                        inline
                         aria-label="协议"
                         value={manual.type}
                         onValueChange={(next) =>
-                          setManual({ ...manual, type: next })
+                          setManual({
+                            ...manual,
+                            type: next,
+                            port: manual.port === (manualSSH ? "22" : "1080")
+                              ? next === "ssh" ? "22" : "1080"
+                              : manual.port,
+                          })
                         }
                       >
                         <option value="socks5">SOCKS5</option>
                         <option value="http">HTTP CONNECT</option>
+                        <option value="ssh">SSH</option>
                       </InlineSelect>
                     </label>
                   </div>
@@ -991,9 +1026,26 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
                       />
                     </label>
                   </div>
+                  {manualSSH && (
+                    <label>
+                      认证方式
+                      <InlineSelect
+                        inline
+                        aria-label="认证方式"
+                        value={manual.sshAuth}
+                        onValueChange={(next) => setManual({
+                          ...manual, sshAuth: next,
+                          ...(next !== manual.sshAuth ? { password: "", privateKey: "", passphrase: "" } : {}),
+                        })}
+                      >
+                        <option value="password">密码</option>
+                        <option value="private-key">私钥</option>
+                      </InlineSelect>
+                    </label>
+                  )}
                   <div className="field-row">
                     <label>
-                      用户名
+                      {manualSSH ? "用户名（必填）" : "用户名"}
                       <input
                         value={manual.username}
                         autoComplete="off"
@@ -1002,8 +1054,8 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
                         }
                       />
                     </label>
-                    <label>
-                      密码
+                    {(!manualSSH || manual.sshAuth === "password") && <label>
+                      {manualSSH ? "密码（必填）" : "密码"}
                       <input
                         type="password"
                         value={manual.password}
@@ -1012,12 +1064,52 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
                           setManual({ ...manual, password: e.target.value })
                         }
                       />
-                    </label>
+                    </label>}
                   </div>
+                  {manualSSH && <>
+                    {manual.sshAuth === "private-key" && <>
+                      <label>
+                        私钥内容（必填）
+                        <textarea
+                          aria-label="私钥内容（必填）"
+                          value={manual.privateKey}
+                          rows={7}
+                          spellCheck={false}
+                          autoComplete="off"
+                          autoCapitalize="none"
+                          onChange={(e) => setManual({ ...manual, privateKey: e.target.value })}
+                          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                        />
+                      </label>
+                      <p className="field-help">粘贴完整 PEM / OpenSSH 私钥内容，不支持填写本机文件路径。</p>
+                      <label>
+                        私钥口令（可选）
+                        <input
+                          type="password"
+                          value={manual.passphrase}
+                          autoComplete="new-password"
+                          onChange={(e) => setManual({ ...manual, passphrase: e.target.value })}
+                        />
+                      </label>
+                    </>}
+                    <label>
+                      服务器公钥（可选，建议填写）
+                      <textarea
+                        aria-label="服务器公钥（可选，建议填写）"
+                        value={manual.hostKey}
+                        rows={2}
+                        spellCheck={false}
+                        autoCapitalize="none"
+                        onChange={(e) => setManual({ ...manual, hostKey: e.target.value })}
+                        placeholder="ssh-ed25519 AAAA…"
+                      />
+                    </label>
+                    <p className="field-help">填写可信的服务器公钥以核对服务器身份，每行一条；留空时不校验服务器身份。SSH 仅转发 TCP。</p>
+                  </>}
                 </>
               )}
               <div className="proxy-form-actions">
-                <button disabled={busy} onClick={() => setForm(null)}>
+                <button disabled={busy} onClick={() => { setForm(null); setManual(emptyManual); }}>
                   取消
                 </button>
                 <button
@@ -1030,7 +1122,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, initializ
                         ? !form.url || !form.name
                         : mode === "file"
                           ? !form.content.trim() || !form.name
-                          : !manual.name || !manual.server))
+                          : !manualValid))
                   }
                   onClick={submit}
                 >

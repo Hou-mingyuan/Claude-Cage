@@ -10,7 +10,7 @@
 
 <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
 
-**[موقع المشروع](https://lee-xeo.github.io/Claude-Cage/) · [تنزيل التطبيق](https://lee-xeo.github.io/Claude-Cage/ar/#download) · [البدء](docs/getting-started.md) · [الأسئلة الشائعة](docs/troubleshooting.md) · [دليل الاستخدام (بالصينية)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+**[موقع المشروع](https://claude-cage.com/) · [تنزيل التطبيق](https://claude-cage.com/ar/#download) · [البدء](docs/getting-started.md) · [الأسئلة الشائعة](docs/troubleshooting.md) · [دليل الاستخدام (بالصينية)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -65,7 +65,7 @@
 
 يدعم Cage أنظمة macOS وWindows وLinux: أجهزة Apple Silicon مع macOS 14+، وWindows 10 22H2 / 11 x64، وDebian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac أو Windows ARM64 أو Linux ARM64. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. تنزيل التطبيق: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/ar/#download).
+1. تنزيل التطبيق: [macOS / Windows / Linux](https://claude-cage.com/ar/#download).
 2. macOS: افتح حزمة التثبيت واسحب **Cage** في **التطبيقات**; ثم قم بتشغيله من التطبيقات. Windows: [دليل التثبيت](docs/windows.md#安装并开始工作) · Linux: [دليل التثبيت](docs/linux.md#安装并开始工作).
 3. اتبع الإرشادات الموجودة في التطبيق لتكوين وكيل الشبكة الخاص بك، وبدء تشغيل البيئة، وفتح المشروع.
 
@@ -106,16 +106,18 @@
 
 | مهمتك | ابدأ هنا |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [اختيار النظام الضيف](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [اختيار النظام الضيف](https://claude-cage.com/docs/guest-systems/) |
 | قم بتثبيت وكيل الشبكة وتكوينه وافتح مشروعك الأول | [البدء](docs/getting-started.md) |
 | استكشاف أخطاء التنزيلات وبدء التشغيل والاتصال وتسجيل الدخول وإصلاحها | [الأسئلة الشائعة والاسترداد](docs/troubleshooting.md) |
 | تعرف على عناصر التحكم في لوحة المفاتيح والمظهر واستمرارية البيانات وسلوك الخروج | [الاستخدام اليومي](docs/getting-started.md#日常使用) |
 | الإبلاغ عن مشكلة قابلة للتكرار | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| المساهمة بإصلاح أو ميزة أو توثيق: مراجعة Issue ← دعوة متعاون ← PR | [دليل المساهمة (بالصينية)](.github/CONTRIBUTING.md) |
 
 المشروع يتطور بسرعة. انضم إلى مجموعة المجتمع لمشاركة التعليقات؛ مشرفو المجتمع مرحب بهم.
 
 <p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1127457578" width="240" /></a>
+  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a>
+  <br />QQ group · 782087179
 </p>
 
 ## الأصول والترخيص

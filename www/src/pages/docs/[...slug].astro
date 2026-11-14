@@ -1,5 +1,6 @@
 ---
 import '@fontsource-variable/inter';
+import GoogleAnalytics from '../../components/GoogleAnalytics.astro';
 import '../../styles/cage.css';
 import '../../styles/guide.css';
 import { guidePages, guideGroups, guideURL, guideHTML } from '../../lib/guide';
@@ -21,6 +22,7 @@ const canonical = new URL(guideURL(page.slug), Astro.site);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <GoogleAnalytics />
   <meta name="description" content={page.description} />
   <meta name="theme-color" content="#faf8f4" />
   <title>{page.title} · Cage 使用文档</title>
@@ -59,7 +61,7 @@ const canonical = new URL(guideURL(page.slug), Astro.site);
       </article>
     </main>
   </div>
-  <footer class="wrap guide-footer"><a href={base}>Claude Cage</a><small>独立社区项目，与 Anthropic 无隶属关系。</small><a href="#article">回到正文 ↑</a></footer>
+  <footer class="wrap guide-footer"><a href={base}>Claude Cage</a><small>独立社区项目，与 Anthropic 无隶属关系。</small><a href={`${base}privacy/`}>统计与隐私</a><a href="#article">回到正文 ↑</a></footer>
   <script id="guide-search-data" type="application/json" set:html={JSON.stringify(search).replaceAll('<', '\\u003c')} />
   <script>
     type SearchPage = { title: string; description: string; url: string; text: string };

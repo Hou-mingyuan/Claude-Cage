@@ -8,7 +8,7 @@ keywords: Agent CLI JSON 自动化 配置 接口 安装 诊断 修复 capabiliti
 
 你可以把下面这段话交给自己的 Agent，让它根据你的目标准备 Cage。你只需提供自己的代理来源、选择工作环境，并在操作系统要求时完成授权。Cage 账户密码、Claude 登录、许可证确认和项目共享范围由你决定。
 
-> 请阅读 https://lee-xeo.github.io/Claude-Cage/agent.md ，协助我安装、配置并验证 Cage。先检查本机安装和接口能力，再按实际状态操作；完成后告诉我环境是否就绪、网络是否通过检查，以及还需要我完成什么。保留所有现有账户、项目和虚拟机数据。
+> 请阅读 https://claude-cage.com/agent.md ，协助我安装、配置并验证 Cage。先检查本机安装和接口能力，再按实际状态操作；完成后告诉我环境是否就绪、网络是否通过检查，以及还需要我完成什么。保留所有现有账户、项目和虚拟机数据。
 
 本页是当前源码与开发构建的接口说明。公开 Release 可能尚未包含 `cage agent`。安装后必须先运行能力探测；遇到未知命令时，使用该版本的界面和发行说明，或安装用户授权的较新构建。不要仅凭版本字符串推断接口已存在。
 
@@ -34,7 +34,7 @@ macOS/Linux 也可先获取 `/cage-install.sh` 再运行，参数与下载助手
 
 ```sh
 curl --proto '=https' --proto-redir '=https' -fL \
-  https://lee-xeo.github.io/Claude-Cage/agent-bootstrap.mjs -o agent-bootstrap.mjs
+  https://claude-cage.com/agent-bootstrap.mjs -o agent-bootstrap.mjs
 node agent-bootstrap.mjs plan --platform darwin-arm64
 node agent-bootstrap.mjs download --platform darwin-arm64 \
   --version v0.1.6-alpha-preview --destination /absolute/path/downloads

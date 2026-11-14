@@ -14,6 +14,10 @@ on:
         description: Release artifact name, or development artifact prefix
         required: true
         type: string
+      all_windows_versions:
+        description: Also test the development package on Windows Server 2022
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -22,7 +26,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, windows-2025]
+        # windows-2025 produces the test package. The older image repeats
+        # the same suite, so ordinary branch pushes leave it out.
+        os: ${{ fromJSON(inputs.all_windows_versions && '["windows-2025", "windows-2022"]' || '["windows-2025"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:
@@ -33,53 +39,14 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/windows-toolchain
         with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.403
-      - uses: astral-sh/setup-uv@v10.3.3
-      - uses: msys2/setup-msys2@v2
-        id: msys2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            make patch diffutils git findutils curl
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-glib2
-            mingw-w64-ucrt-x86_64-pixman
-            mingw-w64-ucrt-x86_64-libslirp
-            mingw-w64-ucrt-x86_64-dtc
-            mingw-w64-ucrt-x86_64-ninja
-            mingw-w64-ucrt-x86_64-python
-            mingw-w64-ucrt-x86_64-pkgconf
-      - uses: actions/cache/restore@v4
-        id: qemu_cache
-        with:
-          path: _output/windows-deps
-          key: cage-windows-deps-${{ hashFiles('packaging/windows/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
-          restore-keys: cage-windows-deps-
-      - name: Build and verify QEMU runtime before application acceptance
-        env:
-          CAGE_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
-        run: ./scripts/build-qemu-windows.ps1
-      - name: Preserve only the completed verified runtime cache
-        if: steps.qemu_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: _output/windows-deps
-          key: cage-windows-deps-${{ hashFiles('packaging/windows/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
+          # Rehearse the release-only source collection on every change, so
+          # it cannot first fail while a release is waiting.
+          corresponding-sources: ${{ matrix.os == 'windows-2025' }}
       - name: Build, test and install the unsigned development package
         env:
           CAGE_BUILD_REF: ${{ inputs.ref }}
-          CAGE_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
         run: ./scripts/ci-windows-build.ps1
       - uses: actions/upload-artifact@v4
         with:
@@ -126,71 +93,9 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/windows-toolchain
         with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.403
-      - uses: astral-sh/setup-uv@v10.3.3
-      - uses: msys2/setup-msys2@v2
-        id: msys2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            make patch diffutils git findutils curl
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-glib2
-            mingw-w64-ucrt-x86_64-pixman
-            mingw-w64-ucrt-x86_64-libslirp
-            mingw-w64-ucrt-x86_64-dtc
-            mingw-w64-ucrt-x86_64-ninja
-            mingw-w64-ucrt-x86_64-python
-            mingw-w64-ucrt-x86_64-pkgconf
-      - uses: actions/cache/restore@v4
-        id: qemu_cache
-        with:
-          path: _output/windows-deps
-          restore-keys: cage-windows-deps-
-          key: cage-windows-deps-${{ hashFiles('packaging/windows/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
-      - name: Build and verify QEMU runtime and package identity
-        id: qemu_build
-        env:
-          CAGE_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
-        run: |
-          ./scripts/build-qemu-windows.ps1
-          $identity = Get-Content '_output/windows-deps/qemu-cage/cage-build.json' -Raw | ConvertFrom-Json
-          "fingerprint=$($identity.fingerprint)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "manifest=$((Get-FileHash '_output/windows-deps/qemu-cage/cage-build.json' -Algorithm SHA256).Hash)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          $collectorHash = (Get-FileHash 'scripts/bundle-qemu-sources.sh' -Algorithm SHA256).Hash + (Get-FileHash 'scripts/prepare-qemu-release.ps1' -Algorithm SHA256).Hash
-          "collector=$collectorHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-      - name: Preserve only the completed verified runtime cache
-        if: steps.qemu_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: _output/windows-deps
-          key: cage-windows-deps-${{ hashFiles('packaging/windows/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
-      - uses: actions/cache/restore@v4
-        id: qemu_sources
-        with:
-          path: _output/windows-qemu-sources
-          key: cage-qemu-sources-${{ steps.qemu_build.outputs.fingerprint }}-${{ steps.qemu_build.outputs.manifest }}-${{ steps.qemu_build.outputs.collector }}
-      - name: Collect and verify corresponding sources before signing
-        env:
-          CAGE_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
-        run: ./scripts/prepare-qemu-release.ps1
-      - name: Preserve only the completed verified source cache
-        if: steps.qemu_sources.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: _output/windows-qemu-sources
-          key: cage-qemu-sources-${{ steps.qemu_build.outputs.fingerprint }}-${{ steps.qemu_build.outputs.manifest }}-${{ steps.qemu_build.outputs.collector }}
+          corresponding-sources: true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -198,7 +103,6 @@ jobs:
       - name: Build, sign, test and install the release candidate
         env:
           CAGE_BUILD_REF: ${{ inputs.ref }}
-          CAGE_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
           CAGE_WINDOWS_SIGNING_PROVIDER: ${{ vars.CAGE_WINDOWS_SIGNING_PROVIDER }}
           CAGE_ESIGNER_USERNAME: ${{ secrets.CAGE_ESIGNER_USERNAME }}
           CAGE_ESIGNER_PASSWORD: ${{ secrets.CAGE_ESIGNER_PASSWORD }}

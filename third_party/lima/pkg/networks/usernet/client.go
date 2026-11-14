@@ -33,7 +33,7 @@ type Client struct {
 }
 
 func (c *Client) ConfigureDriver(ctx context.Context, inst *limatype.Instance, sshLocalPort int) error {
-	macAddress := limayaml.MACAddress(inst.Dir)
+	macAddress := limayaml.GuestMACAddress(inst.Config, inst.Dir)
 	ipAddress, err := c.ResolveIPAddress(ctx, macAddress)
 	if err != nil {
 		return err
@@ -135,7 +135,7 @@ func (c *Client) WaitOpeningSSHPort(ctx context.Context, inst *limatype.Instance
 	timeoutSeconds := 600
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
-	macAddress := limayaml.MACAddress(inst.Dir)
+	macAddress := limayaml.GuestMACAddress(inst.Config, inst.Dir)
 	ipAddr, err := c.ResolveIPAddress(ctx, macAddress)
 	if err != nil {
 		return err

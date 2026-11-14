@@ -1,0 +1,1594 @@
+kind,vendor,model,prefix
+desktop,Dell,Dell Pro 24 All-in-One QC24250/QC24251/Plus QB24250,QB24250
+desktop,Dell,Dell Pro 5 Micro P5M1260,DELL260
+desktop,Dell,Dell Pro Essential Micro PVM1265,PVM1265
+desktop,Dell,Dell Pro Max Micro FCM2250,FCM2250
+desktop,Dell,Dell Pro Max Slim FCS1250,FCS1250
+desktop,Dell,Dell Pro Micro Plus QBM1250/Dell Pro Micro QCM1250,QCM1250
+desktop,Dell,Dell Pro Micro QCM1255,QCM1255
+desktop,Dell,Dell Pro Precision 7 R1 PW7R1260,PRE1260
+desktop,Dell,Dell Pro Precision 7 T1 PW7T1260,PRE1260
+desktop,Dell,Dell Pro Precision 9 T2 PW9T2260,PRE2260
+desktop,Dell,Dell Pro Precision 9 T4 PW9T4260,PRE4260
+desktop,Dell,Dell Pro Precision 9 T6 PW9T6260,PRE6260
+desktop,Dell,Dell Pro Slim Plus QBS1250/Dell Pro Slim QCS1250,QCS1250
+desktop,Dell,Dell Pro Slim QCS1255,QCS1255
+desktop,Dell,Dell Pro Tower Plus QBT1250/Dell Pro Tower QCT1250,QCT1250
+desktop,Dell,Dell Pro Tower QCT1255,QCT1255
+desktop,Dell,Dell Slim DS1265,DS1265
+desktop,Dell,Dell Tower DT1265,DT1265
+desktop,Dell,FCT2250,FCT2250
+desktop,Dell,OptiPlex 3000,OP3000
+desktop,Dell,OptiPlex 3010,OP3010
+desktop,Dell,OptiPlex 3011 AIO,OP3011
+desktop,Dell,OptiPlex 3020,OP3020
+desktop,Dell,OptiPlex 3020M,OP3020
+desktop,Dell,OptiPlex 3030 AIO,OP3030
+desktop,Dell,OptiPlex 3040,OP3040
+desktop,Dell,OptiPlex 3046,OP3046
+desktop,Dell,OptiPlex 3050,OP3050
+desktop,Dell,OptiPlex 3050 AIO,OP3050
+desktop,Dell,OptiPlex 3060,OP3060
+desktop,Dell,OptiPlex 3070,OP3070
+desktop,Dell,OptiPlex 3080,OP3080
+desktop,Dell,OptiPlex 3090 Ultra,OP3090
+desktop,Dell,OptiPlex 3240 AIO,OP3240
+desktop,Dell,OptiPlex 3280 AIO,OP3280
+desktop,Dell,OptiPlex 360,OP360
+desktop,Dell,OptiPlex 380,OP380
+desktop,Dell,OptiPlex 390,OP390
+desktop,Dell,OptiPlex 5000,OP5000
+desktop,Dell,OptiPlex 5040,OP5040
+desktop,Dell,OptiPlex 5050,OP5050
+desktop,Dell,OptiPlex 5055 A-Series,OP5055
+desktop,Dell,OptiPlex 5055 Ryzen APU,OP5055
+desktop,Dell,OptiPlex 5055 Ryzen CPU,OP5055
+desktop,Dell,OptiPlex 5060,OP5060
+desktop,Dell,OptiPlex 5070,OP5070
+desktop,Dell,OptiPlex 5080,OP5080
+desktop,Dell,OptiPlex 5090,OP5090
+desktop,Dell,OptiPlex 5250 AIO,OP5250
+desktop,Dell,OptiPlex 5260 AIO,OP5260
+desktop,Dell,OptiPlex 5270 AIO,OP5270
+desktop,Dell,OptiPlex 5400 All-in-One,OP5400
+desktop,Dell,OptiPlex 5480 AIO,OP5480
+desktop,Dell,OptiPlex 5490 AIO,OP5490
+desktop,Dell,OptiPlex 580,OP580
+desktop,Dell,OptiPlex 7000,OP7000
+desktop,Dell,OptiPlex 7010,OP7010
+desktop,Dell,OptiPlex 7010 Micro,OP7010
+desktop,Dell,OptiPlex 7010 SFF,OP7010
+desktop,Dell,OptiPlex 7010 Tower,OP7010
+desktop,Dell,OptiPlex 7020,OP7020
+desktop,Dell,OptiPlex 7020 SFF,OP7020
+desktop,Dell,OptiPlex 7020 Tower,OP7020
+desktop,Dell,OptiPlex 7040,OP7040
+desktop,Dell,OptiPlex 7050,OP7050
+desktop,Dell,OptiPlex 7060,OP7060
+desktop,Dell,OptiPlex 7070,OP7070
+desktop,Dell,OptiPlex 7070 ULTRA,OP7070
+desktop,Dell,OptiPlex 7071 Tower,OP7071
+desktop,Dell,OptiPlex 7080,OP7080
+desktop,Dell,OptiPlex 7090 Tower,OP7090
+desktop,Dell,OptiPlex 7090 Ultra,OP7090
+desktop,Dell,OptiPlex 7400 All-in-One,OP7400
+desktop,Dell,OptiPlex 7440 AIO,OP7440
+desktop,Dell,OptiPlex 7450 AIO,OP7450
+desktop,Dell,OptiPlex 7460 AIO,OP7460
+desktop,Dell,OptiPlex 7470 AIO,OP7470
+desktop,Dell,OptiPlex 7480 AIO,OP7480
+desktop,Dell,OptiPlex 7490 AIO,OP7490
+desktop,Dell,OptiPlex 760,OP760
+desktop,Dell,OptiPlex 7760 AIO,OP7760
+desktop,Dell,OptiPlex 7770 AIO,OP7770
+desktop,Dell,OptiPlex 7780 AIO,OP7780
+desktop,Dell,OptiPlex 780,OP780
+desktop,Dell,OptiPlex 790,OP790
+desktop,Dell,OptiPlex 9010,OP9010
+desktop,Dell,OptiPlex 9010 AIO,OP9010
+desktop,Dell,OptiPlex 9020,OP9020
+desktop,Dell,OptiPlex 9020 AIO,OP9020
+desktop,Dell,OptiPlex 9020M,OP9020
+desktop,Dell,OptiPlex 9030 AIO,OP9030
+desktop,Dell,OptiPlex 960,OP960
+desktop,Dell,OptiPlex 980,OP980
+desktop,Dell,OptiPlex 990,OP990
+desktop,Dell,OptiPlex AIO 7410,OP7410
+desktop,Dell,OptiPlex AIO 7420,OP7420
+desktop,Dell,OptiPlex Micro 7020,OP7020
+desktop,Dell,OptiPlex Tower 7020,OP7020
+desktop,Dell,OptiPlex XE,OPXE
+desktop,Dell,OptiPlex XE2,OPXE2
+desktop,Dell,OptiPlex XE3,OPXE3
+desktop,Dell,OptiPlex XE4,OPXE4
+desktop,Dell,Optiplex 3090,OP3090
+desktop,HP,HP Collaboration G6 24 All-in-One with Zoom Rooms,HP24G6
+desktop,HP,HP Collaboration G6 27 All-in-One with Zoom Rooms,HP27G6
+desktop,HP,HP Elite Mini 600 G9 PC,EL600G9
+desktop,HP,HP Elite Mini 800 G9 Desktop PC,EL800G9
+desktop,HP,HP Elite Mini 805 G8 Desktop PC,EL805G8
+desktop,HP,HP Elite SFF 600 G9 Desktop PC,EL600G9
+desktop,HP,HP Elite SFF 800 G9 Desktop PC,EL800G9
+desktop,HP,HP Elite SFF 805 G9 Desktop PC,EL805G9
+desktop,HP,HP Elite Slice,ELELICE
+desktop,HP,HP Elite Slice G2 - Audio Ready with Zoom Rooms,ELG2
+desktop,HP,HP Elite Slice G2 - Partner Ready with Microsoft Teams Rooms,ELG2
+desktop,HP,HP Elite Slice G2 with Intel Unite,ELG2
+desktop,HP,HP Elite Slice G2 with Microsoft Teams Rooms,ELG2
+desktop,HP,HP Elite Slice G2 with Zoom Rooms,ELG2
+desktop,HP,HP Elite Slice for Meeting Rooms,ELELOMS
+desktop,HP,HP Elite Tower 600 G9 Desktop PC,EL600G9
+desktop,HP,HP Elite Tower 680 G9 Desktop PC,EL680G9
+desktop,HP,HP Elite Tower 800 G9 PC,EL800G9
+desktop,HP,HP Elite Tower 880 G9 PC,EL880G9
+desktop,HP,HP EliteBoard G1a Next Gen AI PC,ELG1A
+desktop,HP,HP EliteBoard G2a Next Gen AI PC,ELG2A
+desktop,HP,HP EliteDesk 700 G1 Microtower PC,ED700G1
+desktop,HP,HP EliteDesk 705 35W G4 Desktop Mini PC,ED705G4
+desktop,HP,HP EliteDesk 705 65W G4 Desktop Mini PC,ED705G4
+desktop,HP,HP EliteDesk 705 G1 Desktop Mini PC,ED705G1
+desktop,HP,HP EliteDesk 705 G1 Microtower PC,ED705G1
+desktop,HP,HP EliteDesk 705 G1 Small Form Factor PC,ED705G1
+desktop,HP,HP EliteDesk 705 G2 Microtower PC,ED705G2
+desktop,HP,HP EliteDesk 705 G2 Small Form Factor PC,ED705G2
+desktop,HP,HP EliteDesk 705 G3 Desktop Mini PC,ED705G3
+desktop,HP,HP EliteDesk 705 G3 Microtower PC,ED705G3
+desktop,HP,HP EliteDesk 705 G3 Small Form Factor PC,ED705G3
+desktop,HP,HP EliteDesk 705 G4 Microtower PC,ED705G4
+desktop,HP,HP EliteDesk 705 G4 Small Form Factor PC,ED705G4
+desktop,HP,HP EliteDesk 705 G5 Desktop Mini PC,ED705G5
+desktop,HP,HP EliteDesk 705 G5 Small Form Factor PC,ED705G5
+desktop,HP,HP EliteDesk 8 Mini G1a Desktop Next Gen AI PC,ED8G1A
+desktop,HP,HP EliteDesk 8 Mini G1a Desktop PC,ED8G1A
+desktop,HP,HP EliteDesk 8 Mini G1i Desktop AI PC,ED8G1I
+desktop,HP,HP EliteDesk 8 Mini G2a Desktop Next Gen AI PC,ED8G2A
+desktop,HP,HP EliteDesk 8 Mini G2i Desktop Next Gen AI PC,ED8G2I
+desktop,HP,HP EliteDesk 8 SFF G1i Desktop AI PC,ED8G1I
+desktop,HP,HP EliteDesk 8 SFF G2a Desktop Next Gen AI PC,ED8G2A
+desktop,HP,HP EliteDesk 8 Tower G1i Desktop AI PC,ED8G1I
+desktop,HP,HP EliteDesk 8 Tower G1i E Desktop AI PC,ED8G1I
+desktop,HP,HP EliteDesk 800 35W G3 Desktop Mini PC,ED800G3
+desktop,HP,HP EliteDesk 800 35W G3 Desktop Mini PC (ENERGY STAR),ED800G3
+desktop,HP,HP EliteDesk 800 35W G4 Desktop Mini PC,ED800G4
+desktop,HP,HP EliteDesk 800 65W G3 Desktop Mini PC,ED800G3
+desktop,HP,HP EliteDesk 800 65W G4 Desktop Mini PC,ED800G4
+desktop,HP,HP EliteDesk 800 95W G4 Desktop Mini PC,ED800G4
+desktop,HP,HP EliteDesk 800 G1 Base Model Small Form Factor PC,ED800G1
+desktop,HP,HP EliteDesk 800 G1 Base Model Ultra-slim PC,ED800G1
+desktop,HP,HP EliteDesk 800 G1 Desktop Mini PC,ED800G1
+desktop,HP,HP EliteDesk 800 G1 Tower PC,ED800G1
+desktop,HP,HP EliteDesk 800 G3 Small Form Factor PC,ED800G3
+desktop,HP,HP EliteDesk 800 G3 Tower PC (ENERGY STAR),ED800G3
+desktop,HP,HP EliteDesk 800 G4 Small Form Factor PC,ED800G4
+desktop,HP,HP EliteDesk 800 G4 Tower PC,ED800G4
+desktop,HP,HP EliteDesk 800 G5 Desktop Mini PC,ED800G5
+desktop,HP,HP EliteDesk 800 G5 Small Form Factor PC,ED800G5
+desktop,HP,HP EliteDesk 800 G5 Tower PC,ED800G5
+desktop,HP,HP EliteDesk 800 G6 Desktop Mini PC,ED800G6
+desktop,HP,HP EliteDesk 800 G6 Small Form Factor PC,ED800G6
+desktop,HP,HP EliteDesk 800 G6 Tower PC,ED800G6
+desktop,HP,HP EliteDesk 800 G8 Desktop Mini PC,ED800G8
+desktop,HP,HP EliteDesk 800 G8 Small Form Factor PC,ED800G8
+desktop,HP,HP EliteDesk 800 G8 Tower PC,ED800G8
+desktop,HP,HP EliteDesk 805 G6 Desktop Mini PC,ED805G6
+desktop,HP,HP EliteDesk 805 G6 Small Form Factor PC,ED805G6
+desktop,HP,HP EliteDesk 805 G8 Desktop Mini PC,ED805G8
+desktop,HP,HP EliteDesk 805 G8 Small Form Factor PC,ED805G8
+desktop,HP,HP EliteDesk 880 G1 Tower PC,ED880G1
+desktop,HP,HP EliteDesk 880 G2 Tower PC,ED880G2
+desktop,HP,HP EliteDesk 880 G3 Tower PC,ED880G3
+desktop,HP,HP EliteDesk 880 G4 Tower PC,ED880G4
+desktop,HP,HP EliteDesk 880 G5 Tower PC,ED880G5
+desktop,HP,HP EliteDesk 880 G6 Tower PC,ED880G6
+desktop,HP,HP EliteDesk 880 G8 Tower PC,ED880G8
+desktop,HP,HP EliteOne 1000 G2 23.8-in All-in-One Business PC,E1000G2
+desktop,HP,HP EliteOne 1000 G2 23.8-in Touch All-in-One Business PC,E1000G2
+desktop,HP,HP EliteOne 1000 G2 27-in 4K UHD All-in-One Business PC,E1000G2
+desktop,HP,HP EliteOne 1000 G2 34-in Curved All-in-One Business PC,E1000G2
+desktop,HP,HP EliteOne 705 G1 23-inch Non-Touch All-in-One PC,EL705G1
+desktop,HP,HP EliteOne 800 G1 21.5-inch Non-Touch All-in-One PC,EL800G1
+desktop,HP,HP EliteOne 800 G3 23.8 Non-Touch Healthcare Edition All-in-One Business PC,EL800G3
+desktop,HP,HP EliteOne 800 G3 23.8-inch Non-Touch All-in-One PC,EL800G3
+desktop,HP,HP EliteOne 800 G3 23.8-inch Non-Touch GPU All-in-One PC,EL800G3
+desktop,HP,HP EliteOne 800 G3 23.8-inch Touch All-in-One PC,EL800G3
+desktop,HP,HP EliteOne 800 G3 23.8-inch Touch GPU All-in-One PC,EL800G3
+desktop,HP,HP EliteOne 800 G4 23.8-in Healthcare Edition All-in-One Business PC,EL800G4
+desktop,HP,HP EliteOne 800 G4 23.8-inch Non-Touch All-in-One PC,EL800G4
+desktop,HP,HP EliteOne 800 G4 23.8-inch Non-Touch GPU All-in-One PC,EL800G4
+desktop,HP,HP EliteOne 800 G4 23.8-inch Touch All-in-One PC,EL800G4
+desktop,HP,HP EliteOne 800 G4 23.8-inch Touch GPU All-in-One PC,EL800G4
+desktop,HP,HP EliteOne 800 G5 23.8-in Healthcare Edition All-in-One,EL800G5
+desktop,HP,HP EliteOne 800 G5 23.8-inch All-in-One,EL800G5
+desktop,HP,HP EliteOne 800 G6 24 All-in-One PC,EL800G6
+desktop,HP,HP EliteOne 800 G6 27 All-in-One PC,EL800G6
+desktop,HP,HP EliteOne 800 G8 24 All-in-One PC,EL800G8
+desktop,HP,HP EliteOne 800 G8 27 All-in-One PC,EL800G8
+desktop,HP,HP EliteOne 840 23.8 inch G9 All-in-One Desktop PC,EL840G9
+desktop,HP,HP EliteOne 870 27 inch G9 All-in-One Desktop PC,EL870G9
+desktop,HP,HP EliteStudio 8 All-in-One G1i 23.8 inch Desktop AI PC,EL8G1I
+desktop,HP,HP EliteStudio 8 All-in-One G1i 27 inch Desktop AI PC,EL8G1I
+desktop,HP,HP Mini Conferencing PC with Microsoft Team Rooms,HPMIOMS
+desktop,HP,HP Mini Conferencing PC with Zoom Rooms,HPMIOMS
+desktop,HP,HP Presence 27 All-in-One with Zoom Rooms,HP27
+desktop,HP,HP Presence Control Kit Zoom Room,HPPROOM
+desktop,HP,HP Presence Control Plus Kit Microsoft Team Room,HPPROOM
+desktop,HP,HP Pro Mini 400 G9 PC,P400G9
+desktop,HP,HP Pro SFF 400 G9 Desktop PC,P400G9
+desktop,HP,HP Pro Tower 400 G9 PCI Desktop PC,P400G9
+desktop,HP,HP Pro Tower 480 G9 PCI Desktop PC,P480G9
+desktop,HP,HP ProDesk 4 Mini G1i Desktop AI PC,PD4G1I
+desktop,HP,HP ProDesk 4 Mini G2a Desktop AI PC,PD4G2A
+desktop,HP,HP ProDesk 4 Mini G2a Desktop PC,PD4G2A
+desktop,HP,HP ProDesk 4 SFF G1i Desktop AI PC,PD4G1I
+desktop,HP,HP ProDesk 4 Tower G1i Desktop AI PC,PD4G1I
+desktop,HP,HP ProDesk 4 Tower G1i E Desktop AI PC,PD4G1I
+desktop,HP,HP ProDesk 400 G1 Desktop Mini PC,PD400G1
+desktop,HP,HP ProDesk 400 G1 Small Form Factor PC,PD400G1
+desktop,HP,HP ProDesk 400 G2.5 Small Form Factor PC,PD400G2
+desktop,HP,HP ProDesk 400 G3 Desktop Mini PC,PD400G3
+desktop,HP,HP ProDesk 400 G4 Desktop Mini PC,PD400G4
+desktop,HP,HP ProDesk 400 G4 Small Form Factor PC,PD400G4
+desktop,HP,HP ProDesk 400 G5 Desktop Mini PC,PD400G5
+desktop,HP,HP ProDesk 400 G5 Small Form Factor PC,PD400G5
+desktop,HP,HP ProDesk 400 G6 Desktop Mini PC,PD400G6
+desktop,HP,HP ProDesk 400 G6 Microtower PC,PD400G6
+desktop,HP,HP ProDesk 400 G6 Small Form Factor PC,PD400G6
+desktop,HP,HP ProDesk 400 G7 Microtower PC,PD400G7
+desktop,HP,HP ProDesk 400 G7 Small Form Factor PC,PD400G7
+desktop,HP,HP ProDesk 405 G4 Desktop Mini PC,PD405G4
+desktop,HP,HP ProDesk 405 G4 Small Form Factor PC,PD405G4
+desktop,HP,HP ProDesk 405 G6 Desktop Mini PC,PD405G6
+desktop,HP,HP ProDesk 405 G6 Small Form Factor PC,PD405G6
+desktop,HP,HP ProDesk 405 G8 Desktop Mini PC,PD405G8
+desktop,HP,HP ProDesk 405 G8 Small Form Factor PC,PD405G8
+desktop,HP,HP ProDesk 480 G1 Microtower PC,PD480G1
+desktop,HP,HP ProDesk 480 G3 Microtower PC,PD480G3
+desktop,HP,HP ProDesk 480 G6 Microtower PC,PD480G6
+desktop,HP,HP ProDesk 480 G7 PCI Microtower PC,PD480G7
+desktop,HP,HP ProDesk 490 G1 Microtower PC,PD490G1
+desktop,HP,HP ProDesk 498 G1 Microtower PC,PD498G1
+desktop,HP,HP ProDesk 600 G1 Desktop Mini PC,PD600G1
+desktop,HP,HP ProDesk 600 G1 Small Form Factor PC,PD600G1
+desktop,HP,HP ProDesk 600 G1 Tower PC,PD600G1
+desktop,HP,HP ProDesk 600 G3 Base Model Small Form Factor PC,PD600G3
+desktop,HP,HP ProDesk 600 G3 Desktop Mini PC,PD600G3
+desktop,HP,HP ProDesk 600 G3 Microtower PC,PD600G3
+desktop,HP,HP ProDesk 600 G3 Microtower PC (with PCI slot),PD600G3
+desktop,HP,HP ProDesk 600 G4 Desktop Mini PC,PD600G4
+desktop,HP,HP ProDesk 600 G4 Microtower PC,PD600G4
+desktop,HP,HP ProDesk 600 G4 Microtower PC (with PCI slot),PD600G4
+desktop,HP,HP ProDesk 600 G4 Small Form Factor PC,PD600G4
+desktop,HP,HP ProDesk 600 G5 Desktop Mini PC,PD600G5
+desktop,HP,HP ProDesk 600 G5 Microtower PC,PD600G5
+desktop,HP,HP ProDesk 600 G5 Microtower PC (with PCI slot),PD600G5
+desktop,HP,HP ProDesk 600 G5 Small Form Factor PC,PD600G5
+desktop,HP,HP ProDesk 600 G6 Desktop Mini PC,PD600G6
+desktop,HP,HP ProDesk 600 G6 Microtower PC,PD600G6
+desktop,HP,HP ProDesk 600 G6 PCI Microtower PC,PD600G6
+desktop,HP,HP ProDesk 600 G6 Small Form Factor PC,PD600G6
+desktop,HP,HP ProDesk 680 G1 Tower PC,PD680G1
+desktop,HP,HP ProDesk 680 G2 Microtower PC,PD680G2
+desktop,HP,HP ProDesk 680 G3 Microtower PC,PD680G3
+desktop,HP,HP ProDesk 680 G4 Microtower PC,PD680G4
+desktop,HP,HP ProDesk 680 G4 Microtower PC (with PCI slot),PD680G4
+desktop,HP,HP ProDesk 680 G6 PCI Microtower PC,PD680G6
+desktop,HP,HP ProOne 400 G1 19.5-inch Non-Touch All-in-One PC,P400G1
+desktop,HP,HP ProOne 400 G1 21.5-inch Touch All-in-One PC,P400G1
+desktop,HP,HP ProOne 400 G1 23-inch Non-Touch All-in-One PC,P400G1
+desktop,HP,HP ProOne 400 G2 20-inch Touch All-in-One PC,P400G2
+desktop,HP,HP ProOne 400 G3 20-inch Non-Touch All-in-One PC,P400G3
+desktop,HP,HP ProOne 400 G3 Base Model 20-inch Touch All-in-One PC,P400G3
+desktop,HP,HP ProOne 400 G4 20-inch Non-Touch All-in-One Business PC,P400G4
+desktop,HP,HP ProOne 400 G4 23.8-inch Non-Touch All-in-One Business PC,P400G4
+desktop,HP,HP ProOne 400 G5 20-inch All-in-One Business PC,P400G5
+desktop,HP,HP ProOne 400 G5 23.8-inch All-in-One Business PC,P400G5
+desktop,HP,HP ProOne 400 G6 20 All-in-One PC,P400G6
+desktop,HP,HP ProOne 400 G6 24 All-in-One PC,P400G6
+desktop,HP,HP ProOne 440 23.8 inch G9 All-in-One Desktop PC,P440G9
+desktop,HP,HP ProOne 440 G4 23.8-inch Non-Touch All-in-One Business PC,P440G4
+desktop,HP,HP ProOne 440 G5 23.8-in All-in-One Business PC,P440G5
+desktop,HP,HP ProOne 440 G6 24 All-in-One PC,P440G6
+desktop,HP,HP ProOne 480 G3 20-inch Non-Touch All-in One PC,P480G3
+desktop,HP,HP ProOne 600 G1 All-in-One PC,P600G1
+desktop,HP,HP ProOne 600 G2 21.5-inch Touch All-in-One PC,P600G2
+desktop,HP,HP ProOne 600 G3 21.5-inch Non-Touch All-in-One PC,P600G3
+desktop,HP,HP ProOne 600 G4 21.5-inch Non-Touch All-in-One Business PC,P600G4
+desktop,HP,HP ProOne 600 G4 21.5-inch Touch All-in-One Business PC,P600G4
+desktop,HP,HP ProOne 600 G5 21.5-in All-in-One Business PC,P600G5
+desktop,HP,HP ProOne 600 G6 22 All-in-One PC,P600G6
+desktop,HP,HP ProStudio 4 All-in-One G1i 23.8 inch Desktop AI PC,PRO4G1I
+desktop,HP,HP ZHAN 66 Pro G2 21.5-in All-in-One,PRO66G2
+desktop,HP,HP ZHAN 66 Pro G2 23.8-in All-in-One,PRO66G2
+desktop,HP,HP ZHAN 66 Pro G3 22 All-in-One PC,PRO66G3
+desktop,HP,HP ZHAN 66 Pro G3 24 All-in-One PC,PRO66G3
+desktop,HP,HP ZHAN 99 Pro 23.8 inch G9 All-in-One Desktop PC,PRO99G9
+desktop,HP,HP Zhan60 G1 21.5-inch FHD Non-Touch GPU All-in-One Business PC,HP21G1
+desktop,HP,HP Zhan60 G1 23.8-inch FHD Non-Touch GPU All-in-One Business PC,HP23G1
+desktop,HP,Sprout Pro by HP,PROSYHP
+desktop,Lenovo,ThinkCentre M625Q,M625Q
+desktop,Lenovo,ThinkCentre M630E,M630E
+desktop,Lenovo,ThinkCentre M70A,M70A
+desktop,Lenovo,ThinkCentre M70A Gen 2,M70AG2
+desktop,Lenovo,ThinkCentre M70A Gen 3,M70AG3
+desktop,Lenovo,ThinkCentre M70A Gen 6,M70AG6
+desktop,Lenovo,ThinkCentre M70C,M70C
+desktop,Lenovo,ThinkCentre M70Q,M70Q
+desktop,Lenovo,ThinkCentre M70Q Gen 2,M70QG2
+desktop,Lenovo,ThinkCentre M70Q Gen 3,M70QG3
+desktop,Lenovo,ThinkCentre M70Q Gen 4,M70QG4
+desktop,Lenovo,ThinkCentre M70Q Gen 5,M70QG5
+desktop,Lenovo,ThinkCentre M70Q Gen 6,M70QG6
+desktop,Lenovo,ThinkCentre M70Q Gen 6 Type 13HX,M70QG6
+desktop,Lenovo,ThinkCentre M70Q Type 11e8,M70Q
+desktop,Lenovo,ThinkCentre M70S,M70S
+desktop,Lenovo,ThinkCentre M70S Gen 3,M70SG3
+desktop,Lenovo,ThinkCentre M70S Gen 4,M70SG4
+desktop,Lenovo,ThinkCentre M70S Gen 5,M70SG5
+desktop,Lenovo,ThinkCentre M70S Gen 6,M70SG6
+desktop,Lenovo,ThinkCentre M70T,M70T
+desktop,Lenovo,ThinkCentre M70T Gen 3,M70TG3
+desktop,Lenovo,ThinkCentre M70T Gen 4,M70TG4
+desktop,Lenovo,ThinkCentre M70T Gen 5,M70TG5
+desktop,Lenovo,ThinkCentre M70T Gen 6,M70TG6
+desktop,Lenovo,ThinkCentre M710Q,M710Q
+desktop,Lenovo,ThinkCentre M710Q Type 10YC,M710Q
+desktop,Lenovo,ThinkCentre M710S,M710S
+desktop,Lenovo,ThinkCentre M710T,M710T
+desktop,Lenovo,ThinkCentre M715Q,M715Q
+desktop,Lenovo,ThinkCentre M715Q 2nd Gen,M715QG2
+desktop,Lenovo,ThinkCentre M715S,M715S
+desktop,Lenovo,ThinkCentre M715T,M715T
+desktop,Lenovo,ThinkCentre M720E,M720E
+desktop,Lenovo,ThinkCentre M720Q,M720Q
+desktop,Lenovo,ThinkCentre M720S,M720S
+desktop,Lenovo,ThinkCentre M720T,M720T
+desktop,Lenovo,ThinkCentre M725S,M725S
+desktop,Lenovo,ThinkCentre M75N,M75N
+desktop,Lenovo,ThinkCentre M75Q 1,M75Q1
+desktop,Lenovo,ThinkCentre M75Q Gen 2,M75QG2
+desktop,Lenovo,ThinkCentre M75Q Gen 2 Type 11JN 11JQ 11JR 11JS,M75QG2
+desktop,Lenovo,ThinkCentre M75Q Gen 5,M75QG5
+desktop,Lenovo,ThinkCentre M75Q Gen 6,M75QG6
+desktop,Lenovo,ThinkCentre M75Q-1,M75Q1
+desktop,Lenovo,ThinkCentre M75S 1,M75S1
+desktop,Lenovo,ThinkCentre M75S Gen 2,M75SG2
+desktop,Lenovo,ThinkCentre M75S Gen 2 CEZANNE,M75SNNE
+desktop,Lenovo,ThinkCentre M75S Gen 5,M75SG5
+desktop,Lenovo,ThinkCentre M75S Gen 6,M75SG6
+desktop,Lenovo,ThinkCentre M75S Gen-2,M75SEN2
+desktop,Lenovo,ThinkCentre M75S-1,M75S1
+desktop,Lenovo,ThinkCentre M75T Gen 2,M75TG2
+desktop,Lenovo,ThinkCentre M75T Gen 2 CEZANNE,M75TNNE
+desktop,Lenovo,ThinkCentre M75T Gen 5,M75TG5
+desktop,Lenovo,ThinkCentre M75T Gen 6,M75TG6
+desktop,Lenovo,ThinkCentre M80Q,M80Q
+desktop,Lenovo,ThinkCentre M80Q Gen 3,M80QG3
+desktop,Lenovo,ThinkCentre M80Q Gen 4,M80QG4
+desktop,Lenovo,ThinkCentre M80S,M80S
+desktop,Lenovo,ThinkCentre M80S Gen 3,M80SG3
+desktop,Lenovo,ThinkCentre M80T,M80T
+desktop,Lenovo,ThinkCentre M80T Gen 3,M80TG3
+desktop,Lenovo,ThinkCentre M810Z,M810Z
+desktop,Lenovo,ThinkCentre M820Z,M820Z
+desktop,Lenovo,ThinkCentre M90A,M90A
+desktop,Lenovo,ThinkCentre M90A Gen 2,M90AG2
+desktop,Lenovo,ThinkCentre M90A Gen 3,M90AG3
+desktop,Lenovo,ThinkCentre M90A Gen 3 PRO,M90APRO
+desktop,Lenovo,ThinkCentre M90A Gen 5,M90AG5
+desktop,Lenovo,ThinkCentre M90A Gen 6,M90AG6
+desktop,Lenovo,ThinkCentre M90A PRO Gen 4,M90AOG4
+desktop,Lenovo,ThinkCentre M90A PRO Gen 6,M90AOG6
+desktop,Lenovo,ThinkCentre M90N 1,M90N1
+desktop,Lenovo,ThinkCentre M90N-1,M90N1
+desktop,Lenovo,ThinkCentre M90Q,M90Q
+desktop,Lenovo,ThinkCentre M90Q Gen 2,M90QG2
+desktop,Lenovo,ThinkCentre M90Q Gen 3,M90QG3
+desktop,Lenovo,ThinkCentre M90Q Gen 4,M90QG4
+desktop,Lenovo,ThinkCentre M90Q Gen 5,M90QG5
+desktop,Lenovo,ThinkCentre M90Q Gen 6,M90QG6
+desktop,Lenovo,ThinkCentre M90S,M90S
+desktop,Lenovo,ThinkCentre M90S Gen 3,M90SG3
+desktop,Lenovo,ThinkCentre M90S Gen 4,M90SG4
+desktop,Lenovo,ThinkCentre M90S Gen 5,M90SG5
+desktop,Lenovo,ThinkCentre M90S Gen 6,M90SG6
+desktop,Lenovo,ThinkCentre M90T,M90T
+desktop,Lenovo,ThinkCentre M90T Gen 3,M90TG3
+desktop,Lenovo,ThinkCentre M90T Gen 4,M90TG4
+desktop,Lenovo,ThinkCentre M90T Gen 5,M90TG5
+desktop,Lenovo,ThinkCentre M90T Gen 6,M90TG6
+desktop,Lenovo,ThinkCentre M910Q,M910Q
+desktop,Lenovo,ThinkCentre M910S,M910S
+desktop,Lenovo,ThinkCentre M910T,M910T
+desktop,Lenovo,ThinkCentre M910X,M910X
+desktop,Lenovo,ThinkCentre M910Z,M910Z
+desktop,Lenovo,ThinkCentre M920Q,M920Q
+desktop,Lenovo,ThinkCentre M920S,M920S
+desktop,Lenovo,ThinkCentre M920T,M920T
+desktop,Lenovo,ThinkCentre M920X,M920X
+desktop,Lenovo,ThinkCentre M920Z,M920Z
+desktop,Lenovo,ThinkCentre X AIO,XAIO
+desktop,Lenovo,ThinkCentre X TOWER,XTOWER
+desktop,Lenovo,ThinkCentre X1,X1
+laptop,Dell,9305,DELL305
+laptop,Dell,DA16250,DA16250
+laptop,Dell,Dell 14 Premium DA14250,DA14250
+laptop,Dell,Dell Pro 13 Plus PB13250,PB13250
+laptop,Dell,Dell Pro 13 Plus PB13255,PB13255
+laptop,Dell,Dell Pro 13 Premium PA13250,PA13250
+laptop,Dell,Dell Pro 14 Essential PV14250,PV14250
+laptop,Dell,Dell Pro 14 PC14250,PC14250
+laptop,Dell,Dell Pro 14 PC14255,PC14255
+laptop,Dell,Dell Pro 14 Plus PB14250,PB14250
+laptop,Dell,Dell Pro 14 Plus PB14255,PB14255
+laptop,Dell,Dell Pro 14 Premium PA14250,PA14250
+laptop,Dell,Dell Pro 14 Premium PA14260,PA14260
+laptop,Dell,Dell Pro 16 PC16250,PC16250
+laptop,Dell,Dell Pro 16 PC16255,PC16255
+laptop,Dell,Dell Pro 16 Plus PB16250,PB16250
+laptop,Dell,Dell Pro 16 Plus PB16255,PB16255
+laptop,Dell,Dell Pro 3 14 P314260,DELLELL
+laptop,Dell,Dell Pro 3 14 P314265,DELLELL
+laptop,Dell,Dell Pro 3 16 P316260,DELLELL
+laptop,Dell,Dell Pro 3 16 P316265,DELLELL
+laptop,Dell,Dell Pro 5 14 P514260,DELLELL
+laptop,Dell,Dell Pro 5 14 P514265,DELLELL
+laptop,Dell,Dell Pro 5 16 P516260,DELLELL
+laptop,Dell,Dell Pro 5 16 P516265,DELLELL
+laptop,Dell,Dell Pro 7 13 P713260/Dell Pro 7 13 2-in-1 P703260,DELLELL
+laptop,Dell,Dell Pro 7 13 P713265/Dell Pro 7 13 2-in-1 P703265,DELLELL
+laptop,Dell,Dell Pro 7 14 P714260/Dell Pro 7 14 2-in-1 P704260,DELLELL
+laptop,Dell,Dell Pro 7 14 P714265/Dell Pro 7 14 2-in-1 P704265,DELLELL
+laptop,Dell,Dell Pro Education 11 PE11260,PE11260
+laptop,Dell,Dell Pro Education 14 PE14260,PE14260
+laptop,Dell,Dell Pro Max 14 MC14250,MC14250
+laptop,Dell,Dell Pro Max 14 MC14255,MC14255
+laptop,Dell,Dell Pro Max 14 Premium MA14250,MA14250
+laptop,Dell,Dell Pro Max 16 MC16250,MC16250
+laptop,Dell,Dell Pro Max 16 MC16255,MC16255
+laptop,Dell,Dell Pro Max 16 Plus MB16250,MB16250
+laptop,Dell,Dell Pro Max 16 Premium MA16250,MA16250
+laptop,Dell,Dell Pro Max 18 Plus MB18250,MB18250
+laptop,Dell,Dell Pro Precision 5 14 PW514261,PREDELL
+laptop,Dell,Dell Pro Precision 5 14S PW514260,PREDELL
+laptop,Dell,Dell Pro Precision 5 14S PW514265,PREDELL
+laptop,Dell,Dell Pro Precision 5 16 PW516261,PREDELL
+laptop,Dell,Dell Pro Precision 5 16S PW516260,PREDELL
+laptop,Dell,Dell Pro Precision 5 16S PW516265,PREDELL
+laptop,Dell,Dell Pro Precision 7 14 PW714260,PREDELL
+laptop,Dell,Dell Pro Precision 7 16 PW716260,PREDELL
+laptop,Dell,Dell Pro Rugged 10 Tablet RA00260,RA00260
+laptop,Dell,Dell Pro Rugged 12 Tablet RA02260,RA02260
+laptop,Dell,Dell Pro Rugged 13 Extreme PR713260,DELLELL
+laptop,Dell,Dell Pro Rugged 13 RA13250,RA13250
+laptop,Dell,Dell Pro Rugged 14 PR514260,DELLELL
+laptop,Dell,Dell Pro Rugged 14 RB14250,RB14250
+laptop,Dell,Latitude 12 Rugged Extreme (7204),LAT7204
+laptop,Dell,Latitude 12 Rugged Tablet 7202,LAT7202
+laptop,Dell,Latitude 13,LAT13
+laptop,Dell,Latitude 14 Rugged (5404),LAT5404
+laptop,Dell,Latitude 14 Rugged Extreme (7404),LAT7404
+laptop,Dell,Latitude 2100,LAT2100
+laptop,Dell,Latitude 2110,LAT2110
+laptop,Dell,Latitude 2120,LAT2120
+laptop,Dell,Latitude 3120,LAT3120
+laptop,Dell,Latitude 3140,LAT3140
+laptop,Dell,Latitude 3150,LAT3150
+laptop,Dell,Latitude 3160,LAT3160
+laptop,Dell,Latitude 3180,LAT3180
+laptop,Dell,Latitude 3189,LAT3189
+laptop,Dell,Latitude 3190,LAT3190
+laptop,Dell,Latitude 3190 2-in-1,LAT3190
+laptop,Dell,Latitude 3300,LAT3300
+laptop,Dell,Latitude 3301,LAT3301
+laptop,Dell,Latitude 3310,LAT3310
+laptop,Dell,Latitude 3310 2-IN-1,LAT3310
+laptop,Dell,Latitude 3320,LAT3320
+laptop,Dell,Latitude 3330,LAT3330
+laptop,Dell,Latitude 3340,LAT3340
+laptop,Dell,Latitude 3350,LAT3350
+laptop,Dell,Latitude 3379,LAT3379
+laptop,Dell,Latitude 3380,LAT3380
+laptop,Dell,Latitude 3390 2-in-1,LAT3390
+laptop,Dell,Latitude 3400,LAT3400
+laptop,Dell,Latitude 3410,LAT3410
+laptop,Dell,Latitude 3420,LAT3420
+laptop,Dell,Latitude 3430,LAT3430
+laptop,Dell,Latitude 3440,LAT3440
+laptop,Dell,Latitude 3450,LAT3450
+laptop,Dell,Latitude 3460,LAT3460
+laptop,Dell,Latitude 3470,LAT3470
+laptop,Dell,Latitude 3480,LAT3480
+laptop,Dell,Latitude 3490,LAT3490
+laptop,Dell,Latitude 3500,LAT3500
+laptop,Dell,Latitude 3510,LAT3510
+laptop,Dell,Latitude 3520,LAT3520
+laptop,Dell,Latitude 3530,LAT3530
+laptop,Dell,Latitude 3540,LAT3540
+laptop,Dell,Latitude 3550,LAT3550
+laptop,Dell,Latitude 3560,LAT3560
+laptop,Dell,Latitude 3570,LAT3570
+laptop,Dell,Latitude 3580,LAT3580
+laptop,Dell,Latitude 3590,LAT3590
+laptop,Dell,Latitude 5175,LAT5175
+laptop,Dell,Latitude 5179,LAT5179
+laptop,Dell,Latitude 5250,LAT5250
+laptop,Dell,Latitude 5280,LAT5280
+laptop,Dell,Latitude 5285,LAT5285
+laptop,Dell,Latitude 5289,LAT5289
+laptop,Dell,Latitude 5290,LAT5290
+laptop,Dell,Latitude 5290 2-IN-1,LAT5290
+laptop,Dell,Latitude 5300,LAT5300
+laptop,Dell,Latitude 5300 2-IN-1,LAT5300
+laptop,Dell,Latitude 5310,LAT5310
+laptop,Dell,Latitude 5310 2 in 1,LAT5310
+laptop,Dell,Latitude 5320,LAT5320
+laptop,Dell,Latitude 5330,LAT5330
+laptop,Dell,Latitude 5340,LAT5340
+laptop,Dell,Latitude 5350,LAT5350
+laptop,Dell,Latitude 5400,LAT5400
+laptop,Dell,Latitude 5401,LAT5401
+laptop,Dell,Latitude 5410,LAT5410
+laptop,Dell,Latitude 5411,LAT5411
+laptop,Dell,Latitude 5414,LAT5414
+laptop,Dell,Latitude 5420,LAT5420
+laptop,Dell,Latitude 5420 Rugged,LAT5420
+laptop,Dell,Latitude 5421,LAT5421
+laptop,Dell,Latitude 5424,LAT5424
+laptop,Dell,Latitude 5424 Rugged,LAT5424
+laptop,Dell,Latitude 5430,LAT5430
+laptop,Dell,Latitude 5430 Rugged,LAT5430
+laptop,Dell,Latitude 5431,LAT5431
+laptop,Dell,Latitude 5440,LAT5440
+laptop,Dell,Latitude 5450,LAT5450
+laptop,Dell,Latitude 5455,LAT5455
+laptop,Dell,Latitude 5480,LAT5480
+laptop,Dell,Latitude 5490,LAT5490
+laptop,Dell,Latitude 5491,LAT5491
+laptop,Dell,Latitude 5495,LAT5495
+laptop,Dell,Latitude 5500,LAT5500
+laptop,Dell,Latitude 5501,LAT5501
+laptop,Dell,Latitude 5510,LAT5510
+laptop,Dell,Latitude 5511,LAT5511
+laptop,Dell,Latitude 5520,LAT5520
+laptop,Dell,Latitude 5521,LAT5521
+laptop,Dell,Latitude 5530,LAT5530
+laptop,Dell,Latitude 5531,LAT5531
+laptop,Dell,Latitude 5540,LAT5540
+laptop,Dell,Latitude 5550,LAT5550
+laptop,Dell,Latitude 5580,LAT5580
+laptop,Dell,Latitude 5590,LAT5590
+laptop,Dell,Latitude 5591,LAT5591
+laptop,Dell,Latitude 6430U,LAT6430
+laptop,Dell,Latitude 7030 Rugged,LAT7030
+laptop,Dell,Latitude 7030 Rugged Extreme Tablet,LAT7030
+laptop,Dell,Latitude 7200 2-in-1,LAT7200
+laptop,Dell,Latitude 7210 2-in-1,LAT7210
+laptop,Dell,Latitude 7212,LAT7212
+laptop,Dell,Latitude 7214,LAT7214
+laptop,Dell,Latitude 7220,LAT7220
+laptop,Dell,Latitude 7230,LAT7230
+laptop,Dell,Latitude 7250,LAT7250
+laptop,Dell,Latitude 7275,LAT7275
+laptop,Dell,Latitude 7280,LAT7280
+laptop,Dell,Latitude 7285,LAT7285
+laptop,Dell,Latitude 7290,LAT7290
+laptop,Dell,Latitude 7300,LAT7300
+laptop,Dell,Latitude 7310,LAT7310
+laptop,Dell,Latitude 7320,LAT7320
+laptop,Dell,Latitude 7320 Detachable,LAT7320
+laptop,Dell,Latitude 7330,LAT7330
+laptop,Dell,Latitude 7330 Rugged Extreme,LAT7330
+laptop,Dell,Latitude 7340,LAT7340
+laptop,Dell,Latitude 7350,LAT7350
+laptop,Dell,Latitude 7350 Detachable,LAT7350
+laptop,Dell,Latitude 7370,LAT7370
+laptop,Dell,Latitude 7380,LAT7380
+laptop,Dell,Latitude 7389,LAT7389
+laptop,Dell,Latitude 7390,LAT7390
+laptop,Dell,Latitude 7390 2-in-1,LAT7390
+laptop,Dell,Latitude 7400,LAT7400
+laptop,Dell,Latitude 7400 2-IN-1,LAT7400
+laptop,Dell,Latitude 7410,LAT7410
+laptop,Dell,Latitude 7414,LAT7414
+laptop,Dell,Latitude 7420,LAT7420
+laptop,Dell,Latitude 7424,LAT7424
+laptop,Dell,Latitude 7424 Rugged Extreme,LAT7424
+laptop,Dell,Latitude 7430,LAT7430
+laptop,Dell,Latitude 7440,LAT7440
+laptop,Dell,Latitude 7450,LAT7450
+laptop,Dell,Latitude 7455,LAT7455
+laptop,Dell,Latitude 7480,LAT7480
+laptop,Dell,Latitude 7490,LAT7490
+laptop,Dell,Latitude 7520,LAT7520
+laptop,Dell,Latitude 7530,LAT7530
+laptop,Dell,Latitude 7640,LAT7640
+laptop,Dell,Latitude 7650,LAT7650
+laptop,Dell,Latitude 9330,LAT9330
+laptop,Dell,Latitude 9410,LAT9410
+laptop,Dell,Latitude 9420,LAT9420
+laptop,Dell,Latitude 9430,LAT9430
+laptop,Dell,Latitude 9440 2-in-1,LAT9440
+laptop,Dell,Latitude 9450,LAT9450
+laptop,Dell,Latitude 9450 2-in-1,LAT9450
+laptop,Dell,Latitude 9510,LAT9510
+laptop,Dell,Latitude 9520,LAT9520
+laptop,Dell,Latitude E4200,LAT4200
+laptop,Dell,Latitude E4300,LAT4300
+laptop,Dell,Latitude E4310,LAT4310
+laptop,Dell,Latitude E5250,LAT5250
+laptop,Dell,Latitude E5270,LAT5270
+laptop,Dell,Latitude E5400,LAT5400
+laptop,Dell,Latitude E5410,LAT5410
+laptop,Dell,Latitude E5420,LAT5420
+laptop,Dell,Latitude E5420m,LAT5420
+laptop,Dell,Latitude E5430-non-vPro,LAT5430
+laptop,Dell,Latitude E5430-vPro,LAT5430
+laptop,Dell,Latitude E5440,LAT5440
+laptop,Dell,Latitude E5450,LAT5450
+laptop,Dell,Latitude E5470,LAT5470
+laptop,Dell,Latitude E5500,LAT5500
+laptop,Dell,Latitude E5510,LAT5510
+laptop,Dell,Latitude E5520,LAT5520
+laptop,Dell,Latitude E5520m,LAT5520
+laptop,Dell,Latitude E5530 non-vPro,LAT5530
+laptop,Dell,Latitude E5530 vPro,LAT5530
+laptop,Dell,Latitude E5540,LAT5540
+laptop,Dell,Latitude E5550,LAT5550
+laptop,Dell,Latitude E5570,LAT5570
+laptop,Dell,Latitude E6220,LAT6220
+laptop,Dell,Latitude E6230,LAT6230
+laptop,Dell,Latitude E6320,LAT6320
+laptop,Dell,Latitude E6330,LAT6330
+laptop,Dell,Latitude E6400,LAT6400
+laptop,Dell,Latitude E6410,LAT6410
+laptop,Dell,Latitude E6420,LAT6420
+laptop,Dell,Latitude E6430,LAT6430
+laptop,Dell,Latitude E6430s,LAT6430
+laptop,Dell,Latitude E6440,LAT6440
+laptop,Dell,Latitude E6500,LAT6500
+laptop,Dell,Latitude E6510,LAT6510
+laptop,Dell,Latitude E6520,LAT6520
+laptop,Dell,Latitude E6530,LAT6530
+laptop,Dell,Latitude E6540,LAT6540
+laptop,Dell,Latitude E7240,LAT7240
+laptop,Dell,Latitude E7250,LAT7250
+laptop,Dell,Latitude E7270,LAT7270
+laptop,Dell,Latitude E7440,LAT7440
+laptop,Dell,Latitude E7450,LAT7450
+laptop,Dell,Latitude E7470,LAT7470
+laptop,Dell,Latitude ST,LATST
+laptop,Dell,Latitude XT2,LATXT2
+laptop,Dell,Latitude XT3,LATXT3
+laptop,Dell,Latitude Z600,LAT600
+laptop,Dell,Latitue 3300,LAT3300
+laptop,Dell,XPS 12 9250,XPS9250
+laptop,Dell,XPS 13 2in1 9310,XPS9310
+laptop,Dell,XPS 13 7390,XPS7390
+laptop,Dell,XPS 13 9300,XPS9300
+laptop,Dell,XPS 13 9310,XPS9310
+laptop,Dell,XPS 13 9315,XPS9315
+laptop,Dell,XPS 13 9315 2-in-1,XPS9315
+laptop,Dell,XPS 13 9320,XPS9320
+laptop,Dell,XPS 13 9340,XPS9340
+laptop,Dell,XPS 13 9343,XPS9343
+laptop,Dell,XPS 13 9345,XPS9345
+laptop,Dell,XPS 13 9350,XPS9350
+laptop,Dell,XPS 13 9360,XPS9360
+laptop,Dell,XPS 13 9365,XPS9365
+laptop,Dell,XPS 13 9370,XPS9370
+laptop,Dell,XPS 13 9380,XPS9380
+laptop,Dell,XPS 13 DX13260,DX13260
+laptop,Dell,XPS 14 9440,XPS9440
+laptop,Dell,XPS 14 DA14260,DA14260
+laptop,Dell,XPS 15 7590,XPS7590
+laptop,Dell,XPS 15 9500,XPS9500
+laptop,Dell,XPS 15 9510,XPS9510
+laptop,Dell,XPS 15 9520,XPS9520
+laptop,Dell,XPS 15 9530,XPS9530
+laptop,Dell,XPS 15 9550,XPS9550
+laptop,Dell,XPS 15 9560,XPS9560
+laptop,Dell,XPS 15 9570,XPS9570
+laptop,Dell,XPS 15 9575,XPS9575
+laptop,Dell,XPS 16 9640,XPS9640
+laptop,Dell,XPS 16 DA16260,DA16260
+laptop,Dell,XPS 16 DX16263,DX16263
+laptop,Dell,XPS 17 9700,XPS9700
+laptop,Dell,XPS 17 9710,XPS9710
+laptop,Dell,XPS 17 9720,XPS9720
+laptop,Dell,XPS 17 9730,XPS9730
+laptop,Dell,XPS 7390 2in1,XPS7390
+laptop,HP,HP Dragonfly 13.5 inch G4 Notebook PC,DF13G4
+laptop,HP,HP Dragonfly Folio 13.5 inch G3 2-in-1 Notebook PC,DF13G3
+laptop,HP,HP Elite Dragonfly 13.5 inch G3 Notebook PC,DF13G3
+laptop,HP,HP Elite Dragonfly G2 Notebook PC,DFG2
+laptop,HP,HP Elite Dragonfly Max Notebook PC,DFELKPC
+laptop,HP,HP Elite Dragonfly Notebook PC,DFELKPC
+laptop,HP,HP Elite x360 1040 14 inch G10 2-in-1 Notebook PC,EL1040
+laptop,HP,HP Elite x360 1040 14 inch G11 2-in-1 Notebook PC,EL1040
+laptop,HP,HP Elite x360 1040 14 inch G9 2-in-1 Notebook PC,E1040G9
+laptop,HP,HP Elite x360 830 13 inch G10 2-in-1 Notebook PC,E830G10
+laptop,HP,HP Elite x360 830 13 inch G11 2-in-1 Notebook PC,E830G11
+laptop,HP,HP Elite x360 830 13.3 inch G9 2-in-1 Notebook PC,EL830G9
+laptop,HP,HP EliteBook 1040 14 inch G10 Notebook PC,EB1040
+laptop,HP,HP EliteBook 1040 14 inch G11 Notebook PC,EB1040
+laptop,HP,HP EliteBook 1040 14 inch G9 Notebook PC,E1040G9
+laptop,HP,HP EliteBook 1040 G3 Notebook PC,E1040G3
+laptop,HP,HP EliteBook 1040 G4 Notebook PC,E1040G4
+laptop,HP,HP EliteBook 1050 G1 Notebook PC,E1050G1
+laptop,HP,HP EliteBook 6 G1a 14 inch Notebook AI PC,EB6G1A
+laptop,HP,HP EliteBook 6 G1a 14 inch Notebook Next Gen AI PC,EB6G1A
+laptop,HP,HP EliteBook 6 G1a 16 inch Notebook AI PC,EB6G1A
+laptop,HP,HP EliteBook 6 G1ah 14 inch Notebook PC,EB6G1AH
+laptop,HP,HP EliteBook 6 G1ah 16 inch Notebook PC,EB6G1AH
+laptop,HP,HP EliteBook 6 G1i 13 inch Notebook AI PC,EB6G1I
+laptop,HP,HP EliteBook 6 G1i 14 inch Notebook AI PC,EB6G1I
+laptop,HP,HP EliteBook 6 G1i 16 inch Notebook AI PC,EB6G1I
+laptop,HP,HP EliteBook 6 G1iR 14 inch Notebook PC,EB6G1IR
+laptop,HP,HP EliteBook 6 G1iR 16 inch Notebook PC,EB6G1IR
+laptop,HP,HP EliteBook 6 G2a 14 inch Notebook AI PC,EB6G2A
+laptop,HP,HP EliteBook 6 G2a 14 inch Notebook Next Gen AI PC,EB6G2A
+laptop,HP,HP EliteBook 6 G2a 16 inch Notebook AI PC,EB6G2A
+laptop,HP,HP EliteBook 6 G2a 16 inch Notebook Next Gen AI PC,EB6G2A
+laptop,HP,HP EliteBook 6 G2ah 14 inch Notebook PC,EB6G2AH
+laptop,HP,HP EliteBook 6 G2ah 16 inch Notebook PC,EB6G2AH
+laptop,HP,HP EliteBook 6 G2i 14 inch Notebook AI PC,EB6G2I
+laptop,HP,HP EliteBook 6 G2i 14 inch Notebook Next Gen AI PC,EB6G2I
+laptop,HP,HP EliteBook 6 G2i 16 inch Notebook AI PC,EB6G2I
+laptop,HP,HP EliteBook 6 G2i 16 inch Notebook Next Gen AI PC,EB6G2I
+laptop,HP,HP EliteBook 6 G2iR 14 inch Notebook Next Gen AI PC,EB6G2IR
+laptop,HP,HP EliteBook 630 13 inch G9 Notebook PC,EB630G9
+laptop,HP,HP EliteBook 630 13.3 inch G10 Notebook PC,E630G10
+laptop,HP,HP EliteBook 630 13.3 inch G11 Notebook PC,E630G11
+laptop,HP,HP EliteBook 640 14 inch G10 Notebook PC,E640G10
+laptop,HP,HP EliteBook 640 14 inch G11 Notebook PC,E640G11
+laptop,HP,HP EliteBook 640 14 inch G9 Notebook PC,EB640G9
+laptop,HP,HP EliteBook 645 14 inch G10 Notebook PC,E645G10
+laptop,HP,HP EliteBook 645 14 inch G11 Notebook PC,E645G11
+laptop,HP,HP EliteBook 645 14 inch G9 Notebook PC,EB645G9
+laptop,HP,HP EliteBook 650 15.6 inch G10 Notebook PC,E650G10
+laptop,HP,HP EliteBook 650 15.6 inch G9 Notebook PC,EB650G9
+laptop,HP,HP EliteBook 655 15.6 inch G10 Notebook PC,E655G10
+laptop,HP,HP EliteBook 655 15.6 inch G9 Notebook PC,EB655G9
+laptop,HP,HP EliteBook 660 16 inch G11 Notebook PC,E660G11
+laptop,HP,HP EliteBook 665 16 inch G11 Notebook PC,E665G11
+laptop,HP,HP EliteBook 735 G5 Notebook PC,EB735G5
+laptop,HP,HP EliteBook 735 G6 Notebook PC,EB735G6
+laptop,HP,HP EliteBook 745 G2 Notebook PC,EB745G2
+laptop,HP,HP EliteBook 745 G5 Notebook PC,EB745G5
+laptop,HP,HP EliteBook 745 G6 Notebook PC,EB745G6
+laptop,HP,HP EliteBook 755 G2 Notebook PC,EB755G2
+laptop,HP,HP EliteBook 755 G5 Notebook PC,EB755G5
+laptop,HP,HP EliteBook 8 Flip G1i 13 inch Notebook AI PC,EB8G1I
+laptop,HP,HP EliteBook 8 Flip G2i 13 inch Notebook Next Gen AI PC,EB8G2I
+laptop,HP,HP EliteBook 8 G1a 13 inch Notebook AI PC,EB8G1A
+laptop,HP,HP EliteBook 8 G1a 13 inch Notebook Next Gen AI PC,EB8G1A
+laptop,HP,HP EliteBook 8 G1a 14 inch Notebook AI PC,EB8G1A
+laptop,HP,HP EliteBook 8 G1a 14 inch Notebook Next Gen AI PC,EB8G1A
+laptop,HP,HP EliteBook 8 G1a 16 inch Notebook AI PC,EB8G1A
+laptop,HP,HP EliteBook 8 G1a 16 inch Notebook Next Gen AI PC,EB8G1A
+laptop,HP,HP EliteBook 8 G1i 13 inch Notebook AI PC,EB8G1I
+laptop,HP,HP EliteBook 8 G1i 14 inch Notebook AI PC,EB8G1I
+laptop,HP,HP EliteBook 8 G1i 14 inch Notebook Next Gen AI PC,EB8G1I
+laptop,HP,HP EliteBook 8 G1i 16 inch Notebook AI PC,EB8G1I
+laptop,HP,HP EliteBook 8 G1i 16 inch Notebook Next Gen AI PC,EB8G1I
+laptop,HP,HP EliteBook 8 G2a 14 inch Notebook Next Gen AI PC,EB8G2A
+laptop,HP,HP EliteBook 8 G2a 16 inch Notebook Next Gen AI PC,EB8G2A
+laptop,HP,HP EliteBook 8 G2i 13 inch Notebook Next Gen AI PC,EB8G2I
+laptop,HP,HP EliteBook 8 G2i 14 inch Notebook Next Gen AI PC,EB8G2I
+laptop,HP,HP EliteBook 8 G2i 16 inch Notebook Next Gen AI PC,EB8G2I
+laptop,HP,HP EliteBook 8 G2iW 14 inch Notebook AI PC,EB8G2IW
+laptop,HP,HP EliteBook 820 G4 Notebook PC,EB820G4
+laptop,HP,HP EliteBook 830 13 inch G10 Notebook PC,E830G10
+laptop,HP,HP EliteBook 830 13 inch G11 Notebook PC,E830G11
+laptop,HP,HP EliteBook 830 13.3 inch G9 Notebook PC,EB830G9
+laptop,HP,HP EliteBook 830 G5 Notebook PC,EB830G5
+laptop,HP,HP EliteBook 830 G6 Notebook PC,EB830G6
+laptop,HP,HP EliteBook 830 G7 Notebook PC,EB830G7
+laptop,HP,HP EliteBook 830 G8 Notebook PC,EB830G8
+laptop,HP,HP EliteBook 835 13 inch G10 Notebook PC,E835G10
+laptop,HP,HP EliteBook 835 13 inch G11 Notebook PC,E835G11
+laptop,HP,HP EliteBook 835 13.3 inch G9 Notebook PC,EB835G9
+laptop,HP,HP EliteBook 835 G7 Notebook PC,EB835G7
+laptop,HP,HP EliteBook 835 G8 Notebook PC,EB835G8
+laptop,HP,HP EliteBook 836 G5 Notebook PC,EB836G5
+laptop,HP,HP EliteBook 836 G6 Notebook PC,EB836G6
+laptop,HP,HP EliteBook 840 14 inch G10 Notebook PC,E840G10
+laptop,HP,HP EliteBook 840 14 inch G11 Notebook PC,E840G11
+laptop,HP,HP EliteBook 840 14 inch G9 Notebook PC,EB840G9
+laptop,HP,HP EliteBook 840 Aero G8 Notebook PC,EB840G8
+laptop,HP,HP EliteBook 840 G4 Notebook PC,EB840G4
+laptop,HP,HP EliteBook 840 G5 Healthcare Edition Notebook PC,EB840G5
+laptop,HP,HP EliteBook 840 G5 Notebook PC,EB840G5
+laptop,HP,HP EliteBook 840 G6 Healthcare Edition Notebook PC,EB840G6
+laptop,HP,HP EliteBook 840 G6 Notebook PC,EB840G6
+laptop,HP,HP EliteBook 840 G7 Notebook PC,EB840G7
+laptop,HP,HP EliteBook 840 G8 Notebook PC,EB840G8
+laptop,HP,HP EliteBook 840r G4 Notebook PC,EBG4
+laptop,HP,HP EliteBook 845 14 inch G10 Notebook PC,E845G10
+laptop,HP,HP EliteBook 845 14 inch G11 Notebook PC,E845G11
+laptop,HP,HP EliteBook 845 14 inch G9 Notebook PC,EB845G9
+laptop,HP,HP EliteBook 845 G7 Notebook PC,EB845G7
+laptop,HP,HP EliteBook 845 G8 Notebook PC,EB845G8
+laptop,HP,HP EliteBook 846 G5 Notebook PC,EB846G5
+laptop,HP,HP EliteBook 846r G4 Notebook PC,EBG4
+laptop,HP,HP EliteBook 848 G4 Notebook PC,EB848G4
+laptop,HP,HP EliteBook 850 G4 Notebook PC,EB850G4
+laptop,HP,HP EliteBook 850 G5 Notebook PC,EB850G5
+laptop,HP,HP EliteBook 850 G6 Notebook PC,EB850G6
+laptop,HP,HP EliteBook 850 G7 Notebook PC,EB850G7
+laptop,HP,HP EliteBook 850 G8 Notebook PC,EB850G8
+laptop,HP,HP EliteBook 855 G7 Notebook PC,EB855G7
+laptop,HP,HP EliteBook 855 G8 Notebook PC,EB855G8
+laptop,HP,HP EliteBook 860 16 inch G10 Notebook PC,E860G10
+laptop,HP,HP EliteBook 860 16 inch G11 Notebook PC,E860G11
+laptop,HP,HP EliteBook 860 16 inch G9 Notebook PC,EB860G9
+laptop,HP,HP EliteBook 865 16 inch G10 Notebook PC,E865G10
+laptop,HP,HP EliteBook 865 16 inch G11 Notebook PC,E865G11
+laptop,HP,HP EliteBook 865 16 inch G9 Notebook PC,EB865G9
+laptop,HP,HP EliteBook Ultra G1i 14 inch Notebook Next Gen AI PC,EB14G1I
+laptop,HP,HP EliteBook X Flip G1i 14 inch Notebook Next Gen AI PC,EB14G1I
+laptop,HP,HP EliteBook X Flip G2i 14 inch Notebook Next Gen AI PC,EB14G2I
+laptop,HP,HP EliteBook X G1a 14 inch Notebook Next Gen AI PC,EB14G1A
+laptop,HP,HP EliteBook X G1i 14 inch Notebook Next Gen AI PC,EB14G1I
+laptop,HP,HP EliteBook X G2a 14 inch Notebook Next Gen AI PC,EB14G2A
+laptop,HP,HP EliteBook X G2i 14 inch Notebook Next Gen AI PC,EB14G2I
+laptop,HP,HP EliteBook x360 1030 G3 Notebook PC,E1030G3
+laptop,HP,HP EliteBook x360 1030 G4 Notebook PC,E1030G4
+laptop,HP,HP EliteBook x360 1030 G7 Notebook PC,E1030G7
+laptop,HP,HP EliteBook x360 1030 G8 Notebook PC,E1030G8
+laptop,HP,HP EliteBook x360 1040 G5 Notebook PC,E1040G5
+laptop,HP,HP EliteBook x360 1040 G6 Notebook PC,E1040G6
+laptop,HP,HP EliteBook x360 1040 G7 Notebook PC,E1040G7
+laptop,HP,HP EliteBook x360 1040 G8 Notebook PC,E1040G8
+laptop,HP,HP EliteBook x360 830 G5 Notebook PC,EB830G5
+laptop,HP,HP EliteBook x360 830 G6 Notebook PC,EB830G6
+laptop,HP,HP EliteBook x360 830 G7 Notebook PC,EB830G7
+laptop,HP,HP EliteBook x360 830 G8 Notebook PC,EB830G8
+laptop,HP,HP Fortis Flip G1i 11 inch Notebook PC,HP11G1I
+laptop,HP,HP Limited Edition Scuderia Ferrari Notebook Next Gen AI PC,HPLIIPC
+laptop,HP,HP Presence 24 All-in-One with Zoom Rooms,HP24
+laptop,HP,HP Pro x360 435 13.3 inch G10 Notebook PC,P435G10
+laptop,HP,HP Pro x360 435 13.3 inch G9 Notebook PC,P435G9
+laptop,HP,HP Pro x360 Fortis 11 inch G10 Notebook PC,P11G10
+laptop,HP,HP Pro x360 Fortis 11 inch G11 Notebook PC,P11G11
+laptop,HP,HP Pro x360 Fortis 11 inch G9 Notebook PC,PRO11G9
+laptop,HP,HP ProBook 4 Flip G2i 13 inch Notebook AI PC,PB4G2I
+laptop,HP,HP ProBook 4 G1a 14 inch Notebook AI PC,PB4G1A
+laptop,HP,HP ProBook 4 G1a 16 inch Notebook AI PC,PB4G1A
+laptop,HP,HP ProBook 4 G1ah 14 inch Notebook PC,PB4G1AH
+laptop,HP,HP ProBook 4 G1ah 16 inch Notebook PC,PB4G1AH
+laptop,HP,HP ProBook 4 G1i 14 inch Notebook AI PC,PB4G1I
+laptop,HP,HP ProBook 4 G1i 16 inch Notebook AI PC,PB4G1I
+laptop,HP,HP ProBook 4 G1iR 14 inch Notebook PC,PB4G1IR
+laptop,HP,HP ProBook 4 G1iR 16 inch Notebook PC,PB4G1IR
+laptop,HP,HP ProBook 4 G2a 14 inch Notebook AI PC,PB4G2A
+laptop,HP,HP ProBook 4 G2a 14 inch Notebook Next Gen AI PC,PB4G2A
+laptop,HP,HP ProBook 4 G2a 16 inch Notebook AI PC,PB4G2A
+laptop,HP,HP ProBook 4 G2a 16 inch Notebook Next Gen AI PC,PB4G2A
+laptop,HP,HP ProBook 4 G2ah 14 inch Notebook PC,PB4G2AH
+laptop,HP,HP ProBook 4 G2ah 16 inch Notebook PC,PB4G2AH
+laptop,HP,HP ProBook 4 G2i 13 inch Notebook AI PC,PB4G2I
+laptop,HP,HP ProBook 4 G2i 14 inch Notebook AI PC,PB4G2I
+laptop,HP,HP ProBook 4 G2i 14 inch Notebook Next Gen AI PC,PB4G2I
+laptop,HP,HP ProBook 4 G2i 16 inch Notebook AI PC,PB4G2I
+laptop,HP,HP ProBook 4 G2i 16 inch Notebook Next Gen AI PC,PB4G2I
+laptop,HP,HP ProBook 4 G2iR 14 inch Notebook Next Gen AI PC,PB4G2IR
+laptop,HP,HP ProBook 430 G5 Notebook PC,PB430G5
+laptop,HP,HP ProBook 430 G6 Notebook PC,PB430G6
+laptop,HP,HP ProBook 430 G7 Notebook PC,PB430G7
+laptop,HP,HP ProBook 430 G8 Notebook PC,PB430G8
+laptop,HP,HP ProBook 440 14 inch G10 Notebook PC,P440G10
+laptop,HP,HP ProBook 440 14 inch G11 Notebook PC,P440G11
+laptop,HP,HP ProBook 440 14 inch G9 Notebook PC,PB440G9
+laptop,HP,HP ProBook 440 G5 Notebook PC,PB440G5
+laptop,HP,HP ProBook 440 G6 Notebook PC,PB440G6
+laptop,HP,HP ProBook 440 G7 Notebook PC,PB440G7
+laptop,HP,HP ProBook 440 G8 Notebook PC,PB440G8
+laptop,HP,HP ProBook 445 14 inch G10 Notebook PC,P445G10
+laptop,HP,HP ProBook 445 14 inch G11 Notebook PC,P445G11
+laptop,HP,HP ProBook 445 14 inch G9 Notebook PC,PB445G9
+laptop,HP,HP ProBook 445 G6 Notebook PC,PB445G6
+laptop,HP,HP ProBook 445 G7 Notebook PC,PB445G7
+laptop,HP,HP ProBook 445 G8 Notebook PC,PB445G8
+laptop,HP,HP ProBook 445R G6 Notebook PC,PBG6
+laptop,HP,HP ProBook 450 15.6 inch G10 Notebook PC,P450G10
+laptop,HP,HP ProBook 450 15.6 inch G9 Notebook PC,PB450G9
+laptop,HP,HP ProBook 450 G5 Notebook PC,PB450G5
+laptop,HP,HP ProBook 450 G6 Notebook PC,PB450G6
+laptop,HP,HP ProBook 450 G7 Notebook PC,PB450G7
+laptop,HP,HP ProBook 450 G8 Notebook PC,PB450G8
+laptop,HP,HP ProBook 455 15.6 inch G10 Notebook PC,P455G10
+laptop,HP,HP ProBook 455 15.6 inch G9 Notebook PC,PB455G9
+laptop,HP,HP ProBook 455 G6 Notebook PC,PB455G6
+laptop,HP,HP ProBook 455 G7 Notebook PC,PB455G7
+laptop,HP,HP ProBook 455 G8 Notebook PC,PB455G8
+laptop,HP,HP ProBook 455R G6 Notebook PC,PBG6
+laptop,HP,HP ProBook 460 16 inch G11 Notebook PC,P460G11
+laptop,HP,HP ProBook 465 16 inch G11 Notebook PC,P465G11
+laptop,HP,HP ProBook 470 G5 Notebook PC,PB470G5
+laptop,HP,HP ProBook 630 G8 Notebook PC,PB630G8
+laptop,HP,HP ProBook 635 Aero G7 Notebook PC,PB635G7
+laptop,HP,HP ProBook 635 Aero G8 Notebook PC,PB635G8
+laptop,HP,HP ProBook 640 G4 Notebook PC,PB640G4
+laptop,HP,HP ProBook 640 G5 Notebook PC,PB640G5
+laptop,HP,HP ProBook 640 G7 Notebook PC,PB640G7
+laptop,HP,HP ProBook 640 G8 Notebook PC,PB640G8
+laptop,HP,HP ProBook 645 G4 Notebook PC,PB645G4
+laptop,HP,HP ProBook 650 G4 Notebook PC,PB650G4
+laptop,HP,HP ProBook 650 G5 Notebook PC,PB650G5
+laptop,HP,HP ProBook 650 G7 Notebook PC,PB650G7
+laptop,HP,HP ProBook 650 G8 Notebook PC,PB650G8
+laptop,HP,HP ProBook Fortis 14 inch G10 Notebook PC,PB14G10
+laptop,HP,HP ProBook Fortis 14 inch G9 Notebook PC,PB14G9
+laptop,HP,HP ProBook x360 11 G3 EE Notebook PC,PB11G3
+laptop,HP,HP ProBook x360 11 G4 EE Notebook PC,PB11G4
+laptop,HP,HP ProBook x360 11 G5 EE Notebook PC,PB11G5
+laptop,HP,HP ProBook x360 11 G6 EE Notebook PC,PB11G6
+laptop,HP,HP ProBook x360 11 G7 Education Edition,PB11G7
+laptop,HP,HP ProBook x360 435 G7 Notebook PC,PB435G7
+laptop,HP,HP ProBook x360 435 G8 Notebook PC,PB435G8
+laptop,HP,HP ProBook x360 440 G1 Notebook PC,PB440G1
+laptop,HP,HP Spectre Pro x360 G2 Convertible PC,PROG2
+laptop,HP,HP ZBook 14 Mobile Workstation,ZB14
+laptop,HP,HP ZBook 14u G4 Mobile Workstation,ZBG4
+laptop,HP,HP ZBook 14u G5 Mobile Workstation,ZBG5
+laptop,HP,HP ZBook 14u G6 Mobile Workstation,ZBG6
+laptop,HP,HP ZBook 15 G5 Mobile Workstation,ZB15G5
+laptop,HP,HP ZBook 15 G6 Mobile Workstation,ZB15G6
+laptop,HP,HP ZBook 15u G4 Mobile Workstation,ZBG4
+laptop,HP,HP ZBook 15u G5 Mobile Workstation,ZBG5
+laptop,HP,HP ZBook 15u G6 Mobile Workstation,ZBG6
+laptop,HP,HP ZBook 15v G5 Mobile Workstation,ZBG5
+laptop,HP,HP ZBook 17 G6 Mobile Workstation,ZB17G6
+laptop,HP,HP ZBook 8 G1ah 14 inch Mobile Workstation PC,ZB8G1AH
+laptop,HP,HP ZBook 8 G1ak 14 inch Mobile Workstation PC,ZB8G1AK
+laptop,HP,HP ZBook 8 G1as 14 inch Mobile Workstation PC,ZB8G1AS
+laptop,HP,HP ZBook 8 G1i 14 inch Mobile Workstation PC,ZB8G1I
+laptop,HP,HP ZBook 8 G1i 16 inch Mobile Workstation PC,ZB8G1I
+laptop,HP,HP ZBook 8 G2a 14 inch Mobile Workstation PC,ZB8G2A
+laptop,HP,HP ZBook 8 G2a 16 inch Mobile Workstation PC,ZB8G2A
+laptop,HP,HP ZBook 8 G2i 14 inch Mobile Workstation PC,ZB8G2I
+laptop,HP,HP ZBook 8 G2i 16 inch Mobile Workstation PC,ZB8G2I
+laptop,HP,HP ZBook Create G7 Notebook PC,ZBG7
+laptop,HP,HP ZBook Firefly 14 G7 Mobile Workstation,ZB14G7
+laptop,HP,HP ZBook Firefly 14 inch G10 A Mobile Workstation PC,ZB14G10
+laptop,HP,HP ZBook Firefly 14 inch G10 Mobile Workstation PC,ZB14G10
+laptop,HP,HP ZBook Firefly 14 inch G11 A Mobile Workstation PC,ZB14G11
+laptop,HP,HP ZBook Firefly 14 inch G11 Mobile Workstation PC,ZB14G11
+laptop,HP,HP ZBook Firefly 14 inch G8 Mobile Workstation PC,ZB14G8
+laptop,HP,HP ZBook Firefly 14 inch G9 Mobile Workstation PC,ZB14G9
+laptop,HP,HP ZBook Firefly 15 G7 Mobile Workstation,ZB15G7
+laptop,HP,HP ZBook Firefly 15.6 inch G8 Mobile Workstation PC,ZB15G8
+laptop,HP,HP ZBook Firefly 16 inch G10 Mobile Workstation PC,ZB16G10
+laptop,HP,HP ZBook Firefly 16 inch G11 Mobile Workstation PC,ZB16G11
+laptop,HP,HP ZBook Firefly 16 inch G9 Mobile Workstation PC,ZB16G9
+laptop,HP,HP ZBook Fury 15 G7 Mobile Workstation,ZB15G7
+laptop,HP,HP ZBook Fury 15.6 inch G8 Mobile Workstation PC,ZB15G8
+laptop,HP,HP ZBook Fury 16 G10 Mobile Workstation PC,ZB16G10
+laptop,HP,HP ZBook Fury 16 G11 Mobile Workstation PC,ZB16G11
+laptop,HP,HP ZBook Fury 16 G9 Mobile Workstation PC,ZB16G9
+laptop,HP,HP ZBook Fury 17 G7 Mobile Workstation,ZB17G7
+laptop,HP,HP ZBook Fury 17.3 inch G8 Mobile Workstation PC,ZB17G8
+laptop,HP,HP ZBook Fury G1i 16 inch Mobile Workstation PC,ZB16G1I
+laptop,HP,HP ZBook Fury G1i 18 inch Mobile Workstation PC,ZB18G1I
+laptop,HP,HP ZBook Power 15.6 inch G10 A Mobile Workstation PC,ZB15G10
+laptop,HP,HP ZBook Power 15.6 inch G10 Mobile Workstation PC,ZB15G10
+laptop,HP,HP ZBook Power 15.6 inch G8 Mobile Workstation PC,ZB15G8
+laptop,HP,HP ZBook Power 15.6 inch G9 Mobile Workstation PC,ZB15G9
+laptop,HP,HP ZBook Power 16 inch G11 A Mobile Workstation PC,ZB16G11
+laptop,HP,HP ZBook Power 16 inch G11 Mobile Workstation PC,ZB16G11
+laptop,HP,HP ZBook Power G7 Mobile Workstation,ZBG7
+laptop,HP,HP ZBook Studio 15.6 inch G8 Mobile Workstation PC,ZB15G8
+laptop,HP,HP ZBook Studio 16 inch G10 Mobile Workstation PC,ZB16G10
+laptop,HP,HP ZBook Studio 16 inch G11 Mobile Workstation PC,ZB16G11
+laptop,HP,HP ZBook Studio 16 inch G9 Mobile Workstation PC,ZB16G9
+laptop,HP,HP ZBook Studio G5 Mobile Workstation,ZBG5
+laptop,HP,HP ZBook Studio G7 Mobile Workstation,ZBG7
+laptop,HP,HP ZBook Studio x360 G5 Convertible Workstation,ZBG5
+laptop,HP,HP ZBook Ultra G1a 14 inch Mobile Workstation PC,ZB14G1A
+laptop,HP,HP ZBook Ultra G3a 16 inch Mobile Workstation PC,ZB16G3A
+laptop,HP,HP ZBook X G1i 16 inch Mobile Workstation PC,ZB16G1I
+laptop,HP,HP ZBook X G2i 16 inch Mobile Workstation PC,ZB16G2I
+laptop,HP,HP ZBook x2 G4 Detachable Workstation,ZBG4
+laptop,HP,HP ZHAN 66 Pro 13 G2 Notebook PC,PRO66G2
+laptop,HP,HP ZHAN 66 Pro 14 G2 Notebook PC,PRO66G2
+laptop,HP,HP ZHAN 66 Pro 14 G3 Notebook PC,PRO66G3
+laptop,HP,HP ZHAN 66 Pro 14 G4 Notebook PC,PRO66G4
+laptop,HP,HP ZHAN 66 Pro 14 inch G5 Notebook PC,PRO66G5
+laptop,HP,HP ZHAN 66 Pro 15 G2 Notebook PC,PRO66G2
+laptop,HP,HP ZHAN 66 Pro 15 G3 Notebook PC,PRO66G3
+laptop,HP,HP ZHAN 66 Pro A 14 G3 Notebook PC,PRO66G3
+laptop,HP,HP ZHAN 66 Pro A 14 G4 Notebook PC,PRO66G4
+laptop,HP,HP ZHAN 66 Pro A 14 G5 Notebook PC,PRO66G5
+laptop,HP,HP ZHAN 66 Pro G1 Notebook PC,PRO66G1
+laptop,HP,HP Zbook 17 G5 Mobile Workstation,ZB17G5
+laptop,Lenovo,ThinkPad 10,TP10
+laptop,Lenovo,ThinkPad 10 20E3 20E4,TP100E4
+laptop,Lenovo,ThinkPad 11e,TP11E
+laptop,Lenovo,ThinkPad 11e 20E6 20E8,TP110E8
+laptop,Lenovo,ThinkPad 11e 20G9 20GB,TP110GB
+laptop,Lenovo,ThinkPad 11e 4th Gen Type 20HT 20HV,TP11EG4
+laptop,Lenovo,ThinkPad 11e 5TH Gen Type 20LR 20LQ,TP11EG5
+laptop,Lenovo,ThinkPad 13,TP13
+laptop,Lenovo,ThinkPad 13 Type 20J1 20J2,TP13
+laptop,Lenovo,ThinkPad 8,TP8
+laptop,Lenovo,ThinkPad A275 Type 20KC 20KD,A275
+laptop,Lenovo,ThinkPad A285 Type 20MW 20MX,A285
+laptop,Lenovo,ThinkPad A475 Type 20KL 20KM,A475
+laptop,Lenovo,ThinkPad A485 Type 20MU 20MV,A485
+laptop,Lenovo,ThinkPad E14 Gen 2 Type 20T6 20T7,E14G2
+laptop,Lenovo,ThinkPad E14 Gen 2 Type 20TA 20TB,E14G2
+laptop,Lenovo,ThinkPad E14 Gen 3 Type 20YE 20YD 20Y7 20YF,E14G3
+laptop,Lenovo,ThinkPad E14 Gen 4 Type 21E3 21E4,E14G4
+laptop,Lenovo,ThinkPad E14 Gen 4 Type 21EB AND 21EC,E14G4
+laptop,Lenovo,ThinkPad E14 Gen 5 Type 21JK 21JL,E14G5
+laptop,Lenovo,ThinkPad E14 Gen 5 Type 21JR 21JS,E14G5
+laptop,Lenovo,ThinkPad E14 Gen 6 Type 21M3 21M4,E14G6
+laptop,Lenovo,ThinkPad E14 Gen 6 Type 21M7 21M8,E14G6
+laptop,Lenovo,ThinkPad E14 Gen 7 Type 21SX 21SY,E14G7
+laptop,Lenovo,ThinkPad E14 Gen 7 Type 21T0 21T1,E14G7
+laptop,Lenovo,ThinkPad E14 Gen 7 Type 21T9 21TA,E14G7
+laptop,Lenovo,ThinkPad E14 Gen 7 Type 21U2 21U3,E14G7
+laptop,Lenovo,ThinkPad E14 Gen 8 Type 21Y2 21Y3,E14G8
+laptop,Lenovo,ThinkPad E14 Gen 8 Type 21Y6 21Y7,E14G8
+laptop,Lenovo,ThinkPad E14 Gen 8 Type 21Y8 21Y9,E14G8
+laptop,Lenovo,ThinkPad E14 Type 20RA 20RB,E14
+laptop,Lenovo,ThinkPad E15 Gen 2 Type 20T8 20T9,E15G2
+laptop,Lenovo,ThinkPad E15 Gen 2 Type 20TD 20TE,E15G2
+laptop,Lenovo,ThinkPad E15 Gen 3 Type 20YG 20YH 20YJ 20YK,E15G3
+laptop,Lenovo,ThinkPad E15 Gen 4 Type 21E6 21E7,E15G4
+laptop,Lenovo,ThinkPad E15 Gen 4 Type 21ED 21EE,E15G4
+laptop,Lenovo,ThinkPad E15 Type 20RD 20RE,E15
+laptop,Lenovo,ThinkPad E16 Gen 1 Type 21JN 21JQ,E16G1
+laptop,Lenovo,ThinkPad E16 Gen 1 Type 21JT 21JU,E16G1
+laptop,Lenovo,ThinkPad E16 Gen 2 Type 21M5 21M6,E16G2
+laptop,Lenovo,ThinkPad E16 Gen 2 Type 21MA 21MB,E16G2
+laptop,Lenovo,ThinkPad E16 Gen 3 Type 21SR 21SS,E16G3
+laptop,Lenovo,ThinkPad E16 Gen 3 Type 21TF 21TG,E16G3
+laptop,Lenovo,ThinkPad E16 Gen 3 Type 21st 21SU,E16G3
+laptop,Lenovo,ThinkPad E16 Gen 3 Type 22AY 22B0,E16G3
+laptop,Lenovo,ThinkPad E16 Gen 4 Type 21Y4 21Y5,E16G4
+laptop,Lenovo,ThinkPad E16 Gen 4 Type 21YC 21YD,E16G4
+laptop,Lenovo,ThinkPad E16 Gen 4 Type 21YE 21YF,E16G4
+laptop,Lenovo,ThinkPad L13 2 IN 1 Gen 5 Type 21LM 21LN,L1321G5
+laptop,Lenovo,ThinkPad L13 2 IN 1 Gen 6 Type 21R7 21R8,L1321G6
+laptop,Lenovo,ThinkPad L13 2 IN 1 Gen 6 Type 21RD 21RE,L1321G6
+laptop,Lenovo,ThinkPad L13 2 IN 1 Gen 7 Type 21XT 21XU,L1321G7
+laptop,Lenovo,ThinkPad L13 Gen 2 Non-VPro Type 20VH 20VJ,L13GPRO
+laptop,Lenovo,ThinkPad L13 Gen 2 Type 21AB 21AC,L13G2
+laptop,Lenovo,ThinkPad L13 Gen 2 VPro Type 20VH 20VJ,L13GPRO
+laptop,Lenovo,ThinkPad L13 Gen 3 Type 21B3 21B4,L13G3
+laptop,Lenovo,ThinkPad L13 Gen 3 Type 21B9 21BA,L13G3
+laptop,Lenovo,ThinkPad L13 Gen 4 Type 21FG 21FH,L13G4
+laptop,Lenovo,ThinkPad L13 Gen 4 Type 21FN 21FQ,L13G4
+laptop,Lenovo,ThinkPad L13 Gen 5 Type 21LB 21LC,L13G5
+laptop,Lenovo,ThinkPad L13 Gen 6 Type 21R5 21R6,L13G6
+laptop,Lenovo,ThinkPad L13 Gen 6 Type 21RB 21RC,L13G6
+laptop,Lenovo,ThinkPad L13 Gen 7 Type 21XR 21XS,L13G7
+laptop,Lenovo,ThinkPad L13 Type 20R3 20R4,L13
+laptop,Lenovo,ThinkPad L13 Yoga Gen 2 Non-VPro Type 20VL 20VK,L13YPRO
+laptop,Lenovo,ThinkPad L13 Yoga Gen 2 Type 21AD 21AE,L13YG2
+laptop,Lenovo,ThinkPad L13 Yoga Gen 2 VPro Type 20VL 20VK,L13YPRO
+laptop,Lenovo,ThinkPad L13 Yoga Gen 3 Type 21B5 21B6,L13YG3
+laptop,Lenovo,ThinkPad L13 Yoga Gen 3 Type 21BB 21BC,L13YG3
+laptop,Lenovo,ThinkPad L13 Yoga Gen 4 Type 21FJ 21FK,L13YG4
+laptop,Lenovo,ThinkPad L13 Yoga Gen 4 Type 21FR 21FS,L13YG4
+laptop,Lenovo,ThinkPad L13 Yoga Type 20R5 20R6,L13Y
+laptop,Lenovo,ThinkPad L14 Gen 2 Type 20X1 20X2,L14G2
+laptop,Lenovo,ThinkPad L14 Gen 2 Type 20X5 20X6,L14G2
+laptop,Lenovo,ThinkPad L14 Gen 3 Type 21C1 21C2,L14G3
+laptop,Lenovo,ThinkPad L14 Gen 3 Type 21C5 21C6,L14G3
+laptop,Lenovo,ThinkPad L14 Gen 4 Type 21H1 21H2,L14G4
+laptop,Lenovo,ThinkPad L14 Gen 4 Type 21H5 21H6,L14G4
+laptop,Lenovo,ThinkPad L14 Gen 5 Type 21L1 21L2,L14G5
+laptop,Lenovo,ThinkPad L14 Gen 5 Type 21L5 21L6,L14G5
+laptop,Lenovo,ThinkPad L14 Gen 6 Type 21S6 21S7,L14G6
+laptop,Lenovo,ThinkPad L14 Gen 6 Type 21S8 21S9,L14G6
+laptop,Lenovo,ThinkPad L14 Gen 6 Type 21SE 21SF,L14G6
+laptop,Lenovo,ThinkPad L14 Gen 7 Type 21X2 21X3,L14G7
+laptop,Lenovo,ThinkPad L14 Gen 7 Type 21X6 21X7,L14G7
+laptop,Lenovo,ThinkPad L14 Type 20U1 20U2,L14
+laptop,Lenovo,ThinkPad L14 Type 20U5 20U6,L14
+laptop,Lenovo,ThinkPad L15 Gen 2 Type 20X3 20X4,L15G2
+laptop,Lenovo,ThinkPad L15 Gen 2 Type 20X7 20X8,L15G2
+laptop,Lenovo,ThinkPad L15 Gen 3 Type 21C3 21C4,L15G3
+laptop,Lenovo,ThinkPad L15 Gen 3 Type 21C7 21C8,L15G3
+laptop,Lenovo,ThinkPad L15 Gen 4 Type 21H3 21H4,L15G4
+laptop,Lenovo,ThinkPad L15 Gen 4 Type 21H7 21H8,L15G4
+laptop,Lenovo,ThinkPad L15 Type 20U3 20U4,L15
+laptop,Lenovo,ThinkPad L15 Type 20U7 20U8,L15
+laptop,Lenovo,ThinkPad L16 Gen 1 Type 21L3 21L4,L16G1
+laptop,Lenovo,ThinkPad L16 Gen 1 Type 21L7 21L8,L16G1
+laptop,Lenovo,ThinkPad L16 Gen 2 Type 21RH 21RJ,L16G2
+laptop,Lenovo,ThinkPad L16 Gen 2 Type 21SA 21SB,L16G2
+laptop,Lenovo,ThinkPad L16 Gen 2 Type 21SC 21SD,L16G2
+laptop,Lenovo,ThinkPad L16 Gen 3 Type 21X8 21X9,L16G3
+laptop,Lenovo,ThinkPad L16 Gen 3 Type 21XC 21XD,L16G3
+laptop,Lenovo,ThinkPad L380 Type 20M5 20M6,L380
+laptop,Lenovo,ThinkPad L380 Yoga Type 20M7 20M8,L380Y
+laptop,Lenovo,ThinkPad L390 Type 20NR 20NS,L390
+laptop,Lenovo,ThinkPad L390 Yoga Type 20NT 20NU,L390Y
+laptop,Lenovo,ThinkPad L440,L440
+laptop,Lenovo,ThinkPad L450,L450
+laptop,Lenovo,ThinkPad L460,L460
+laptop,Lenovo,ThinkPad L470,L470
+laptop,Lenovo,ThinkPad L470 Type 20JU 20JV,L470
+laptop,Lenovo,ThinkPad L480 Type 20LS 20LT,L480
+laptop,Lenovo,ThinkPad L490 Type 20Q5 20Q6,L490
+laptop,Lenovo,ThinkPad L540,L540
+laptop,Lenovo,ThinkPad L560,L560
+laptop,Lenovo,ThinkPad L570 Type 20J8 20J9,L570
+laptop,Lenovo,ThinkPad L570 Type 20JQ 20JR,L570
+laptop,Lenovo,ThinkPad L580 Type 20LW 20LX,L580
+laptop,Lenovo,ThinkPad L590 Type 20Q7 20Q8,L590
+laptop,Lenovo,ThinkPad P1 Gen 2 Type 20QT 20QU,P1G2
+laptop,Lenovo,ThinkPad P1 Gen 3 Type 20TH 20TJ,P1G3
+laptop,Lenovo,ThinkPad P1 Gen 4 Type 20Y3 20Y4,P1G4
+laptop,Lenovo,ThinkPad P1 Gen 5 Type 21DC 21DD,P1G5
+laptop,Lenovo,ThinkPad P1 Gen 6 Type 21FV 21FW,P1G6
+laptop,Lenovo,ThinkPad P1 Gen 7 Type 21KV 21KW,P1G7
+laptop,Lenovo,ThinkPad P1 Gen 8 Type 21Q8 21Q9,P1G8
+laptop,Lenovo,ThinkPad P1 Gen 9 Type 21UE 21UF,P1G9
+laptop,Lenovo,ThinkPad P1 Type 20MD 20ME,P1
+laptop,Lenovo,ThinkPad P14S Gen 2 Type 20VX 20VY,P14SG2
+laptop,Lenovo,ThinkPad P14S Gen 2 Type 21A0 21A1,P14SG2
+laptop,Lenovo,ThinkPad P14S Gen 3 Type 21AK 21AL,P14SG3
+laptop,Lenovo,ThinkPad P14S Gen 3 Type 21J5 21J6,P14SG3
+laptop,Lenovo,ThinkPad P14S Gen 4 Type 21HF 21HG,P14SG4
+laptop,Lenovo,ThinkPad P14S Gen 4 Type 21K5 21K6,P14SG4
+laptop,Lenovo,ThinkPad P14S Gen 5 Type 21G2 21G3,P14SG5
+laptop,Lenovo,ThinkPad P14S Gen 5 Type 21ME 21MF,P14SG5
+laptop,Lenovo,ThinkPad P14S Gen 6 Type 21QL 21QM,P14SG6
+laptop,Lenovo,ThinkPad P14S Gen 6 Type 21QT 21QU,P14SG6
+laptop,Lenovo,ThinkPad P14S Gen 6 Type 21RV 21RW,P14SG6
+laptop,Lenovo,ThinkPad P14S Gen 7 Type 21X0 21X1,P14SG7
+laptop,Lenovo,ThinkPad P14S Gen 7 Type 21XJ 21XK,P14SG7
+laptop,Lenovo,ThinkPad P14S Type 20S4 20S5,P14S
+laptop,Lenovo,ThinkPad P14S Type 20Y1 20Y2,P14S
+laptop,Lenovo,ThinkPad P15 Gen 2 Type 20YQ 20YR,P15G2
+laptop,Lenovo,ThinkPad P15 Type 20ST 20SU,P15
+laptop,Lenovo,ThinkPad P15S Gen 2 Type 20W6 20W7,P15SG2
+laptop,Lenovo,ThinkPad P15S Type 20T4 20T5,P15S
+laptop,Lenovo,ThinkPad P15V Gen 2 Type 21A9 21AA,P15VG2
+laptop,Lenovo,ThinkPad P15V Gen 3 Type 21D8 21D9,P15VG3
+laptop,Lenovo,ThinkPad P15V Gen 3 Type 21EN 21EM,P15VG3
+laptop,Lenovo,ThinkPad P15V Type 20TQ 20TR,P15V
+laptop,Lenovo,ThinkPad P16 Gen 1 Type 21D6 21D7,P16G1
+laptop,Lenovo,ThinkPad P16 Gen 2 Type 21FA 21FB,P16G2
+laptop,Lenovo,ThinkPad P16 Gen 3 Type 21RQ 21RR,P16G3
+laptop,Lenovo,ThinkPad P16S Gen 1 Type 21BT 21BU,P16SG1
+laptop,Lenovo,ThinkPad P16S Gen 1 Type 21CK 21CL,P16SG1
+laptop,Lenovo,ThinkPad P16S Gen 2 Type 21HK 21HL,P16SG2
+laptop,Lenovo,ThinkPad P16S Gen 2 Type 21K9 21KA,P16SG2
+laptop,Lenovo,ThinkPad P16S Gen 3 Type 21KS 21KT,P16SG3
+laptop,Lenovo,ThinkPad P16S Gen 4 Type 21QR 21QS,P16SG4
+laptop,Lenovo,ThinkPad P16S Gen 4 Type 21QV 21QW,P16SG4
+laptop,Lenovo,ThinkPad P16S Gen 4 Type 21RX 21RY,P16SG4
+laptop,Lenovo,ThinkPad P16S Gen 5 Type 21XE 21XF,P16SG5
+laptop,Lenovo,ThinkPad P16S Gen 5 Type 21XG 21XH,P16SG5
+laptop,Lenovo,ThinkPad P16V Gen 1 Type 21FC 21FD,P16VG1
+laptop,Lenovo,ThinkPad P16V Gen 1 Type 21FE 21FF,P16VG1
+laptop,Lenovo,ThinkPad P16V Gen 2 Type 21KX 21KY,P16VG2
+laptop,Lenovo,ThinkPad P16V Gen 3 Type 21RS 21RT,P16VG3
+laptop,Lenovo,ThinkPad P17 Gen 1 Type 20SN 20SQ,P17G1
+laptop,Lenovo,ThinkPad P17 Gen 2 Type 20YU 20YV,P17G2
+laptop,Lenovo,ThinkPad P40 Yoga,P40Y
+laptop,Lenovo,ThinkPad P43S Type 20RH 20RJ,P43S
+laptop,Lenovo,ThinkPad P50,P50
+laptop,Lenovo,ThinkPad P50S,P50S
+laptop,Lenovo,ThinkPad P51 Type 20HH 20HJ,P51
+laptop,Lenovo,ThinkPad P51 Type 20MM 20MN,P51
+laptop,Lenovo,ThinkPad P51S Type 20HB 20HC,P51S
+laptop,Lenovo,ThinkPad P51S Type 20JY 20K0,P51S
+laptop,Lenovo,ThinkPad P52 Type 20M9 20MA,P52
+laptop,Lenovo,ThinkPad P52S Type 20LB 20LC,P52S
+laptop,Lenovo,ThinkPad P53 Type 20QN 20QQ,P53
+laptop,Lenovo,ThinkPad P53S Type 20N6 20N7,P53S
+laptop,Lenovo,ThinkPad P70,P70
+laptop,Lenovo,ThinkPad P71,P71
+laptop,Lenovo,ThinkPad P72 Type 20MB 20MC,P72
+laptop,Lenovo,ThinkPad P73 Type 20QR 20QS,P73
+laptop,Lenovo,ThinkPad T14 Gen 2 Type 20W0 20W1,T14G2
+laptop,Lenovo,ThinkPad T14 Gen 2 Type 20XK 20XL,T14G2
+laptop,Lenovo,ThinkPad T14 Gen 3 Type 21AH 21AJ,T14G3
+laptop,Lenovo,ThinkPad T14 Gen 3 Type 21CF 21CG,T14G3
+laptop,Lenovo,ThinkPad T14 Gen 4 Type 21HD 21HE,T14G4
+laptop,Lenovo,ThinkPad T14 Gen 4 Type 21K3 21K4,T14G4
+laptop,Lenovo,ThinkPad T14 Gen 5 Type 21MC 21MD,T14G5
+laptop,Lenovo,ThinkPad T14 Gen 5 Type 21ML 21MM,T14G5
+laptop,Lenovo,ThinkPad T14 Gen 6 Type 21QC 21QD,T14G6
+laptop,Lenovo,ThinkPad T14 Gen 6 Type 21QG 21QH,T14G6
+laptop,Lenovo,ThinkPad T14 Gen 6 Type 21QJ 21QK,T14G6
+laptop,Lenovo,ThinkPad T14 Gen 7 Type 21WN 21WQ,T14G7
+laptop,Lenovo,ThinkPad T14 Gen 7 Type 21WV 21WW,T14G7
+laptop,Lenovo,ThinkPad T14 Gen 7 Type 22AL 22AM,T14G7
+laptop,Lenovo,ThinkPad T14 Type 20S0 20S1,T14
+laptop,Lenovo,ThinkPad T14 Type 20S2 20S3,T14
+laptop,Lenovo,ThinkPad T14 Type 20UD 20UE,T14
+laptop,Lenovo,ThinkPad T14S 2IN1 Gen 1 Type 21R3 21R4,T14S1G1
+laptop,Lenovo,ThinkPad T14S 2IN1 Gen 2 Type 21YY 22A0,T14S1G2
+laptop,Lenovo,ThinkPad T14S Gen 2 Type 20WM 20WN,T14SG2
+laptop,Lenovo,ThinkPad T14S Gen 2 Type 20XF 20XG,T14SG2
+laptop,Lenovo,ThinkPad T14S Gen 3 Type 21BR 21BS,T14SG3
+laptop,Lenovo,ThinkPad T14S Gen 3 Type 21CQ 21CR,T14SG3
+laptop,Lenovo,ThinkPad T14S Gen 4 Type 21F6 21F7,T14SG4
+laptop,Lenovo,ThinkPad T14S Gen 4 Type 21F8 21F9,T14SG4
+laptop,Lenovo,ThinkPad T14S Gen 5 Type 21LS 21LT,T14SG5
+laptop,Lenovo,ThinkPad T14S Gen 6 Type 21M1 21M2,T14SG6
+laptop,Lenovo,ThinkPad T14S Gen 6 Type 21QX 21QY,T14SG6
+laptop,Lenovo,ThinkPad T14S Gen 6 Type 21R1 21R2,T14SG6
+laptop,Lenovo,ThinkPad T14S Gen 6 Type 21TB 21TC,T14SG6
+laptop,Lenovo,ThinkPad T14S Gen 7 Type 21YU 21YV,T14SG7
+laptop,Lenovo,ThinkPad T14S Gen 7 Type 21YW 21YX,T14SG7
+laptop,Lenovo,ThinkPad T14S Type 20T0 20T1,T14S
+laptop,Lenovo,ThinkPad T14S Type 20UH 20UJ,T14S
+laptop,Lenovo,ThinkPad T15 Gen 2 Type 20W4 20W5,T15G2
+laptop,Lenovo,ThinkPad T15 Type 20S6 20S7,T15
+laptop,Lenovo,ThinkPad T15G Gen 1 Type 20UR 20US,T15GG1
+laptop,Lenovo,ThinkPad T15G Gen 2 Type 20YS 20YT,T15GG2
+laptop,Lenovo,ThinkPad T15P Gen 2 Type 21A7 21A8,T15PG2
+laptop,Lenovo,ThinkPad T15P Gen 3 Type 21DA 21DB,T15PG3
+laptop,Lenovo,ThinkPad T15P Type 20TN 20TM,T15P
+laptop,Lenovo,ThinkPad T16 Gen 1 Type 21BV 21BW,T16G1
+laptop,Lenovo,ThinkPad T16 Gen 1 Type 21CH 21CJ,T16G1
+laptop,Lenovo,ThinkPad T16 Gen 2 Type 21HH 21HJ,T16G2
+laptop,Lenovo,ThinkPad T16 Gen 2 Type 21K7 21K8,T16G2
+laptop,Lenovo,ThinkPad T16 Gen 3 Type 21MN 21MQ,T16G3
+laptop,Lenovo,ThinkPad T16 Gen 4 Type 21QE 21QF,T16G4
+laptop,Lenovo,ThinkPad T16 Gen 4 Type 21QN 21QQ,T16G4
+laptop,Lenovo,ThinkPad T16 Gen 4 Type 22AW 22AX,T16G4
+laptop,Lenovo,ThinkPad T16 Gen 5 Type 21WT 21WU,T16G5
+laptop,Lenovo,ThinkPad T16 Gen 5 Type 21WX 21WY,T16G5
+laptop,Lenovo,ThinkPad T16 Gen 5 Type 22AN 22AQ,T16G5
+laptop,Lenovo,ThinkPad T16G Gen 3 Type 21V5 21V6,T16GG3
+laptop,Lenovo,ThinkPad T1G Gen 8 Type 21TD 21TE,T1GG8
+laptop,Lenovo,ThinkPad T1G Gen 9 Type 21UG 21UH,T1GG9
+laptop,Lenovo,ThinkPad T25 Type 20K7,T25
+laptop,Lenovo,ThinkPad T440,T440
+laptop,Lenovo,ThinkPad T440P,T440P
+laptop,Lenovo,ThinkPad T440S,T440S
+laptop,Lenovo,ThinkPad T450,T450
+laptop,Lenovo,ThinkPad T450S,T450S
+laptop,Lenovo,ThinkPad T460,T460
+laptop,Lenovo,ThinkPad T460P,T460P
+laptop,Lenovo,ThinkPad T460S,T460S
+laptop,Lenovo,ThinkPad T470,T470
+laptop,Lenovo,ThinkPad T470 Type 20JM 20JN,T470
+laptop,Lenovo,ThinkPad T470P,T470P
+laptop,Lenovo,ThinkPad T470S,T470S
+laptop,Lenovo,ThinkPad T470S Type 20JS 20JT,T470S
+laptop,Lenovo,ThinkPad T480 Type 20L5 20L6,T480
+laptop,Lenovo,ThinkPad T480S Type 20L7 20L8,T480S
+laptop,Lenovo,ThinkPad T490 Type 20N2 20N3,T490
+laptop,Lenovo,ThinkPad T490 Type 20Q9 20QH,T490
+laptop,Lenovo,ThinkPad T490 Type 20RY 20RX,T490
+laptop,Lenovo,ThinkPad T490S Type 20NX 20NY,T490S
+laptop,Lenovo,ThinkPad T495 Type 20NJ 20NK,T495
+laptop,Lenovo,ThinkPad T495S Type 20QJ 20QK,T495S
+laptop,Lenovo,ThinkPad T540P,T540P
+laptop,Lenovo,ThinkPad T550,T550
+laptop,Lenovo,ThinkPad T560,T560
+laptop,Lenovo,ThinkPad T570,T570
+laptop,Lenovo,ThinkPad T570 Type 20JW 20JX,T570
+laptop,Lenovo,ThinkPad T580 Type 20L9 20LA,T580
+laptop,Lenovo,ThinkPad T590 Type 20N4 20N5,T590
+laptop,Lenovo,ThinkPad W540,W540
+laptop,Lenovo,ThinkPad W541,W541
+laptop,Lenovo,ThinkPad W550S,W550S
+laptop,Lenovo,ThinkPad X1 2 IN 1 Gen 10 Type 21NU 21NV,X12IG10
+laptop,Lenovo,ThinkPad X1 2 IN 1 Gen 10 Type 21Q0 21Q1,X12IG10
+laptop,Lenovo,ThinkPad X1 2 IN 1 Gen 11 Type 21V9 21VA,X12IG11
+laptop,Lenovo,ThinkPad X1 2 IN 1 Gen 9 Type 21KE 21KF,X12I1G9
+laptop,Lenovo,ThinkPad X1 Carbon 10TH Gen Type 21CB 21CC,X1CG10
+laptop,Lenovo,ThinkPad X1 Carbon 11TH Gen Type 21HM 21HN,X1CG11
+laptop,Lenovo,ThinkPad X1 Carbon 12TH Gen Type 21KC 21KD,X1CG12
+laptop,Lenovo,ThinkPad X1 Carbon 13TH Gen Type 21NS 21NT,X1CG13
+laptop,Lenovo,ThinkPad X1 Carbon 13TH Gen Type 21NX 21NY,X1CG13
+laptop,Lenovo,ThinkPad X1 Carbon 20BS 20BT,X1C20BT
+laptop,Lenovo,ThinkPad X1 Carbon 6TH Gen Type 20KH 20KG,X1CG6
+laptop,Lenovo,ThinkPad X1 Carbon 7TH Gen Type 20QD 20QE,X1CG7
+laptop,Lenovo,ThinkPad X1 Carbon 7TH Gen Type 20R1 20R2,X1CG7
+laptop,Lenovo,ThinkPad X1 Carbon 8th Gen Type 20U9 20UA,X1CG8
+laptop,Lenovo,ThinkPad X1 Carbon 9TH Gen Type 20XW 20XX,X1CG9
+laptop,Lenovo,ThinkPad X1 Carbon Gen 14 Type 21V7 21V8,X1CG14
+laptop,Lenovo,ThinkPad X1 Carbon Type 20A7 20A8,X1C
+laptop,Lenovo,ThinkPad X1 Carbon Type 20FB 20FC,X1C
+laptop,Lenovo,ThinkPad X1 Carbon Type 20HR 20HQ,X1C
+laptop,Lenovo,ThinkPad X1 Carbon Type 20K4 20K3,X1C
+laptop,Lenovo,ThinkPad X1 EXTREME,X1E
+laptop,Lenovo,ThinkPad X1 EXTREME 3rd Gen Type 20TK 20TL,X1EG3
+laptop,Lenovo,ThinkPad X1 EXTREME 4th Gen Type 20Y5 20Y6,X1EG4
+laptop,Lenovo,ThinkPad X1 EXTREME Gen 2,X1EG2
+laptop,Lenovo,ThinkPad X1 EXTREME Gen 5 Type 21DE 21DF,X1EG5
+laptop,Lenovo,ThinkPad X1 FOLD 16 Gen 1 Type 21ES 21ET,X1FO6G1
+laptop,Lenovo,ThinkPad X1 FOLD Gen 1 Type 20RK 20RL,X1FODG1
+laptop,Lenovo,ThinkPad X1 NANO Gen 1 Type 20UN 20UQ,X1NAOG1
+laptop,Lenovo,ThinkPad X1 NANO Gen 2 Type 21E8 21E9,X1NAOG2
+laptop,Lenovo,ThinkPad X1 NANO Gen 3 Type 21K1 21K2,X1NAOG3
+laptop,Lenovo,ThinkPad X1 TITANIUM Type 20QA 20QB,X1TIIUM
+laptop,Lenovo,ThinkPad X1 Yoga 3rd Gen Type 20LD 20LE 20LF 20LG,X1YG3
+laptop,Lenovo,ThinkPad X1 Yoga 4th Gen Type 20QF 20QG,X1YG4
+laptop,Lenovo,ThinkPad X1 Yoga 4th Gen Type 20SA 20SB,X1YG4
+laptop,Lenovo,ThinkPad X1 Yoga 5th Gen Type 20UB 20UC,X1YG5
+laptop,Lenovo,ThinkPad X1 Yoga 6th Gen Type 20XY 20Y0,X1YG6
+laptop,Lenovo,ThinkPad X1 Yoga 7th Gen Type 21CD 21CE,X1YG7
+laptop,Lenovo,ThinkPad X1 Yoga 8th Gen Type 21HQ 21HR,X1YG8
+laptop,Lenovo,ThinkPad X1 Yoga Type 20FQ 20FR,X1Y
+laptop,Lenovo,ThinkPad X1 Yoga Type 20JD 20JE 20JF 20JG,X1Y
+laptop,Lenovo,ThinkPad X12 DETACHABLE Gen 1 Type 20UW 20UV,X12DEG1
+laptop,Lenovo,ThinkPad X12 DETACHABLE Gen 2 Type 21LK 21LL,X12DEG2
+laptop,Lenovo,ThinkPad X13 2 IN 1 Gen 5 Type 21LW 21LX,X1321G5
+laptop,Lenovo,ThinkPad X13 DETACHABLE Gen 1 Type 21U6 21U7,X13DEG1
+laptop,Lenovo,ThinkPad X13 Gen 2 Type 20WK 20WL,X13G2
+laptop,Lenovo,ThinkPad X13 Gen 2 Type 20XH 20XJ,X13G2
+laptop,Lenovo,ThinkPad X13 Gen 3 Type 21BN 21BQ,X13G3
+laptop,Lenovo,ThinkPad X13 Gen 3 Type 21CM 21CN,X13G3
+laptop,Lenovo,ThinkPad X13 Gen 4 Type 21EX 21EY,X13G4
+laptop,Lenovo,ThinkPad X13 Gen 4 Type 21J3 21J4,X13G4
+laptop,Lenovo,ThinkPad X13 Gen 5 Type 21LU 21LV,X13G5
+laptop,Lenovo,ThinkPad X13 Gen 6 Type 21RK 21RL,X13G6
+laptop,Lenovo,ThinkPad X13 Gen 6 Type 21RM 21RN,X13G6
+laptop,Lenovo,ThinkPad X13 Gen 7 Type 21YH 21YJ,X13G7
+laptop,Lenovo,ThinkPad X13 Gen 7 Type 21YK 21YL,X13G7
+laptop,Lenovo,ThinkPad X13 Type 20T2 20T3,X13
+laptop,Lenovo,ThinkPad X13 Type 20UF 20UG,X13
+laptop,Lenovo,ThinkPad X13 Yoga Gen 1,X13YG1
+laptop,Lenovo,ThinkPad X13 Yoga Gen 2 Type 20W8 20W9,X13YG2
+laptop,Lenovo,ThinkPad X13 Yoga Gen 3 Type 21AW 21AX,X13YG3
+laptop,Lenovo,ThinkPad X13 Yoga Gen 4 Type 21F2 21F3,X13YG4
+laptop,Lenovo,ThinkPad X140E,X140E
+laptop,Lenovo,ThinkPad X240,X240
+laptop,Lenovo,ThinkPad X240S,X240S
+laptop,Lenovo,ThinkPad X250,X250
+laptop,Lenovo,ThinkPad X260,X260
+laptop,Lenovo,ThinkPad X270,X270
+laptop,Lenovo,ThinkPad X270 Type 20K6 20K5,X270
+laptop,Lenovo,ThinkPad X280 Type 20KF 20KE,X280
+laptop,Lenovo,ThinkPad X380 Yoga,X380Y
+laptop,Lenovo,ThinkPad X390,X390
+laptop,Lenovo,ThinkPad X390 Type 20SC 20SD,X390
+laptop,Lenovo,ThinkPad X390 Yoga,X390Y
+laptop,Lenovo,ThinkPad X395,X395
+laptop,Lenovo,ThinkPad X9-14 Gen 1 Type 21QA 21QB,X914G1
+laptop,Lenovo,ThinkPad X9-15 Gen 1 Type 21Q6 21Q7,X915G1
+laptop,Lenovo,ThinkPad X9-15P Gen 1 Type 21VV 21VW,X915PG1
+laptop,Lenovo,ThinkPad Yoga 11e,Y11E
+laptop,Lenovo,ThinkPad Yoga 11e 20E5 20E7,Y11E0E7
+laptop,Lenovo,ThinkPad Yoga 11e 20G8 20GA,Y11E0GA
+laptop,Lenovo,ThinkPad Yoga 11e 4th Gen Type 20HS 20HU,Y11EG4
+laptop,Lenovo,ThinkPad Yoga 11e 5TH Gen Type 20LN 20LM,Y11EG5
+laptop,Lenovo,ThinkPad Yoga 11e 6th Gen Type 20SE 20SF,Y11EG6
+laptop,Lenovo,ThinkPad Yoga 12,Y12
+laptop,Lenovo,ThinkPad Yoga 14,Y14
+laptop,Lenovo,ThinkPad Yoga 14 20FY,Y1420FY
+laptop,Lenovo,ThinkPad Yoga 15,Y15
+laptop,Lenovo,ThinkPad Yoga 260,Y260
+laptop,Lenovo,ThinkPad Yoga 370,Y370
+laptop,Lenovo,ThinkPad Yoga 460,Y460
+laptop,Lenovo,ThinkPad Z13 Gen 2 Type 21JV 21JW,Z13G2
+laptop,Lenovo,ThinkPad Z13 Type 21D2 21D3,Z13
+laptop,Lenovo,ThinkPad Z16 Gen 2 Type 21JX 21JY,Z16G2
+laptop,Lenovo,ThinkPad Z16 Type 21D4 21D5,Z16
+motherboard,ASRock,B850 Challenger WiFi,B850CH
+motherboard,ASRock,B850 Challenger WiFi White,B850CH
+motherboard,ASRock,B850 LiveMixer WiFi,B850LM
+motherboard,ASRock,B850 Pro RS WiFi,B850PRS
+motherboard,ASRock,B850 Riptide WiFi,B850RP
+motherboard,ASRock,B850 Rock WiFi 7,B850RK
+motherboard,ASRock,B850 Steel Legend WiFi,B850SL
+motherboard,ASRock,B850I Lightning WiFi,B850ILT
+motherboard,ASRock,B850M Pro RS WiFi,B850PRS
+motherboard,ASRock,B850M Rock WiFi,B850MRK
+motherboard,ASRock,B850M Steel Legend WiFi,B850MSL
+motherboard,ASRock,B860 Challenger WiFi,B860CH
+motherboard,ASRock,B860 Challenger WiFi White,B860CH
+motherboard,ASRock,B860 LiveMixer WiFi,B860LM
+motherboard,ASRock,B860 Pro RS WiFi,B860PRS
+motherboard,ASRock,B860 Rock WiFi 7,B860RK
+motherboard,ASRock,B860 Steel Legend WiFi,B860SL
+motherboard,ASRock,B860I Lightning WiFi,B860ILT
+motherboard,ASRock,B860M LiveMixer WiFi,B860MLM
+motherboard,ASRock,B860M Rock WiFi,B860MRK
+motherboard,ASRock,B860M Steel Legend WiFi,B860MSL
+motherboard,ASRock,X870 LiveMixer WiFi,X870LM
+motherboard,ASRock,X870 Nova WiFi,X870NV
+motherboard,ASRock,X870 Pro RS WiFi,X870PRS
+motherboard,ASRock,X870 Pro-A WiFi,X870PA
+motherboard,ASRock,X870 Steel Legend WiFi,X870SL
+motherboard,ASRock,X870 Taichi Creator,X870TC
+motherboard,ASRock,X870E Nova WiFi,X870ENV
+motherboard,ASRock,X870E Taichi,X870ETC
+motherboard,ASRock,X870E Taichi White,X870ETC
+motherboard,ASRock,Z890 LiveMixer WiFi,Z890LM
+motherboard,ASRock,Z890 Nova WiFi,Z890NV
+motherboard,ASRock,Z890 Pro RS WiFi White,Z890PRS
+motherboard,ASRock,Z890 Steel Legend WiFi,Z890SL
+motherboard,ASRock,Z890 Taichi,Z890TC
+motherboard,ASRock,Z890 Taichi AQUA,Z890TC
+motherboard,ASRock,Z890 Taichi OCF,Z890TC
+workstation,Dell,Precision 3240 Compact,PRE3240
+workstation,Dell,Precision 3260 Compact,PRE3260
+workstation,Dell,Precision 3280 Compact,PRE3280
+workstation,Dell,Precision 3430,PRE3430
+workstation,Dell,Precision 3431,PRE3431
+workstation,Dell,Precision 3440 SFF,PRE3440
+workstation,Dell,Precision 3450 SFF,PRE3450
+workstation,Dell,Precision 3460 SFF,PRE3460
+workstation,Dell,Precision 3470,PRE3470
+workstation,Dell,Precision 3480,PRE3480
+workstation,Dell,Precision 3490,PRE3490
+workstation,Dell,Precision 3510,PRE3510
+workstation,Dell,Precision 3520,PRE3520
+workstation,Dell,Precision 3530,PRE3530
+workstation,Dell,Precision 3540,PRE3540
+workstation,Dell,Precision 3541,PRE3541
+workstation,Dell,Precision 3550,PRE3550
+workstation,Dell,Precision 3551,PRE3551
+workstation,Dell,Precision 3560,PRE3560
+workstation,Dell,Precision 3561,PRE3561
+workstation,Dell,Precision 3570,PRE3570
+workstation,Dell,Precision 3571,PRE3571
+workstation,Dell,Precision 3580,PRE3580
+workstation,Dell,Precision 3581,PRE3581
+workstation,Dell,Precision 3590,PRE3590
+workstation,Dell,Precision 3591,PRE3591
+workstation,Dell,Precision 3630,PRE3630
+workstation,Dell,Precision 3640 Tower,PRE3640
+workstation,Dell,Precision 3650 Tower,PRE3650
+workstation,Dell,Precision 3660 Tower,PRE3660
+workstation,Dell,Precision 3680 Tower,PRE3680
+workstation,Dell,Precision 3930 Rack,PRE3930
+workstation,Dell,Precision 5470,PRE5470
+workstation,Dell,Precision 5480,PRE5480
+workstation,Dell,Precision 5490,PRE5490
+workstation,Dell,Precision 5510,PRE5510
+workstation,Dell,Precision 5520,PRE5520
+workstation,Dell,Precision 5530,PRE5530
+workstation,Dell,Precision 5530 2-IN-1,PRE5530
+workstation,Dell,Precision 5540,PRE5540
+workstation,Dell,Precision 5550,PRE5550
+workstation,Dell,Precision 5560,PRE5560
+workstation,Dell,Precision 5570,PRE5570
+workstation,Dell,Precision 5680,PRE5680
+workstation,Dell,Precision 5690,PRE5690
+workstation,Dell,Precision 5720 AIO,PRE5720
+workstation,Dell,Precision 5750,PRE5750
+workstation,Dell,Precision 5760,PRE5760
+workstation,Dell,Precision 5770,PRE5770
+workstation,Dell,Precision 5820 Tower,PRE5820
+workstation,Dell,Precision 5860 Tower,PRE5860
+workstation,Dell,Precision 7510,PRE7510
+workstation,Dell,Precision 7520,PRE7520
+workstation,Dell,Precision 7530,PRE7530
+workstation,Dell,Precision 7540,PRE7540
+workstation,Dell,Precision 7550,PRE7550
+workstation,Dell,Precision 7560,PRE7560
+workstation,Dell,Precision 7670,PRE7670
+workstation,Dell,Precision 7680,PRE7680
+workstation,Dell,Precision 7710,PRE7710
+workstation,Dell,Precision 7720,PRE7720
+workstation,Dell,Precision 7730,PRE7730
+workstation,Dell,Precision 7740,PRE7740
+workstation,Dell,Precision 7750,PRE7750
+workstation,Dell,Precision 7760,PRE7760
+workstation,Dell,Precision 7770,PRE7770
+workstation,Dell,Precision 7780,PRE7780
+workstation,Dell,Precision 7820 Tower,PRE7820
+workstation,Dell,Precision 7865 Tower,PRE7865
+workstation,Dell,Precision 7875 Tower,PRE7875
+workstation,Dell,Precision 7920 Rack,PRE7920
+workstation,Dell,Precision 7920 Tower,PRE7920
+workstation,Dell,Precision 7960 Rack,PRE7960
+workstation,Dell,Precision 7960 Tower,PRE7960
+workstation,Dell,Precision M2400,PRE2400
+workstation,Dell,Precision M2800,PRE2800
+workstation,Dell,Precision M3800,PRE3800
+workstation,Dell,Precision M4400,PRE4400
+workstation,Dell,Precision M4500,PRE4500
+workstation,Dell,Precision M4600,PRE4600
+workstation,Dell,Precision M4700,PRE4700
+workstation,Dell,Precision M4800,PRE4800
+workstation,Dell,Precision M6400,PRE6400
+workstation,Dell,Precision M6500,PRE6500
+workstation,Dell,Precision M6600,PRE6600
+workstation,Dell,Precision M6700,PRE6700
+workstation,Dell,Precision M6800,PRE6800
+workstation,Dell,Precision R5400,PRE5400
+workstation,Dell,Precision R5500,PRE5500
+workstation,Dell,Precision R7610,PRE7610
+workstation,Dell,Precision Rack 7910,PRE7910
+workstation,Dell,Precision T1600,PRE1600
+workstation,Dell,Precision T1650,PRE1650
+workstation,Dell,Precision T1700,PRE1700
+workstation,Dell,Precision T3500,PRE3500
+workstation,Dell,Precision T3600,PRE3600
+workstation,Dell,Precision T3610,PRE3610
+workstation,Dell,Precision T5600,PRE5600
+workstation,Dell,Precision T5610,PRE5610
+workstation,Dell,Precision T7600,PRE7600
+workstation,Dell,Precision T7610,PRE7610
+workstation,Dell,Precision Tower 3420,PRE3420
+workstation,Dell,Precision Tower 3620,PRE3620
+workstation,Dell,Precision Tower 5810,PRE5810
+workstation,Dell,Precision Tower 7810,PRE7810
+workstation,Dell,Precision Tower 7910,PRE7910
+workstation,Dell,Precision WorkStation T5500,PRE5500
+workstation,Dell,Precision WorkStation T7500,PRE7500
+workstation,HP,HP VR Backpack G2,HPG2
+workstation,HP,HP Z1 All-in-One G2 Workstation,HPZ1G2
+workstation,HP,HP Z1 All-in-One G3 Workstation,HPZ1G3
+workstation,HP,HP Z1 Entry Tower G5,HPZ1G5
+workstation,HP,HP Z1 Entry Tower G6,HPZ1G6
+workstation,HP,HP Z1 G8 Tower Desktop PC,HPZ1G8
+workstation,HP,HP Z1 G9 Tower Desktop,HPZ1G9
+workstation,HP,HP Z1 Tower G1i Desktop PC,HPZ1G1I
+workstation,HP,HP Z2 G8 Tower Workstation Desktop PC,HPZ2G8
+workstation,HP,HP Z2 Mini G1a Workstation Desktop PC,HPZ2G1A
+workstation,HP,HP Z2 Mini G1i Workstation Desktop PC,HPZ2G1I
+workstation,HP,HP Z2 Mini G3 Workstation,HPZ2G3
+workstation,HP,HP Z2 Mini G4 Workstation,HPZ2G4
+workstation,HP,HP Z2 Mini G5 Workstation,HPZ2G5
+workstation,HP,HP Z2 Mini G9 Workstation Desktop PC,HPZ2G9
+workstation,HP,HP Z2 SFF G1i Workstation Desktop PC,HPZ2G1I
+workstation,HP,HP Z2 SFF G9 Workstation Desktop PC,HPZ2G9
+workstation,HP,HP Z2 Small Form Factor G4 Workstation,HPZ2G4
+workstation,HP,HP Z2 Small Form Factor G5 Workstation,HPZ2G5
+workstation,HP,HP Z2 Small Form Factor G8 Workstation,HPZ2G8
+workstation,HP,HP Z2 Tower G1i Workstation Desktop PC,HPZ2G1I
+workstation,HP,HP Z2 Tower G4 Workstation,HPZ2G4
+workstation,HP,HP Z2 Tower G5 Workstation,HPZ2G5
+workstation,HP,HP Z2 Tower G9 Workstation Desktop PC,HPZ2G9
+workstation,HP,HP Z230 Small Form Factor Workstation,HPZ230
+workstation,HP,HP Z230 Tower Workstation,HPZ230
+workstation,HP,HP Z240 Small Form Factor Workstation,HPZ240
+workstation,HP,HP Z240 Tower Workstation,HPZ240
+workstation,HP,HP Z4 G4 Workstation,HPZ4G4
+workstation,HP,HP Z4 G5 Workstation Desktop PC,HPZ4G5
+workstation,HP,HP Z4 G6i Workstation Desktop PC,HPZ4G6I
+workstation,HP,HP Z4 Rack G5 Workstation,HPZ4G5
+workstation,HP,HP Z440 Workstation,HPZ440
+workstation,HP,HP Z6 G4 Workstation,HPZ6G4
+workstation,HP,HP Z6 G5 A Workstation Desktop PC,HPZ6G5
+workstation,HP,HP Z6 G5 Workstation Desktop PC,HPZ6G5
+workstation,HP,HP Z640 Workstation,HPZ640
+workstation,HP,HP Z8 Fury G5 Workstation Desktop PC,HPZ8G5
+workstation,HP,HP Z8 Fury G6i Workstation Desktop PC,HPZ8G6I
+workstation,HP,HP Z8 G4 Workstation,HPZ8G4
+workstation,HP,HP Z8 G5 Workstation Desktop PC,HPZ8G5
+workstation,HP,HP Z840 Workstation,HPZ840
+workstation,HP,HP ZCentral 4R Workstation,HPZCION
+workstation,Lenovo,ThinkStation P2 TOWER,P2TOWER
+workstation,Lenovo,ThinkStation P2 TOWER Gen 2,P2TORG2
+workstation,Lenovo,ThinkStation P3 TINY,P3TINY
+workstation,Lenovo,ThinkStation P3 TINY Gen 2,P3TIYG2
+workstation,Lenovo,ThinkStation P3 TOWER,P3TOWER
+workstation,Lenovo,ThinkStation P3 TOWER Gen 2,P3TORG2
+workstation,Lenovo,ThinkStation P3 ULTRA,P3ULTRA
+workstation,Lenovo,ThinkStation P3 ULTRA SFF Gen 2,P3ULFG2
+workstation,Lenovo,ThinkStation P320,P320
+workstation,Lenovo,ThinkStation P320 TINY,P320INY
+workstation,Lenovo,ThinkStation P330,P330
+workstation,Lenovo,ThinkStation P330 2nd Gen,P330G2
+workstation,Lenovo,ThinkStation P330 TINY,P330INY
+workstation,Lenovo,ThinkStation P340,P340
+workstation,Lenovo,ThinkStation P340 TINY,P340INY
+workstation,Lenovo,ThinkStation P348,P348
+workstation,Lenovo,ThinkStation P350,P350
+workstation,Lenovo,ThinkStation P350 TINY,P350INY
+workstation,Lenovo,ThinkStation P358,P358
+workstation,Lenovo,ThinkStation P360,P360
+workstation,Lenovo,ThinkStation P360 TINY,P360INY
+workstation,Lenovo,ThinkStation P360 ULTRA,P360TRA
+workstation,Lenovo,ThinkStation P4,P4
+workstation,Lenovo,ThinkStation P5,P5
+workstation,Lenovo,ThinkStation P5 Gen 2,P5G2
+workstation,Lenovo,ThinkStation P510,P510
+workstation,Lenovo,ThinkStation P520,P520
+workstation,Lenovo,ThinkStation P520C,P520C
+workstation,Lenovo,ThinkStation P620,P620
+workstation,Lenovo,ThinkStation P7,P7
+workstation,Lenovo,ThinkStation P710,P710
+workstation,Lenovo,ThinkStation P720,P720
+workstation,Lenovo,ThinkStation P8,P8
+workstation,Lenovo,ThinkStation P920,P920
+workstation,Lenovo,ThinkStation PX,PX

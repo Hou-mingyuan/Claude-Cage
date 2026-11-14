@@ -136,6 +136,15 @@ func (e *app) main(ctx context.Context, args []string) int {
 
 var versionRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*(-[A-Za-z0-9.]+)?$`)
 
+// Command names this program in the messages of the commands it shares with
+// other entry points. A program that embeds this package, such as Cage, sets
+// its own before calling Main.
+var Command = "agent-vm"
+
+// UpdateHint, when set, replaces the installer-based suggestion of
+// `version --min`: a program that embeds this package knows how it updates.
+var UpdateHint string
+
 // `version [--min X.Y.Z]`: silent and 0 when this agent-vm is at least
 // X.Y.Z, an error and 1 when older, 2 when the call itself is wrong.
 func versionCmd(args []string, io IO) int {
@@ -166,7 +175,7 @@ func versionCmd(args []string, io IO) int {
 	if version.AtLeast(version.Version, want) {
 		return 0
 	}
-	fmt.Fprintf(io.Stderr, "Error: agent-vm %s is older than the required %s.\n", version.Version, want)
+	fmt.Fprintf(io.Stderr, "Error: %s %s is older than the required %s.\n", Command, version.Version, want)
 	fmt.Fprintf(io.Stderr, "  Update it:  %s\n", updateCommand())
 	return 1
 }
@@ -175,6 +184,9 @@ func versionCmd(args []string, io IO) int {
 // it. The installer's copy would otherwise land in ~/.local/bin, ahead of a
 // package's on the PATH, and hide its updates.
 func updateCommand() string {
+	if UpdateHint != "" {
+		return UpdateHint
+	}
 	exe, err := self()
 	if err != nil {
 		exe = ""

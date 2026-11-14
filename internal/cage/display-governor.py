@@ -67,6 +67,21 @@ def raw_key(data):
     return struct.unpack_from('=I', data, 6)[0] if isinstance(data, (bytes, bytearray)) and len(data) >= 10 else None
 
 
+def negotiate_input(connection):
+    """Require raw events even while another application owns an input grab.
+
+    python-xlib's xinput_query_version helper requests XI 2.0, whose raw
+    events disappear during another client's grab (menus/scrollbar drags).
+    XI 2.1 keeps delivery active. Older servers must keep the full frame rate
+    rather than throttle a viewer whose activity we cannot reliably observe.
+    """
+    from Xlib.ext import xinput
+    version = xinput.XIQueryVersion(display=connection.display,
+                                   opcode=connection.display.get_extension_major(xinput.extname),
+                                   major_version=2, minor_version=1)
+    return (version.major_version, version.minor_version) >= (2, 1)
+
+
 def choose_mode(rate, current, base, available):
     """Mode to show `rate` at the current size, and the remembered base mode.
 
@@ -150,6 +165,7 @@ class Governor:
         self.expected = None
         self.base = None
         self.probe_codes = None
+        self.stopping = False
         # Requests without a reply report their errors here. A mode another
         # client still uses is simply left in place.
         connection.set_error_handler(lambda *_: None)
@@ -260,9 +276,9 @@ class Governor:
                 acted = True
         return acted, changed
 
-    def run(self, clock=time.monotonic):
+    def run(self, clock=time.monotonic, wakeup_fd=None):
         last_input, shown = clock(), None
-        while True:
+        while not self.stopping:
             acted, changed = self.events()
             acted = self.activity.acted() or acted
             if acted:
@@ -282,7 +298,10 @@ class Governor:
             if self.conn.pending_events():
                 continue
             wait = next_change(clock() - last_input) if shown is not None else 5
-            select.select([self.conn.fileno(), *self.activity.files()], [], [], None if wait is None else wait + .01)
+            readers = [self.conn.fileno(), *self.activity.files()]
+            if wakeup_fd is not None:
+                readers.append(wakeup_fd)
+            select.select(readers, [], [], None if wait is None else wait + .01)
 
 
 def main():
@@ -305,12 +324,22 @@ def main():
         # Without both extensions the display simply keeps its full rate.
         print('display governor: RandR or XInput2 unavailable', file=sys.stderr)
         return 0
-    connection.xinput_query_version()
+    if not negotiate_input(connection):
+        print('display governor: XI 2.1 unavailable; keeping the full rate', file=sys.stderr)
+        connection.close()
+        return 0
     governor = Governor(connection, os.environ.get('CAGE_DISPLAY_OUTPUT', 'VNC-0'),
                         Activity(os.environ.get('CAGE_DISPLAY_ACTIVITY')))
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    # Never raise out of a python-xlib request: it can leave a reply lock held
+    # and deadlock the full-rate restore below. Mark shutdown and wake select
+    # instead, including when the idle display has no next timer deadline.
+    wake_read, wake_write = os.pipe()
+    os.set_blocking(wake_read, False)
+    os.set_blocking(wake_write, False)
+    previous_wakeup = signal.set_wakeup_fd(wake_write)
+    previous_handler = signal.signal(signal.SIGTERM, lambda *_: setattr(governor, 'stopping', True))
     try:
-        governor.run()
+        governor.run(wakeup_fd=wake_read)
     finally:
         # A stopped governor leaves the display at its full rate.
         try:
@@ -318,6 +347,11 @@ def main():
                 governor.apply(ACTIVE_RATE)
         except Exception:
             pass
+        signal.signal(signal.SIGTERM, previous_handler)
+        signal.set_wakeup_fd(previous_wakeup)
+        os.close(wake_read)
+        os.close(wake_write)
+        connection.close()
     return 0
 
 

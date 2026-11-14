@@ -234,12 +234,27 @@ func (r *Runtime) ServeNetwork(ctx context.Context, configPath string) error {
 	if err := cfg.RequireManagedProxy(r.profile); err != nil {
 		return err
 	}
-	network, err := NewNetwork(cfg)
+	container, err := r.inspectContainer(ctx)
+	if err != nil {
+		return err
+	}
+	if container == nil || container.ID != inspection.State.ContainerID {
+		return errors.New("container identity changed before network startup")
+	}
+	identity, err := containerIdentity(container)
+	if err != nil {
+		return err
+	}
+	network, err := newNetwork(cfg, identity)
 	if err != nil {
 		return err
 	}
 	defer network.Gate.Close("容器网络服务已停止")
-	command := r.command(ctx, "exec", "-i", "--user", "0", inspection.State.ContainerID, guestHelper, "container-tap")
+	args := []string{"exec", "-i", "--user", "0", inspection.State.ContainerID, guestHelper, "container-tap"}
+	if identity != nil {
+		args = append(args, identity.MACAddress)
+	}
+	command := r.command(ctx, args...)
 	command.Stderr = os.Stderr
 	endpoint, wait, err := ProcessEndpoint(command)
 	if err != nil {

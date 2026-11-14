@@ -104,7 +104,7 @@ function fixture(native = false, browserComposition = false, options = {}) {
   };
   const install = vm.runInNewContext(source + "\ninstallRemoteInput;", context);
   const container = Object.assign(new EventTarget(), {
-      querySelector: () => null,
+      querySelector: () => options.surface || null,
       contains: (element) => element === canvas || element === target,
       append() {},
       getBoundingClientRect: () => ({ left: 0, top: 0 }),
@@ -130,9 +130,9 @@ function fixture(native = false, browserComposition = false, options = {}) {
         compositions.push({ id, ...value });
       } : null,
       tabId: () => currentTabId,
-      caretRect: browserComposition ? options.caretRect || (async () => ({
+      caretRect: options.caretRect || (browserComposition ? async () => ({
         available: true, context: "a".repeat(32), rect: [240, 120, 0, 24],
-      })) : null,
+      }) : null),
       pasteContent: async (content) => {
         const value = await content;
         if (rfb.target) pastes.push(value.png || value.text);
@@ -154,6 +154,7 @@ function fixture(native = false, browserComposition = false, options = {}) {
     return event;
   };
   return {
+    container,
     doc,
     win,
     rfb,
@@ -799,3 +800,71 @@ test("malformed native Command letters retain clipboard and redo semantics", asy
     f.controller.dispose();
   }
 });
+
+test('remote hover shape updates even without an editable focus and rejects arbitrary CSS', async () => {
+  const changes = [];
+  let cursor = 'text';
+  const f = fixture(false, false, {
+    surface: { style: { setProperty: (...args) => changes.push(args) } },
+    caretRect: async () => ({ available: false, cursor }),
+  });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(changes.at(-1), ['cursor', 'text', 'important']);
+    cursor = 'url(https://invalid.example/cursor)';
+    const before = changes.length;
+    await new Promise(resolve => setTimeout(resolve, 280));
+    assert.equal(changes.length, before);
+    cursor = 'default';
+    await new Promise(resolve => setTimeout(resolve, 280));
+    assert.deepEqual(changes.at(-1), ['cursor', 'default', 'important']);
+  } finally { f.controller.dispose(); }
+});
+
+for (const platform of ["windows", "windows-11"]) {
+test(platform + ' hover after toolbar focus refreshes cursor without activating native IME', async () => {
+  const changes = [], calls = [];
+  let cursor = 'default';
+  const f = fixture(true, false, {
+    surface: { style: { setProperty: (...args) => changes.push(args) } },
+    caretRect: async () => ({ available: true, cursor, rect: [20, 20, 1, 20] }),
+    native: async (...args) => { calls.push(args); return true; },
+  });
+  f.setGuestPlatform(platform);
+  try {
+    f.doc.activeElement = {};
+    f.win.cageNativeIMEAvailable = true;
+    f.container.dispatchEvent(new Event('pointermove'));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(changes.at(-1), ['cursor', 'default', 'important']);
+    cursor = 'text';
+    f.container.dispatchEvent(new Event('pointermove'));
+    await new Promise(resolve => setTimeout(resolve, 280));
+    assert.deepEqual(changes.at(-1), ['cursor', 'text', 'important']);
+    assert.equal(calls.filter(([name, value]) => name === 'remoteInput' && value.operation === 'activate').length, 0);
+  } finally { f.controller.dispose(); }
+});
+}
+
+for (const platform of ["linux", "darwin"]) {
+  test(platform + " toolbar hover makes no cursor query and keeps focused IME polling", async () => {
+    const clock = fakeClock();
+    let readings = 0;
+    const f = fixture(false, true, { ...clock, caretRect: async () => {
+      readings++;
+      return { available: true, context: "a".repeat(32) };
+    } });
+    f.setGuestPlatform(platform);
+    try {
+      f.doc.activeElement = f.local;
+      await clock.advance(1000);
+      const before = readings;
+      f.container.dispatchEvent(new Event("pointermove"));
+      await clock.advance(1000);
+      assert.equal(readings, before);
+      f.rfb.focus();
+      await clock.advance(2500);
+      assert.ok(readings > before);
+    } finally { f.controller.dispose(); }
+  });
+}

@@ -276,6 +276,9 @@ func copyDownload(ctx context.Context, cancel context.CancelFunc, body io.Reader
 			reported = time.Now()
 		}
 		if readErr == io.EOF {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if expected >= 0 && received != expected {
 				return errors.New("下载未收到预期的全部字节")
 			}

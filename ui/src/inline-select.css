@@ -50,6 +50,13 @@
   overflow-wrap: anywhere;
   cursor: var(--control-cursor, default);
 }
+.inline-select-list.is-inline {
+  position: static;
+  z-index: auto;
+  margin-top: 4px;
+  width: 100%;
+  box-shadow: none;
+}
 .inline-select-list [aria-selected="true"] { background: var(--selected); }
 .inline-select-list [data-active], .inline-select-list [role="option"]:hover { outline: 1px solid var(--focus); outline-offset: -1px; }
 .inline-select-list [aria-disabled="true"] { color: var(--muted); }

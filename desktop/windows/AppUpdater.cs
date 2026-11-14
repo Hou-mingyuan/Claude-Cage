@@ -141,7 +141,11 @@ internal sealed class AppUpdater : IDisposable
             Directory.CreateDirectory(Root); UpdatePolicy.PlainPath(Root);
             File.Copy(Environment.ProcessPath!, helperPath);
             await Task.Run(() => Authenticode.SamePublisher(helperPath, prepared.Publisher), token);
-            var start = Backend.StartInfo(helperPath, "--install-update"); start.RedirectStandardInput = true;
+            var start = Backend.StartInfo(helperPath, "--install-update");
+            // A live process's working directory cannot be renamed on Windows.
+            // The helper outlives this App and must not retain its install path.
+            start.WorkingDirectory = Root;
+            start.RedirectStandardInput = true;
             helper = new Process { StartInfo = start };
             if (!helper.Start()) throw new IOException("无法启动安全安装程序");
             await helper.StandardInput.WriteLineAsync(JsonSerializer.Serialize(prepared));

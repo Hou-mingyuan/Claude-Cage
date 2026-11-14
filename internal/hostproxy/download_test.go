@@ -60,6 +60,22 @@ func TestHostDownloadStallAndCancellation(t *testing.T) {
 	}
 }
 
+// Some response bodies unblock a pending Read with EOF when canceled.
+func TestHostDownloadIdleEOFIsNotSuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	go func() {
+		<-ctx.Done()
+		writer.Close()
+	}()
+	err := copyDownload(ctx, cancel, reader, io.Discard, 10*time.Millisecond, -1, func(int) {})
+	if err != context.Canceled {
+		t.Fatalf("idle stream returned %v, want cancellation", err)
+	}
+}
+
 func TestHostDownloadRejectsPlainHTTP(t *testing.T) {
 	if err := downloadOnce(t.Context(), http.DefaultClient, "http://example.invalid/archive", filepath.Join(t.TempDir(), "archive"), "chrome.dmg", "", io.Discard, time.Second, 0); err == nil {
 		t.Fatal("unencrypted host download accepted")

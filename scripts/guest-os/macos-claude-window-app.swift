@@ -8,7 +8,8 @@ private var appURL: URL { claudeApplicationURL() }
 private let requirement = #"anchor apple generic and identifier "com.anthropic.claudefordesktop" and certificate leaf[subject.OU] = "Q6L2SF6YDW" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"#
 
 struct Request: Decodable {
-    let action: String
+    var action: String
+    var surface, url, login: String?
     var window: UInt32?
     var pid: Int32?
     var x, y, delta: Double?
@@ -142,6 +143,18 @@ func sendInput(_ input: Request, window: SCWindow, canvas: ClaudeCanvas? = nil, 
         guard let x = input.x, let y = input.y, (0..<1).contains(x), (0..<1).contains(y) else { throw Failure(8, "invalid_input") }
         let crop = canvas?.cropTop ?? 0
         let point = CGPoint(x: origin.x + extent.width * x, y: origin.y + crop + (extent.height-crop) * y)
+        if input.surface == "browser" {
+            guard let inputSession else { throw Failure(8, "input_connection_required") }
+            if input.action == "click" {
+                var pointer = input
+                pointer.action = "pointer"; pointer.button = 0; pointer.clicks = 1
+                for phase in ["down", "up"] {
+                    pointer.phase = phase
+                    try inputSession.pointer(pointer, target: target, window: window, canvas: canvas)
+                }
+                return
+            }
+        }
         if input.action == "project-click" {
             // NSOpenPanel's remote view returns the hosting AXWindow from
             // point queries. Hit-test only its actual approval button, using
@@ -205,7 +218,10 @@ func sendInput(_ input: Request, window: SCWindow, canvas: ClaudeCanvas? = nil, 
             event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowID))
             event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowID))
             event.setIntegerValueField(.mouseEventClickState, value: 1)
-            event.postToPid(pid)
+            if input.surface == "browser" {
+                guard try MacChromeWindow.shared.ownsPoint(point, pid: pid, window: window.windowID) else { throw Failure(7, "window_changed") }
+                event.post(tap: .cghidEventTap)
+            } else { event.postToPid(pid) }
         }
     default: throw Failure(8, "invalid_input")
     }
@@ -226,13 +242,28 @@ func launchClaudeWindow() async throws {
 @MainActor
 private func handle(_ input: Request, inputSession: MacWindowInputSession) async throws -> [String: Any] {
     try requireGuest()
+    var input = input
+    let browser = input.surface == "browser"
+    if browser {
+        guard input.action.hasPrefix("browser-") else { throw Failure(8, "unknown_action") }
+        input.action.removeFirst("browser-".count)
+        switch input.action {
+        case "status", "launch", "finish-login", "files-start", "frame", "key", "text", "click", "scroll", "pointer", "ime", "input-reset", "request-screen", "request-input": break
+        default: throw Failure(8, "unknown_action")
+        }
+    } else if input.surface != nil { throw Failure(8, "unknown_surface") }
+    let canvas = browser ? ClaudeCanvasSession.browser : ClaudeCanvasSession.shared
+    func targetWindow() async throws -> (SCWindow, SCContentFilter?) {
+        if browser { return (try await MacChromeWindow.shared.window(), nil) }
+        return try await selectedWindow()
+    }
     if input.action.hasPrefix("phone-") {
         return try await MacPhoneDesktop.shared.handle(input)
     }
     try consoleUser()
     switch input.action {
     case "files-start":
-        let (window, _) = try await selectedWindow()
+        let (window, _) = try await targetWindow()
         guard input.pid == window.owningApplication?.processID, input.window == window.windowID else { throw Failure(7, "window_changed") }
         return try MacDesktopFiles.shared.start(window: window, kind: input.kind ?? "")
     case "files-add":
@@ -276,12 +307,18 @@ private func handle(_ input: Request, inputSession: MacWindowInputSession) async
         guard let url = MacMaintenance.settingsURL(for: purpose), NSWorkspace.shared.open(url) else { throw Failure(7, "settings_unavailable") }
         return ["ok":true]
     case "status":
+        if browser { return MacChromeWindow.shared.status }
         let installed = FileManager.default.fileExists(atPath: appURL.path)
         let running = ((try? claudePIDs())?.isEmpty == false)
         var screen = CGPreflightScreenCaptureAccess()
         if #available(macOS 15.2, *) { screen = screen || ClaudePicker.shared.selection != nil }
         return ["version": (Bundle(url: appURL)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "", "installed": installed, "running": running, "screen": screen, "input": AXIsProcessTrusted(), "input_protocol": 1, "persistent": true, "push_frames": true]
+    case "finish-login":
+        guard browser, let token = input.login else { throw Failure(8, "invalid_login") }
+        MacChromeWindow.shared.finish(token)
+        return ["ok": true]
     case "launch":
+        if browser { try MacChromeWindow.shared.launch(input); return ["ok": true] }
         try await launchClaudeWindow()
         return ["ok": true]
     case "stop":
@@ -290,26 +327,25 @@ private func handle(_ input: Request, inputSession: MacWindowInputSession) async
         }
         return ["ok": true]
     case "request-screen":
-        if #available(macOS 15.2, *) { ClaudePicker.shared.choose() } else { _ = CGRequestScreenCaptureAccess() }
+        if #available(macOS 15.2, *), !browser { ClaudePicker.shared.choose() } else { _ = CGRequestScreenCaptureAccess() }
         return ["screen": CGPreflightScreenCaptureAccess()]
     case "request-input":
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         return ["input": AXIsProcessTrustedWithOptions(options)]
     case "frame":
-        if input.wait != true && input.refresh != true && MacWindowStream.shared.unchanged(after: input.after) {
+        if input.wait != true && input.refresh != true && !browser && canvas.stream.unchanged(after: input.after) {
             return ["unchanged": true, "sequence": input.after!]
         }
-        let (window, filter) = try await selectedWindow()
+        let (window, filter) = try await targetWindow()
         if input.width != nil || input.height != nil || input.scale != nil {
             guard let width=input.width, let height=input.height, let scale=input.scale else { throw Failure(8,"invalid_input") }
             let capture = filter ?? SCContentFilter(desktopIndependentWindow: window)
-            let canvas = ClaudeCanvasSession.shared
             let layout = try await canvas.layout(window, filter:capture, width:width, height:height, scale:scale)
             // A window object from before AX resizing still describes the old
             // surface. Reacquire that exact window before the first new frame.
             var target = window, source = capture
             if abs(window.frame.width - layout.frame.width) >= 1 || abs(window.frame.height - layout.frame.height) >= 1 {
-                let (fresh, selection) = try await selectedWindow()
+                let (fresh, selection) = try await targetWindow()
                 guard fresh.windowID == layout.id, fresh.owningApplication?.processID == layout.pid else {
                     throw Failure(7, "window_changed")
                 }
@@ -321,7 +357,7 @@ private func handle(_ input: Request, inputSession: MacWindowInputSession) async
             return reply
         }
         let data = try await screenshot(window, filter: filter)
-        guard data.count < 8 << 20, let owner = window.owningApplication, try claudePIDs().contains(owner.processID) else {
+        guard data.count < 8 << 20, let owner = window.owningApplication, (browser ? MacChromeWindow.shared.owns(owner.processID) : try claudePIDs().contains(owner.processID)) else {
             throw Failure(7, "window_changed")
         }
         try consoleUser()
@@ -330,18 +366,18 @@ private func handle(_ input: Request, inputSession: MacWindowInputSession) async
         inputSession.reset()
         return ["ok": true]
     case "ime":
-        let (window, _) = try await selectedWindow()
-        let canvas = try input.geometry.map { try ClaudeCanvasSession.shared.inputGeometry($0, window: window) }
-        return try inputSession.ime(input, window: window, canvas: canvas) { value in
+        let (window, _) = try await targetWindow()
+        let geometry = try input.geometry.map { try canvas.inputGeometry($0, window: window) }
+        return try inputSession.ime(input, window: window, canvas: geometry) { value in
             if value.isEmpty { return }
             var text = Request(action: "text")
             text.pid = input.pid; text.window = input.window; text.geometry = input.geometry; text.text = value
-            try sendInput(text, window: window, canvas: canvas, inputSession: inputSession)
+            try sendInput(text, window: window, canvas: geometry, inputSession: inputSession)
         }
     case "text", "key", "click", "scroll", "pointer":
-        let (window, _) = try await selectedWindow()
-        let canvas = try input.geometry.map { try ClaudeCanvasSession.shared.inputGeometry($0, window:window) }
-        try sendInput(input, window: window, canvas:canvas, inputSession: inputSession)
+        let (window, _) = try await targetWindow()
+        let geometry = try input.geometry.map { try canvas.inputGeometry($0, window:window) }
+        try sendInput(input, window: window, canvas:geometry, inputSession: inputSession)
         return ["ok": true]
     case "project-frame", "project-click":
         guard let path = input.project else { throw Failure(7, "no_project_panel") }
@@ -398,9 +434,11 @@ private func respondConnection(_ fd: Int32, inputSession: MacWindowInputSession)
         }
         var reply: [String:Any]
         do {
-            if request.action == "paste-image" {
+            if request.action == "paste-image" && request.surface == nil || request.action == "browser-paste-image" && request.surface == "browser" {
                 guard let length = request.length, length > 0, length <= 20 * 1024 * 1024, body.count <= length else { throw Failure(8, "attachment_size_limit") }
-                let (window, _) = try await selectedWindow()
+                try requireGuest()
+                try consoleUser()
+                let window = request.surface == "browser" ? try await MacChromeWindow.shared.window() : try await selectedWindow().0
                 guard request.pid == window.owningApplication?.processID, request.window == window.windowID else { throw Failure(7, "window_changed") }
                 var image = body
                 body.removeAll()
@@ -416,7 +454,7 @@ private func respondConnection(_ fd: Int32, inputSession: MacWindowInputSession)
             GuestDiagnostic.record("window", reason)
             reply = ["error": reason]
         }
-        if request.binary == true && request.action == "frame" {
+        if request.binary == true && (request.action == "frame" || request.action == "browser-frame") {
             let pixels = reply.removeValue(forKey: "imageBytes") as? Data ?? Data()
             reply["imageLength"] = pixels.count
             let header = try JSONSerialization.data(withJSONObject: reply)

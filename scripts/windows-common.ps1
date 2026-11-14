@@ -50,6 +50,7 @@ function Assert-WindowsWorkbenchReport {
     $safe = @{ phase = ConvertTo-SmokeSafeText $result['phase']; nativeStatus = ConvertTo-SmokeSafeText $result['nativeStatus']; jsErrors = @() }
     if ($result['prepareExit'] -is [int] -or $result['prepareExit'] -is [long]) { $safe.prepareExit = $result['prepareExit'] }
     if ($result['prepareStatus'] -in @('prepared', 'stop_required', 'error', 'unexpected')) { $safe.prepareStatus = $result['prepareStatus'] }
+    if ($result['prepareMessage'] -is [string]) { $safe.prepareMessage = ConvertTo-SmokeSafeText $result['prepareMessage'] }
     if ($result['page'] -is [System.Collections.IDictionary] -and $result['page']['errors']) {
         $safe.jsErrors = @($result['page']['errors'] | Select-Object -First 8 | ForEach-Object {
             if ($_ -isnot [System.Collections.IDictionary]) { return }
@@ -66,6 +67,26 @@ function Assert-WindowsWorkbenchReport {
     Write-Host ('Cage smoke diagnostic: ' + ($safe | ConvertTo-Json -Depth 6 -Compress))
     if ($ExitCode -ne 0 -or $result['success'] -ne $true -or $result['nativeBridgeReady'] -ne $true) {
         throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $($safe.nativeStatus). Diagnostics: $Report"
+    }
+}
+
+function Wait-WindowsWorkbenchFiles {
+    param([Parameter(Mandatory)][string]$AppDirectory)
+    # The log relay can outlive the controller's profile lock. Wait for the
+    # isolated build's executable images to be released before moving them.
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    foreach ($relative in @('Cage.exe', 'resources/cage.exe')) {
+        $file = Join-Path $AppDirectory $relative
+        while ($true) {
+            try {
+                $handle = [IO.File]::Open($file, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+                $handle.Dispose()
+                break
+            } catch [IO.IOException], [UnauthorizedAccessException] {
+                if ([DateTime]::UtcNow -ge $deadline) { throw "Smoke executable is still in use: $relative" }
+                Start-Sleep -Milliseconds 100
+            }
+        }
     }
 }
 
@@ -86,6 +107,7 @@ function Assert-WindowsWorkbench {
     try {
         if (-not $window.WaitForExit(180000)) { throw "Cage workbench acceptance timed out. Diagnostics retained at $testRoot" }
         Assert-WindowsWorkbenchReport -ExitCode $window.ExitCode -Report $report
+        Wait-WindowsWorkbenchFiles -AppDirectory $AppDirectory
         $passed = $true
     } finally {
         if (-not $window.HasExited) { $window.Kill($true); $window.WaitForExit() }
@@ -140,7 +162,18 @@ function Get-VerifiedDependency {
         New-Item -ItemType Directory -Path $Cache -Force | Out-Null
         $partial = "$path.partial"
         try {
-            Invoke-WebRequest -Uri $Dependency.url -OutFile $partial -TimeoutSec 900 -MaximumRedirection 5
+            # Release hosts and CDNs drop connections now and then. Retry the
+            # transfer; the checksum below still decides what is accepted.
+            for ($attempt = 1; ; $attempt++) {
+                try {
+                    Invoke-WebRequest -Uri $Dependency.url -OutFile $partial -TimeoutSec 900 -MaximumRedirection 5
+                    break
+                } catch {
+                    if ($attempt -ge 4) { throw }
+                    Write-Warning "Download of $($Dependency.file) failed (attempt $attempt): $($_.Exception.Message)"
+                    Start-Sleep -Seconds (5 * $attempt)
+                }
+            }
             Move-Item -LiteralPath $partial -Destination $path -Force
         } finally {
             if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }

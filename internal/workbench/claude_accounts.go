@@ -97,6 +97,7 @@ type claudeAccountManager struct {
 	defaultReading claudeGuestSnapshot
 	defaultError   error
 	probe          func(context.Context, string) (claudeGuestSnapshot, error)
+	recoverLogin   func(context.Context, string, string, string) (claudeGuestSnapshot, error)
 	mu             sync.Mutex
 	lastPick       string
 	recent         map[string]claudeProjectPick

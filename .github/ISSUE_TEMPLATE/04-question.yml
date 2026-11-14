@@ -1,0 +1,46 @@
+name: 使用咨询
+description: 询问安装、配置或日常使用方法。
+title: "[Question] "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先查看 README、使用指南与已有 Issue。
+        若已经遇到报错或异常行为，请选择“问题反馈”，填写版本与复现步骤。
+  - type: textarea
+    id: question
+    attributes:
+      label: 你想了解什么？
+      description: 说明你希望完成的任务，以及目前不清楚的地方。
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: 已查看的资料或尝试的方法
+      description: 附上你参考的文档链接、尝试过的操作及结果，便于我们给出具体解答。
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Cage 版本号
+      description: 填写当前使用的完整版本号；源码构建可同时填写提交号，尚未安装时填写“尚未安装”。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 主机与客机系统
+      description: 填写主机、客机的系统名称、版本和架构；尚未安装时说明计划使用的系统。
+      placeholder: |
+        主机：
+        客机：
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 可附截图或相关配置；上传前请移除密码、令牌、订阅链接等敏感信息。

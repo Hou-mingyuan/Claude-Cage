@@ -116,8 +116,9 @@ func TestStatelessCommandsNeedNoProfile(t *testing.T) {
 		{name: "long version", args: []string{"--version"}, wantStdout: version.Version},
 		{name: "short version", args: []string{"-V"}, wantStdout: version.Version},
 		{name: "version gate met", args: []string{"version", "--min", "0.0.0"}},
-		{name: "version gate missed", args: []string{"version", "--min", "99.0.0"}, wantCode: 1, wantStderr: "older than"},
+		{name: "version gate missed", args: []string{"version", "--min", "99.0.0"}, wantCode: 1, wantStderr: "Update it:  update Cage"},
 		{name: "licenses", args: []string{"licenses"}, wantStdout: "MIT License"},
+		{name: "licenses usage", args: []string{"licenses", "x"}, wantCode: 2, wantStderr: "Usage: claude-cage licenses"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,6 +140,10 @@ func TestStatelessCommandsNeedNoProfile(t *testing.T) {
 			}
 			if tc.wantStderr != "" && !strings.Contains(stderr, tc.wantStderr) {
 				t.Errorf("stderr %q does not contain %q", stderr, tc.wantStderr)
+			}
+			// The license texts name agent-vm as an upstream; messages must not.
+			if strings.Contains(stderr, "agent-vm") {
+				t.Errorf("a Cage message names agent-vm: %q", stderr)
 			}
 			if _, err := os.Stat(profileDir); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("profile directory was created: %v", err)

@@ -120,6 +120,27 @@ try
     catch (System.Reflection.TargetInvocationException error) when (error.InnerException is InvalidDataException) { rejectedNestedSnapshot = true; }
     Check(rejectedNestedSnapshot, "snapshot recursively copied its own output");
     Check(!Directory.Exists(nestedSnapshot), "overlapping snapshot destination was created before validation");
+    var intactApp = Path.Combine(integration, "intact application");
+    var intactBackup = Path.Combine(integration, "intact backup");
+    foreach (var directory in new[] { intactApp, intactBackup })
+    {
+        Directory.CreateDirectory(Path.Combine(directory, "resources"));
+        File.WriteAllText(Path.Combine(directory, "Cage.exe"), "original launcher");
+        File.WriteAllText(Path.Combine(directory, "Cage.install-id"), "io.github.lee-xeo.claude-cage");
+        File.WriteAllText(Path.Combine(directory, "resources", "cage.exe"), "original backend");
+    }
+    Directory.CreateDirectory(Path.Combine(intactApp, "my-project"));
+    File.WriteAllText(Path.Combine(intactApp, "my-project", "work.txt"), "latest personal data");
+    Check(UpdateRecovery.OriginalIntact(intactApp, intactBackup), "unchanged original was sent through replacement rollback");
+    File.WriteAllText(Path.Combine(intactApp, "resources", "cage.exe"), "modified backend");
+    Check(!UpdateRecovery.OriginalIntact(intactApp, intactBackup), "same launcher hid a changed backend");
+    File.Copy(Path.Combine(intactBackup, "resources", "cage.exe"), Path.Combine(intactApp, "resources", "cage.exe"), true);
+    File.WriteAllText(intactApp + ".cage-installation.json", "unresolved transaction");
+    Check(!UpdateRecovery.OriginalIntact(intactApp, intactBackup), "unfinished personal-file transfer was treated as intact");
+    File.Delete(intactApp + ".cage-installation.json");
+    File.Delete(Path.Combine(intactApp, "Cage.exe"));
+    Check(!UpdateRecovery.OriginalIntact(intactApp, intactBackup), "missing launcher was treated as intact");
+    Check(File.ReadAllText(Path.Combine(intactApp, "my-project", "work.txt")) == "latest personal data", "recovery classification changed personal data");
     var ensureComplete = typeof(UpdateInstaller).GetMethod("EnsureInstallationComplete", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
     ensureComplete.Invoke(null, [snapshotSource]);
     var recoveryReceipt = snapshotSource + ".cage-installation.json";

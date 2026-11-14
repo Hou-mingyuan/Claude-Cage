@@ -18,7 +18,7 @@
 
 ## 1. 安装应用
 
-在[项目主页](https://lee-xeo.github.io/Claude-Cage/#download)点击“下载应用”，选择 macOS、Windows 或 Linux。也可直接查看 [GitHub Releases](https://github.com/Lee-xeo/Claude-Cage/releases)，无需获得仓库访问授权。各平台的可下载版本可能不同；没有公开安装包的平台会提供安装与构建说明。
+在[项目主页](https://claude-cage.com/#download)点击“下载应用”，选择 macOS、Windows 或 Linux。也可直接查看 [GitHub Releases](https://github.com/Lee-xeo/Claude-Cage/releases)，无需获得仓库访问授权。各平台的可下载版本可能不同；没有公开安装包的平台会提供安装与构建说明。
 
 | 平台 | 安装方式 |
 |---|---|

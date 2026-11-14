@@ -225,6 +225,7 @@ internal sealed class MainWindow : Form
         var errors = new List<string>();
         int? prepareExit = null;
         string? prepareStatus = null;
+        string? prepareMessage = null;
         if (failure != null) errors.Add(failure);
         try
         {
@@ -246,6 +247,10 @@ internal sealed class MainWindow : Form
                 var (exit, data) = await Backend.Json(["prepare-update", "--json"], shutdown.Token, TimeSpan.FromSeconds(20));
                 prepareExit = exit;
                 prepareStatus = data.Text("status") is "prepared" or "stop_required" or "error" ? data.Text("status") : "unexpected";
+                // This report is uploaded by CI. Keep the shutdown error but
+                // remove URL queries/fragments and bound its size.
+                prepareMessage = System.Text.RegularExpressions.Regex.Replace(data.Text("message"), @"[?#][^\s""'<>)]*", "[redacted]");
+                if (prepareMessage.Length > 768) prepareMessage = prepareMessage[..768];
                 if (exit != 0 || data.Text("status") != "prepared") throw new IOException("自检结束时无法确认后台已停止");
                 await Task.WhenAll(controllers.Select(process => process.WaitForExitAsync(shutdown.Token)));
             }
@@ -273,7 +278,7 @@ internal sealed class MainWindow : Form
             if (nativeBridgeReady && errors.Count == 0) smokePhase = "completed";
             File.WriteAllText(Program.SmokeOutput, JsonSerializer.Serialize(new {
                 success = nativeBridgeReady && errors.Count == 0, nativeBridgeReady, version = AppUpdater.Version,
-                phase = smokePhase, nativeStatus = message.Text, prepareExit, prepareStatus, errors, page,
+                phase = smokePhase, nativeStatus = message.Text, prepareExit, prepareStatus, prepareMessage, errors, page,
                 pageURL, webviewVersion,
                 windowBounds = Bounds, workingArea = Screen.FromHandle(Handle).WorkingArea, deviceDpi = DeviceDpi,
                 nativeMenuBar = MainMenuStrip != null,

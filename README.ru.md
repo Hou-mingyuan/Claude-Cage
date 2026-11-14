@@ -10,7 +10,7 @@
 
 <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
 
-**[Сайт проекта](https://lee-xeo.github.io/Claude-Cage/) · [Скачать приложение](https://lee-xeo.github.io/Claude-Cage/ru/#download) · [Начало работы](docs/getting-started.md) · [Часто задаваемые вопросы](docs/troubleshooting.md) · [Руководство (на китайском)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+**[Сайт проекта](https://claude-cage.com/) · [Скачать приложение](https://claude-cage.com/ru/#download) · [Начало работы](docs/getting-started.md) · [Часто задаваемые вопросы](docs/troubleshooting.md) · [Руководство (на китайском)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -65,7 +65,7 @@ Claude Cage объединяет терминал, браузер, редакт�
 
 Cage поддерживает macOS, Windows и Linux: Apple Silicon с macOS 14+, Windows 10 22H2 / 11 x64 и Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac, Windows ARM64 и Linux ARM64 пока не поддерживаются. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. Скачать приложение: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/ru/#download).
+1. Скачать приложение: [macOS / Windows / Linux](https://claude-cage.com/ru/#download).
 2. macOS: Откройте установочный пакет и перетащите **Cage** в **Приложения**; затем запустите его из приложений. Windows: [Инструкция по установке](docs/windows.md#安装并开始工作) · Linux: [Инструкция по установке](docs/linux.md#安装并开始工作).
 3. Следуйте инструкциям в приложении, чтобы настроить собственный сетевой прокси, запустить среду и открыть проект.
 
@@ -106,16 +106,18 @@ macOS и подписанные версии Windows обновляются че
 
 | Ваша задача | Начните здесь |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [Выбор гостевой системы](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [Выбор гостевой системы](https://claude-cage.com/docs/guest-systems/) |
 | Установите, настройте сетевой прокси и откройте свой первый проект. | [Начало работы](docs/getting-started.md) |
 | Устранение неполадок при загрузке, запуске, подключении и входе в систему | [FAQ и восстановление](docs/troubleshooting.md) |
 | Изучите элементы управления клавиатурой, внешний вид, сохранение данных и поведение при выходе. | [Ежедневное использование](docs/getting-started.md#日常使用) |
 | Сообщить о воспроизводимой проблеме | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| Внести исправление, функцию или документацию: проверка Issue → приглашение соавтора → PR | [Руководство для участников (китайский)](.github/CONTRIBUTING.md) |
 
 Проект быстро развивается. Присоединяйтесь к группе сообщества, чтобы поделиться отзывами; сопровождающие сообщества приветствуются.
 
 <p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1127457578" width="240" /></a>
+  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a>
+  <br />QQ group · 782087179
 </p>
 
 ## Происхождение и лицензирование

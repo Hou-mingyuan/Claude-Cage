@@ -1,3 +1,7 @@
+# Complete the browser change before interrupting access to the running session.
+if cage_is_ubuntu && [[ ! -x /usr/local/lib/workbench-browser/chromium ]]; then
+  cage_install_ubuntu_browser
+fi
 # Publish browser assets while the web endpoint is stopped, so clients cannot
 # mix old and new noVNC modules during an upgrade.
 if systemctl is-active --quiet cage-webvnc; then
@@ -8,6 +12,9 @@ if ! command -v X0tigervnc >/dev/null || ! command -v Xtigervnc >/dev/null || ! 
 fi
 cage_novnc_root=/usr/share/novnc
 if cage_is_ubuntu; then
+  # snap run tracks Chromium in this dedicated user's systemd session.
+  sudo loginctl enable-linger cage-browser
+  sudo systemctl start "user@$(id -u cage-browser).service"
   cage_install_ubuntu_novnc
   cage_novnc_root=/usr/local/share/cage-novnc
 fi
@@ -16,7 +23,7 @@ sudo ln -sfn "$cage_novnc_root" /usr/local/share/cage-webvnc
 sudo install -d -m 0755 /etc/claude-cage /usr/local/lib
 # New website passwords belong to the host vault. Keep existing browser data.
 cage_browser_policy_dir=/etc/chromium/policies/managed
-if cage_is_ubuntu; then cage_browser_policy_dir=/etc/opt/chrome_for_testing/policies/managed; fi
+if cage_is_ubuntu; then cage_browser_policy_dir=/etc/chromium-browser/policies/managed; fi
 sudo install -d -m 0755 "$cage_browser_policy_dir"
 printf '%s\n' '{"PasswordManagerEnabled":false}' | sudo tee "$cage_browser_policy_dir/cage-password-vault.json" >/dev/null
 sudo chmod 0644 "$cage_browser_policy_dir/cage-password-vault.json"

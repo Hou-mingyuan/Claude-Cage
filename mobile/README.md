@@ -2,7 +2,7 @@
 
 手机 Cage 是远程客户端。点首页中央的「连接电脑」，用二维码或配对码连接主机，即可查看项目、接续 Claude Code 会话和处理工具审批。配对后还可在手机上操作主机里的浏览器和 Claude Desktop。代理、时区和语言在远程主机的 Cage 中设置。右上角的设置提供主题和电脑连接选项。
 
-Android arm64 APK 可从[官网下载入口](https://lee-xeo.github.io/Claude-Cage/#download)获取，支持 Android 8.0+。iOS 17+ 设备版由用户通过 Xcode 在本地构建并签名安装。
+Android arm64 APK 可从[官网下载入口](https://claude-cage.com/#download)获取，支持 Android 8.0+。iOS 17+ 设备版由用户通过 Xcode 在本地构建并签名安装。
 
 ## iOS 本地构建
 

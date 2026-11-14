@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/guestos"
 	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/hostimage"
@@ -187,7 +188,41 @@ func (s *Server) installedWindowsVMOwner(install guestos.Installation) (string, 
 	return "windows/" + binding.VMID.String() + "/Running", nil
 }
 
+func (s *Server) resumePendingMacOSInstall(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	recovery, err := guestos.LoadMacOSInstallRecovery(s.profile)
+	if err != nil {
+		_ = diagnostics.New(s.profile).Record("warn", "macos-install-recovery", "继续原安装被拒绝，恢复入口身份校验未通过："+err.Error())
+		http.Error(w, "暂时无法确认安装恢复入口，请稍后重试；原磁盘和安装记录已保留", http.StatusConflict)
+		return
+	}
+	if recovery == nil || recovery.InstallationID != id {
+		http.Error(w, "请先准备与原客机身份匹配的恢复入口", http.StatusConflict)
+		return
+	}
+	if !s.hasTrustedView(r) || s.macosGuest != nil || s.windowsGuest != nil || !s.localVMStorage() {
+		http.Error(w, "请在本机 Cage 窗口恢复原 macOS 安装", http.StatusForbidden)
+		return
+	}
+	s.beginGuestInstallMode(w, r, guestInstallRequest{System: guestos.MacOS}, true, recovery.User)
+}
+
 func (s *Server) beginGuestInstall(w http.ResponseWriter, r *http.Request, in guestInstallRequest) {
+	s.beginGuestInstallMode(w, r, in, false, "")
+}
+
+// guestInstallFailureMessage keeps every install failure actionable without
+// implying that the recovery screen is required: only the macOS component
+// recovery prompt needs GUI authorization, everything else is diagnosed from
+// the operation details and the diagnostics bundle.
+func guestInstallFailureMessage(system string, err error) error {
+	next := "请在初始化页打开“操作详情”查看失败记录后点击「继续安装」；仍失败时在“日志与诊断”导出诊断包排查。"
+	if system == guestos.MacOS {
+		next = "请在初始化页打开“操作详情”查看失败记录后点击「继续安装」；只有页面出现“恢复 macOS 组件安装”提示时才需要打开恢复画面完成授权，其余失败可在“日志与诊断”导出诊断包排查。"
+	}
+	return fmt.Errorf("客户机安装未完成，已保留安装进度和文件。%s失败原因：%w", next, err)
+}
+
+func (s *Server) beginGuestInstallMode(w http.ResponseWriter, r *http.Request, in guestInstallRequest, guiAuthorize bool, recoveryUser string) {
 	if in.System == guestos.MacOS && !s.account.view().MacOSCredentialsReady {
 		http.Error(w, "请先注册或确认 Cage 账密，再安装 macOS 客机", http.StatusConflict)
 		return
@@ -322,6 +357,18 @@ func (s *Server) beginGuestInstall(w http.ResponseWriter, r *http.Request, in gu
 			if err != nil {
 				return err
 			}
+			if guiAuthorize {
+				recovery, err := guestos.LoadMacOSInstallRecovery(s.profile)
+				if err != nil {
+					_ = diagnostics.New(s.profile).Record("warn", "guest-install", "恢复入口身份校验未通过："+err.Error())
+					return errors.New("暂时无法核对原安装恢复入口，请稍后重试；原磁盘和安装记录已保留")
+				}
+				if recovery == nil || recovery.InstallationID != install.ID || recovery.User != credential.Username || recovery.User != recoveryUser {
+					_ = diagnostics.New(s.profile).Record("warn", "guest-install", fmt.Sprintf("恢复入口与本次安装身份不一致 record_present=%t installation_match=%t user_match=%t",
+						recovery != nil, recovery != nil && recovery.InstallationID == install.ID, recovery != nil && recovery.User == credential.Username && recovery.User == recoveryUser))
+					return errors.New("恢复入口与原安装身份不一致，请在初始化页重新准备恢复入口；原磁盘和安装记录已保留")
+				}
+			}
 		}
 		if err := s.prepareEnvironment(); err != nil {
 			return err
@@ -341,6 +388,9 @@ func (s *Server) beginGuestInstall(w http.ResponseWriter, r *http.Request, in gu
 		if install.System == guestos.MacOS {
 			cmd = exec.CommandContext(s.operationContext(), s.exe, "guest-os", "macos", "install")
 			cmd.Env = append(os.Environ(), cage.ConfigEnv+"="+s.configPath, "CAGE_MACOS_ACCOUNT="+credential.Username)
+			if guiAuthorize {
+				cmd.Env = append(cmd.Env, "CAGE_MACOS_GUI_AUTHORIZE=1")
+			}
 			cmd.Stdin = strings.NewReader(credential.Password)
 		} else {
 			cmd, err = guestos.WindowsInstallCommand(s.operationContext(), s.profile, filepath.Join(filepath.Dir(s.exe), "guest-os"), install)
@@ -351,7 +401,7 @@ func (s *Server) beginGuestInstall(w http.ResponseWriter, r *http.Request, in gu
 		cmd.Stdout = s.jobs.execution()
 		cmd.Stderr = s.jobs.execution()
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("客户机安装未完成，已保留安装进度和文件。请点击「继续安装」。若仍失败，请在设置中导出诊断包：%w", err)
+			return guestInstallFailureMessage(install.System, err)
 		}
 		return nil
 	})

@@ -91,6 +91,8 @@ finally { if ($progressStream) { $progressStream.Dispose() } }
     try{
         if($context){Wait-CageHostEnrollment $context $worker}
         $process=Start-Process -FilePath (Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell/v1.0/powershell.exe') -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','RemoteSigned','-EncodedCommand',$encoded) -Verb RunAs -PassThru
+        # Windows PowerShell 5.1 must retain a handle before waiting to read ExitCode.
+        $null=$process.Handle
         if($context){Set-CageHostEnrollmentAdmin $context $process}
         Wait-CageWindowsInstaller $process $progressFile
         if($process.ExitCode -ne 0){throw 'Windows setup did not complete; existing VM and data were preserved.'}
@@ -111,12 +113,12 @@ if ($stateAnchor -and $stateAnchor.Attributes -band [IO.FileAttributes]::Reparse
 $instance=Join-Path $state ('windows-'+$InstallationID.ToString('N'))
 $name='Cage-'+$InstallationID.ToString('N')
 $receipt=Join-Path $Profile 'windows-install-vm.txt'
-$owner=Get-Content -LiteralPath (Join-Path $Profile 'guest-install.json') -Raw | ConvertFrom-Json
+$owner=Get-Content -LiteralPath (Join-Path $Profile 'guest-install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $preparedPath = Join-Path $Profile ('guest-install-media-'+$InstallationID.ToString('D')+'.json')
 if ($owner.source.host.system -ceq 'windows-11') {
     $preparedFile = Get-Item -LiteralPath $preparedPath -Force
     if ($preparedFile -isnot [IO.FileInfo] -or $preparedFile.Length -gt 32768 -or $preparedFile.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Invalid verified installation media receipt.' }
-    $prepared = Get-Content -LiteralPath $preparedPath -Raw | ConvertFrom-Json
+    $prepared = Get-Content -LiteralPath $preparedPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ([guid]$prepared.id -ne $InstallationID -or $prepared.source.digest -cne $owner.source.digest -or
         $prepared.source.host.edition -cne $owner.source.host.edition -or $prepared.source.host.language -cne $owner.source.host.language -or
         $prepared.source.version -cne $owner.source.version -or $prepared.source.build -cne $owner.source.build -or $prepared.source.format -cne 'esd') {

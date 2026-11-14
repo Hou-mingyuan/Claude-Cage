@@ -17,7 +17,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -71,6 +70,7 @@ type Server struct {
 	identity                                         ControllerIdentity
 	guestManifest                                    *cage.GuestManifest
 	guestUpdateRequired                              bool
+	macComponentsChecked                             bool
 	guestUpdateError                                 string
 	storageRecoveryError                             string
 	closing                                          bool
@@ -181,15 +181,9 @@ func serve(configPath string, clientOnly bool, fullConfigPath string) (returned 
 	if err != nil {
 		return err
 	}
-	var listener net.Listener
-	port := 17777
-	for ; port < 17808; port++ {
-		listener, err = net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
-		if err == nil {
-			break
-		}
-	}
+	listener, port, err := listenController(profile)
 	if err != nil {
+		diagnostics.Log("error", "controller", err.Error())
 		return err
 	}
 	defer listener.Close()
@@ -405,6 +399,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/environment/guest-systems/clone", s.hostClone)
 	mux.HandleFunc("DELETE /api/environment/guest-systems", s.guestInstallation)
 	mux.HandleFunc("POST /api/environment/guest-systems/activate", s.guestInstallation)
+	mux.HandleFunc("GET /api/macos/install-recovery", s.macOSInstallRecovery)
+	mux.HandleFunc("POST /api/macos/install-recovery", s.macOSInstallRecovery)
 	mux.HandleFunc("GET /api/environment/storage", s.environmentStorage)
 	mux.HandleFunc("POST /api/environment/storage", s.environmentStorage)
 	mux.HandleFunc("POST /api/environment/storage/recover", s.recoverEnvironmentStorage)
@@ -536,6 +532,19 @@ func (s *Server) handler() http.Handler {
 		if r.URL.Path == "/api/client/about" {
 			mux.ServeHTTP(w, r)
 			return
+		}
+		if s.macosGuest == nil && !s.desktopEntry && !s.clientOnly && strings.HasPrefix(r.URL.Path, "/api/") {
+			pending, err := guestos.LoadInstallation(s.profile)
+			if err != nil {
+				if !macOSInstallRecoveryRoute(r.Method, r.URL.Path) {
+					http.Error(w, "安装记录无法读取，请保留现有数据", http.StatusConflict)
+					return
+				}
+			}
+			if pending != nil && pending.System == guestos.MacOS && !macOSInstallRecoveryRoute(r.Method, r.URL.Path) {
+				http.Error(w, "macOS 客机尚未完成安装", http.StatusConflict)
+				return
+			}
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/agent/native") || r.URL.Path == "/api/agent/routes" {
 			mux.ServeHTTP(w, r)
@@ -814,12 +823,36 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		s.launch(w, "start", s.startMacOSGuest)
 		return
 	}
+	if input.System == guestos.MacOS {
+		pending, err := guestos.LoadInstallation(s.profile)
+		if err != nil {
+			requestError(w, err)
+			return
+		}
+		if pending != nil && pending.System == guestos.MacOS {
+			if recovery, loadErr := guestos.LoadMacOSInstallRecovery(s.profile); loadErr != nil {
+				requestError(w, loadErr)
+				return
+			} else if recovery != nil {
+				s.resumePendingMacOSInstall(w, r, pending.ID)
+				return
+			}
+		}
+	}
 	if input.System == guestos.MacOS || input.System == guestos.Windows11 || input.CloneKey != "" {
 		s.beginGuestInstall(w, r, input)
 		return
 	}
 	pending, err := guestos.LoadInstallation(s.profile)
-	if err != nil || (pending != nil && !hostimage.IsLinux(pending.System)) {
+	if err != nil {
+		http.Error(w, "客户机安装记录无法读取，请保留现有数据", http.StatusConflict)
+		return
+	}
+	if pending != nil && pending.System == guestos.MacOS {
+		s.resumePendingMacOSInstall(w, r, pending.ID)
+		return
+	}
+	if pending != nil && !hostimage.IsLinux(pending.System) {
 		http.Error(w, "已有原生客户机安装，请继续原安装", http.StatusConflict)
 		return
 	}

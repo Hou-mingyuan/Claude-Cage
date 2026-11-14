@@ -18,6 +18,7 @@ const maxImageBytes = 20 << 20
 type imageInputRequest struct {
 	PNG      string  `json:"png"`
 	Text     *string `json:"text,omitempty"`
+	Surface  string  `json:"surface,omitempty"`
 	Target   string  `json:"target"`
 	ID       string  `json:"id"`
 	Transfer string  `json:"transfer,omitempty"`
@@ -46,7 +47,7 @@ func (s *Server) pasteInputStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Target == "desktop" {
-		body, _ := json.Marshal(map[string]any{"kind": "image", "window": input.Window, "pid": input.PID})
+		body, _ := json.Marshal(map[string]any{"kind": "image", "window": input.Window, "pid": input.PID, "surface": input.Surface})
 		result, err := s.guestFiles(ctx, "desktop", "POST", "/start", bytes.NewReader(body), "")
 		id, _ := result["id"].(string)
 		if err != nil || !browserFileID.MatchString(id) {

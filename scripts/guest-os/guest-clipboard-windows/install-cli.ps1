@@ -12,7 +12,7 @@ Set-StrictMode -Version Latest
 if (-not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) { throw 'Native Windows is required.' }
 $user = [Security.Principal.WindowsIdentity]::GetCurrent()
 if ((New-Object Security.Principal.WindowsPrincipal($user)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Use the paired ordinary GUI user.' }
-$manifest = Get-Content (Join-Path $PSScriptRoot 'cli-dependencies.json') -Raw | ConvertFrom-Json
+$manifest = Get-Content (Join-Path $BundleDirectory 'resolved-cli-dependencies.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $bundle = [IO.Path]::GetFullPath($BundleDirectory)
 $bridge = [IO.Path]::GetFullPath($BridgeDirectory)
 if (-not (Test-Path (Join-Path $bridge 'Cage.GuestClipboard.exe') -PathType Leaf)) { throw 'The paired GUI bridge must be installed first.' }
@@ -54,6 +54,27 @@ function New-PrivateDirectory([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { New-Item -ItemType Directory -Path $Path | Out-Null }
     Assert-NoReparse $Path; Protect-Path $Path $true
 }
+function Select-ClaudeCodeBinary([string]$Claude, [string]$Version, [string]$Digest, [string]$BridgeDirectory) {
+    $reported=(& $claude --version | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or $reported -notmatch '^(\d+\.\d+\.\d+)(?:\s|$)' -or $Matches[1] -ne $Version) { throw 'The downloaded Claude Code version differs from the selected release.' }
+    $claudeVersion=$Version
+    $claudeDigest=$Digest
+    $previousReceipt=Join-Path $BridgeDirectory 'cli-tools.json'
+    if (Test-Path -LiteralPath $previousReceipt) {
+        $previous=Get-Content -LiteralPath $previousReceipt -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-NoReparse $previous.claude
+        if ((Get-FileHash -LiteralPath $previous.claude -Algorithm SHA256).Hash -ne $previous.claude_sha256) { throw 'The installed Claude Code no longer matches its protected receipt.' }
+        $signature=Get-AuthenticodeSignature -LiteralPath $previous.claude
+        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Anthropic,? PBC') { throw 'The installed Claude Code signature is invalid.' }
+        $reported=(& $previous.claude --version | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0 -or $reported -notmatch '^(\d+\.\d+\.\d+)(?:\s|$)') { throw 'The installed Claude Code version could not be verified.' }
+        if ([version]$Matches[1] -gt [version]$claudeVersion) {
+            $claudeVersion=$Matches[1]; $claude=$previous.claude; $claudeDigest=$previous.claude_sha256
+        }
+    }
+    return [pscustomobject]@{Path=$claude;Version=$claudeVersion;SHA256=$claudeDigest}
+}
+
 function Check-Package($Entry) {
     $path = Join-Path $bundle $Entry.filename
     Assert-NoReparse $path
@@ -124,9 +145,11 @@ New-PrivateDirectory $claudeDir
 $claude = Join-Path $claudeDir 'claude.exe'
 if (-not (Test-Path -LiteralPath $claude)) { [IO.File]::Copy($packages.claude, $claude, $false) }
 if ((Get-FileHash -LiteralPath $claude -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.claude.sha256) { throw 'The Cage-owned native Claude binary changed.' }
+$selected=Select-ClaudeCodeBinary $claude $manifest.claude.version $manifest.claude.sha256 $bridge
+$claude=$selected.Path; $claudeVersion=$selected.Version; $claudeDigest=$selected.SHA256
 # The official native binary is used as a versioned custom launcher. No default
 # Claude account, existing installer, project, settings or history is replaced.
-$receipt = [ordered]@{version=1;python=$python;python_version=$manifest.python.version;python_sha256=(Get-FileHash $python -Algorithm SHA256).Hash.ToLowerInvariant();claude=$claude;claude_version=$manifest.claude.version;claude_sha256=$manifest.claude.sha256;git_bash=$bash;git_bash_sha256=(Get-FileHash $bash -Algorithm SHA256).Hash.ToLowerInvariant();uv_version=$manifest.uv.version}
+$receipt = [ordered]@{version=1;python=$python;python_version=$manifest.python.version;python_sha256=(Get-FileHash $python -Algorithm SHA256).Hash.ToLowerInvariant();claude=$claude;claude_version=$claudeVersion;claude_sha256=$claudeDigest;git_bash=$bash;git_bash_sha256=(Get-FileHash $bash -Algorithm SHA256).Hash.ToLowerInvariant();uv_version=$manifest.uv.version}
 $receipt.gh=$gh
 $receipt.gh_sha256=(Get-FileHash $gh -Algorithm SHA256).Hash.ToLowerInvariant()
 Assert-NoReparse $bridge

@@ -18,10 +18,15 @@ func TestDesktopResizeScriptAppliesTheViewersDensity(t *testing.T) {
 	if runtime.GOOS != "linux" || err != nil {
 		t.Skip("the script identifies its settings manager through /proc")
 	}
-	// Go's temporary directory can be mounted noexec; the stand-ins must run.
-	root, err := os.MkdirTemp("/dev/shm", "cage-resize-")
+	// go test already executes its test binary from this filesystem. Both
+	// TMPDIR and /dev/shm can be mounted noexec independently of the Go build directory.
+	executable, err := os.Executable()
 	if err != nil {
-		root = t.TempDir()
+		t.Fatal(err)
+	}
+	root, err := os.MkdirTemp(filepath.Dir(executable), "cage-resize-")
+	if err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
 	desktop, phone, bin := filepath.Join(root, "desktop"), filepath.Join(root, "phone"), filepath.Join(root, "bin")
@@ -40,9 +45,10 @@ func TestDesktopResizeScriptAppliesTheViewersDensity(t *testing.T) {
 		data, _ := os.ReadFile(path)
 		return string(data)
 	}
-	write(filepath.Join(bin, "xrandr"), "#!/bin/sh\necho \"$*\" >> "+filepath.Join(root, "modes")+"\n", 0o700)
+	t.Setenv("CAGE_RESIZE_FIXTURE", root)
+	write(filepath.Join(bin, "xrandr"), "#!/bin/sh\necho \"$*\" >> \"$CAGE_RESIZE_FIXTURE/modes\"\n", 0o700)
 	// The script signals a process named xsettingsd.
-	write(filepath.Join(bin, "xsettingsd"), "#!/bin/sh\ntrap 'echo reload >> "+filepath.Join(root, "reloads")+"' HUP\nwhile :; do sleep 1 & wait $!; done\n", 0o700)
+	write(filepath.Join(bin, "xsettingsd"), "#!/bin/sh\ntrap 'echo reload >> \"$CAGE_RESIZE_FIXTURE/reloads\"' HUP\nwhile :; do sleep 1 & wait $!; done\n", 0o700)
 	resize := func(scale string) string {
 		t.Helper()
 		script := strings.NewReplacer("/run/cage-desktop", desktop, "/run/cage-phone-desktop", phone).Replace(desktopResizeScript(1000, 800, scale))

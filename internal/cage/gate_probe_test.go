@@ -161,7 +161,7 @@ func TestExitProbeUsesIPv4ServiceThroughProxy(t *testing.T) {
 				var requests atomic.Int32
 				upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 					requests.Add(1)
-					if (request.Host != "ipv4.icanhazip.com" && request.Host != "api.ipify.org") || request.URL.RequestURI() != "/" || request.Method != "GET" || request.Header.Get("User-Agent") != "Cage-network-check/1" || request.Header.Get("Cookie") != "" || request.Header.Get("Authorization") != "" || request.Header.Get("Proxy-Authorization") != "" {
+					if (request.Host != "ipv4.icanhazip.com" && request.Host != "api.ipify.org") || request.URL.RequestURI() != "/" || request.Method != "GET" || request.Header.Get("User-Agent") != "Go-http-client/1.1" || request.Header.Get("Cookie") != "" || request.Header.Get("Authorization") != "" || request.Header.Get("Proxy-Authorization") != "" {
 						t.Error("probe request changed destination or forwarded guest/proxy data")
 					}
 					if request.Host == "api.ipify.org" {
@@ -345,4 +345,40 @@ func exitProbeProxy(t *testing.T, scheme, upstream string) (string, *atomic.Int3
 		}
 	}()
 	return scheme + "://test-user:test-password@" + listener.Addr().String(), count
+}
+func TestBrowserCheckServesOnlyFixedPage(t *testing.T) {
+	gate, err := NewEgressGate(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Close("test complete")
+	if err := gate.BeginCheck(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/browser-check", "/browser-check?report=unexpected"} {
+		conn, err := gate.DialContext(context.Background(), "tcp", DiagnosticAddress)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n", path, DiagnosticHost)
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			conn.Close()
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		conn.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path == "/browser-check" {
+			if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") || string(body) != string(browserCheckPage) {
+				t.Fatal("normal browser cannot run the fixed diagnostic page")
+			}
+		} else if resp.StatusCode != 400 {
+			t.Fatal("browser callback parameters must stay in the client-side fragment")
+		}
+	}
 }

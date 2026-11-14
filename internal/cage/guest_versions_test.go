@@ -234,7 +234,7 @@ func TestClaudeNativeCacheUsesGuestArchitectureAndIntegrity(t *testing.T) {
 for arg in "$@"; do [ "$arg" != --head ] || exit 0; done
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    https://cdn.npmmirror.com/packages/%40anthropic-ai/"$TEST_PACKAGE"/2.1.314/"$TEST_PACKAGE"-2.1.314.tgz)
+    https://cdn.npmmirror.com/packages/%40anthropic-ai/"$TEST_PACKAGE"/9.8.7/"$TEST_PACKAGE"-9.8.7.tgz)
       body=native-package
       [ "$TEST_ARCH" != amd64 ] || body=corrupt-mirror
       echo mirror >> "$HOME/sources";;
@@ -250,7 +250,11 @@ exit 1
 				"npm": `#!/bin/sh
 case "$1" in
 view)
-  test "$3" = "@anthropic-ai/$TEST_PACKAGE@2.1.314" || exit 91
+  if [ "$3" = @anthropic-ai/claude-code@latest ]; then
+    test "$4 $5" = 'version --json' || exit 96
+    printf '"9.8.7"'; exit
+  fi
+  test "$3" = "@anthropic-ai/$TEST_PACKAGE@9.8.7" || exit 91
   printf '{"integrity":"sha512-%s","tarball":"https://registry.npmjs.org/%s.tgz"}' "$TEST_INTEGRITY" "$TEST_PACKAGE";;
 cache)
   test "$2 $3 $4" = 'add --offline --ignore-scripts' || exit 92
@@ -258,6 +262,7 @@ cache)
   printf cached > "$HOME/cached";;
 install)
   test -f "$HOME/cached" || exit 94
+  test "$6" = '@anthropic-ai/claude-code@9.8.7' || exit 97
   printf installed > "$HOME/installed";;
 *) exit 95;;
 esac
@@ -301,6 +306,44 @@ esac
 				if out, err := retry.CombinedOutput(); err == nil || !strings.Contains(string(out), "需要 SSE4.2") {
 					t.Fatalf("missing guest CPU feature should stop Claude setup: %v %s", err, out)
 				}
+			}
+		})
+	}
+}
+
+func TestClaudeLatestResolutionPreservesNewerInstallAndRejectsBadMetadata(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq unavailable")
+	}
+	for _, metadata := range []string{`"9.8.7"`, `"latest"`, `{}`, `"9.8.7;touch bad"`, `null`} {
+		t.Run(metadata, func(t *testing.T) {
+			dir := t.TempDir()
+			// Exercise the real installation entry point. Resolving latest is
+			// mandatory even when an existing install satisfies the old floor.
+			cmd := exec.Command("bash", "-c", ToolInstallPrelude()+`
+dpkg() {
+  if [ "$1" = --print-architecture ]; then echo arm64; return; fi
+  test "$*" = '--compare-versions 9.9.9 ge 9.8.7'
+}
+claude() { echo '9.9.9 (Claude Code)'; }
+npm() {
+  printf '%s\n' "$*" >> "$HOME/npm-calls"
+  test "$*" = 'view --registry=https://registry.npmjs.org @anthropic-ai/claude-code@latest version --json' || return 98
+  printf '%s' "$TEST_METADATA"
+}
+cage_install_tool claude`)
+			cmd.Env = append(os.Environ(), "HOME="+dir, "TEST_METADATA="+metadata)
+			out, err := cmd.CombinedOutput()
+			calls, readErr := os.ReadFile(filepath.Join(dir, "npm-calls"))
+			if readErr != nil || string(calls) != "view --registry=https://registry.npmjs.org @anthropic-ai/claude-code@latest version --json\n" {
+				t.Fatalf("resolution reached cache/install or repeated the lookup: %q %v", calls, readErr)
+			}
+			if metadata == `"9.8.7"` {
+				if err != nil || !strings.Contains(string(out), "already meets required version 9.8.7") {
+					t.Fatalf("newer install changed or latest not resolved: %v %s", err, out)
+				}
+			} else if err == nil {
+				t.Fatalf("bad metadata accepted: %s", out)
 			}
 		})
 	}

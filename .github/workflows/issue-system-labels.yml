@@ -1,0 +1,34 @@
+name: Label issues by system
+# Adds the host and guest system labels from the answers in the issue body, so
+# maintainers can filter issues by the platform they look after.
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to label again from its current body'
+        required: true
+        type: string
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: issue-system-labels-${{ github.event.issue.number || inputs.issue_number }}
+  cancel-in-progress: false
+jobs:
+  label:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Add host and guest system labels
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/issue-system-labels.mjs

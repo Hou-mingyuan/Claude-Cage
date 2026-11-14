@@ -165,7 +165,10 @@ cage_install_tool() (
         echo 'Claude Code 需要 SSE4.2 指令。当前 x86_64 客机未提供该指令，请检查宿主 CPU、虚拟化平台和虚拟 CPU 配置后重启环境。' >&2
         exit 1
       fi
-      wanted="$CAGE_CLAUDE_VERSION"
+      # Resolve at installation/update time, then keep that exact version for
+      # both the integrity-checked native cache and the npm installation.
+      export npm_config_fetch_retries=3 npm_config_fetch_timeout=120000
+      wanted="$(npm view --registry=https://registry.npmjs.org @anthropic-ai/claude-code@latest version --json </dev/null | jq -er 'select(type == "string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))')"
       if command -v claude >/dev/null; then current="$(DISABLE_AUTOUPDATER=1 claude --version | cage_tool_version)" || current=''; fi
       ;;
     *) echo 'Unknown Cage tool.' >&2; exit 2 ;;
