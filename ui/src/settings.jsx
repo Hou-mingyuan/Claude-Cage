@@ -21,6 +21,7 @@ import {
   Archive,
 } from "lucide-react";
 import { api } from "./api";
+import "./settings.css";
 import { SafetyMessage } from "./safety-message";
 import { AppearanceSettings } from "./appearance-settings";
 import { ProxySettings } from "./proxy-settings";
