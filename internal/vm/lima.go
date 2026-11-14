@@ -25,6 +25,7 @@ import (
 
 	"github.com/lima-vm/lima/v2/pkg/driver/external/server"
 	"github.com/lima-vm/lima/v2/pkg/driverutil"
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
 	"github.com/lima-vm/lima/v2/pkg/instance"
 	"github.com/lima-vm/lima/v2/pkg/limatmpl"
 	"github.com/lima-vm/lima/v2/pkg/limatype"
@@ -317,6 +318,15 @@ func (l *Lima) Create(ctx context.Context, name, template string, s Settings, lo
 		if err != nil {
 			return err
 		}
+		identity, err := guestidentity.New()
+		if err != nil {
+			return err
+		}
+		data, err := json.Marshal(identity)
+		if err != nil {
+			return err
+		}
+		e = append(e, ".guestIdentity = "+string(data))
 		if path := os.Getenv(cage.ConfigEnv); path != "" {
 			cfg, err := cage.Load(path)
 			if err != nil {

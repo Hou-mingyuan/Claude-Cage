@@ -843,7 +843,7 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 		// https://github.com/lima-vm/lima/pull/3319/files#r1986388345
 		virtioNet = "virtio-net-ccw"
 	}
-	args = append(args, "-device", virtioNet+",netdev=net0,mac="+limayaml.MACAddress(cfg.InstanceDir))
+	args = append(args, "-device", virtioNet+",netdev=net0,mac="+limayaml.GuestMACAddress(y, cfg.InstanceDir))
 
 	for i, nw := range y.Networks {
 		if nw.Lima != "" {
@@ -1077,6 +1077,10 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 		args = append(args, "-chardev", fmt.Sprintf("socket,path=%s,server=on,wait=off,id=qga0", guestSock))
 		args = append(args, "-device", "virtio-serial")
 		args = append(args, "-device", "virtserialport,chardev=qga0,name="+filenames.VirtioPort)
+	}
+
+	if y.GuestIdentity != nil {
+		args = append(args, "-uuid", y.GuestIdentity.UUID)
 	}
 
 	// QEMU process

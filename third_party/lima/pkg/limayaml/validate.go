@@ -32,6 +32,9 @@ import (
 
 func Validate(y *limatype.LimaYAML, warn bool) error {
 	var errs error
+	if y.GuestIdentity != nil {
+		errs = errors.Join(errs, y.GuestIdentity.Validate())
+	}
 
 	if len(y.Base) > 0 {
 		errs = errors.Join(errs, errors.New("field `base` must be empty for YAML validation"))
