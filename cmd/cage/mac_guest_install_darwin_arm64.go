@@ -30,6 +30,7 @@ func installMacWorkbench(ctx context.Context, profile, state string, l *vm.Lima)
 	if err != nil || i == nil || i.System != guestos.MacOS {
 		return errors.New("缺少这台虚拟 Mac 的首次安装记录")
 	}
+	guiAuthorize := os.Getenv("CAGE_MACOS_GUI_AUTHORIZE") == "1"
 	pw, err := io.ReadAll(io.LimitReader(os.Stdin, 257))
 	if err != nil || !guestos.ValidMacOSInstallPassword(string(pw)) {
 		return errors.New("客机初始密码需使用 8 至 256 个英文键盘可输入的字母、数字、空格或符号")
@@ -38,6 +39,13 @@ func installMacWorkbench(ctx context.Context, profile, state string, l *vm.Lima)
 	ordinaryUser := os.Getenv("CAGE_MACOS_ACCOUNT")
 	if !guestos.ValidMacOSAccountName(ordinaryUser) {
 		return errors.New("请从 Cage 注册共用账密后继续安装 macOS 客机")
+	}
+	recovery, err := guestos.LoadMacOSInstallRecovery(profile)
+	if err != nil {
+		return err
+	}
+	if recovery != nil && recovery.User != ordinaryUser {
+		return errors.New("客机账户与原安装恢复记录不匹配")
 	}
 	if !macGuestLoginAvailable() {
 		return errors.New("此 Cage 构建缺少虚拟 Mac 登录组件")
@@ -83,15 +91,48 @@ func installMacWorkbench(ctx context.Context, profile, state string, l *vm.Lima)
 	if err := local("/bin/bash", filepath.Join(kit, "prepare-macos-media.sh"), cache); err != nil {
 		return fmt.Errorf("准备客机应用失败：%w", err)
 	}
-	fmt.Fprintln(os.Stdout, "正在恢复虚拟 Mac…")
-	fmt.Fprintln(os.Stdout, "CAGE_GUEST_STAGE macos restore")
-	if err := runMacGuest(ctx, profile, state, []string{"create", media}); err != nil {
+	newGuest := recovery == nil
+	if newGuest {
+		fmt.Fprintln(os.Stdout, "正在恢复虚拟 Mac…")
+		fmt.Fprintln(os.Stdout, "CAGE_GUEST_STAGE macos restore")
+		if err := runMacGuest(ctx, profile, state, []string{"create", media}); err != nil {
+			return err
+		}
+		if err := l.CheckMacOSGuest(ctx, "mac"); err != nil {
+			return err
+		}
+		if err := guestos.PinMacOSInstallHostKey(profile); err != nil {
+			return err
+		}
+		if err := guestos.CreateMacOSInstallRecovery(profile, ordinaryUser, i.ID); err != nil {
+			return err
+		}
+		if err := l.Stop(ctx, "mac"); err != nil {
+			return err
+		}
+	}
+	if guiAuthorize {
+		if err := guestos.SetMacOSInstallRecoveryPhase(profile, i.ID, guestos.MacOSInstallAwaitingGUIAuthorization, nil); err != nil {
+			return err
+		}
+	}
+	if newGuest {
+		if err := l.CheckMacOSGuest(ctx, "mac"); err != nil {
+			return err
+		}
+		if err := l.Start(ctx, "mac", os.Stderr); err != nil {
+			return err
+		}
+	} else if err := runMacGuest(ctx, profile, state, []string{"start"}); err != nil {
 		return err
 	}
 	if err := l.CheckMacOSGuest(ctx, "mac"); err != nil {
 		return err
 	}
 	if err := guestos.PinMacOSInstallHostKey(profile); err != nil {
+		return err
+	}
+	if err := guestos.SetMacOSInstallRecoveryPhase(profile, i.ID, guestos.MacOSInstallAwaitingGUIAuthorization, nil); err != nil {
 		return err
 	}
 	provision, err := guestos.MacOSProvisionUser(profile)
@@ -149,10 +190,27 @@ func installMacWorkbench(ctx context.Context, profile, state string, l *vm.Lima)
 	if err := auth.Run(); err != nil {
 		return errors.New("无法准备虚拟 Mac 账户")
 	}
-	cmd := guestCommand(ctx, `sudo -S -p '' /bin/sh -ec `+shellescape.Quote(`cd `+remote+`; exec 4<login-input; rm login-input; /usr/bin/perl ./native-component-manifest.pl source ./native-components.json .; /bin/bash ./provision-macos-workbench.sh `+remote+` `+i.ID.String()+` `+provision+` `+ordinaryUser+` <&4; /usr/bin/perl ./native-component-manifest.pl publish ./native-components.json .`)+adminPassword)
+	guiMode := ""
+	if guiAuthorize {
+		guiMode = "CAGE_MACOS_GUI_AUTHORIZE=1 CAGE_MACOS_GUI_USER=" + ordinaryUser + " "
+	}
+	cmd := guestCommand(ctx, `sudo -S -p '' /bin/sh -ec `+shellescape.Quote(`cd `+remote+`; exec 4<login-input; rm login-input; /usr/bin/perl ./native-component-manifest.pl source ./native-components.json .; `+guiMode+`/bin/bash ./provision-macos-workbench.sh `+remote+` `+i.ID.String()+` `+provision+` `+ordinaryUser+` <&4; /usr/bin/perl ./native-component-manifest.pl publish ./native-components.json .`)+adminPassword)
 	cmd.Stdout = os.Stdout
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("安装虚拟 Mac 应用失败，可在工作台继续安装：%w", err)
+		failure := fmt.Errorf("安装虚拟 Mac 应用未完成，请在恢复界面继续安装：%w", err)
+		if saveErr := guestos.SetMacOSInstallRecoveryPhase(profile, i.ID, guestos.MacOSInstallAwaitingGUIAuthorization, failure); saveErr != nil {
+			return errors.Join(failure, saveErr)
+		}
+		clean, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = guestCommand(clean, `sudo -S -p '' /bin/rm -rf `+remote+adminPassword).Run()
+		if stopErr := l.Stop(clean, "mac"); stopErr != nil {
+			return errors.Join(failure, stopErr)
+		}
+		return failure
+	}
+	if err := guestos.SetMacOSInstallRecoveryPhase(profile, i.ID, guestos.MacOSInstallComponentsVerified, nil); err != nil {
+		return err
 	}
 	ordinary, err := guestos.MacOSSSHArgs(profile, ordinaryUser)
 	if err != nil {
@@ -162,6 +220,9 @@ func installMacWorkbench(ctx context.Context, profile, state string, l *vm.Lima)
 		`test "$(id -un)" = `+ordinaryUser+` && test "$(uname -s)" = Darwin && ! id -Gn | /usr/bin/grep -qw admin`)...)
 	if err := verify.Run(); err != nil {
 		return errors.New("普通客机账户无法通过已验证的 SSH 通道连接，已保留安装进度")
+	}
+	if err := guestos.SetMacOSInstallRecoveryPhase(profile, i.ID, guestos.MacOSInstallAccountVerified, nil); err != nil {
+		return err
 	}
 	key, err := guestos.MacOSInstallHostKey(profile)
 	if err != nil {
@@ -173,6 +234,9 @@ func installMacWorkbench(ctx context.Context, profile, state string, l *vm.Lima)
 	}
 	fmt.Fprintln(os.Stdout, "CAGE_GUEST_STAGE macos services")
 	if err := l.Stop(ctx, "mac"); err != nil {
+		return err
+	}
+	if err := guestos.SetMacOSInstallRecoveryPhase(profile, i.ID, guestos.MacOSInstallServicesPrepared, nil); err != nil {
 		return err
 	}
 	if err := guestos.BindNewMacOSProfile(profile, ordinaryUser, key, i.ID); err != nil {

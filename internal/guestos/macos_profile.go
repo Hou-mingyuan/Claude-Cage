@@ -97,7 +97,7 @@ func BindMacOSProfile(profile, user string, hostKey []byte) error {
 	return bindMacOSProfile(profile, user, hostKey, "")
 }
 
-// BindNewMacOSProfile is called only by the fresh, resumable installer.
+// BindNewMacOSProfile is called only after the pending guest completed recovery.
 func BindNewMacOSProfile(profile, user string, hostKey []byte, id uuid.UUID) error {
 	install, err := LoadInstallation(profile)
 	if err != nil {
@@ -106,7 +106,18 @@ func BindNewMacOSProfile(profile, user string, hostKey []byte, id uuid.UUID) err
 	if install == nil || id == uuid.Nil || install.ID != id || install.System != MacOS {
 		return errors.New("首次设置与当前安装记录不匹配")
 	}
-	return bindMacOSProfile(profile, user, hostKey, id.String())
+	recovery, err := LoadMacOSInstallRecovery(profile)
+	if err != nil {
+		return err
+	}
+	if recovery == nil || recovery.InstallationID != id || recovery.User != user ||
+		recovery.Phase != MacOSInstallServicesPrepared {
+		return errors.New("macOS 客机尚未完成组件和服务置备")
+	}
+	if err := bindMacOSProfile(profile, user, hostKey, id.String()); err != nil {
+		return err
+	}
+	return RemoveMacOSInstallRecovery(profile, id)
 }
 
 func validSetupID(id string) bool {

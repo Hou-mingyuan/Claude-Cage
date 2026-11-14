@@ -60,6 +60,8 @@ function Initialization({ initial, onComplete }) {
   const [choice, setChoice] = useState(undefined);
   const [storage, setStorage] = useState(null);
   const [pending, setPending] = useState(null);
+  const [macRecovery, setMacRecovery] = useState(null);
+  const [recoveryError, setRecoveryError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [connectionError, setConnectionError] = useState("");
@@ -104,6 +106,10 @@ function Initialization({ initial, onComplete }) {
         else setConnectionError(results[0].reason.message);
         if (results[1].status === "fulfilled") {
           const install = results[1].value;
+          if (install?.pending?.system === "macos" && !install?.activate) {
+            try { setMacRecovery(await api("/macos/install-recovery")); setRecoveryError(""); }
+            catch (error) { if (alive.current) { setMacRecovery(null); setRecoveryError(error.message); } }
+          } else { setMacRecovery(null); setRecoveryError(""); }
           setPending(install?.pending || null);
           if (!restored.current) {
             restored.current = true;
@@ -262,6 +268,34 @@ function Initialization({ initial, onComplete }) {
             {exitCandidate && <section className="initialization-notice" aria-label="确认固定出口"><p>客机终端、浏览器和代理已测得一致出口。请确认是否将它绑定为固定出口。</p><button disabled={busy || Boolean(connectionError)} onClick={bindExit}>绑定检测到的固定出口 {exitCandidate}</button></section>}
             {needsExitRestart && <section className="initialization-notice" aria-label="固定出口已保存"><p>固定出口已保存。重启客机并重新检测后才能进入工作台。</p><button className="primary" disabled={busy || Boolean(connectionError)} onClick={restart}>{status.vm_running ? "重启客机并重新检测" : "启动客机并重新检测"}</button></section>}
             {progress ? <SetupProgress job={progress} onDetails={() => setDetails(true)} onStop={stop} onRetry={needsExitRestart ? restart : install} disconnected={Boolean(connectionError) || submitting} /> : (busy || status.guest_system !== "macos" || !networkPending) && <div className="initialization-operation" role="status">{busy && <LoaderCircle size={22} className="spin" />}<p>{job.message || (status.vm_running ? "请完成客机连接和网络检查。" : "准备继续原安装，已有文件和磁盘会保留。")}</p>{!busy && !job.error && !needsExitRestart && <button className="primary" disabled={Boolean(connectionError)} onClick={install}>{status.ready ? "重新启动并检查" : "继续安装"}</button>}{busy && <button onClick={stop} disabled={submitting}>停止安装</button>}</div>}
+            {pending?.system === "macos" && macRecovery?.available && <section className="initialization-notice" aria-label="恢复 macOS 组件安装">
+              <h2>继续安装 macFUSE</h2>
+              <p>macOS 27 需要你在客机中完成一次管理员授权，这是正常流程。客机磁盘和安装进度已保留。请按以下顺序操作：</p>
+              <ol>
+                <li>启动恢复客机。</li>
+                <li>打开恢复画面，先登录安装时创建的客机普通账户。</li>
+                <li>点击「打开 Apple Installer」继续安装。</li>
+                <li>安装器要求管理员认证时，用户名填 cagesetup，密码与你登录 Cage 的账户密码相同。</li>
+                <li>系统弹出允许访问系统配置文件的提示时，选择允许。</li>
+              </ol>
+              <p>安装过程中关闭恢复画面会取消本次作业；取消不会丢失已有进度，重新启动客机后再试。反复失败时，可使用页面底部的「日志与诊断」查看记录。</p>
+              {!macRecovery.running && <button disabled={busy} onClick={() => run(() => api("/macos/install-recovery", { action: "start" }))}>启动恢复客机</button>}
+              {macRecovery.running && <MacOSLogin initialSetup installRecovery label="打开恢复画面" setupHint="先登录安装时创建的客机普通账户，再点击「打开 Apple Installer」。管理员认证用户名填 cagesetup，密码与 Cage 账户相同；系统提示时选择允许。" setupStatus="安装完成后返回 Cage 继续置备。" setupActions={<button disabled={busy} onClick={() => run(() => api("/macos/install-recovery", { action: "resume" }))}>打开 Apple Installer</button>} onSettings={() => setHelp(true)} />}
+            </section>}
+            {pending?.system === "macos" && macRecovery && !macRecovery.available && macRecovery.can_prepare && <section className="initialization-notice" aria-label="macOS 安装恢复">
+              <p>检测到未完成的 macOS 安装；macOS 27 需要你在客机中完成一次管理员授权，这是正常流程。后续恢复将沿用原客机磁盘。准备完成后，这里会出现继续安装的指引。</p>
+              <button disabled={busy} onClick={() => run(async () => { await api("/macos/install-recovery", { action: "prepare" }); pollNow.current?.(); })}>准备恢复入口</button>
+            </section>}
+            {pending?.system === "macos" && macRecovery && !macRecovery.available && !macRecovery.can_prepare && <section className="initialization-notice" aria-label="macOS 恢复入口不可用">
+              <p>检测到未完成的 macOS 安装；macOS 27 需要你在客机中完成一次管理员授权，这是正常流程。恢复入口尚未就绪，可能仍在准备中。可查看操作详情了解进度，或继续原安装；现有数据会保留。</p>
+              <button disabled={busy} onClick={() => setDetails(true)}>查看操作详情</button>
+              <button className="primary" disabled={busy || Boolean(connectionError)} onClick={install}>继续原安装</button>
+            </section>}
+            {pending?.system === "macos" && recoveryError && <section className="initialization-notice" role="alert" aria-label="恢复状态读取失败">
+              <p>暂时无法读取 macOS 安装恢复状态，安装进度不受影响。</p>
+              <p><SafetyMessage message={recoveryError} /></p>
+              <button disabled={busy} onClick={() => pollNow.current?.()}>重新检查</button>
+            </section>}
             {job.error && !progress && !(status.guest_system === "macos" && networkPending) && <div className="initialization-notice" role="alert"><SafetyMessage message={job.error} />{!networkPending && !needsExitRestart && <button className="primary" disabled={busy || Boolean(connectionError)} onClick={install}>继续安装</button>}</div>}
             {status.guest_system === "macos" && status.vm_running && !status.ready && !busy && <section className="initialization-notice"><h2>连接虚拟 Mac</h2><p>{status.environment_update_error || "客机已经启动，尚未建立工作台连接。请先检查客机是否停在登录画面。"}</p><MacOSLogin onSessionClosed={() => pollNow.current?.()} /><button disabled={Boolean(connectionError)} onClick={install}>重新连接并检查</button></section>}
             {status.ready && network.mode !== "open" && !busy && !needsExitRestart && <>
