@@ -49,13 +49,6 @@ export async function createWorkbench({
     chosenFolder: "/Users/shihao/Projects/design-lab",
     failSave: false,
     failJob: false,
-    hostGit: {
-      state: "ok",
-      ready: true,
-      can_enable: false,
-      message: "本机 Git 安全保护已启用。",
-    },
-    failHostGit: false,
     saves: [],
     requests: [],
     terminalConnections: 0,
@@ -174,24 +167,6 @@ export async function createWorkbench({
     if (path === "/favorites") {
       if (favoritesRequest) return route.fulfill(await favoritesRequest(request));
       return route.fulfill({ json: { items: [], folders: [] } });
-    }
-    if (path === "/host/git") {
-      if (request.method() === "POST") {
-        if (!body?.confirm)
-          return route.fulfill({ status: 400, body: "请先确认启用保护" });
-        if (state.failHostGit)
-          return route.fulfill({
-            status: 500,
-            body: "未能保存 Git 安全设置，请检查写入权限后重试。",
-          });
-        state.hostGit = {
-          state: "ok",
-          ready: true,
-          can_enable: false,
-          message: "本机 Git 安全保护已启用。",
-        };
-      }
-      return route.fulfill({ json: state.hostGit });
     }
     if (path === "/appearance/codex")
       return route.fulfill({ json: state.codexAppearance });

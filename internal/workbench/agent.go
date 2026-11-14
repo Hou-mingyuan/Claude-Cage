@@ -97,8 +97,6 @@ func AgentOperations() []AgentOperation {
 		}
 		post("account."+action, "Same account action and verification as the workbench", "/api/account/"+action, schema)
 	}
-	get("host.git", "Inspect the same host Git prerequisite as first setup", "/api/host/git")
-	post("host.git.enable", "Enable the workbench's host Git protection with the same confirm=true authorization", "/api/host/git", object(map[string]string{"confirm": "boolean"}))
 	get("appearance.get", "Read complete appearance and saved themes", "/api/appearance")
 	post("appearance.set", "Save complete appearance using the workbench validator", "/api/appearance", from(Appearance{}))
 	get("appearance.codex", "Read the same local Codex appearance import as the UI", "/api/appearance/codex")

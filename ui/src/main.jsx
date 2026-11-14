@@ -55,7 +55,6 @@ import { SafetyPanel } from "./safety";
 import { SafetyChecklistContext, SafetyMessage } from "./safety-message";
 import { networkState, isGuestLocalURL } from "./safety-state.mjs";
 import { needsProxySetup } from "./onboarding-state.mjs";
-import { HostGitPreparation } from "./host-git";
 import { NetworkLatency } from "./network-latency";
 import { useWindowVisibility } from "./window-visibility";
 import { AppUpdateButton, useAppUpdates } from "./app-updates";
@@ -99,7 +98,6 @@ function App() {
     [browserSettingsRevision, setBrowserSettingsRevision] = useState(0),
     [settingsOpen, setSettingsOpen] = useState(false),
     [claudeAccountsOpen, setClaudeAccountsOpen] = useState(false),
-    [startOptions, setStartOptions] = useState(null),
     [guestSystem, setGuestSystem] = useState(undefined),
     [startRequest, setStartRequest] = useState(null),
     [settingsSection, setSettingsSection] = useState("keyboard"),
@@ -126,10 +124,8 @@ function App() {
     [quitting, setQuitting] = useState(null);
   // Keep feedback continuous until polling observes the accepted start job.
   const clientStatus = serverStatus && { ...serverStatus, keyboard: clientKeyboard(serverStatus.keyboard) };
-  const hostGitOpen = startOptions !== null;
-  const status = clientStatus && (hostGitOpen || startRequest)
-    ? { ...clientStatus, job: { running: true, kind: "start", message: hostGitOpen
-      ? isRemoteClient() ? "正在检查云端主机 Git 安全保护…" : "正在检查本机 Git 安全保护…" : "正在启动 Cage 环境…" } }
+  const status = clientStatus && startRequest
+    ? { ...clientStatus, job: { running: true, kind: "start", message: "正在启动 Cage 环境…" } }
     : clientStatus;
   const { active } = layout;
   const setActive = id => setLayout(previous => focusTab(previous, id));
@@ -161,7 +157,6 @@ function App() {
     if (storageRecovery) {
       setDesktopOpen(false);
       setHome(true);
-      setStartOptions(null);
       setStartRequest(null);
     }
   }, [storageRecovery]);
@@ -368,6 +363,19 @@ function App() {
     } catch (e) {
       notify(e.message);
       return null;
+    }
+  };
+  const starting = useRef(false);
+  const startEnvironment = async (options = {}) => {
+    if (starting.current) return;
+    starting.current = true;
+    setStartRequest({ id: null });
+    try {
+      const result = await action("/start", options);
+      setStartRequest(result ? { id: result.id } : null);
+      if (result) refreshStatus.current?.();
+    } finally {
+      starting.current = false;
     }
   };
   const openBrowserPage = async (
@@ -872,7 +880,7 @@ function App() {
         }
         return;
       }
-      if (k === "," && !projectDialog && !rename && !hostGitOpen && !claudeAccountsOpen) {
+      if (k === "," && !projectDialog && !rename && !claudeAccountsOpen) {
         event.preventDefault();
         event.stopImmediatePropagation();
         openSettings();
@@ -881,7 +889,6 @@ function App() {
       if (
         settingsOpen ||
         claudeAccountsOpen ||
-        hostGitOpen ||
         transfer ||
         details ||
         safetyOpen ||
@@ -970,11 +977,6 @@ function App() {
       }
       if (document.querySelector("[data-environment-dialog]")) {
         if (command === "closeTab") document.dispatchEvent(new Event("cage-close-modal"));
-        return;
-      }
-      if (hostGitOpen && command !== "quit") {
-        if (command === "closeTab")
-          document.dispatchEvent(new Event("cage-close-modal"));
         return;
       }
       if (command === "settings") {
@@ -1070,7 +1072,6 @@ function App() {
     status,
     settingsOpen,
     claudeAccountsOpen,
-    hostGitOpen,
     safetyOpen,
     details,
     transfer,
@@ -1242,18 +1243,6 @@ function App() {
     onRecover={() => recoverEditor(tab)} />;
   const dialogs = (
     <>
-      {hostGitOpen && (
-        <HostGitPreparation
-          onClose={() => setStartOptions(null)}
-          onReady={async () => {
-            setStartRequest({ id: null });
-            setStartOptions(null);
-            const result = await action("/start", startOptions);
-            setStartRequest(result ? { id: result.id } : null);
-            if (result) refreshStatus.current?.();
-          }}
-        />
-      )}
       {dialog && (
         <Modal
           title={dialog.title}
@@ -1360,7 +1349,7 @@ function App() {
     <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <div
         className="workbench-shell"
-        inert={settingsOpen || claudeAccountsOpen || hostGitOpen || undefined}
+        inert={settingsOpen || claudeAccountsOpen || undefined}
       >
         {!sidebarCollapsed && (
           <WorkspaceSidebar
@@ -1489,7 +1478,7 @@ function App() {
                       {!status.ready && <div className="view-overlay">
                         <RefreshCw /><h3>浏览器连接暂时不可用</h3>
                         <p>环境和终端仍可运行；恢复浏览器不会停止现有终端。</p>
-                        <button className="primary" disabled={busy} onClick={() => setStartOptions({})}>恢复浏览器</button>
+                        <button className="primary" disabled={busy} onClick={() => startEnvironment({})}>恢复浏览器</button>
                       </div>}
                       {status.ready && !splitReady && <div className="view-overlay">正在调整浏览器布局…</div>}
                     </div>
@@ -1532,7 +1521,7 @@ function App() {
                   </> : setupProgress ? <>
                     <h1>{status.job.error ? "环境安装未完成" : "正在安装 Cage 环境"}</h1>
                     <SetupProgress job={status.job} onDetails={() => setDetails(true)}
-                      onStop={stop} onRetry={() => setStartOptions(status.job.kind === "guest-install" ? { guest_system: status.job.setup_progress.system } : {})} disconnected={Boolean(connectionError)} />
+                      onStop={stop} onRetry={() => startEnvironment(status.job.kind === "guest-install" ? { guest_system: status.job.setup_progress.system } : {})} disconnected={Boolean(connectionError)} />
                   </> : <>
                   <h1>
                     {busy
@@ -1623,7 +1612,7 @@ function App() {
                             api("/environment/guest-systems/activate", {}).then(() => native("reconnect")).catch((e) => setToast(e.message));
                           } else if (!running && setupProxy) openSettings("network");
                           else if (!running || !status.ready)
-                            setStartOptions(!running && guestSystem?.guest_system === "debian-13" && !guestSystem.clone ? { guest_system: "debian-13" } : !running && guestSystem ? {
+                            startEnvironment(!running && guestSystem?.guest_system === "debian-13" && !guestSystem.clone ? { guest_system: "debian-13" } : !running && guestSystem ? {
                               guest_system: guestSystem.guest_system, media: guestSystem.media, sha256: guestSystem.sha256,
                               clone_key: guestSystem.clone_key,
                               editor_terms: guestSystem.editor_terms,

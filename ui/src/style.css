@@ -1939,23 +1939,6 @@ svg {
   line-height: 1.7;
   margin-top: 20px;
 }
-.host-git-preparation p {
-  line-height: 1.75;
-}
-.host-git-preparation p + p {
-  margin-top: 12px;
-}
-.host-git-preparation p code {
-  white-space: nowrap;
-}
-.host-git-preparation pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 0.8571rem;
-}
 .welcome-shortcuts {
   display: flex;
   justify-content: center;
