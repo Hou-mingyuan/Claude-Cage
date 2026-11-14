@@ -161,7 +161,7 @@ func TestExitProbeUsesIPv4ServiceThroughProxy(t *testing.T) {
 				var requests atomic.Int32
 				upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 					requests.Add(1)
-					if (request.Host != "ipv4.icanhazip.com" && request.Host != "api.ipify.org") || request.URL.RequestURI() != "/" || request.Method != "GET" || request.Header.Get("User-Agent") != "Cage-network-check/1" || request.Header.Get("Cookie") != "" || request.Header.Get("Authorization") != "" || request.Header.Get("Proxy-Authorization") != "" {
+					if (request.Host != "ipv4.icanhazip.com" && request.Host != "api.ipify.org") || request.URL.RequestURI() != "/" || request.Method != "GET" || request.Header.Get("User-Agent") != "Go-http-client/1.1" || request.Header.Get("Cookie") != "" || request.Header.Get("Authorization") != "" || request.Header.Get("Proxy-Authorization") != "" {
 						t.Error("probe request changed destination or forwarded guest/proxy data")
 					}
 					if request.Host == "api.ipify.org" {
