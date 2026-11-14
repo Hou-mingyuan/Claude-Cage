@@ -19,6 +19,7 @@ import {
   Palette,
   UserRound,
   Archive,
+  Info,
 } from "lucide-react";
 import { api } from "./api";
 import "./settings.css";
@@ -33,6 +34,7 @@ import { ResourceSettings } from "./resources";
 import { DiagnosticSettings } from "./diagnostics.jsx";
 import { MacOSLogin } from "./macos-login";
 import { AccountSettings } from "./account";
+import { AboutSettings } from "./about-settings";
 const sections = [
   ["account", "账户", UserRound],
   ["vault", "密码保险箱", KeyRound],
@@ -43,6 +45,7 @@ const sections = [
   ["network", "网络与代理", Globe2],
   ["region", "时区与语言", Clock3],
   ["project", "环境与恢复", RotateCcw],
+  ["about", "关于", Info],
 ];
 export function SettingsPanel({
   current,
@@ -239,6 +242,7 @@ export function SettingsPanel({
       <div className="settings-main">
         <div className={section === "archived-sessions" ? "settings-content settings-content--archives" : section === "mobile" ? "settings-content settings-content--remote" : "settings-content"} ref={contentRef}>
           {section === "appearance" && <AppearanceSettings />}
+          {section === "about" && <AboutSettings />}
           {section === "archived-sessions" && <ArchivedSessions ready={status.ready && !busy} />}
           {section === "vault" && <PasswordVaultSettings onConfirm={onConfirm} onDirty={setAccountDirty} />}
           {section === "account" && <AccountSettings busy={busy} onDirty={setAccountDirty} />}
@@ -657,7 +661,7 @@ export function SettingsPanel({
             </div>
           )}
         </div>
-        {(!["appearance", "browser", "account", "vault", "mobile", "archived-sessions", "project"].includes(section) || changed) && (
+        {(!["appearance", "browser", "account", "vault", "mobile", "archived-sessions", "project", "about"].includes(section) || changed) && (
           <footer className="settings-footer">
             {" "}
             <>
