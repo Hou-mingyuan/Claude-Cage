@@ -11,7 +11,7 @@ $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $utf8=[Text.UTF8Encoding]::new($false)
 $copiedFixtureText=$utf8.GetString([Convert]::FromBase64String('Q2FnZSBuYXRpdmUgY29weSDkuK3mlofwn5mC'))
-$binding=Get-Content -LiteralPath $ProfilePath -Raw|ConvertFrom-Json
+$binding=Get-Content -LiteralPath $ProfilePath -Raw -Encoding UTF8|ConvertFrom-Json
 $vm=Get-VM -Id ([guid]$binding.vm_id)
 if($binding.version -ne 1 -or $vm.State -ne 'Running' -or @(Get-VMNetworkAdapter -VM $vm).Count -ne 0){throw 'The independently bound offline guest is not ready.'}
 $credential=Import-Clixml -LiteralPath $CredentialFile
@@ -29,7 +29,7 @@ function Bridge([string]$Operation){
 function Send($p,$value){$bytes=$utf8.GetBytes((ConvertTo-Json -InputObject $value -Compress -Depth 12)+"`n");$p.StandardInput.BaseStream.Write($bytes,0,$bytes.Length);$p.StandardInput.BaseStream.Flush()}
 function Read($p){$pending=$p.StandardOutput.ReadLineAsync();if(!$pending.Wait(45000) -or !$pending.Result){throw ('The owned browser response did not complete: '+$script:phase)};return $pending.Result|ConvertFrom-Json}
 function Call([string]$Path,$Payload=@{},[string]$Method='POST'){Send $browser @{method=$Method;path=$Path;input=$Payload};$value=Read $browser;if($value.error){throw ($script:phase+': '+$value.error)};return $value}
-function State {return Invoke-Command -Session $session -ArgumentList $guestDirectory -ScriptBlock {param($dir);$file=Join-Path $dir 'fixture-state.json';if(Test-Path -LiteralPath $file){foreach($report in (Get-Content -LiteralPath $file -Raw|ConvertFrom-Json)){$report}}}}
+function State {return Invoke-Command -Session $session -ArgumentList $guestDirectory -ScriptBlock {param($dir);$file=Join-Path $dir 'fixture-state.json';if(Test-Path -LiteralPath $file){foreach($report in (Get-Content -LiteralPath $file -Raw -Encoding UTF8|ConvertFrom-Json)){$report}}}}
 function Frame([string]$Name){
     $f=Call '/frame' @{} 'GET';if($f.width -lt 1 -or $f.height -lt 1 -or !$f.target){throw 'The native frame receipt is invalid.'}
     Add-Type -AssemblyName System.Drawing
