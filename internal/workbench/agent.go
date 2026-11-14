@@ -54,7 +54,7 @@ func AgentOperations() []AgentOperation {
 	}
 	get("status", "Environment readiness, network checks and current job", "/api/status")
 	get("account.status", "Account presence and lock state; no credentials", "/api/account")
-	post("account.create", "Create an account only on an empty profile; user chooses the password", "/api/account/create", object(map[string]string{"username": "string", "password": "string", "confirm_password": "string", "avatar": "string"}))
+	post("account.create", "Create an account only on an empty profile; user chooses the password. Returns a recovery_key once; deliver it privately to the user for secure storage", "/api/account/create", object(map[string]string{"username": "string", "password": "string", "confirm_password": "string", "avatar": "string"}))
 	post("account.unlock", "Unlock using a user-provided password via private input", "/api/account/unlock", object(map[string]string{"password": "string"}))
 	get("settings.get", "Read settings without proxy credentials", "/api/settings")
 	post("settings.patch", "Merge specified fields under the operation lock; dry_run validates without writing", "/api/agent/settings", object(map[string]string{"patch": "object", "dry_run": "boolean"}))
@@ -87,6 +87,7 @@ func AgentOperations() []AgentOperation {
 	post("project.open", "Grant access only to a user-authorized directory; add=true remembers the grant", "/api/projects/open", object(map[string]string{"workspace": "string", "add": "boolean", "activate": "boolean"}))
 	post("project.save", "Save a named project with user-authorized folders. For a new project, omit workspace; the first folder becomes its stable default directory. To edit, provide its existing workspace and keep that folder. Returns approval if macOS authorization is needed; retry the same request after approval", "/api/projects/save", from(projectGroup{}))
 	post("project.remove", "Remove a project and revoke every bound folder share. Close its terminals, running sessions and editors first. Preserve files and history", "/api/projects/remove", object(map[string]string{"workspace": "string"}))
+	post("project.refresh", "Linux guests only: forget cached names and attributes of project files so host-side changes show at once", "/api/projects/refresh", object(nil))
 
 	for _, action := range []string{"profile", "password", "lock", "logout", "suspend"} {
 		schema := object(nil)

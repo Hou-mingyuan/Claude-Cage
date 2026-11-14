@@ -39,6 +39,8 @@ export function WorkspaceSidebar({
   sessionError,
   sessionRefreshing,
   onSessionRefresh,
+  onProjectRefresh,
+  projectRefreshing,
   onSessionOpen,
   openingSession,
   sessionOpenError,
@@ -66,7 +68,9 @@ export function WorkspaceSidebar({
   terminalMenuAt,
   onBrowser,
   onTailscale,
+  tailscaleOpen,
   onClaudeAccounts,
+  claudeAccountsOpen,
   onClaudeWeb,
   onClaudeDesktop,
   desktopOpen,
@@ -136,25 +140,39 @@ export function WorkspaceSidebar({
             <img src={claudeLogo} width="18" height="18" alt="" />
           </button>
         </div>
-        <button className="sidebar-link" onClick={onTailscale} aria-label="打开 Tailscale"><Network size={17} />Tailscale</button>
+        <button className={`sidebar-link ${tailscaleOpen ? "selected" : ""}`} aria-current={tailscaleOpen ? "page" : undefined} onClick={onTailscale} aria-label="打开 Tailscale"><Network size={17} />Tailscale</button>
         {ssh && <button className="sidebar-link ssh-navigation" onClick={ssh.open} aria-label="SSH 主机"><Server size={17} />SSH</button>}
         <button className={`sidebar-link ${desktopOpen ? "selected" : ""}`} onClick={onClaudeDesktop} disabled={!running || busy} title="安装或打开 Claude Desktop"><Monitor size={17} />Claude Desktop</button>
-        <button className="sidebar-link" onClick={onClaudeAccounts} aria-haspopup="dialog">
+        <button className={`sidebar-link ${claudeAccountsOpen ? "selected" : ""}`} onClick={onClaudeAccounts}
+          aria-current={claudeAccountsOpen ? "page" : undefined}>
           <UsersRound size={17} />Claude 账号管理
         </button>
       </nav>
       <div className="sidebar-scroll">
         <div className="sidebar-section-heading">
           <span>项目</span>
-          <button
-            className="icon-button"
-            onClick={() => onOpenProject()}
-            aria-label="添加项目"
-            title="添加项目"
-            disabled={busy}
-          >
-            <Plus size={15} />
-          </button>
+          <span className="sidebar-section-actions">
+            {onProjectRefresh && (
+              <button
+                className="icon-button"
+                onClick={onProjectRefresh}
+                aria-label="刷新项目文件"
+                title="刷新项目文件：让环境立即看到在本机上所做的改动"
+                disabled={busy || !running || projectRefreshing}
+              >
+                <RefreshCw size={14} className={projectRefreshing ? "spin" : undefined} />
+              </button>
+            )}
+            <button
+              className="icon-button"
+              onClick={() => onOpenProject()}
+              aria-label="添加项目"
+              title="添加项目"
+              disabled={busy}
+            >
+              <Plus size={15} />
+            </button>
+          </span>
         </div>
         {sessionError && (
           <div className="sidebar-session-error">
