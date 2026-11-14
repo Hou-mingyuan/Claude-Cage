@@ -85,7 +85,8 @@ func AgentOperations() []AgentOperation {
 	post("network.check", "Run existing safety checks; may reopen networking when checks pass", "/api/safety/check", object(nil))
 	post("network.pause", "Close external networking and persist pause intent", "/api/safety/close", object(nil))
 	post("project.open", "Grant access only to a user-authorized directory; add=true remembers the grant", "/api/projects/open", object(map[string]string{"workspace": "string", "add": "boolean", "activate": "boolean"}))
-	post("project.remove", "Remove an added directory and revoke its share. Close its terminals, running sessions and editor first. Preserve files and history", "/api/projects/remove", object(map[string]string{"workspace": "string"}))
+	post("project.save", "Save a named project with user-authorized folders. For a new project, omit workspace; the first folder becomes its stable default directory. To edit, provide its existing workspace and keep that folder. Returns approval if macOS authorization is needed; retry the same request after approval", "/api/projects/save", from(projectGroup{}))
+	post("project.remove", "Remove a project and revoke every bound folder share. Close its terminals, running sessions and editors first. Preserve files and history", "/api/projects/remove", object(map[string]string{"workspace": "string"}))
 
 	for _, action := range []string{"profile", "password", "lock", "logout", "suspend"} {
 		schema := object(nil)

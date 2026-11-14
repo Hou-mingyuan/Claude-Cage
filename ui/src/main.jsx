@@ -49,6 +49,7 @@ import {
   focusTab,
   splitTab,
   projectName,
+  projectGroups,
   tabName,
 } from "./workspace-state.mjs";
 import { SafetyPanel } from "./safety";
@@ -258,8 +259,10 @@ function App() {
   useEffect(() => {
     if (audio.error) setToast(audio.error);
   }, [audio.error]);
-  const projects = status?.projects || [];
-  const workspace = selectedProject || status?.workspace;
+  const groups = projectGroups(status);
+  const projects = groups.map(group => group.workspace);
+  const selectedWorkspace = selectedProject || status?.workspace;
+  const workspace = groups.find(group => group.folders.includes(selectedWorkspace))?.workspace || selectedWorkspace;
   const contentWorkspace =
     terminal && !showHome ? current.workspace : workspace;
   const setupProxy = !nativeGuestLabel && needsProxySetup(settings, status, proxy);
@@ -1090,7 +1093,7 @@ function App() {
     desktopOpen,
     terminalChoice,
   ]);
-  const project = projectName(contentWorkspace);
+  const project = projectName(contentWorkspace, groups);
   const tabLayoutKey = status?.environment_identity_directory || status?.environment_directory || status?.workspace;
   const metadata = { ...(savedTabs[tabLayoutKey] || {}), ...(privateTabMetadata[tabLayoutKey] || {}) };
   for (const tab of tabs) {
@@ -1207,7 +1210,7 @@ function App() {
     const detail = tab?.terminalKind === "claude-login" ? `登录 · ${account || "新账号"}`
       : account ? `Claude · ${account}${tab.claude_account_source === "default" ? "（启动时账号）" : ""}` : "";
     const location = split && tab ? `heading-${tab.id}` : "heading";
-    return <TerminalHeader tab={tab} project={projectName(path)} metadata={metadata}
+    return <TerminalHeader tab={tab} project={projectName(path, groups)} metadata={metadata}
       contentWorkspace={path} terminalDetail={detail} terminalDetailHint={tab?.claude_account_source === "default"
         ? "此终端按启动时的普通终端登录标记。若普通终端已换号，请重新打开工作会话确认身份。" : detail}
       busy={busy} onHome={() => setHome(true)}
@@ -1358,6 +1361,7 @@ function App() {
             workspace={selectedProject || status.workspace}
             guestSystem={account?.guest_system || status.guest_system || guestSystem?.guest_system || "debian-13"}
             projects={projects}
+            projectGroups={groups}
             tabs={displayTabs}
             sessions={cliSessions.sessions.map(session => ({ ...session,
               claudeAccountNumber: claudeNumbers.get(session.account_id) }))}
@@ -1692,7 +1696,7 @@ function App() {
                         <ul className="project-connection-errors">
                           {status.project_errors.map(({ path, message, recovery }) => (
                             <li key={path}>
-                              <strong>{projectName(path)}</strong>
+                              <strong>{projectName(path, groups)}</strong>
                               <span className="project-error-path">{path}</span>
                               <p>{message}</p>
                               <ProjectRecovery recovery={recovery} disabled={!status.ready || busy}
@@ -1838,7 +1842,7 @@ function App() {
           onRemoved={async (removed, workspace) => {
             await refreshSettings();
             await refreshStatus.current?.();
-            if (selectedProject === removed) setSelectedProject(workspace);
+            if ((groups.find(group => group.workspace === removed)?.folders || [removed]).includes(selectedProject)) setSelectedProject(workspace);
           }}
         />
       )}
