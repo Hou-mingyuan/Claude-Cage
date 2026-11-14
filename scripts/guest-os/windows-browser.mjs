@@ -345,10 +345,10 @@ export function createNativeBrowserService(options = {}) {
   async function captureFrame(tab) {
     await stoppingCaptures.get(tab.page);
     const size = tab.page.viewportSize();
-    // HiDPI surface scaling also affects native menus. Keep the established
-    // screenshot path by default until the native popup comparison is verified.
-    const streaming = continuousFrames && !tab.captureFallback &&
-      (displayScale === 1 || options.continuousFrames === true);
+    // Windows native menus do not follow the compositor's emulated scale.
+    // Keep HiDPI on full-density screenshots, even with continuousFrames opted
+    // in, so page pixels and native overlays share one physical-pixel mapping.
+    const streaming = continuousFrames && !tab.captureFallback && displayScale === 1;
     const key = `${tab.document}:${tab.geometry}:${size.width}:${size.height}:${displayScale}`;
     let capture = captures.get(tab.page);
     if (capture && capture.key !== key) { await stopCapture(tab.page); capture = undefined; }
