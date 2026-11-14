@@ -142,6 +142,20 @@ try {
     if(!(@(State)|Where-Object {$_.type -eq 'png' -and $_.width -eq 17 -and $_.height -eq 9})){throw 'The native OS PNG did not reach the fixture paste event.'};$results.native_png_paste=$true;$null=Frame '09-png-pasted'
     $script:phase='native_permission';$frame=Frame '10-before-permission';Click $frame 330 215;Start-Sleep -Milliseconds 250
     $permission=Frame '11-native-permission';if(@($permission.overlays).Count -eq 0){throw 'The native permission prompt was not captured.'};$results.native_permission_prompt=$true;Key $permission 65307 $true;Key $permission 65307 $false
+    $script:phase='verification_popup';$frame=Frame '11a-opener';Click $frame 45 36
+    $popup=$null
+    for($i=0;$i-lt 40;$i++){
+        $snapshot=Call '/tabs' @{} 'GET'
+        $popup=@($snapshot.tabs|Where-Object {$_.incognito -and $_.url -like '*/verification-popup'})[0]
+        if($popup -and $snapshot.active -eq $popup.id){break};Start-Sleep -Milliseconds 50
+    }
+    if(!$popup -or $snapshot.active -ne $popup.id){throw 'The verification popup did not become active.'};$tabs.Add($popup.id)
+    $popupFrame=Frame '11a-verification-popup'
+    if($popupFrame.id -ne $popup.id){throw 'The verification frame still shows the opener.'}
+    Click $popupFrame 45 36
+    for($i=0;$i-lt 40;$i++){if(@(State)|Where-Object {$_.page -eq '/verification-popup' -and $_.type -eq 'verified'}){break};Start-Sleep -Milliseconds 50}
+    if($i -eq 40){throw 'The verification popup did not receive the click.'}
+    $null=Call '/close' @{id=$popup.id};$null=Call '/activate' @{id=$tab.id};$results.native_verification_popup=$true
     $script:phase='native_private_tabs';$frame=Frame '11a-private-one';Click $frame ($frame.width/$frame.scale-120) 36
     $privateSecond=$null;for($i=0;$i-lt 40;$i++){$snapshot=Call '/tabs' @{} 'GET';$privateSecond=@($snapshot.tabs|Where-Object {$_.incognito -and $_.url -like '*/private-two'})[0];if($privateSecond){break};Start-Sleep -Milliseconds 50}
     if(!$privateSecond){throw 'The native private popup was not registered.'};$tabs.Add($privateSecond.id)
