@@ -4,12 +4,13 @@ import { useSelectPopup } from "./select-popup";
 import { Check, ChevronDown } from "lucide-react";
 import "./inline-select.css";
 
-// Keep keyboard focus on the control; the popup does not change page layout.
+// Keep keyboard focus on the control in either layout.
 export function InlineSelect({
   children,
   value,
   onValueChange,
   disabled,
+  inline = false,
   editable = false,
   displayLabel,
   ...props
@@ -45,7 +46,7 @@ export function InlineSelect({
   const active = filtered.findIndex(
     (item) => item.value === cursor && !item.disabled,
   );
-  const position = useSelectPopup(visible, control, list, filtered.length);
+  const position = useSelectPopup(visible && !inline, control, list, filtered.length);
   useEffect(() => {
     if (visible && active >= 0) {
       const row = list.current.querySelector(`[data-index="${active}"]`);
@@ -125,6 +126,7 @@ export function InlineSelect({
       visible && active >= 0 ? id + "-" + active : undefined,
     onKeyDown: keydown,
   };
+  const renderList = (options) => inline ? options : createPortal(options, document.body);
   return (
     <span ref={root} className="inline-select">
       {editable ? (
@@ -155,14 +157,14 @@ export function InlineSelect({
           <ChevronDown size={14} aria-hidden="true" />
         </button>
       )}
-      {visible && createPortal(
+      {visible && renderList(
         <span
           ref={list}
           id={id}
           role="listbox"
           aria-label={(props["aria-label"] || "") + "选项"}
-          className="inline-select-list"
-          style={position}
+          className={`inline-select-list${inline ? " is-inline" : ""}`}
+          style={inline ? undefined : position}
           onMouseDown={(event) => event.preventDefault()}
           onClick={(event) => event.preventDefault()}
         >
@@ -193,7 +195,7 @@ export function InlineSelect({
               </span>
             </React.Fragment>
           ))}
-        </span>, document.body
+        </span>
       )}
     </span>
   );
