@@ -668,7 +668,9 @@ function App() {
           if (next.job.error) notify(next.job.error);
         }
         if (next.ready) {
-          const fetchBrowser = !browserStreamReady.current || !initialized.current;
+          // A guest waiting for a component update cannot serve browser tabs;
+          // the update banner replaces a request that fails on every poll.
+          const fetchBrowser = (!browserStreamReady.current || !initialized.current) && !next.environment_update_required;
           const [browserResult, t] = await Promise.all([
             fetchBrowser ? api("/browser/tabs").then(result => {
               if (live) setBrowserError("");
