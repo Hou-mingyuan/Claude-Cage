@@ -34,10 +34,10 @@ import { MacOSLogin } from "./macos-login";
 import { MacOSAppWindow } from "./macos-claude-window";
 import { ProjectRecovery } from "./project-recovery";
 import { ClaudeDesktop } from "./claude-desktop";
-import { useClaudeAccounts } from "./claude-accounts";
+import { ClaudeAccountsPanel, useClaudeAccounts } from "./claude-accounts";
 import { AccountProvider, AccountGate, useAccount } from "./account";
 import { BrowserHeader, BrowserTabRail, TerminalHeader, ExpandSidebar, ExpandPane } from "./pane-headers";
-import { BrowserDownloads, useDownloadNotifications, useDesktopFiles } from "./browser-downloads";
+import { useDownloadNotifications, useDesktopFiles } from "./browser-downloads";
 import { BrowserUploads } from "./browser-uploads";
 import { BrowserSettingsPage } from "./browser-settings";
 import { AudioControls, useAudioOutput } from "./audio";
@@ -49,13 +49,13 @@ import {
   focusTab,
   splitTab,
   projectName,
+  projectGroups,
   tabName,
 } from "./workspace-state.mjs";
 import { SafetyPanel } from "./safety";
 import { SafetyChecklistContext, SafetyMessage } from "./safety-message";
 import { networkState, isGuestLocalURL } from "./safety-state.mjs";
 import { needsProxySetup } from "./onboarding-state.mjs";
-import { HostGitPreparation } from "./host-git";
 import { NetworkLatency } from "./network-latency";
 import { useWindowVisibility } from "./window-visibility";
 import { AppUpdateButton, useAppUpdates } from "./app-updates";
@@ -96,7 +96,7 @@ function App() {
     [browser, setBrowser] = useState({ tabs: [] }),
     [browserSettingsRevision, setBrowserSettingsRevision] = useState(0),
     [settingsOpen, setSettingsOpen] = useState(false),
-    [startOptions, setStartOptions] = useState(null),
+    [claudeAccountsOpen, setClaudeAccountsOpen] = useState(false),
     [guestSystem, setGuestSystem] = useState(undefined),
     [startRequest, setStartRequest] = useState(null),
     [settingsSection, setSettingsSection] = useState("keyboard"),
@@ -123,10 +123,8 @@ function App() {
     [quitting, setQuitting] = useState(null);
   // Keep feedback continuous until polling observes the accepted start job.
   const clientStatus = serverStatus && { ...serverStatus, keyboard: clientKeyboard(serverStatus.keyboard) };
-  const hostGitOpen = startOptions !== null;
-  const status = clientStatus && (hostGitOpen || startRequest)
-    ? { ...clientStatus, job: { running: true, kind: "start", message: hostGitOpen
-      ? isRemoteClient() ? "正在检查云端主机 Git 安全保护…" : "正在检查本机 Git 安全保护…" : "正在启动 Cage 环境…" } }
+  const status = clientStatus && startRequest
+    ? { ...clientStatus, job: { running: true, kind: "start", message: "正在启动 Cage 环境…" } }
     : clientStatus;
   const system = status?.guest_system || account?.guest_system;
   const macGuest = system === "macos";
@@ -161,7 +159,6 @@ function App() {
     if (storageRecovery) {
       setDesktopOpen(false);
       setHome(true);
-      setStartOptions(null);
       setStartRequest(null);
     }
   }, [storageRecovery]);
@@ -263,8 +260,10 @@ function App() {
   useEffect(() => {
     if (audio.error) setToast(audio.error);
   }, [audio.error]);
-  const projects = status?.projects || [];
-  const workspace = selectedProject || status?.workspace;
+  const groups = projectGroups(status);
+  const projects = groups.map(group => group.workspace);
+  const selectedWorkspace = selectedProject || status?.workspace;
+  const workspace = groups.find(group => group.folders.includes(selectedWorkspace))?.workspace || selectedWorkspace;
   const contentWorkspace =
     terminal && !showHome ? current.workspace : workspace;
   const setupProxy = !nativeGuestLabel && needsProxySetup(settings, status, proxy);
@@ -368,6 +367,19 @@ function App() {
     } catch (e) {
       notify(e.message);
       return null;
+    }
+  };
+  const starting = useRef(false);
+  const startEnvironment = async (options = {}) => {
+    if (starting.current) return;
+    starting.current = true;
+    setStartRequest({ id: null });
+    try {
+      const result = await action("/start", options);
+      setStartRequest(result ? { id: result.id } : null);
+      if (result) refreshStatus.current?.();
+    } finally {
+      starting.current = false;
     }
   };
   const openBrowserPage = async (
@@ -877,7 +889,7 @@ function App() {
         }
         return;
       }
-      if (k === "," && !projectDialog && !rename && !hostGitOpen) {
+      if (k === "," && !projectDialog && !rename && !claudeAccountsOpen) {
         event.preventDefault();
         event.stopImmediatePropagation();
         openSettings();
@@ -885,7 +897,7 @@ function App() {
       }
       if (
         settingsOpen ||
-        hostGitOpen ||
+        claudeAccountsOpen ||
         transfer ||
         details ||
         safetyOpen ||
@@ -954,6 +966,7 @@ function App() {
       if (document.querySelector(".mac-login-fullscreen")) return false;
       if (
         settingsOpen ||
+        claudeAccountsOpen ||
         transfer ||
         dialog ||
         details ||
@@ -977,13 +990,8 @@ function App() {
         if (command === "closeTab") document.dispatchEvent(new Event("cage-close-modal"));
         return;
       }
-      if (hostGitOpen && command !== "quit") {
-        if (command === "closeTab")
-          document.dispatchEvent(new Event("cage-close-modal"));
-        return;
-      }
       if (command === "settings") {
-        if (!projectDialog && !rename && !dialog) openSettings();
+        if (!projectDialog && !rename && !dialog && !claudeAccountsOpen) openSettings();
         return;
       }
       if (storageRecovery && ["openProject", "newTab", "newTerminal"].includes(command)) {
@@ -995,6 +1003,7 @@ function App() {
           !busy &&
           running &&
           !settingsOpen &&
+          !claudeAccountsOpen &&
           !dialog &&
           !projectDialog &&
           !rename
@@ -1003,7 +1012,7 @@ function App() {
         return;
       }
       if (
-        (settingsOpen || dialog || projectDialog || terminalChoice || rename) &&
+        (settingsOpen || claudeAccountsOpen || dialog || projectDialog || terminalChoice || rename) &&
         ["newTab", "newTerminal"].includes(command)
       )
         return;
@@ -1019,6 +1028,7 @@ function App() {
           void finishDialog(false);
         } else if (
           settingsOpen ||
+          claudeAccountsOpen ||
           transfer ||
           details ||
           safetyOpen ||
@@ -1073,7 +1083,7 @@ function App() {
   }, [
     status,
     settingsOpen,
-    hostGitOpen,
+    claudeAccountsOpen,
     safetyOpen,
     details,
     transfer,
@@ -1093,7 +1103,7 @@ function App() {
     desktopOpen,
     terminalChoice,
   ]);
-  const project = projectName(contentWorkspace);
+  const project = projectName(contentWorkspace, groups);
   const tabLayoutKey = status?.environment_identity_directory || status?.environment_directory || status?.workspace;
   const metadata = { ...(savedTabs[tabLayoutKey] || {}), ...(privateTabMetadata[tabLayoutKey] || {}) };
   for (const tab of tabs) {
@@ -1210,7 +1220,7 @@ function App() {
     const detail = tab?.terminalKind === "claude-login" ? `登录 · ${account || "新账号"}`
       : account ? `Claude · ${account}${tab.claude_account_source === "default" ? "（启动时账号）" : ""}` : "";
     const location = split && tab ? `heading-${tab.id}` : "heading";
-    return <TerminalHeader tab={tab} project={projectName(path)} metadata={metadata}
+    return <TerminalHeader tab={tab} project={projectName(path, groups)} metadata={metadata}
       contentWorkspace={path} terminalDetail={detail} terminalDetailHint={tab?.claude_account_source === "default"
         ? "此终端按启动时的普通终端登录标记。若普通终端已换号，请重新打开工作会话确认身份。" : detail}
       busy={busy} onHome={() => setHome(true)}
@@ -1246,18 +1256,6 @@ function App() {
     onRecover={() => recoverEditor(tab)} />;
   const dialogs = (
     <>
-      {hostGitOpen && (
-        <HostGitPreparation
-          onClose={() => setStartOptions(null)}
-          onReady={async () => {
-            setStartRequest({ id: null });
-            setStartOptions(null);
-            const result = await action("/start", startOptions);
-            setStartRequest(result ? { id: result.id } : null);
-            if (result) refreshStatus.current?.();
-          }}
-        />
-      )}
       {dialog && (
         <Modal
           title={dialog.title}
@@ -1364,15 +1362,16 @@ function App() {
     <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <div
         className="workbench-shell"
-        inert={settingsOpen || hostGitOpen || undefined}
+        inert={settingsOpen || claudeAccountsOpen || undefined}
       >
         {!sidebarCollapsed && (
           <WorkspaceSidebar
-            downloadAction={<BrowserDownloads sidebar downloads={downloads} ready={status.ready && !busy} onStatus={notify} />}
+            onClaudeAccounts={() => setClaudeAccountsOpen(true)}
             updateAction={<AppUpdateButton updates={appUpdates} />}
             workspace={selectedProject || status.workspace}
             guestSystem={account?.guest_system || status.guest_system || guestSystem?.guest_system || "debian-13"}
             projects={projects}
+            projectGroups={groups}
             tabs={displayTabs}
             sessions={cliSessions.sessions.map(session => ({ ...session,
               claudeAccountNumber: claudeNumbers.get(session.account_id) }))}
@@ -1501,7 +1500,7 @@ function App() {
                       {!status.ready && <div className="view-overlay">
                         <RefreshCw /><h3>浏览器连接暂时不可用</h3>
                         <p>环境和终端仍可运行；恢复浏览器不会停止现有终端。</p>
-                        <button className="primary" disabled={busy} onClick={() => setStartOptions({})}>恢复浏览器</button>
+                        <button className="primary" disabled={busy} onClick={() => startEnvironment({})}>恢复浏览器</button>
                       </div>}
                       {status.ready && !splitReady && <div className="view-overlay">正在调整浏览器布局…</div>}
                     </div>
@@ -1544,7 +1543,7 @@ function App() {
                   </> : setupProgress ? <>
                     <h1>{status.job.error ? "环境安装未完成" : "正在安装 Cage 环境"}</h1>
                     <SetupProgress job={status.job} onDetails={() => setDetails(true)}
-                      onStop={stop} onRetry={() => setStartOptions(status.job.kind === "guest-install" ? { guest_system: status.job.setup_progress.system } : {})} disconnected={Boolean(connectionError)} />
+                      onStop={stop} onRetry={() => startEnvironment(status.job.kind === "guest-install" ? { guest_system: status.job.setup_progress.system } : {})} disconnected={Boolean(connectionError)} />
                   </> : <>
                   <h1>
                     {busy
@@ -1635,7 +1634,7 @@ function App() {
                             api("/environment/guest-systems/activate", {}).then(() => native("reconnect")).catch((e) => setToast(e.message));
                           } else if (!running && setupProxy) openSettings("network");
                           else if (!running || !status.ready)
-                            setStartOptions(!running && guestSystem?.guest_system === "debian-13" && !guestSystem.clone ? { guest_system: "debian-13" } : !running && guestSystem ? {
+                            startEnvironment(!running && guestSystem?.guest_system === "debian-13" && !guestSystem.clone ? { guest_system: "debian-13" } : !running && guestSystem ? {
                               guest_system: guestSystem.guest_system, media: guestSystem.media, sha256: guestSystem.sha256,
                               clone_key: guestSystem.clone_key,
                               editor_terms: guestSystem.editor_terms,
@@ -1715,7 +1714,7 @@ function App() {
                         <ul className="project-connection-errors">
                           {status.project_errors.map(({ path, message, recovery }) => (
                             <li key={path}>
-                              <strong>{projectName(path)}</strong>
+                              <strong>{projectName(path, groups)}</strong>
                               <span className="project-error-path">{path}</span>
                               <p>{message}</p>
                               <ProjectRecovery recovery={recovery} disabled={!status.ready || busy}
@@ -1826,13 +1825,22 @@ function App() {
           current={settings}
           status={status}
           initialSection={settingsSection}
-          claudeProfiles={claudeProfiles}
-          terminalTabs={tabs}
-          onClaudeLogin={(id) => createTerminal(workspace, "claude-login", id)}
           onClose={() => setSettingsOpen(false)}
           onSaved={refreshSettings}
           onConfirm={confirm}
         />
+      )}
+      {claudeAccountsOpen && (
+        <Modal title="Claude 账号管理" wide onClose={() => setClaudeAccountsOpen(false)}>
+          <div className="claude-accounts-content">
+            <ClaudeAccountsPanel store={claudeProfiles} tabs={tabs} onConfirm={confirm}
+              running={status.vm_running} environmentBusy={busy || storageRecovery}
+              login={async (id) => {
+                await createTerminal(workspace, "claude-login", id);
+                setClaudeAccountsOpen(false);
+              }} />
+          </div>
+        </Modal>
       )}
       {tailscaleOpen && <TailscalePanel status={status} onClose={() => setTailscaleOpen(false)}
         onConfirm={confirm} onInstall={async () => {
@@ -1852,7 +1860,7 @@ function App() {
           onRemoved={async (removed, workspace) => {
             await refreshSettings();
             await refreshStatus.current?.();
-            if (selectedProject === removed) setSelectedProject(workspace);
+            if ((groups.find(group => group.workspace === removed)?.folders || [removed]).includes(selectedProject)) setSelectedProject(workspace);
           }}
         />
       )}

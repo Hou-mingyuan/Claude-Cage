@@ -63,6 +63,7 @@ type Server struct {
 	instanceID                                       string
 	clientOnly                                       bool
 	desktopEntry                                     bool
+	appUpdateConfigPath                              string
 	windowOwners                                     map[int]bool
 	remote                                           *remoteGateway
 	account                                          *localAccount
@@ -188,6 +189,10 @@ func serve(configPath string, clientOnly bool, fullConfigPath string) (returned 
 	defer listener.Close()
 	s := &Server{profile: profile, configPath: configPath, exe: exe, clientOnly: clientOnly, origin: fmt.Sprintf("http://localhost:%d", port), token: randomToken(), session: randomToken(), preferences: Preferences{Keyboard: defaultKeyboard(), AutoTimezone: true, AutoLanguage: true, BalancedDisplay: true}}
 	s.desktopEntry = fullConfigPath != ""
+	s.appUpdateConfigPath = configPath
+	if fullConfigPath != "" {
+		s.appUpdateConfigPath = fullConfigPath
+	}
 	workload := !s.desktopEntry && !clientOnly
 	if s.desktopEntry {
 		if err = importDesktopConnections(filepath.Dir(fullConfigPath), profile); err != nil {
@@ -382,7 +387,10 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/account", s.accountStatus)
 	mux.HandleFunc("POST /api/account/{action}", s.accountAction)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("GET /api/client/about", s.appAbout)
+	mux.HandleFunc("POST /api/client/about", s.appAbout)
 	mux.HandleFunc("POST /api/projects/open", s.openProject)
+	mux.HandleFunc("POST /api/projects/save", s.saveProject)
 	mux.HandleFunc("POST /api/projects/remove", s.removeProject)
 	mux.HandleFunc("POST /api/projects/client-share", s.guestClientShare)
 	mux.HandleFunc("GET /api/projects/client-share", s.guestClientShare)
@@ -400,8 +408,6 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /api/environment/resources", s.applyResources)
 	mux.HandleFunc("POST /api/environment/update", s.updateEnvironment)
 	mux.HandleFunc("POST /api/environment/tools", s.updateEnvironmentTools)
-	mux.HandleFunc("GET /api/host/git", s.hostGit)
-	mux.HandleFunc("POST /api/host/git", s.enableHostGit)
 	mux.HandleFunc("GET /api/appearance", s.getAppearance)
 	mux.HandleFunc("GET /api/favorites", s.serveFavorites)
 	mux.HandleFunc("POST /api/favorites", s.serveFavorites)
@@ -520,6 +526,12 @@ func (s *Server) handler() http.Handler {
 				http.Error(w, "请从 Cage 应用重新打开工作台", 401)
 				return
 			}
+		}
+		// App metadata belongs to this executable, even while an SSH workload
+		// is selected. Like client/context, it uses local session authentication.
+		if r.URL.Path == "/api/client/about" {
+			mux.ServeHTTP(w, r)
+			return
 		}
 		if s.macosGuest == nil && !s.desktopEntry && !s.clientOnly && strings.HasPrefix(r.URL.Path, "/api/") {
 			pending, err := guestos.LoadInstallation(s.profile)
@@ -660,6 +672,11 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		requestError(w, errors.New("无法读取项目列表，请检查项目配置"))
 		return
 	}
+	groups, err := s.projectGroups()
+	if err != nil {
+		requestError(w, err)
+		return
+	}
 	running := s.vmRunning()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -672,7 +689,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		projectError = "当前本机项目已断开，请重新共享或选择其他项目。"
 	}
 	view := map[string]any{
-		"projects": projects, "ready": s.ready, "vm_running": running,
+		"projects": projects, "project_groups": groups, "ready": s.ready, "vm_running": running,
 		"workspace": s.workspaceLocked(), "environment_directory": s.environmentDir(),
 		"environment_identity_directory": cage.EnvironmentIdentityDir(s.profile),
 		"local_vm_storage":               s.localVMStorage(), "project_error": projectError, "project_errors": s.projectErrors,
