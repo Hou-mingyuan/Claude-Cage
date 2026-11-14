@@ -52,11 +52,3 @@ Linux 容器基础镜像必须保持 `/etc/machine-id` 为空，且不得保留�
 手工验收时，在两个全新环境内分别检查主机名、默认网卡 MAC、网关邻居项；Linux 容器还应检查 `/etc/machine-id`。同一环境完整停止再启动后重复检查，确认身份稳定。不要在 Issue 或测试报告中附带认证文件、私钥或原始日志。
 
 参考：[systemd 容器接口](https://systemd.io/CONTAINER_INTERFACE/)、[Windows ComputerName](https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-shell-setup-computername)。
-
-## 本次验证结果
-
-Linux x86_64 / Go 1.26.10 下，容器后端、Lima 后端、Cage 命令入口以及相关 Lima 模块的编译/测试均通过。Linux 客机代理与模板、前端嵌入资源均已实际构建，前端 20 个资源通过校验。镜像脚本通过 Bash 语法检查，Windows 应答文件通过 XML 解析检查。
-
-真实容器镜像构建、首次启动的 machine-id，以及 macOS/Windows 客机实际启动尚未验证。身份记录与旧配置兼容不代表已完成三平台端到端验收。
-
-本次主机名更新的 10 个相关 Go 包编译/测试通过，还验证了硬件目录离线重建的一致性、代表机型简称及 DNS 大小写解析；名称库没有运行时网络依赖。真实容器及 macOS/Windows 客机启动的验证范围仍如上所述。
