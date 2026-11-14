@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -180,6 +181,9 @@ func TestInitialMacSetupQuarantinesRegularWorkbench(t *testing.T) {
 }
 
 func TestPendingMacOSInstallQuarantinesWorkbench(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the recovery record's profile directory sync is denied on Windows")
+	}
 	s := testServer(t)
 	id := uuid.New()
 	if err := guestos.SaveInstallation(s.profile, guestos.Installation{Version: 1, System: guestos.MacOS, ID: id}); err != nil {

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -186,6 +187,9 @@ func TestMacOSInstallRecoveryRouteAllowsOnlyUnstartedReselect(t *testing.T) {
 // once the installation has started, the same call must be refused and keep
 // the pending record and disk for the recovery flow.
 func TestRecoveryReselectRefusesStartedInstallations(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skip("the pending macOS reselect view requires its darwin/arm64 host")
+	}
 	s := testServer(t)
 	started := uuid.New()
 	if err := guestos.SaveInstallation(s.profile, guestos.Installation{Version: 1, System: guestos.MacOS, ID: started}); err != nil {
@@ -208,6 +212,9 @@ func TestRecoveryReselectRefusesStartedInstallations(t *testing.T) {
 // An installation that never started has no disk to protect: the recovery page
 // can clear the choice, and the pending record disappears with it.
 func TestRecoveryReselectClearsUnstartedInstallations(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skip("the pending macOS reselect view requires its darwin/arm64 host")
+	}
 	s := testServer(t)
 	unstarted := uuid.New()
 	if err := guestos.SaveInstallation(s.profile, guestos.Installation{Version: 1, System: guestos.MacOS, ID: unstarted}); err != nil {
