@@ -81,6 +81,29 @@ func TestProxyStreamsRedactBeforeStorageAndSink(t *testing.T) {
 	}
 }
 
+func TestStreamConsumerKeepsStoredRecordsRedacted(t *testing.T) {
+	store := New(t.TempDir())
+	var sink, consumed strings.Builder
+	stream := NewStreamWithConsumer(store, "task/setup", "info", func(line string) { sink.WriteString(line) }, func(line string) bool {
+		consumed.WriteString(line)
+		return true
+	})
+	if _, err := stream.Write([]byte(proxyFailure + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if consumed.String() != proxyFailure || sink.Len() != 0 {
+		t.Fatal("internal consumer did not receive the original complete line or failed to suppress display")
+	}
+	events := readEvents(t, store)
+	if len(events) != 1 {
+		t.Fatalf("consumed line was lost from diagnostic storage: %+v", events)
+	}
+	assertProxyFailureRedacted(t, events[0].Message)
+}
+
 func TestExportRedactsLegacyProxyMessages(t *testing.T) {
 	store := New(t.TempDir())
 	if err := store.Clean(); err != nil {
