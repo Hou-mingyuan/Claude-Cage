@@ -73,7 +73,6 @@ func probeExitIP(ctx context.Context, e *Egress) (string, error) {
 
 func queryExitIP(ctx context.Context, client *http.Client, endpoint string) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
-	req.Header.Set("User-Agent", "Cage-network-check/1")
 	resp, err := client.Do(req)
 	if err != nil {
 		var requestError *url.Error
