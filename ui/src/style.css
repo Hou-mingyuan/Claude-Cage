@@ -1534,14 +1534,15 @@ svg {
   margin: 0 0 5px 25px;
   padding: 8px 8px 8px 35px;
   justify-content: flex-start;
+  text-align: left;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: color-mix(in srgb, var(--sidebar-ink) 55%, transparent);
   font-size: 0.9286rem;
   font-weight: 400;
 }
 .project-session-toggle:hover {
-  color: var(--strong);
+  color: var(--sidebar-ink);
   background: var(--hover);
 }
 .project-children .sidebar-empty {
