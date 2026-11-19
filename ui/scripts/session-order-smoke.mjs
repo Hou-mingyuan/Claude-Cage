@@ -30,7 +30,7 @@ try {
   sessions.forEach(session => {session.workspace = state.settings.workspace;});
   state.status.ready = state.status.vm_running = true;
   state.terminals = [{id:"idle", workspace:state.settings.workspace, title:sessions[0].title, cli_session_id:sessions[0].id}];
-  const project = page.getByRole("region",{name:"项目 默认工作区",exact:true});
+  const project = page.getByRole("region",{name:"项目 .claude-cage-workspace",exact:true});
   const order = () => project.locator(".sidebar-tab").evaluateAll(rows => rows.map(row => row.querySelector(":scope > button").textContent));
   const saved = project.getByRole("button",{name:"保存的会话",exact:true});
   await saved.waitFor();
@@ -43,7 +43,7 @@ try {
   await phone.route("**/api/**", async route => {
     const pathname = new URL(route.request().url()).pathname;
     return route.fulfill({json:pathname.endsWith("/projects")
-      ? {host:"隔离测试",ready:true,shared_sessions:true,projects:[{path:state.settings.workspace,name:"默认工作区"}]}
+      ? {host:"隔离测试",ready:true,shared_sessions:true,projects:[{path:state.settings.workspace,name:".claude-cage-workspace"}]}
       : {sessions}});
   });
   await phone.goto((process.env.CAGE_UI_URL || "http://127.0.0.1:5217")+"/mobile.html");

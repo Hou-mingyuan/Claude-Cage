@@ -31,6 +31,7 @@ function fixture(native = false, browserComposition = false, options = {}) {
   doc.hasFocus = () => true;
   doc.body = { append() {} };
   const target = Object.assign(new EventTarget(), {
+    isConnected: true,
     value: "",
     style: {},
     classList: { add() {}, remove() {} },
@@ -104,7 +105,7 @@ function fixture(native = false, browserComposition = false, options = {}) {
   };
   const install = vm.runInNewContext(source + "\ninstallRemoteInput;", context);
   const container = Object.assign(new EventTarget(), {
-      querySelector: () => null,
+      querySelector: () => options.surface || null,
       contains: (element) => element === canvas || element === target,
       append() {},
       getBoundingClientRect: () => ({ left: 0, top: 0 }),
@@ -130,9 +131,9 @@ function fixture(native = false, browserComposition = false, options = {}) {
         compositions.push({ id, ...value });
       } : null,
       tabId: () => currentTabId,
-      caretRect: browserComposition ? options.caretRect || (async () => ({
+      caretRect: options.caretRect || (browserComposition ? async () => ({
         available: true, context: "a".repeat(32), rect: [240, 120, 0, 24],
-      })) : null,
+      }) : null),
       pasteContent: async (content) => {
         const value = await content;
         if (rfb.target) pastes.push(value.png || value.text);
@@ -154,6 +155,7 @@ function fixture(native = false, browserComposition = false, options = {}) {
     return event;
   };
   return {
+    container,
     doc,
     win,
     rfb,
@@ -434,6 +436,59 @@ function fakeClock() {
   };
 }
 
+test("releasing native input cancels the active composition before its late end event", async () => {
+  const clock = fakeClock();
+  const calls = [];
+  let available = true;
+  const f = fixture(true, true, {
+    ...clock,
+    surface: {
+      width: 800,
+      height: 600,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    },
+    caretRect: async () => available
+      ? { available, context: "a".repeat(32), rect: [240, 120, 0, 24] }
+      : { available },
+    native: async (name, value) => {
+      if (name === "remoteInput") calls.push(value);
+      return true;
+    },
+  });
+  const nativeEvent = (kind, owner) => {
+    f.win.dispatchEvent(new CustomEvent("cage-native-input", {
+      detail: { kind, owner, text: "late text" },
+    }));
+  };
+  try {
+    f.win.cageNativeIMEAvailable = true;
+    f.rfb.focus();
+    await clock.advance(0);
+    const { owner } = calls[0];
+    assert.equal(calls[0].operation, "activate");
+    nativeEvent("compositionstart", owner);
+    await new Promise(resolve => setImmediate(resolve));
+
+    available = false;
+    await clock.advance(caretPollFast);
+    assert.equal(calls.at(-1).operation, "deactivate");
+    nativeEvent("compositionend", owner);
+    assert.deepEqual(f.compositions.map(value => value.mode), ["begin", "cancel"]);
+    assert.equal(f.compositions[1].session, f.compositions[0].session);
+    assert.deepEqual(f.texts, []);
+
+    const backspace = f.key("keydown", "Backspace", "Backspace");
+    assert.equal(backspace.cancelBubble, false,
+      "Backspace should reach the transport keyboard listener");
+    available = true;
+    await clock.advance(caretPollFast);
+    assert.equal(calls.at(-1).operation, "activate");
+    assert.notEqual(calls.at(-1).owner, owner);
+  } finally {
+    f.controller.dispose();
+  }
+});
+
 test("caret readings back off while the viewer is quiet and resume with input", async () => {
   const clock = fakeClock();
   let readings = 0;
@@ -463,6 +518,58 @@ test("caret readings back off while the viewer is quiet and resume with input", 
     f.controller.dispose();
   }
 });
+
+for (const interruption of ["none", "pointer", "keyboard", "workbench", "window", "tab", "hidden", "native"]) {
+  test(`Windows caret handoff after a temporary guest blur (${interruption})`, async () => {
+    const clock = fakeClock();
+    let available = true;
+    let finishHandoff;
+    let activationCount = 0;
+    const f = fixture(true, true, {
+      ...clock,
+      surface: { width: 640, height: 480, getBoundingClientRect: () => ({ left: 0, top: 0, width: 640, height: 480 }) },
+      caretRect: async () => available ? { available, rect: [16, 20, 1, 24] } : { available },
+      native: async (_action, request) => {
+        if (request.operation === "activate") activationCount++;
+        if (request.operation === "deactivate") {
+          assert.equal(request.returnFocus, true);
+          return new Promise(resolve => { finishHandoff = resolve; });
+        }
+        return true;
+      },
+    });
+    f.win.chrome = { webview: {} };
+    f.win.cageNativeIMEAvailable = true;
+    f.rfb.focus();
+    try {
+      await clock.advance(0);
+      assert.equal(activationCount, 1);
+      available = false;
+      await clock.advance(250);
+      // WebView2 selected a workbench button while returning from the native edit control.
+      f.doc.activeElement = f.local;
+      if (interruption === "pointer") f.doc.dispatchEvent(new Event("pointerdown"));
+      if (interruption === "keyboard") f.key("keydown", "Tab", "Tab");
+      if (interruption === "workbench") f.win.dispatchEvent(new Event("cage-input-interrupted"));
+      if (interruption === "hidden") {
+        f.doc.visibilityState = "hidden";
+        f.doc.dispatchEvent(new Event("visibilitychange"));
+        f.doc.visibilityState = "visible";
+      }
+      f.win.dispatchEvent(new Event("blur"));
+      if (interruption === "window") f.win.dispatchEvent(new Event("cage-window-deactivated"));
+      if (interruption === "tab") f.setTabId("tab-2");
+      finishHandoff({ returnedFocus: interruption !== "native" });
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(f.doc.activeElement, interruption === "none" ? f.target : f.local);
+      available = true;
+      await clock.advance(250);
+      assert.equal(activationCount, interruption === "none" ? 2 : 1);
+    } finally {
+      f.controller.dispose();
+    }
+  });
+}
 
 test("a composition begins from the last reading of a quiet viewer", async () => {
   const clock = fakeClock();
@@ -799,3 +906,71 @@ test("malformed native Command letters retain clipboard and redo semantics", asy
     f.controller.dispose();
   }
 });
+
+test('remote hover shape updates even without an editable focus and rejects arbitrary CSS', async () => {
+  const changes = [];
+  let cursor = 'text';
+  const f = fixture(false, false, {
+    surface: { style: { setProperty: (...args) => changes.push(args) } },
+    caretRect: async () => ({ available: false, cursor }),
+  });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(changes.at(-1), ['cursor', 'text', 'important']);
+    cursor = 'url(https://invalid.example/cursor)';
+    const before = changes.length;
+    await new Promise(resolve => setTimeout(resolve, 280));
+    assert.equal(changes.length, before);
+    cursor = 'default';
+    await new Promise(resolve => setTimeout(resolve, 280));
+    assert.deepEqual(changes.at(-1), ['cursor', 'default', 'important']);
+  } finally { f.controller.dispose(); }
+});
+
+for (const platform of ["windows", "windows-11"]) {
+test(platform + ' hover after toolbar focus refreshes cursor without activating native IME', async () => {
+  const changes = [], calls = [];
+  let cursor = 'default';
+  const f = fixture(true, false, {
+    surface: { style: { setProperty: (...args) => changes.push(args) } },
+    caretRect: async () => ({ available: true, cursor, rect: [20, 20, 1, 20] }),
+    native: async (...args) => { calls.push(args); return true; },
+  });
+  f.setGuestPlatform(platform);
+  try {
+    f.doc.activeElement = {};
+    f.win.cageNativeIMEAvailable = true;
+    f.container.dispatchEvent(new Event('pointermove'));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(changes.at(-1), ['cursor', 'default', 'important']);
+    cursor = 'text';
+    f.container.dispatchEvent(new Event('pointermove'));
+    await new Promise(resolve => setTimeout(resolve, 280));
+    assert.deepEqual(changes.at(-1), ['cursor', 'text', 'important']);
+    assert.equal(calls.filter(([name, value]) => name === 'remoteInput' && value.operation === 'activate').length, 0);
+  } finally { f.controller.dispose(); }
+});
+}
+
+for (const platform of ["linux", "darwin"]) {
+  test(platform + " toolbar hover makes no cursor query and keeps focused IME polling", async () => {
+    const clock = fakeClock();
+    let readings = 0;
+    const f = fixture(false, true, { ...clock, caretRect: async () => {
+      readings++;
+      return { available: true, context: "a".repeat(32) };
+    } });
+    f.setGuestPlatform(platform);
+    try {
+      f.doc.activeElement = f.local;
+      await clock.advance(1000);
+      const before = readings;
+      f.container.dispatchEvent(new Event("pointermove"));
+      await clock.advance(1000);
+      assert.equal(readings, before);
+      f.rfb.focus();
+      await clock.advance(2500);
+      assert.ok(readings > before);
+    } finally { f.controller.dispose(); }
+  });
+}

@@ -1,0 +1,23 @@
+---
+const measurementId = import.meta.env.PUBLIC_GA_MEASUREMENT_ID?.trim();
+if (measurementId && !/^G-[A-Z0-9]+$/.test(measurementId)) {
+  throw new Error('PUBLIC_GA_MEASUREMENT_ID must be a GA4 measurement ID beginning with G-.');
+}
+const enabled = import.meta.env.PROD && Boolean(measurementId);
+const cookiePath = import.meta.env.BASE_URL;
+---
+{enabled && <>
+  <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${measurementId}`}></script>
+  <script is:inline define:vars={{ measurementId, cookiePath }}>
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    window.gtag('js', new Date());
+    window.gtag('config', measurementId, {
+      allow_google_signals: false,
+      allow_ad_personalization_signals: false,
+      cookie_path: cookiePath,
+      page_location: window.location.origin + window.location.pathname,
+      page_referrer: document.referrer ? new URL(document.referrer).origin : '',
+    });
+  </script>
+</>}

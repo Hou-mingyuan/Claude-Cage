@@ -76,6 +76,7 @@ func TestMiseArchivesHaveIndependentPinsResumeAndFallback(t *testing.T) {
 				"flock": "exit 0",
 				"dpkg":  "if [ \"$1\" = --print-architecture ]; then echo \"$TEST_ARCH\"; else test \"$2\" = \"$4\"; fi",
 				"curl": `set -eu
+for arg in "$@"; do [ "$arg" != --head ] || exit 0; done
 while [ "$#" -gt 0 ]; do
   case "$1" in
    "https://cdn.npmmirror.com/packages/%40jdxcode/mise-linux-$NPM_ARCH/2026.10.25/mise-linux-$NPM_ARCH-2026.10.25.tgz") src=npm ;;

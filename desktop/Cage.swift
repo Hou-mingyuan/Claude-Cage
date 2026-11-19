@@ -278,6 +278,14 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
         guard UUID(uuidString: id) != nil else { reply(nil,"下载标识无效"); return }
         fileCommand(["browser-file", "--json", "--connection", connection, operation, id] + (path.map { [$0] } ?? []), reply: reply)
     }
+    // Word processors and spreadsheets publish a rendered preview (PDF or a
+    // bitmap) next to the text they copied. Such a copy is text: sharing the
+    // preview would replace the text with a picture on both sides.
+    private func clipboardText(_ board: NSPasteboard) -> String? {
+        guard let text = board.string(forType: .string), !text.isEmpty, let types = board.types else { return nil }
+        if types.contains(.rtf) || types.contains(.rtfd) { return text }
+        return types.contains { UTType($0.rawValue)?.conforms(to: .image) == true } ? nil : text
+    }
     private func clipboardCacheCommand(_ action: String, id: String = "", reply: @escaping (Any?, String?) -> Void) {
         guard let data = try? JSONSerialization.data(withJSONObject: ["action": action, "cache_id": id]),
               let request = String(data: data, encoding: .utf8) else { reply(nil,"剪贴板缓存请求无效"); return }
@@ -425,6 +433,15 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
             guard !controllerNeedsUpdate else { replyHandler(nil,"后台版本尚未同步，更新未完成"); return }
             appUpdater?.markLaunchReady()
             replyHandler(true,nil)
+        case "appReference":
+            let path: String
+            switch body["kind"] as? String {
+            case "source": path = "commits/main"
+            case "releases": path = "releases"
+            default: replyHandler(nil,"未知的项目页面"); return
+            }
+            let opened = NSWorkspace.shared.open(URL(string: "https://github.com/Lee-xeo/Claude-Cage/" + path)!)
+            replyHandler(opened ? true : nil, opened ? nil : "无法打开项目页面，请检查默认浏览器")
         case "appUpdate":
             guard let operation = body["operation"] as? String, ["status", "check", "install", "cancel"].contains(operation) else { replyHandler(nil,"更新操作无效"); return }
             replyHandler(appUpdater.handle(operation),nil)
@@ -456,6 +473,8 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
                     payload["revision"] = revision
                     replyHandler(payload,nil)
                 }
+            } else if let text = clipboardText(board) {
+                replyHandler(["revision":revision,"text":text],nil)
             } else if let image = NSImage(pasteboard:board), let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data:tiff) {
                 guard bitmap.pixelsWide > 0, bitmap.pixelsHigh > 0, bitmap.pixelsWide <= 40_000_000 / bitmap.pixelsHigh,
                       let png = bitmap.representation(using:.png,properties:[:]), png.count <= 20 * 1024 * 1024 else { replyHandler(nil,"图片不能超过 20 MB 或 4000 万像素"); return }
@@ -501,6 +520,8 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
             if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
                 do { replyHandler(try rememberFiles(urls), nil) }
                 catch { replyHandler(nil, error.localizedDescription) }
+            } else if let text = clipboardText(board) {
+                replyHandler(["text":text],nil)
             } else if let image = NSImage(pasteboard: board), let tiff = image.tiffRepresentation,
                let bitmap = NSBitmapImageRep(data: tiff) {
                 guard bitmap.pixelsWide > 0, bitmap.pixelsHigh > 0,
@@ -575,6 +596,23 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
                     guard data.count <= 256 * 1024, let text = String(data: data, encoding: .utf8) else { replyHandler(nil, "请选择不超过 256 KB 的 UTF-8 JSON 主题文件"); return }
                     replyHandler(text, nil)
                 } catch { replyHandler(nil, "无法读取主题文件，请检查文件权限") }
+            }
+        case "saveRecoveryKey":
+            guard !nativeFilePanelOpen else { replyHandler(nil, "请先完成当前文件窗口"); return }
+            guard let key = body["key"] as? String, key.utf8.count == 71,
+                  key.range(of: "^[A-F0-9]{8}(-[A-F0-9]{8}){7}$", options: .regularExpression) != nil,
+                  let data = (key + "\n").data(using: .utf8) else { replyHandler(nil, "恢复密钥格式无效"); return }
+            let panel = NSSavePanel(); panel.allowedContentTypes = [.plainText]; panel.canCreateDirectories = true
+            panel.nameFieldStringValue = "账户恢复密钥.txt"; panel.prompt = "保存"; panel.title = "保存账户恢复密钥"
+            nativeFilePanelOpen = true
+            panel.beginSheetModal(for: window) { response in
+                self.nativeFilePanelOpen = false
+                guard response == .OK, let url = panel.url else { replyHandler(false, nil); return }
+                do {
+                    try data.write(to: url, options: .atomic)
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                    replyHandler(true, nil)
+                } catch { replyHandler(nil, "恢复密钥未能保存，请检查保存位置的权限") }
             }
         case "exportTheme":
             guard let text = body["text"] as? String, let data = text.data(using: .utf8), data.count <= 256 * 1024,

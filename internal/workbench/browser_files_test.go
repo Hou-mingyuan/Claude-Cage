@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +20,43 @@ import (
 )
 
 const testBrowserFileID = "34e399c1-78fe-4cf1-93b0-d7fef431b211"
+
+func TestBrowserUploadExplicitOriginal(t *testing.T) {
+	s := testServer(t)
+	s.ready = true
+	var uploaded []byte
+	s.browserControl = browserClientForTest(t, s, browserTransport(func(r *http.Request) (*http.Response, error) {
+		body := `{"uploads":[{"id":"` + testBrowserFileID + `"}]}`
+		if r.Method == "POST" {
+			uploaded, _ = io.ReadAll(r.Body)
+			body = `{"ok":true}`
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	}))
+	data := []byte("opaque media with GPS=31.23;country=CN")
+	path := "/api/browser/files/uploads/" + testBrowserFileID + "?name=clip.mkv&allow_unclean=true"
+	call := func(name string, payload []byte) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", s.origin+name, bytes.NewReader(payload))
+		r.Host = "localhost:17777"
+		r.Header.Set("Origin", s.origin)
+		r.AddCookie(&http.Cookie{Name: s.cookieName(), Value: s.session})
+		w := httptest.NewRecorder()
+		s.handler().ServeHTTP(w, r)
+		return w
+	}
+	if w := call(path, data); w.Code != 422 || uploaded != nil {
+		t.Fatal("query parameter bypassed stored consent")
+	}
+	s.preferences.TransferAllowUnclean = true
+	w := call(path, data)
+	if w.Code != 200 || w.Header().Get("X-Cage-Metadata-Warning") == "" || !bytes.Equal(uploaded, data) {
+		t.Fatal("explicit original bytes or warning missing")
+	}
+	w = call("/api/browser/files/uploads/"+testBrowserFileID+"?name=photo.jpg", browserJPEGWithMetadata(t))
+	if w.Code != 200 || bytes.Contains(uploaded, []byte("GPSLatitude")) {
+		t.Fatal("consent skipped supported format cleaning")
+	}
+}
 
 func TestBrowserUploadStreamsOnlyToLiveChooser(t *testing.T) {
 	s := testServer(t)
@@ -31,7 +71,7 @@ func TestBrowserUploadStreamsOnlyToLiveChooser(t *testing.T) {
 		body := `{"uploads":[{"id":"` + testBrowserFileID + `"}]}`
 		if r.Method == "POST" {
 			posts++
-			if r.URL.Path != "/upload-file" || r.URL.Query().Get("id") != testBrowserFileID || r.URL.Query().Get("name") != "参考视频.mp4" {
+			if r.URL.Path != "/upload-file" || r.URL.Query().Get("id") != testBrowserFileID || r.URL.Query().Get("name") != "参考附件.bin" {
 				t.Fatal("wrong upload target", r.URL)
 			}
 			got, err := io.ReadAll(r.Body)
@@ -66,11 +106,76 @@ func TestBrowserUploadStreamsOnlyToLiveChooser(t *testing.T) {
 	if code := call(s.origin, true, "video.mp4", browserFileLimit+1); code != 413 {
 		t.Fatal(code)
 	}
+	if code := call(s.origin, true, "video.mp4", int64(len(data))); code != 422 {
+		t.Fatal("unsupported video was accepted", code)
+	}
 	if posts != 0 {
 		t.Fatal("rejected stream reached guest")
 	}
-	if code := call(s.origin, true, "%E5%8F%82%E8%80%83%E8%A7%86%E9%A2%91.mp4", int64(len(data))); code != 200 || posts != 1 {
+	if code := call(s.origin, true, "%E5%8F%82%E8%80%83%E9%99%84%E4%BB%B6.bin", int64(len(data))); code != 200 || posts != 1 {
 		t.Fatal(code, posts)
+	}
+}
+
+func browserJPEGWithMetadata(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{255, 0, 0, 255})
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	data := encoded.Bytes()
+	payload := []byte("Exif\x00\x00GPSLatitude=31.23;OffsetTimeOriginal=+08:00;Language=zh-CN")
+	segment := []byte{0xFF, 0xE1, byte((len(payload) + 2) >> 8), byte((len(payload) + 2) & 0xFF)}
+	segment = append(segment, payload...)
+	out := append([]byte{}, data[:2]...)
+	out = append(out, segment...)
+	out = append(out, data[2:]...)
+	return out
+}
+
+func TestBrowserUploadRemovesMetadata(t *testing.T) {
+	s := testServer(t)
+	s.ready = true
+	s.credentials.Token = "guest-token"
+	original := browserJPEGWithMetadata(t)
+	var uploaded []byte
+	s.browserControl = browserClientForTest(t, s, browserTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer guest-token" {
+			t.Fatal("missing guest authentication")
+		}
+		if r.Method == "GET" {
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"uploads":[{"id":"` + testBrowserFileID + `"}]}`))}, nil
+		}
+		if r.URL.Path != "/upload-file" || r.URL.Query().Get("name") != "photo.jpg" {
+			t.Fatal("wrong upload target", r.URL)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.ContentLength != int64(len(body)) {
+			t.Fatal("upload length does not match cleaned body")
+		}
+		uploaded = body
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}, nil
+	}))
+	r := httptest.NewRequest("POST", s.origin+"/api/browser/files/uploads/"+testBrowserFileID+"?name=photo.jpg", bytes.NewReader(original))
+	r.Host = "localhost:17777"
+	r.Header.Set("Origin", s.origin)
+	r.ContentLength = int64(len(original))
+	r.AddCookie(&http.Cookie{Name: s.cookieName(), Value: s.session})
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if bytes.Equal(uploaded, original) || bytes.Contains(uploaded, []byte("GPSLatitude")) || bytes.Contains(uploaded, []byte("zh-CN")) {
+		t.Fatal("metadata survived browser upload")
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(uploaded)); err != nil {
+		t.Fatal("cleaned JPEG is invalid", err)
 	}
 }
 

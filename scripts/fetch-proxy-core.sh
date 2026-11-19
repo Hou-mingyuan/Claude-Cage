@@ -10,12 +10,7 @@ esac
 directory=_output/proxy-core
 mkdir -p "$directory"
 archive="$directory/$asset"
-if [[ ! -f "$archive" ]]; then
-  curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 "https://github.com/MetaCubeX/mihomo/releases/download/$version/$asset" -o "$archive.part"
-  mv "$archive.part" "$archive"
-fi
-actual="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
-if [[ "$actual" != "$checksum" ]]; then echo 'Cage proxy-core archive checksum mismatch' >&2; exit 1; fi
+node scripts/fetch-build-artifact.mjs "https://github.com/MetaCubeX/mihomo/releases/download/$version/$asset" "$checksum" "$archive"
 gzip -dc "$archive" > "$directory/mihomo.part"
 chmod 755 "$directory/mihomo.part"
 mv "$directory/mihomo.part" "$directory/mihomo"

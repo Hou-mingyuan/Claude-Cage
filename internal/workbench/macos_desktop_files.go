@@ -38,7 +38,11 @@ func (s *Server) macOSDesktopFileCall(ctx context.Context, input macOSWindowRequ
 	if input.Action == "files-start" && (input.Window == 0 || input.PID <= 0) {
 		return nil, macOSFileFailure("window_changed")
 	}
-	data, err := s.macOSWindowCall(ctx, input)
+	call := s.macOSWindowCall
+	if input.Action == "files-poll" {
+		call = s.macOSWindowQuick
+	}
+	data, err := call(ctx, input)
 	if err != nil {
 		return nil, err
 	}

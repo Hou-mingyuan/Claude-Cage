@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,13 +30,13 @@ func macOSWorkbenchRoute(path string) bool {
 		return id == "requests" || id == "open" || browserFileID.MatchString(id)
 	}
 	switch path {
-	case "/api/macos/first-setup", "/api/appearance/codex", "/api/macos/project-approval", "/api/macos/exit-policy", "/api/macos/login", "/api/macos/maintenance":
+	case "/api/environment/macos-screen-sharing", "/api/macos/first-setup", "/api/appearance/codex", "/api/macos/project-approval", "/api/macos/exit-policy", "/api/macos/login", "/api/macos/maintenance":
 		return true
 	}
 	return strings.HasPrefix(path, "/api/macos/claude/") || strings.HasPrefix(path, "/api/macos-browser/")
 }
 
-func macOSInstanceRunning(instanceDir string) bool {
+func macOSInstanceRunning(instanceDir, backend string) bool {
 	data, err := os.ReadFile(filepath.Join(instanceDir, "cage-running.json"))
 	var record struct {
 		PID     int    `json:"pid"`
@@ -44,7 +45,20 @@ func macOSInstanceRunning(instanceDir string) bool {
 	if err != nil || json.Unmarshal(data, &record) != nil || record.PID < 1 {
 		return false
 	}
-	return processExists(record.PID) && cage.ProcessStartMatches(record.PID, record.Started)
+	if !processExists(record.PID) || !cage.ProcessStartMatches(record.PID, record.Started) {
+		return false
+	}
+	if backend == guestos.MacOSQEMU {
+		path := filepath.Join(instanceDir, "qemu.pid")
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > 32 {
+			return false
+		}
+		data, err := os.ReadFile(path)
+		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
+		return err == nil && parseErr == nil && pid > 1 && processExists(pid)
+	}
+	return true
 }
 
 func (s *Server) macOSSSHCommand(ctx context.Context, args ...string) *exec.Cmd {
@@ -98,16 +112,83 @@ func (s *Server) checkMacOSGuest(ctx context.Context) error {
 	s.publishGate(state)
 	probe := `test "$(uname -s)" = Darwin && [[ $(sysctl -n hw.model) == VirtualMac* ]] && test "$(id -un)" = ` +
 		shellescape.Quote(s.macosGuest.User) + ` && [[ " $(id -Gn) " != *" admin "* ]]`
+	if s.macosGuest.Backend == guestos.MacOSQEMU {
+		probe = `/usr/local/libexec/cage-guest-check --expect ` + shellescape.Quote(s.macosGuest.UUID) + ` && test "$(id -un)" = ` + shellescape.Quote(s.macosGuest.User) + ` && [[ " $(id -Gn) " != *" admin "* ]]`
+	}
 	if _, err := s.guest(ctx, probe); err != nil {
 		return errors.New("无法以已绑定的普通用户连接到这台虚拟 Mac，请检查客机身份和 SSH 登录")
 	}
 	return nil
 }
 
+// macOSComponentReceiptProbe reads only the identity of the installed
+// component receipt. Its file digests are checked by the explicit version view.
+const macOSComponentReceiptProbe = `receipt=/var/db/cage-components.json
+if ! test -e "$receipt"; then printf 'null'; exit 0; fi
+exec /usr/local/libexec/cage-cli/bin/python3 -I -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as stream:
+        value = json.load(stream)
+    print(json.dumps({key: value.get(key) for key in ("protocol", "revision", "app_version", "system")}))
+except (ValueError, AttributeError):
+    print("null")
+' "$receipt"`
+
+var errMacOSComponentUpdate = errors.New("虚拟 Mac 的客机组件与当前 Cage 版本不一致，浏览器、剪贴板和声音可能无法连接。请保存工作后在环境设置中同步环境组件；系统磁盘、账户和项目数据会保留。")
+
+// macOSComponentsDrifted reports whether a receipt read from the guest belongs
+// to a different component kit. A missing or unreadable receipt also requires
+// an update, matching the explicit version view.
+func macOSComponentsDrifted(receipt []byte, required cage.GuestManifest) bool {
+	var installed *struct {
+		cage.GuestManifest
+		System string `json:"system"`
+	}
+	if json.Unmarshal(receipt, &installed) != nil || installed == nil {
+		return true
+	}
+	return installed.System != guestos.MacOS || installed.Protocol != required.Protocol || installed.Revision != required.Revision
+}
+
+// checkMacOSComponents runs once per connection. Without it a guest left on
+// older components looks ready while its services fail, and every client
+// retries those failures instead of offering the component update.
+func (s *Server) checkMacOSComponents() {
+	kit, system := s.nativeComponentKit()
+	required, err := guestos.RequiredNativeComponents(kit, system)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(s.lifetimeContext(), 10*time.Second)
+	defer cancel()
+	receipt, err := s.guest(ctx, macOSComponentReceiptProbe)
+	if err != nil {
+		return
+	}
+	drifted := macOSComponentsDrifted(receipt, required.GuestManifest)
+	s.mu.Lock()
+	s.macComponentsChecked = true
+	s.guestUpdateRequired = drifted
+	s.mu.Unlock()
+}
+
 func (s *Server) attachMacOSGuest() error {
 	ctx, cancel := s.controlContext()
 	defer cancel()
 	err := s.checkMacOSGuest(ctx)
+	if err == nil {
+		err = s.syncNativeBrowserProfile(ctx)
+	}
+	s.mu.Lock()
+	if err != nil {
+		s.macComponentsChecked = false
+	}
+	checkComponents := err == nil && !s.macComponentsChecked
+	s.mu.Unlock()
+	if checkComponents && !s.macSetupPending() {
+		s.checkMacOSComponents()
+	}
 	s.mu.Lock()
 	newlyReady := !s.ready && err == nil
 	checkAfterReconnect := newlyReady && !s.closing && !s.networkPaused && !s.jobs.snapshot().Running
@@ -115,6 +196,8 @@ func (s *Server) attachMacOSGuest() error {
 	s.guestUpdateError = ""
 	if err != nil {
 		s.guestUpdateError = err.Error()
+	} else if s.guestUpdateRequired {
+		s.guestUpdateError = errMacOSComponentUpdate.Error()
 	}
 	s.mu.Unlock()
 	if newlyReady && !s.macSetupPending() {
@@ -191,12 +274,14 @@ func (s *Server) syncMacOSRegion(ctx context.Context, cfg cage.Config) error {
 
 func (s *Server) stopMacOSGuest() error {
 	s.mu.Lock()
-	s.macSetupProjectsChecked = time.Time{}
-	s.mu.Unlock()
-	s.closeWindowsBrowser()
-	s.mu.Lock()
 	s.ready = false
+	s.macSetupProjectsChecked = time.Time{}
+	s.macSetupSharingConfirmed = false
+	s.macSetupSharingAttempt = time.Time{}
+	s.macSetupSharingStatus = macOSScreenSharingStatus{}
 	s.mu.Unlock()
+	s.closeMacOSScreenSharing()
+	s.closeWindowsBrowser()
 	s.terminals.closeAll()
 	s.closeProjectShares()
 	return s.macOSLifecycleCommand("stop")

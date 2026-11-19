@@ -33,6 +33,7 @@ internal static class BrowserRpc
     internal static void Register()
     {
         Routes.UnionWith(["paste-start", "paste-chunk", "paste-finish", "paste-cancel", "tailnet", "phone-browser/open", "phone-browser/frame", "phone-browser/action", "phone-browser/close"]);
+        Routes.Add("profile");
         GuestOperations.Register("browser", Run);
         ProjectRpc.Revoked += (project, grant) =>
         {
@@ -185,6 +186,7 @@ internal static class BrowserRpc
             }
             if(route=="/input"&&BrowserWindowCapture.ReleaseInput(lease,input))return new JsonObject { ["ok"] = true };
             await Start(timeout.Token);
+            if (route == "/profile") return await Control(request, timeout.Token);
             if (pagePointerReleasePending) await ReleasePagePointer(timeout.Token);
             if (pagePointerOwner is not null && route is "/resize" or "/navigate" or "/new" or "/close" or "/activate" or "/split" or "/back" or "/forward" or "/reload" or "/paste" or "/cut" or "/copy" or "/select-all" or "/insert-text")
                 await ReleasePagePointer(timeout.Token);
@@ -254,8 +256,18 @@ internal static class BrowserRpc
                 }
                 var proof = await Control(new JsonObject { ["method"] = "GET", ["path"] = "/frame-proof" }, timeout.Token);
                 AssertEditorTab(proof["id"]?.GetValue<string>());
-                if(BrowserWindowCapture.FocusRenderer(browser!,proof))
-                {proof=await Control(new JsonObject{["method"]="GET",["path"]="/frame-proof"},timeout.Token);AssertEditorTab(proof["id"]?.GetValue<string>());}
+                if (BrowserWindowCapture.NeedsPageActivation(browser!, proof, input))
+                {
+                    var resultAfterActivation = await Control(new JsonObject {
+                        ["operation"] = "input-focus-page", ["input"] = new JsonObject {
+                            ["id"] = proof["id"]!.DeepClone(), ["document"] = proof["document"]!.DeepClone(),
+                            ["target"] = proof["target"]!.DeepClone(),
+                        },
+                    }, timeout.Token);
+                    if (resultAfterActivation["error"] is not null) return resultAfterActivation;
+                    proof = resultAfterActivation;
+                    AssertEditorTab(proof["id"]?.GetValue<string>());
+                }
                 if (pagePointerOwner != lease && BrowserWindowCapture.SelectPane(browser!, lease, input, proof))
                 {
                     await Control(new JsonObject { ["operation"] = "input-select-pane", ["input"] = new JsonObject { ["target"] = proof["target"]!.DeepClone(), ["x"] = input["x"]!.DeepClone() } }, timeout.Token);
@@ -320,7 +332,23 @@ internal static class BrowserRpc
                     cachedPageFrame = (JsonObject)result.DeepClone();
                 }
                 AssertFrameEditors(result);
-                await BrowserWindowCapture.Decorate(browser!, result, async ()=>{var current=await Control(new JsonObject { ["method"] = "GET", ["path"] = "/frame-proof" }, timeout.Token);AssertEditorTab(current["id"]?.GetValue<string>());return current;});
+                var captureOwner = browser!;
+                async Task WaitForCapture(Task pending)
+                {
+                    // The controller reply has been fully drained. Only the
+                    // native image copy runs outside this serial wire owner.
+                    Gate.Release();
+                    try { await pending.WaitAsync(timeout.Token); }
+                    finally { await Gate.WaitAsync(); }
+                }
+                await BrowserWindowCapture.Decorate(captureOwner, result, async () =>
+                {
+                    if (!ReferenceEquals(browser, captureOwner)) throw new InvalidDataException("browser_target_changed");
+                    connection.ThrowIfCancellationRequested();
+                    var current = await Control(new JsonObject { ["method"] = "GET", ["path"] = "/frame-proof" }, timeout.Token);
+                    AssertEditorTab(current["id"]?.GetValue<string>());
+                    return current;
+                }, WaitForCapture);
                 AssertFrameEditors(result);
                 result = BrowserWindowCapture.FrameReply(result, afterFrame);
             }
@@ -403,6 +431,16 @@ internal static class BrowserRpc
             StandardInputEncoding = Protocol.Utf8, StandardOutputEncoding = Protocol.Utf8, StandardErrorEncoding = Protocol.Utf8,
         };
         start.ArgumentList.Add(script);
+        var tailnet = Path.Combine(AppContext.BaseDirectory, "cage-tailnet.exe");
+        if (File.Exists(tailnet))
+        {
+            using var protocol = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\tailscale");
+            protocol.SetValue("", "URL:Tailscale");
+            protocol.SetValue("URL Protocol", "");
+            using var command = protocol.CreateSubKey(@"shell\open\command");
+            // Device authorization is completed by the node. Never pass web-supplied arguments.
+            command.SetValue("", $"\"{tailnet}\" --browser-return");
+        }
         browser = Process.Start(start) ?? throw new InvalidDataException("browser_unavailable");
         var process = browser;
         try { browserJob = new GuestProcessJob(process); }
@@ -455,7 +493,7 @@ internal static class BrowserRpc
     internal static JsonObject Status()
     {
         var root = AppContext.BaseDirectory;
-        var installed = new[] { "node.exe", "windows-browser.mjs", "windows-browser-extensions.mjs", "playwright/index.mjs", "modules/browser-clipboard.mjs", "modules/browser-uploads.mjs", "modules/browser-downloads.mjs", "modules/browser-cookies.mjs", "modules/browser-extensions.mjs", "modules/browser-vault.mjs", "split-extension/manifest.json", "split-extension/control.html", "split-extension/control.js" }.All(file => File.Exists(Path.Combine(root, file)));
+        var installed = new[] { "node.exe", "windows-browser.mjs", "browser-protocol.mjs", "device-observation.mjs", "windows-browser-extensions.mjs", "playwright/index.mjs", "modules/browser-clipboard.mjs", "modules/browser-uploads.mjs", "modules/browser-downloads.mjs", "modules/browser-cookies.mjs", "modules/browser-extensions.mjs", "modules/browser-vault.mjs", "split-extension/manifest.json", "split-extension/control.html", "split-extension/control.js" }.All(file => File.Exists(Path.Combine(root, file)));
         installed &= BrowserExecutableInstalled();
         var network = false;var phoneNetwork = false;
         try

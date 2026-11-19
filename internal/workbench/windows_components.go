@@ -28,7 +28,13 @@ func (s *Server) refreshWindowsComponents() {
 	s.mu.Unlock()
 	go func() {
 		defer cancel()
-		report, err := readWindowsComponentStatus(ctx, s.profile)
+		var report windowsGuestState
+		var err error
+		if binding.Remote() {
+			report, err = s.windowsStatus(ctx)
+		} else {
+			report, err = readWindowsComponentStatus(ctx, s.profile)
+		}
 		if err == nil && (report.Version != 1 || report.OS != "windows" || report.VMID != binding.VMID.String() ||
 			report.SID != binding.GUIUserSID || report.Session == "" || len(report.Session) > 256) {
 			err = errors.New("Windows component identity mismatch")
@@ -42,6 +48,14 @@ func (s *Server) refreshWindowsComponents() {
 		}
 		s.windowsState.ComponentsRefreshing = false
 		s.windowsState.ComponentsChecked = time.Now()
+		if binding.Remote() {
+			if err != nil {
+				s.windowsState.Available = false
+				return
+			}
+			s.windowsState = report
+			return
+		}
 		if !s.ready {
 			return
 		}
@@ -60,7 +74,11 @@ func (s *Server) refreshWindowsComponents() {
 }
 
 func readWindowsComponentStatus(ctx context.Context, profile string) (windowsGuestState, error) {
-	cmd, err := guestos.WindowsRelayCommand(ctx, profile, "status")
+	operation := "status"
+	if binding, err := guestos.LoadWindowsProfile(profile); err == nil && binding != nil && binding.Remote() {
+		operation = "headless-status"
+	}
+	cmd, err := guestos.WindowsRelayCommand(ctx, profile, operation)
 	if err != nil {
 		return windowsGuestState{}, err
 	}

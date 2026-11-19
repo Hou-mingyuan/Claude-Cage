@@ -1,9 +1,21 @@
 #!/bin/sh
 set -eu
+login="${CAGE_CLAUDE_LOGIN:-}"
+if [ "${1:-}" = --login-id ]; then
+  [ "$#" -ge 3 ] || exit 2
+  login="$2"
+  case "$login" in ''|*[!a-f0-9]*) exit 2 ;; esac
+  [ "${#login}" = 24 ] || exit 2
+  shift 2
+fi
 case "${1:-}" in
   --finish-login)
-    [ -n "${CAGE_CLAUDE_LOGIN:-}" ] || exit 2
-    set -- /login-finish "" "$CAGE_CLAUDE_LOGIN"
+    [ -n "$login" ] || exit 2
+    set -- /login-finish "" "$login"
+    ;;
+  tailscale:*)
+    if [ "$(id -un)" = cage ]; then exec /usr/local/bin/cage-tailnet --browser-return; fi
+    exec sudo -n -H -u cage /usr/local/bin/cage-tailnet --browser-return
     ;;
   claude://*)
     sudo -u cage /usr/local/bin/cage-claude-open "$1"
@@ -12,8 +24,8 @@ case "${1:-}" in
     set -- /desktop-focus
     ;;
   http://*|https://*|about:blank)
-    if [ -n "${CAGE_CLAUDE_LOGIN:-}" ]; then
-      set -- /login-open "$1" "$CAGE_CLAUDE_LOGIN"
+    if [ -n "$login" ]; then
+      set -- /login-open "$1" "$login"
     else
       set -- /new "$1"
     fi

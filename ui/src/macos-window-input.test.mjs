@@ -151,3 +151,27 @@ test("a frame change rejects queued input and disposal releases only its connect
   await assert.rejects(f.input.run(() => {}), /连接已关闭/);
   assert.equal(f.calls.length, count);
 });
+
+test("native window merges wheel events queued behind a slow scroll and keeps the excess", async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const calls = [], errors = [];
+  const element = Object.assign(new EventTarget(), { getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }) });
+  const input = createMacWindowInput({
+    element, frame: () => ({ pid: 23, window: 70, geometry: "geometry-1" }), active: () => true,
+    request: async (action, fields) => { calls.push({ action, ...fields }); if (calls.length === 1) await gate; return { ok: true }; },
+    onError: error => errors.push(error), eventWindow: new EventTarget(),
+  });
+  const wheel = (deltaY, clientY = 50) => element.dispatchEvent(Object.assign(new Event("wheel", { cancelable: true }), { deltaY, deltaX: 0, clientX: 50, clientY }));
+  try {
+    wheel(100);
+    await new Promise(resolve => setTimeout(resolve));
+    for (const delta of [300, 400, 500, 600]) wheel(delta, 60);
+    release();
+    await input.run(() => {});
+    await input.run(() => {});
+    assert.deepEqual(calls.map(call => [call.action, call.delta]), [["scroll", 100], ["scroll", 1200], ["scroll", 600]]);
+    assert.equal(calls[1].y, 0.6);
+    assert.deepEqual(errors, []);
+  } finally { input.dispose(); }
+});

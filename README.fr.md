@@ -6,9 +6,13 @@
 
 <img src="assets/claude-cage-character.png" alt="Claude Cage" width="320" />
 
-[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![CI](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**[Site Web du projet](https://lee-xeo.github.io/Claude-Cage/) · [Télécharger l’application](https://lee-xeo.github.io/Claude-Cage/fr/#download) · [Commencer](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [Guide d’utilisation (chinois)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
+
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily" alt="Trendshift — Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly" alt="Trendshift — Repository of the Week" width="250" height="55" /></a>
+
+**[Site Web du projet](https://claude-cage.com/) · [Télécharger l’application](https://claude-cage.com/fr/#download) · [Commencer](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [Guide d’utilisation (chinois)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -31,6 +35,8 @@ Claude Cage réunit terminal, navigateur, éditeur et Claude Desktop officiel da
 | :---: | :---: |
 | <a href="assets/network-checks.png"><img src="assets/network-checks.png" alt="Contrôles du réseau et de l’isolation" width="400" /></a> | <a href="assets/community-browser-check.png"><img src="assets/community-browser-check-cropped.png" alt="Contrôle communautaire du navigateur" width="400" /></a> |
 
+[FuckClaude](https://fuck-claude.vercel.app/) · [LinXiaoTao / GitHub](https://github.com/LinXiaoTao/FuckClaude)
+
 **L'interface principale de Cage :**
 
 ![Cage](www/public/workbench-2026-11.jpg)
@@ -52,7 +58,7 @@ Claude Cage réunit terminal, navigateur, éditeur et Claude Desktop officiel da
 Envoyez cette demande à votre agent IA (codex, dsh, workbuddy — probablement pas Claude Code 😁) :
 
 ```markdown
-Aide-moi à installer https://github.com/Lee-xeo/Claude-Cage et configurez le proxy réseau de Cage pour utiliser le point de terminaison xxx dans mon installation Clash locale.
+Récupère le code source le plus récent de https://github.com/Lee-xeo/Claude-Cage, compile-le, crée le paquet et installe-le. Configure le proxy de Cage pour utiliser le nœud xx de mon Clash local et sortir par mon IP xx. Surveille toute l’opération, corrige directement les problèmes et, si nécessaire, ouvre une issue sur le projet pour améliorer la compatibilité.
 ```
 
 Tout ce dont vous avez besoin est un point de terminaison proxy réseau fiable. Ce projet ne fait la promotion d'aucun fournisseur de proxy ; vous pouvez trouver un fournisseur vous-même, par exemple en recherchant le site Web Black Error.
@@ -61,7 +67,7 @@ Tout ce dont vous avez besoin est un point de terminaison proxy réseau fiable. 
 
 Cage prend en charge macOS, Windows et Linux : Apple Silicon avec macOS 14+, Windows 10 22H2 / 11 x64 et Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac, Windows ARM64 et Linux ARM64 ne sont pas encore pris en charge. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. Télécharger l’application: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/fr/#download).
+1. Télécharger l’application: [macOS / Windows / Linux](https://claude-cage.com/fr/#download).
 2. macOS: Ouvrez le package d'installation et faites glisser **Cage** dans **Applications**; puis lancez-le depuis Applications. Windows: [Guide d’installation](docs/windows.md#安装并开始工作) · Linux: [Guide d’installation](docs/linux.md#安装并开始工作).
 3. Suivez les instructions de l'application pour configurer votre propre proxy réseau, démarrer l'environnement et ouvrir un projet.
 
@@ -102,17 +108,20 @@ Pour l'index complet, voir [Index des documents](docs/README.md).
 
 | Votre tâche | Commencez ici |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [Choisir le système invité](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [Choisir le système invité](https://claude-cage.com/docs/guest-systems/) |
 | Installez, configurez un proxy réseau et ouvrez votre premier projet | [Commencer](docs/getting-started.md) |
 | Dépanner les téléchargements, le démarrage, la connectivité et la connexion | [FAQ et récupération](docs/troubleshooting.md) |
 | Apprenez les commandes du clavier, l'apparence, la persistance des données et le comportement de sortie | [Utilisation quotidienne](docs/getting-started.md#日常使用) |
 | Signaler un problème reproductible | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| Contribuer un correctif, une fonction ou de la documentation : examen de l’Issue → invitation comme collaborateur → PR | [Guide de contribution (chinois)](.github/CONTRIBUTING.md) |
 
 Le projet évolue rapidement. Rejoignez le groupe communautaire pour partager vos commentaires ; les responsables de la communauté sont les bienvenus.
 
-<p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1134250870" width="240" /></a>
-</p>
+| QQ group · 273237690 | WeChat |
+| :---: | :---: |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+
+[Telegram](https://t.me/claude_cage)
 
 ## Origines et licences
 
@@ -135,6 +144,7 @@ Merci aux projets suivants pour leurs capacités fondamentales et leurs référe
 - [code-server](https://github.com/coder/code-server): l'éditeur de code basé sur un navigateur.
 - [AIO Sandbox](https://github.com/agent-infra/sandbox): références pour l'environnement de travail et le design d'interaction.
 - [claude-switcher](https://github.com/YOURSJEYO/claude-switcher) et [Claude-Guardian](https://github.com/DUNHKpcc/Claude-Guardian): références pour les vérifications du réseau et les diagnostics de sécurité.
+- [claude-post-ban-cleanup](https://github.com/l2461090/claude-post-ban-cleanup): référence pour l’inventaire précis, la protection des données et le nettoyage réversible du cache ; implémentation indépendante dans Cage.
 
 
 <a href="https://www.star-history.com/?repos=Lee-xeo%2FClaude-Cage&amp;type=date">

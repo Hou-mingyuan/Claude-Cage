@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 
 namespace Cage.Windows;
@@ -49,6 +50,24 @@ internal static partial class UpdatePolicy
             return (xn ? Number(x[i], y[i]) : string.CompareOrdinal(x[i], y[i])) > 0;
         }
         return x.Length > y.Length;
+    }
+
+    // The country and organization of a certificate subject, or "" when the
+    // subject does not state exactly one of each.
+    public static string PublisherOrganization(X500DistinguishedName subject)
+    {
+        string organization = "", country = "";
+        foreach (var part in subject.EnumerateRelativeDistinguishedNames())
+        {
+            if (part.HasMultipleElements) return "";
+            var name = part.GetSingleElementType().Value;
+            if (name is not ("2.5.4.10" or "2.5.4.6")) continue;
+            var value = part.GetSingleElementValue() ?? "";
+            // A repeated attribute has no single meaning; do not guess.
+            if (value.Length == 0 || (name == "2.5.4.10" ? organization : country).Length != 0) return "";
+            if (name == "2.5.4.10") organization = value; else country = value;
+        }
+        return organization.Length == 0 || country.Length == 0 ? "" : country + "\n" + organization;
     }
 
     public static string DownloadPath(string raw, string updateRoot)

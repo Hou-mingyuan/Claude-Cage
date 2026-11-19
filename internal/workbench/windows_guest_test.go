@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/guestos"
 )
 
@@ -105,7 +106,7 @@ func TestWindowsGateUsesBoundInstanceDirectory(t *testing.T) {
 func TestWindowsSharedStartupAndFavoritesRoutes(t *testing.T) {
 	s := testServer(t)
 	s.windowsGuest = &guestos.WindowsProfile{}
-	for _, path := range []string{"/api/host/git", "/api/favorites"} {
+	for _, path := range []string{"/api/favorites"} {
 		w := windowsBrowserRequestForTest(s, "GET", path, nil)
 		if w.Code != http.StatusOK {
 			t.Fatalf("shared Windows desktop GET %s: %d", path, w.Code)
@@ -114,11 +115,7 @@ func TestWindowsSharedStartupAndFavoritesRoutes(t *testing.T) {
 			t.Fatalf("untrusted viewer reached %s: %d", path, w.Code)
 		}
 	}
-	w := windowsBrowserRequestForTest(s, "POST", "/api/host/git", []byte(`{"confirm":false}`))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("host Git confirmation: %d", w.Code)
-	}
-	w = windowsBrowserRequestForTest(s, "POST", "/api/favorites", []byte(`{"action":"save","title":"Cage","url":"https://example.org/"}`))
+	w := windowsBrowserRequestForTest(s, "POST", "/api/favorites", []byte(`{"action":"save","title":"Cage","url":"https://example.org/"}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("save favorite: %d", w.Code)
 	}
@@ -146,5 +143,52 @@ func TestWindowsColdStartWaitsForAgentButNotWrongIdentityOrLockedUser(t *testing
 	cancel()
 	if err := waitWindowsBoot(ctx, time.Hour, func(context.Context) error { return errWindowsAgentPending }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled: %v", err)
+	}
+}
+
+func TestRemoteWindowsViewRespectsAccountAndProjectBoundaries(t *testing.T) {
+	s := testServer(t)
+	s.windowsGuest = &guestos.WindowsProfile{Mode: "remote"}
+	get := func(path, proof string) int {
+		r := httptest.NewRequest(http.MethodGet, s.origin+path, nil)
+		r.Header.Set("Origin", s.origin)
+		r.AddCookie(&http.Cookie{Name: s.cookieName(), Value: s.session})
+		r.AddCookie(&http.Cookie{Name: "cage_remote_view_" + r.URL.Port(), Value: proof})
+		w := httptest.NewRecorder()
+		s.handler().ServeHTTP(w, r)
+		return w.Code
+	}
+	proof := remoteViewProof(s.token)
+	if code := get("/api/status", trustedViewProof(s.token)); code != http.StatusForbidden {
+		t.Fatalf("incorrect remote proof: %d", code)
+	}
+	if code := get("/api/status", proof); code != http.StatusOK {
+		t.Fatalf("authenticated Windows remote session: %d", code)
+	}
+	if code := get("/api/projects/directories", proof); code != http.StatusNotImplemented {
+		t.Fatalf("remote access to host project directory browser: %d", code)
+	}
+	s.account.trustedSession = true
+	if code := get("/api/status", proof); code != http.StatusLocked {
+		t.Fatalf("SSH proof used the desktop-only unlock: %d", code)
+	}
+	s.windowsGuest.Mode = "hyperv"
+	if code := get("/api/status", proof); code != http.StatusForbidden {
+		t.Fatalf("remote proof accepted for Hyper-V: %d", code)
+	}
+}
+
+func TestStoppingRemoteWindowsRevokesBrokerAndTerminalAccess(t *testing.T) {
+	s, gate := grantedToolUpdateServer(t)
+	s.setJobForTest(Job{})
+	s.windowsGuest = &guestos.WindowsProfile{Mode: "remote", InstanceDirectory: s.instanceDir()}
+	if err := s.stopEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	if gate.Status().Mode != cage.GateClosed {
+		t.Fatal("detaching the controller left the remote broker open")
+	}
+	if _, err := s.createRemoteWindowsTerminal(terminalRequest{Kind: "shell"}); !errors.Is(err, errTerminalNotReady) {
+		t.Fatalf("stopped environment attempted to start a remote shell: %v", err)
 	}
 }

@@ -6,7 +6,7 @@ import { createWorkbench } from "./workbench-fixture.mjs";
 
 const output = process.env.CAGE_WORKSPACE_QA_OUTPUT || await mkdtemp(join(tmpdir(), "cage-default-workspace-ui-"));
 await mkdir(output, { recursive: true });
-const notice = "此历史会话仍使用原来的客机目录，文件保留在虚拟 Mac 内。要使用与主机共享的默认工作区，请从默认工作区新建会话。";
+const notice = "此历史会话仍使用原来的客机目录，文件保留在虚拟 Mac 内。要使用共享项目，请添加项目文件夹后新建会话。";
 let allowed = false;
 let screenAllowed = false, frameReads = 0, frameReadsAtClick = 0;
 const actions = [];
@@ -62,7 +62,8 @@ try {
   await page.getByRole("button", { name: "重新连接项目", exact: true }).click();
   const project = page.getByRole("dialog", { name: "打开项目", exact: true });
   await project.waitFor();
-  assert.equal(await project.getByRole("textbox", { name: "新项目文件夹", exact: true }).inputValue(), state.settings.workspace);
+  await project.getByRole("radio").first().waitFor();
+  assert.equal(await project.getByRole("radio").first().inputValue(), state.settings.workspace);
   await project.getByRole("button", { name: "打开项目", exact: true }).click();
   const permission = page.getByRole("dialog", { name: "允许客机访问所选项目", exact: true });
   await permission.waitFor();
@@ -106,15 +107,15 @@ try {
 } finally { await browser.close(); }
 
 {
-  let grant = "", generation = 0, approved = false;
+  let grant = "", generation = 0, approved = false, failClick = "";
   const f = await createWorkbench({
     initialization: { required: true, tracked: true, started: true, prepared: true },
     async beforeNavigate(page, state) {
       state.account.guest_system = "macos";
       Object.assign(state.status, {
         guest_system: "macos", ready: true, vm_running: true,
-        job: { kind: "safety", running: true, message: "正在检查客机网络" },
-        safety: { gate: { mode: "open", until: new Date(Date.now() + 3600000).toISOString() } },
+        job: { kind: "safety", running: false, error: "需要授权工作区", recovery: "project-approval", workspace: state.settings.workspace },
+        safety: { gate: { mode: "closed" } },
         project_errors: [{ path: state.status.environment_directory, recovery: "project-approval" }],
       });
       const image = await page.evaluate(() => document.createElement("canvas").toDataURL().split(",")[1]);
@@ -131,31 +132,35 @@ try {
           status: 409, headers: { "Content-Type": "text/plain; charset=utf-8", "X-Cage-Recovery": "project-approval-ended" }, body: "项目授权请求已失效，请重新请求授权。",
         });
         if (q.action === "frame") return route.fulfill({ json: { image, window: 1, pid: 2, nonce: grant } });
-        if (q.action === "click") { assert.equal(q.nonce, grant); approved = true; }
+        if (q.action === "click") {
+          assert.equal(q.nonce, grant);
+          if (failClick) return route.fulfill({ json: { error: failClick } });
+          approved = true;
+        }
         if (q.action === "cancel") grant = "";
         return route.fulfill({ json: {} });
+      });
+      await page.route("**/api/safety/check", route => {
+        assert.equal(approved, true, "network checks must wait for project verification");
+        state.status.job = { kind: "safety", running: false };
+        state.status.safety = { gate: { mode: "open", until: new Date(Date.now() + 3600000).toISOString() } };
+        return route.fulfill({ json: state.status.job });
       });
     },
   });
   try {
-    const region = f.page.getByRole("region", { name: "默认工作区访问" });
-    const open = region.getByRole("button", { name: "查看并授权" });
+    const open = f.page.getByRole("button", { name: "打开工作区授权", exact: true });
     const dialog = f.page.getByRole("dialog", { name: "允许客机访问所选项目" });
     const enter = f.page.getByRole("button", { name: "进入工作台", exact: true });
     await open.waitFor();
-    await region.getByText(f.state.status.environment_directory, { exact: true }).waitFor();
     assert.equal(await dialog.count(), 0);
     assert.equal(generation, 0, "polling must not open the guest dialog");
     await open.click();
-    await dialog.getByText("当前客机操作结束后，会显示项目授权窗口。").waitFor();
-    assert.equal(generation, 0);
-    f.state.status.job.running = false;
     await dialog.getByRole("img").waitFor();
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
     await dialog.waitFor({ state: "hidden" });
     assert.equal(grant, "");
-    await enter.waitFor();
-    assert.ok(await enter.isEnabled(), "optional project approval cannot gate workbench entry");
+    assert.equal(approved, false, "cancellation cannot authorize the project");
     await open.click();
     await dialog.getByRole("img").waitFor();
     grant = "";
@@ -164,6 +169,21 @@ try {
     assert.equal(generation, 3);
     await dialog.getByRole("button", { name: "验证授权" }).click();
     assert.equal(approved, false, "verification must not approve a pending project");
+    for (const [code, message] of [
+      ["project_panel_changed", "这次文件夹授权请求已变化"],
+      ["project_window_identity_changed", "显示的授权窗口已被替换"],
+      ["project_window_not_frontmost", "文件夹授权窗口未处于客机前台"],
+      ["project_window_focus_unavailable", "无法读取文件夹授权窗口的焦点"],
+      ["project_window_geometry_unavailable", "无法读取文件夹授权窗口的位置和尺寸"],
+      ["project_window_geometry_changed", "文件夹授权窗口的位置或尺寸与当前画面不一致"],
+    ]) {
+      failClick = code;
+      await dialog.getByRole("img").click();
+      await dialog.getByRole("alert").filter({ hasText: message }).waitFor();
+      await dialog.getByRole("img").waitFor();
+      assert.equal(approved, false, "failed input cannot authorize the project");
+    }
+    failClick = "";
     await dialog.getByRole("img").click();
     await dialog.waitFor({ state: "hidden" });
     await enter.click();

@@ -71,7 +71,10 @@ func ProjectRel(dir, target string) (string, bool) {
 			}
 			return strings.TrimSuffix(strings.TrimPrefix(r, "/"), "/"), true
 		}
-		if fi, err := os.Lstat(next); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		// Go may classify directory junctions as irregular on Windows.
+		// Readlink still has to recognize the reparse tag before we follow it.
+		if fi, err := os.Lstat(next); err == nil && (fi.Mode()&os.ModeSymlink != 0 ||
+			(paths.Windows() && fi.Mode()&os.ModeIrregular != 0)) {
 			if hops++; hops > 40 {
 				return "", false
 			}

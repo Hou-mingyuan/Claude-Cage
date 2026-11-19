@@ -60,6 +60,12 @@ func normalizeProfile(p HostProfile) (HostProfile, error) {
 	p.Name = strings.TrimSpace(p.Name)
 	p.Host = strings.TrimSpace(p.Host)
 	p.User = strings.TrimSpace(p.User)
+	if p.Platform == "" {
+		p.Platform = "linux"
+	}
+	if p.Platform != "linux" && p.Platform != "windows" {
+		return p, failure("invalid_profile", "远程主机系统需要选择 Linux 或 Windows")
+	}
 	if p.Port == 0 {
 		p.Port = 22
 	}
@@ -87,10 +93,19 @@ func normalizeProfile(p HostProfile) (HostProfile, error) {
 	if p.Auth.Kind == "agent" {
 		p.Auth.IdentityFile = ""
 	}
-	if (p.Executable != "cage" && !path.IsAbs(p.Executable)) || hasControl(p.Executable) || len(p.Executable) > 4096 {
+	absolute := path.IsAbs
+	if p.Platform == "windows" {
+		// Validate the remote path independently of the client's OS. UNC and
+		// device paths would execute outside this machine's installed payload.
+		absolute = func(value string) bool {
+			return len(value) >= 3 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) &&
+				value[1] == ':' && (value[2] == '\\' || value[2] == '/') && !strings.Contains(value[2:], ":")
+		}
+	}
+	if (p.Executable != "cage" && !absolute(p.Executable)) || hasControl(p.Executable) || len(p.Executable) > 4096 {
 		return p, failure("invalid_profile", "云端 Cage 程序需要使用绝对路径或 cage")
 	}
-	if (p.ConfigPath != "" && !path.IsAbs(p.ConfigPath)) || hasControl(p.ConfigPath) || len(p.ConfigPath) > 4096 {
+	if (p.ConfigPath != "" && !absolute(p.ConfigPath)) || hasControl(p.ConfigPath) || len(p.ConfigPath) > 4096 {
 		return p, failure("invalid_profile", "云端配置文件需要使用绝对路径")
 	}
 	if p.HostKey != nil {

@@ -8,7 +8,6 @@ import React, {
 import { createPortal } from "react-dom";
 import {
   ArrowDownToLine,
-  CircleAlert,
   File,
   FolderOpen,
   Save,
@@ -50,9 +49,9 @@ export function useDownloadNotifications(
         previous.current.get(item.id)?.state !== item.state
       ) {
         if (item.state === "downloading")
-          onStatus(`正在下载“${item.name}”，可在侧栏“下载”查看`);
+          onStatus(`正在下载“${item.name}”，可在浏览器右上角的下载列表查看`);
         if (item.state === "saved")
-          onStatus(`“${item.name}”已保存到默认工作区的 Downloads`);
+          onStatus(`“${item.name}”已保存到下载暂存目录`);
       }
       if (item.openError && previous.current.get(item.id)?.openError !== item.openError)
         onStatus(`“${item.name}”${item.openError}`);
@@ -76,9 +75,24 @@ export function useDownloadNotifications(
   }, [downloads, uploading]);
 }
 
-export function useDesktopFiles(ready, onStatus) {
+// With the Cage window hidden nobody can answer a file request, and every poll
+// makes the guest inspect its application windows. Downloads still arrive.
+function desktopFilesPollDelay(failures, windowVisible) {
+  return Math.min((windowVisible ? 1500 : 4500) * 2 ** Math.min(failures, 4), 15000);
+}
+
+export function useDesktopFiles(ready, onStatus, desktopVisible, windowVisible = true) {
   const connection = getClientContext().connection_id;
+  const windowShown = useRef(windowVisible);
+  windowShown.current = windowVisible;
+  const wake = useRef(null);
+  useEffect(() => {
+    // A request raised while hidden should not wait out the slow interval.
+    if (windowVisible) wake.current?.();
+  }, [windowVisible]);
   const [files, setFiles] = useState({ uploads: [], downloads: [] });
+  const viewVisible = useRef(desktopVisible);
+  viewVisible.current = desktopVisible;
   const status = useRef(onStatus);
   status.current = onStatus;
   useEffect(() => {
@@ -90,7 +104,9 @@ export function useDesktopFiles(ready, onStatus) {
       timer,
       failures = 0;
     const handled = new Set();
+    let polling = false;
     const poll = async () => {
+      polling = true;
       try {
         const value = await api("/input/files/desktop/requests");
         failures = 0;
@@ -99,6 +115,28 @@ export function useDesktopFiles(ready, onStatus) {
             uploads: value.uploads || [],
             downloads: value.downloads || [],
           });
+        for (const request of value.uploads || []) {
+          if (disposed || !viewVisible.current || !nativeAvailable()) break;
+          if (request.directory || (request.kind && request.kind !== "chooser") || handled.has(request.id)) continue;
+          const body = { target: "desktop", id: request.id };
+          try {
+            assertConnection(connection);
+            const selection = await native("chooseUploadFiles", { multiple: request.multiple });
+            assertConnection(connection);
+            if (selection.canceled) {
+              await api("/input/files/cancel", body);
+            } else {
+              await native("uploadHostFiles", { ...body, selection: selection.fileSelection });
+              await api("/input/files/finish", body);
+              status.current?.("所选文件已交给 Claude Desktop");
+            }
+          } catch (error) {
+            assertConnection(connection);
+            await api("/input/files/cancel", body);
+            status.current?.(error.message);
+          }
+          handled.add(request.id);
+        }
         for (const request of value.opens || []) {
           if (disposed || handled.has(request.id)) continue;
           handled.add(request.id);
@@ -128,11 +166,18 @@ export function useDesktopFiles(ready, onStatus) {
           failures++;
         }
       }
-      if (!disposed) timer = setTimeout(poll, Math.min(1500 * 2 ** Math.min(failures, 4), 15000));
+      polling = false;
+      if (!disposed) timer = setTimeout(poll, desktopFilesPollDelay(failures, windowShown.current));
+    };
+    wake.current = () => {
+      if (disposed || polling) return;
+      clearTimeout(timer);
+      void poll();
     };
     void poll();
     return () => {
       disposed = true;
+      wake.current = null;
       clearTimeout(timer);
     };
   }, [ready, connection]);
@@ -164,7 +209,6 @@ export function BrowserDownloads({
   downloads = [],
   ready,
   onStatus,
-  sidebar = false,
   menu = false,
   anchorRef,
 }) {
@@ -262,23 +306,21 @@ export function BrowserDownloads({
       <button
         ref={trigger}
         className={
-          sidebar
-            ? "sidebar-link"
-            : menu
-              ? "browser-menu-item browser-download-button"
-              : "icon-button browser-download-button"
+          menu
+            ? "browser-menu-item browser-download-button"
+            : "icon-button browser-download-button"
         }
         role={menu ? "menuitem" : undefined}
-        aria-label={sidebar ? "下载文件" : "浏览器下载"}
+        aria-label="浏览器下载"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         title={failed ? "有下载需要处理，点击查看" : "下载文件"}
         onClick={() => setOpen((value) => !value)}
       >
-        {sidebar && failed ? <CircleAlert size={16} /> : <ArrowDownToLine size={16} />}
-        {failed && !sidebar && !menu && <span className="browser-download-warning" aria-hidden="true" />}
-        {(sidebar || menu) && <span>下载</span>}
+        <ArrowDownToLine size={16} />
+        {failed && !menu && <span className="browser-download-warning" aria-hidden="true" />}
+        {menu && <span>下载</span>}
       </button>
       {open &&
         createPortal(

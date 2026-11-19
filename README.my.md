@@ -6,9 +6,13 @@
 
 <img src="assets/claude-cage-character.png" alt="Claude Cage" width="320" />
 
-[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![CI](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**[ပရောဂျက်ဝက်ဘ်ဆိုက်](https://lee-xeo.github.io/Claude-Cage/) · [အက်ပ်ကို ဒေါင်းလုဒ်လုပ်ရန်](https://lee-xeo.github.io/Claude-Cage/my/#download) · [စတင်လုပ်ဆောင်ခြင်း။](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [အသုံးပြုမှုလမ်းညွှန် (တရုတ်ဘာသာ)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
+
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily" alt="Trendshift — Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly" alt="Trendshift — Repository of the Week" width="250" height="55" /></a>
+
+**[ပရောဂျက်ဝက်ဘ်ဆိုက်](https://claude-cage.com/) · [အက်ပ်ကို ဒေါင်းလုဒ်လုပ်ရန်](https://claude-cage.com/my/#download) · [စတင်လုပ်ဆောင်ခြင်း။](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [အသုံးပြုမှုလမ်းညွှန် (တရုတ်ဘာသာ)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -31,6 +35,8 @@ Claude Cage သည် terminal၊ browser၊ editor နှင့် တရား
 | :---: | :---: |
 | <a href="assets/network-checks.png"><img src="assets/network-checks.png" alt="ကွန်ရက်နှင့် သီးခြားခွဲထားမှု စစ်ဆေးချက်များ" width="400" /></a> | <a href="assets/community-browser-check.png"><img src="assets/community-browser-check-cropped.png" alt="အသိုင်းအဝိုင်း၏ ဘရောက်ဇာ စစ်ဆေးချက်" width="400" /></a> |
 
+[FuckClaude](https://fuck-claude.vercel.app/) · [LinXiaoTao / GitHub](https://github.com/LinXiaoTao/FuckClaude)
+
 **Cage ၏ အဓိက အင်တာဖေ့စ်**
 
 ![Cage](www/public/workbench-2026-11.jpg)
@@ -52,7 +58,7 @@ Claude Cage သည် terminal၊ browser၊ editor နှင့် တရား
 ဤတောင်းဆိုချက်ကို သင်၏ AI အေးဂျင့် (codex၊ dsh၊ workbuddy — Claude Code ဖြစ်နိုင်သည် 😁) ။
 
 ```markdown
-တပ်ဆင်ကူညီပေးပါ။ https://github.com/Lee-xeo/Claude-Cage ကျွန်ုပ်၏စက်တွင်း Clash တပ်ဆင်မှုတွင် xxx အဆုံးမှတ်ကို အသုံးပြုရန် Cage ၏ကွန်ရက်ပရောက်စီကို စီစဉ်သတ်မှတ်ပါ။
+https://github.com/Lee-xeo/Claude-Cage ၏ နောက်ဆုံး source code ကို ရယူပြီး build လုပ်၊ package ပြုလုပ်ကာ install လုပ်ပေးပါ။ Cage proxy ကို ကျွန်ုပ်၏ local Clash ရှိ xx node မှတစ်ဆင့် ကျွန်ုပ်၏ xx IP ဖြင့် ထွက်နိုင်အောင် သတ်မှတ်ပေးပါ။ လုပ်ငန်းစဉ်တစ်လျှောက် စောင့်ကြည့်ပြီး ပြဿနာများကို တိုက်ရိုက်ပြင်ဆင်ပါ။ လိုအပ်ပါက compatibility ပိုကောင်းစေရန် project တွင် issue တင်ပေးပါ။
 ```
 
 သင်လိုအပ်သည်မှာ ယုံကြည်စိတ်ချရသော ကွန်ရက် proxy အဆုံးမှတ်တစ်ခုဖြစ်သည်။ ဤပရောဂျက်သည် မည်သည့်ပရောက်စီဝန်ဆောင်မှုပေးသူကိုမျှ မြှင့်တင်မည်မဟုတ်ပါ။ ဥပမာအားဖြင့် Black Error ဝဘ်ဆိုက်ကို ရှာဖွေခြင်းဖြင့် ပံ့ပိုးပေးသူကို သင်ကိုယ်တိုင် ရှာဖွေနိုင်သည်။
@@ -61,7 +67,7 @@ Claude Cage သည် terminal၊ browser၊ editor နှင့် တရား
 
 Cage သည် macOS၊ Windows နှင့် Linux ကို ပံ့ပိုးသည်။ macOS 14+ ရှိ Apple Silicon Mac၊ Windows 10 22H2 / 11 x64 နှင့် Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac၊ Windows ARM64 နှင့် Linux ARM64 ကို မပံ့ပိုးသေးပါ။ [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. အက်ပ်ကို ဒေါင်းလုဒ်လုပ်ရန်: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/my/#download).
+1. အက်ပ်ကို ဒေါင်းလုဒ်လုပ်ရန်: [macOS / Windows / Linux](https://claude-cage.com/my/#download).
 2. macOS: တပ်ဆင်မှုပက်ကေ့ချ်ကိုဖွင့်ပြီး ဆွဲယူပါ။ **Cage** ထဲသို့ **အသုံးချမှု**; ထို့နောက် ၎င်းကို Applications မှ စတင်လိုက်ပါ။ Windows: [တပ်ဆင်နည်း](docs/windows.md#安装并开始工作) · Linux: [တပ်ဆင်နည်း](docs/linux.md#安装并开始工作).
 3. သင့်ကိုယ်ပိုင်ကွန်ရက်ပရောက်စီကို စီစဉ်သတ်မှတ်ရန်၊ ပတ်ဝန်းကျင်ကို စတင်ရန်နှင့် ပရောဂျက်တစ်ခုဖွင့်ရန် အက်ပ်အတွင်း ညွှန်ကြားချက်များကို လိုက်နာပါ။
 
@@ -102,17 +108,20 @@ macOS နှင့် လက်မှတ်ထိုးထားသော Window
 
 | မင်းရဲ့တာဝန် | ဤနေရာတွင် စတင်ပါ။ |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [Guest စနစ်ရွေးချယ်ခြင်း](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [Guest စနစ်ရွေးချယ်ခြင်း](https://claude-cage.com/docs/guest-systems/) |
 | ထည့်သွင်းပါ၊ ကွန်ရက်ပရောက်စီကို စီစဉ်သတ်မှတ်ပါ၊ သင်၏ပထမဆုံးပရောဂျက်ကိုဖွင့်ပါ။ | [စတင်လုပ်ဆောင်ခြင်း။](docs/getting-started.md) |
 | ဒေါင်းလုဒ်များ၊ စတင်ခြင်း၊ ချိတ်ဆက်မှုနှင့် လက်မှတ်ထိုးဝင်ခြင်းတို့ကို ပြဿနာဖြေရှင်းပါ။ | [FAQ နှင့် ပြန်လည်ရယူခြင်း။](docs/troubleshooting.md) |
 | ကီးဘုတ်ထိန်းချုပ်မှုများ၊ အသွင်အပြင်၊ ဒေတာ ခိုင်မြဲမှုနှင့် ထွက်ပေါက်အပြုအမူတို့ကို လေ့လာပါ။ | [နေ့စဉ်အသုံးပြုခြင်း။](docs/getting-started.md#日常使用) |
 | မျိုးပွားနိုင်သော ပြဿနာကို သတင်းပို့ပါ။ | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| ပြင်ဆင်ချက်၊ လုပ်ဆောင်ချက် သို့မဟုတ် စာရွက်စာတမ်း ပံ့ပိုးရန်: Issue စစ်ဆေးမှု → ပူးပေါင်းသူဖိတ်ခေါ်မှု → PR | [ပံ့ပိုးမှုလမ်းညွှန် (တရုတ်ဘာသာ)](.github/CONTRIBUTING.md) |
 
 ပရောဂျက်က အရှိန်အဟုန်နဲ့ တိုးတက်နေတယ်။ တုံ့ပြန်ချက်မျှဝေရန် ကွန်မြူနတီအဖွဲ့သို့ ဝင်ရောက်ပါ။ ရပ်ရွာထိန်းသိမ်းသူ များကို ကြိုဆိုပါတယ်။
 
-<p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1134250870" width="240" /></a>
-</p>
+| QQ group · 273237690 | WeChat |
+| :---: | :---: |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+
+[Telegram](https://t.me/claude_cage)
 
 ## မူရင်းနှင့်လိုင်စင်
 
@@ -135,6 +144,7 @@ Cage သည် လွတ်လပ်သောအသိုင်းအဝို�
 - [code-server](https://github.com/coder/code-server) - ဘရောက်ဆာအခြေခံကုဒ်တည်းဖြတ်သူ။
 - [AIO Sandbox](https://github.com/agent-infra/sandbox): လုပ်ငန်းခွင်ပတ်ဝန်းကျင်နှင့် အပြန်အလှန်အကျိုးပြုမှုဒီဇိုင်းအတွက် ကိုးကားချက်များ။
 - [claude-switcher](https://github.com/YOURSJEYO/claude-switcher) နှင့် [Claude-Guardian](https://github.com/DUNHKpcc/Claude-Guardian): ကွန်ရက်စစ်ဆေးမှုများနှင့် လုံခြုံရေးဆိုင်ရာ စစ်ဆေးမှုများအတွက် ကိုးကားချက်များ။
+- [claude-post-ban-cleanup](https://github.com/l2461090/claude-post-ban-cleanup): တိကျသောစာရင်းစစ်ဆေးမှု၊ အသုံးပြုသူဒေတာကာကွယ်မှုနှင့် ပြန်လည်ရယူနိုင်သော cache ရှင်းလင်းမှုလုပ်ငန်းစဉ်ကို ကိုးကားထားပြီး Cage တွင် သီးခြားအကောင်အထည်ဖော်ထားသည်။
 
 
 <a href="https://www.star-history.com/?repos=Lee-xeo%2FClaude-Cage&amp;type=date">

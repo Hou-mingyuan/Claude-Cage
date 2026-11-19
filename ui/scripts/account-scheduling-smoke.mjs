@@ -30,8 +30,8 @@ try{
     if(body?.action==="update")Object.assign(profiles.find(a=>a.id===body.id),body);
     return route.fulfill({json:{accounts:profiles,scheduling,detection_status:"offline"}});
   });
-  await page.getByRole("button",{name:"设置",exact:true}).click();
-  await page.getByRole("button",{name:"Claude 账号",exact:true}).click();
+
+  await page.getByRole("button",{name:"Claude 账号管理",exact:true}).click();
   await page.getByText("调度设置 · 均衡分配",{exact:true}).click();
   const select=page.getByRole("combobox",{name:"新会话分配",exact:true});
   const policy=page.getByRole("combobox",{name:"新会话切换授权",exact:true});
@@ -51,7 +51,7 @@ try{
   assert.equal(profiles.find(a=>a.id==="a").handoff_group,"本人账号");
   await page.screenshot({path:fileURLToPath(new URL("scheduling-desktop.png",out))});
   await page.reload();
-  await page.getByRole("button",{name:"设置",exact:true}).click();await page.getByRole("button",{name:"Claude 账号",exact:true}).click();
+  await page.getByRole("button",{name:"Claude 账号管理",exact:true}).click();
   await page.getByText("调度设置 · 顺序优先",{exact:true}).waitFor();
 
   const phoneContext=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,userAgent:"CageMobile/1"});
@@ -60,14 +60,14 @@ try{
   await phone.route("**/api/**",async route=>{
     const path=new URL(route.request().url()).pathname;const body=route.request().postDataJSON();
     if(path.endsWith("/account"))return account(route,body);
-    if(path.endsWith("/projects"))return route.fulfill({json:{host:"测试电脑",ready:true,shared_sessions:true,projects:[{path:session.workspace,name:"默认工作区"}]}});
+    if(path.endsWith("/projects"))return route.fulfill({json:{host:"测试电脑",ready:true,shared_sessions:true,projects:[{path:session.workspace,name:".claude-cage-workspace"}]}});
     if(path.endsWith("/sessions"))return route.fulfill({json:{sessions:[session]}});
     return route.fulfill({json:session});
   });
   await phone.goto((process.env.CAGE_UI_URL || "http://127.0.0.1:5198")+"/mobile.html");
   const drawer=phone.getByRole("dialog",{name:"工作区侧栏"});
   await drawer.waitFor();
-  const folder=drawer.getByRole("button",{name:"项目 默认工作区",exact:true});
+  const folder=drawer.getByRole("button",{name:"项目 .claude-cage-workspace",exact:true});
   if(await folder.getAttribute("aria-expanded")==="false")await folder.click();
   await phone.getByRole("button",{name:"调度验证",exact:true}).click();
   await phone.getByRole("button",{name:"账号 A · 会话绑定",exact:true}).click();

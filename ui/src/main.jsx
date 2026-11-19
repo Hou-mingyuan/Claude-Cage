@@ -31,16 +31,17 @@ import { useCLISessions, sessionsChanged } from "./cli-sessions";
 import { TerminalMenu } from "./terminal-menu";
 import { InitializationGate } from "./initialization";
 import { MacOSLogin } from "./macos-login";
-import { MacOSClaudeWindow } from "./macos-claude-window";
+import { MacOSAppWindow } from "./macos-claude-window";
 import { ProjectRecovery } from "./project-recovery";
 import { ClaudeDesktop } from "./claude-desktop";
-import { useClaudeAccounts } from "./claude-accounts";
+import { ClaudeAccountsPanel, useClaudeAccounts } from "./claude-accounts";
 import { AccountProvider, AccountGate, useAccount } from "./account";
 import { BrowserHeader, BrowserTabRail, TerminalHeader, ExpandSidebar, ExpandPane } from "./pane-headers";
-import { BrowserDownloads, useDownloadNotifications, useDesktopFiles } from "./browser-downloads";
+import { useDownloadNotifications, useDesktopFiles } from "./browser-downloads";
 import { BrowserUploads } from "./browser-uploads";
 import { BrowserSettingsPage } from "./browser-settings";
 import { AudioControls, useAudioOutput } from "./audio";
+import { EnvironmentClock } from "./environment-clock";
 import { ProjectDialog } from "./project-dialog";
 import {
   readLocal,
@@ -48,23 +49,22 @@ import {
   focusTab,
   splitTab,
   projectName,
+  projectGroups,
   tabName,
 } from "./workspace-state.mjs";
 import { SafetyPanel } from "./safety";
 import { SafetyChecklistContext, SafetyMessage } from "./safety-message";
 import { networkState, isGuestLocalURL } from "./safety-state.mjs";
 import { needsProxySetup } from "./onboarding-state.mjs";
-import { HostGitPreparation } from "./host-git";
 import { NetworkLatency } from "./network-latency";
 import { useWindowVisibility } from "./window-visibility";
 import { AppUpdateButton, useAppUpdates } from "./app-updates";
 import "./appearance.css";
 import { stopAndExit } from "./quit";
+import { guestCapability } from "./guest-capabilities.mjs";
 
 function App() {
   const { account } = useAccount();
-  const macGuest = account?.guest_system === "macos";
-  const nativeGuestLabel = {macos: "macOS", "windows-11": "Windows"}[account?.guest_system];
   const [, refreshClientPreferences] = useState(0);
   useEffect(() => {
     const refresh = () => refreshClientPreferences((value) => value + 1);
@@ -72,7 +72,8 @@ function App() {
     return () => window.removeEventListener("cage-client-preferences", refresh);
   }, []);
   const claudeProfiles = useClaudeAccounts();
-  const [tailscaleOpen, setTailscaleOpen] = useState(false);
+  const [managementPage, setManagementPage] = useState("");
+  const [tailnetLogin, setTailnetLogin] = useState(null);
   const [desktopOpen, setDesktopOpen] = useState(false);
   const [terminalChoice, setTerminalChoice] = useState(null);
   const [openingSession, setOpeningSession] = useState("");
@@ -97,7 +98,6 @@ function App() {
     [browser, setBrowser] = useState({ tabs: [] }),
     [browserSettingsRevision, setBrowserSettingsRevision] = useState(0),
     [settingsOpen, setSettingsOpen] = useState(false),
-    [startOptions, setStartOptions] = useState(null),
     [guestSystem, setGuestSystem] = useState(undefined),
     [startRequest, setStartRequest] = useState(null),
     [settingsSection, setSettingsSection] = useState("keyboard"),
@@ -114,6 +114,7 @@ function App() {
     [projectDialog, setProjectDialog] = useState(null),
     [rename, setRename] = useState(null),
     [toast, setToast] = useState(""),
+    [projectRefreshing, setProjectRefreshing] = useState(false),
     [fatal, setFatal] = useState(""),
     [connectionError, setConnectionError] = useState(""),
     [browserError, setBrowserError] = useState(""),
@@ -124,11 +125,12 @@ function App() {
     [quitting, setQuitting] = useState(null);
   // Keep feedback continuous until polling observes the accepted start job.
   const clientStatus = serverStatus && { ...serverStatus, keyboard: clientKeyboard(serverStatus.keyboard) };
-  const hostGitOpen = startOptions !== null;
-  const status = clientStatus && (hostGitOpen || startRequest)
-    ? { ...clientStatus, job: { running: true, kind: "start", message: hostGitOpen
-      ? isRemoteClient() ? "正在检查云端主机 Git 安全保护…" : "正在检查本机 Git 安全保护…" : "正在启动 Cage 环境…" } }
+  const status = clientStatus && startRequest
+    ? { ...clientStatus, job: { running: true, kind: "start", message: "正在启动 Cage 环境…" } }
     : clientStatus;
+  const system = status?.guest_system || account?.guest_system;
+  const macGuest = system === "macos";
+  const nativeGuestLabel = {macos: "macOS", "windows-11": "Windows", "windows-remote": "Windows 云端"}[system];
   const { active } = layout;
   const setActive = id => setLayout(previous => focusTab(previous, id));
   const workspaceBox = useRef(null);
@@ -149,17 +151,21 @@ function App() {
   activeRef.current = active;
   readyRef.current = Boolean(status?.ready);
   const storageRecovery = status?.storage_recovery?.required;
+  const browserAvailable = guestCapability(status, "browser");
+  const projectsAvailable = guestCapability(status, "projects");
+  const editorAvailable = guestCapability(status, "editor");
+  const clipboardAvailable = guestCapability(status, "clipboard");
+  const desktopAvailable = guestCapability(status, "desktop");
   const current = tabs.find((t) => t.id === active),
     terminal = !desktopOpen && current?.kind === "terminal",
     busy = Boolean(status?.job?.running),
     showHome = storageRecovery || !desktopOpen && (home || !status?.vm_running || !current);
   const setupProgress = status?.job?.setup_progress && (busy || status.job.error);
-	const cliSessions = useCLISessions(Boolean(status && !busy && !storageRecovery), windowVisible);
+  const cliSessions = useCLISessions(Boolean(status && !busy && !storageRecovery && guestCapability(status, "claude-cli")), windowVisible);
   useEffect(() => {
     if (storageRecovery) {
       setDesktopOpen(false);
       setHome(true);
-      setStartOptions(null);
       setStartRequest(null);
     }
   }, [storageRecovery]);
@@ -168,7 +174,7 @@ function App() {
   const panes = !split ? [current].filter(Boolean)
     : layout.side === "left" ? [current, other] : [other, current];
   const webPanes = panes.filter(tab => tab.kind !== "terminal");
-  const passwordVault = usePasswordVault(Boolean(status?.ready), browser.active);
+  const passwordVault = usePasswordVault(Boolean(status?.ready && !macGuest && browserAvailable), browser.active);
   const dualBrowser = split && webPanes.length === 2;
   const leftId = dualBrowser ? panes[0].id : "";
   const rightId = dualBrowser ? panes[1].id : "";
@@ -177,7 +183,7 @@ function App() {
     ? nativeSplit?.left === leftId && nativeSplit?.right === rightId
     : !nativeSplit;
   const liveBrowser = webPanes.find(tab => tab.id === browser.active) || webPanes[0];
-  const liveBrowserVisible = !desktopOpen && !showHome && status?.ready &&
+  const liveBrowserVisible = !managementPage && !desktopOpen && !showHome && status?.ready &&
     liveBrowser && splitReady && (!split || browser.active === liveBrowser.id);
   const viewBeforeBrowser = useRef(null);
   const browserDismissed = useRef(false);
@@ -210,7 +216,7 @@ function App() {
   const nativeSplitRef = useRef(null);
   nativeSplitRef.current = nativeSplit;
   useEffect(() => {
-    if (!status?.ready) { requestedSplit.current = false; return; }
+    if (!status?.ready || !browserAvailable) { requestedSplit.current = false; return; }
     if (!leftId && !requestedSplit.current && !nativeSplitRef.current) return;
     requestedSplit.current = Boolean(leftId);
     let cancelled = false;
@@ -232,7 +238,7 @@ function App() {
     };
     splitQueue.current = splitQueue.current.then(apply);
     return () => { cancelled = true; };
-  }, [leftId, rightId, status?.ready, Boolean(!leftId && nativeSplit)]);
+  }, [leftId, rightId, status?.ready, browserAvailable, Boolean(!leftId && nativeSplit)]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   useEffect(() => {
@@ -257,12 +263,14 @@ function App() {
   useEffect(() => {
     if (finishedLogins) claudeProfiles.load();
   }, [finishedLogins, claudeProfiles.load]);
-  const audio = useAudioOutput(running && !storageRecovery && !status?.environment_update_required && !connectionError);
+  const audio = useAudioOutput(running && guestCapability(status, "audio") && !storageRecovery && !status?.environment_update_required && !connectionError);
   useEffect(() => {
     if (audio.error) setToast(audio.error);
   }, [audio.error]);
-  const projects = status?.projects || [];
-  const workspace = selectedProject || status?.workspace;
+  const groups = projectGroups(status);
+  const projects = groups.map(group => group.workspace);
+  const selectedWorkspace = selectedProject || status?.workspace;
+  const workspace = groups.find(group => group.folders.includes(selectedWorkspace))?.workspace || selectedWorkspace;
   const contentWorkspace =
     terminal && !showHome ? current.workspace : workspace;
   const setupProxy = !nativeGuestLabel && needsProxySetup(settings, status, proxy);
@@ -287,9 +295,23 @@ function App() {
           ? status?.environment_update_required ? "环境待更新" : "浏览器待恢复"
           : "已停止";
   const notify = (text) => setToast(text);
+  // A Linux environment keeps what it learned about project files for a while.
+  const projectFilesCached = settings?.project_file_cache === true &&
+    !/^(windows|macos)/.test(account?.guest_system || status?.guest_system || "");
+  const refreshProjectFiles = async () => {
+    setProjectRefreshing(true);
+    try {
+      await api("/projects/refresh", {});
+      setToast("项目文件已刷新");
+    } catch (error) {
+      setToast(error.message);
+    } finally {
+      setProjectRefreshing(false);
+    }
+  };
   const clipboardConnection = getClientContext().connection_id;
   useEffect(() => {
-    if (!status?.ready || !nativeAvailable()) return;
+    if (!status?.ready || !clipboardAvailable || !nativeAvailable()) return;
     const clipboard = shareClipboard({
       connect: () => new WebSocket(runtimeSocketURL("/clipboard")), native,
       onStatus: setToast,
@@ -297,8 +319,8 @@ function App() {
     });
     window.cageSyncClipboard = () => clipboard.sync();
     return () => { clipboard.dispose(); delete window.cageSyncClipboard; };
-  }, [status?.ready, clipboardConnection]);
-  const desktopFiles = useDesktopFiles(Boolean(status?.ready), notify);
+  }, [status?.ready, clipboardAvailable, clipboardConnection]);
+  const desktopFiles = useDesktopFiles(Boolean(status?.ready && desktopAvailable), notify, desktopOpen && !settingsOpen && !managementPage && !storageRecovery && windowVisible, windowVisible);
   const downloads = [...(browser.downloads || []), ...desktopFiles.downloads];
   useDownloadNotifications(downloads, notify, Boolean(browser.uploads?.length || desktopFiles.uploads.length));
   const refreshSettings = async () => {
@@ -316,6 +338,8 @@ function App() {
     setSettingsOpen(true);
   };
   const select = async (id, focusContent = true) => {
+    setTailnetLogin(null);
+    setManagementPage("");
     const tab = tabs.find((t) => t.id === id);
     if (tab && tab.kind !== "terminal") browserDismissed.current = false;
     setDesktopOpen(false);
@@ -368,13 +392,33 @@ function App() {
       return null;
     }
   };
+  const starting = useRef(false);
+  const startEnvironment = async (options = {}) => {
+    if (starting.current) return;
+    starting.current = true;
+    setStartRequest({ id: null });
+    try {
+      const result = await action("/start", options);
+      setStartRequest(result ? { id: result.id } : null);
+      if (result) refreshStatus.current?.();
+    } finally {
+      starting.current = false;
+    }
+  };
   const openBrowserPage = async (
-    url = settings?.browser_home_url || "https://www.bing.com/",
+    url = status?.guest_system === "windows-remote" && !guestCapability(status, "network")
+      ? "about:blank" : settings?.browser_home_url || "https://www.bing.com/",
     incognito = Boolean(current?.incognito),
   ) => {
+    if (!browserAvailable) {
+      notify("此 Windows 云端环境的浏览器尚未接通。当前可使用隔离 PowerShell 终端。");
+      return null;
+    }
+    setTailnetLogin(null);
     browserDismissed.current = false;
     const result = await action("/browser/new", { url, incognito });
     if (result) {
+      setManagementPage("");
       setDesktopOpen(false);
       setHome(false);
       setTabs((list) =>
@@ -399,7 +443,8 @@ function App() {
   const showBrowserResult = result => {
     if (!result?.id) return;
     browserDismissed.current = false;
-    setDesktopOpen(false); setHome(false);
+    setTailnetLogin(null);
+    setManagementPage(""); setDesktopOpen(false); setHome(false);
     setTabs(previous => previous.some(tab => tab.id === result.id)
       ? previous.map(tab => tab.id === result.id ? { ...tab, ...result } : tab)
       : [...previous, result]);
@@ -423,10 +468,16 @@ function App() {
       tabs.find((t) => t.kind !== "terminal");
     return tab ? select(tab.id) : newPage();
   };
-  const newTerminal = (path = workspace, anchor = terminalTrigger.current) =>
+  const newTerminal = (path = workspace, anchor = terminalTrigger.current) => {
+    if (system === "windows-remote" && !guestCapability(status, "claude-cli")) {
+      createTerminal(status.workspace || "", "shell").catch((e) => notify(e.message));
+      return;
+    }
+    if (!path && system !== "windows-remote") { setProjectDialog({}); return; }
     setTerminalChoice((previous) =>
       previous?.anchor === anchor ? null : { path, anchor },
     );
+  };
   const createTerminal = async (path, kind, loginAccountId) => {
     setTerminalChoice(null);
     const result = await api("/terminals", {
@@ -441,6 +492,8 @@ function App() {
     }
   };
   const showTerminal = result => {
+    setTailnetLogin(null);
+    setManagementPage("");
     const tab = {
       ...result, id: "terminal:" + result.id, sessionId: result.id,
       terminalKind: result.kind, kind: "terminal",
@@ -507,9 +560,16 @@ function App() {
       onSelect={(kind) => createTerminal(terminalChoice.path, kind).catch((e) => notify(e.message))} />
   );
   const openEditor = async (path = workspace) => {
+    if (!browserAvailable || !editorAvailable) {
+      notify("此 Windows 云端环境的文件编辑器尚未接通。当前可在隔离 PowerShell 中操作文件。");
+      return;
+    }
+    if (!path) { setProjectDialog({}); return; }
     browserDismissed.current = false;
+    setTailnetLogin(null);
     const result = await action("/browser/editor", { workspace: path });
     if (result) {
+      setManagementPage("");
       setDesktopOpen(false);
       setHome(false);
       setTabs((list) =>
@@ -530,6 +590,7 @@ function App() {
     }
   };
   const closeTab = async (tab, anchor) => {
+    if (macGuest && tab.native_window) { closeBrowser(); return; }
     if (tab.cli_session_id) return archiveSession({id:tab.cli_session_id, title:tab.title}, anchor);
     if (tab.kind === "terminal") {
       if (
@@ -558,6 +619,7 @@ function App() {
       )
         return;
       if (!(await action("/browser/close", { id: tab.id }))) return;
+      if (tab.id === tailnetLogin?.tabId) setTailnetLogin(null);
     }
     setTabs((list) => list.filter((t) => t.id !== tab.id));
     if (tab.incognito) setPrivateTabMetadata(previous => Object.fromEntries(Object.entries(previous).map(([key, value]) => [key,
@@ -662,19 +724,21 @@ function App() {
           if (next.job.error) notify(next.job.error);
         }
         if (next.ready) {
-          const fetchBrowser = !browserStreamReady.current || !initialized.current;
+          const supportsBrowser = guestCapability(next, "browser");
+          const fetchBrowser = supportsBrowser && !next.environment_update_required && (!browserStreamReady.current || !initialized.current);
+          if (!supportsBrowser) setBrowserError("");
           const [browserResult, t] = await Promise.all([
             fetchBrowser ? api("/browser/tabs").then(result => {
               if (live) setBrowserError("");
               return result;
             }).catch(error => {
-              if (live) setBrowserError(error.message);
+              if (live) setBrowserError(next.guest_system === "macos" ? "请在环境设置中同步 macOS 组件，并确认已登录客机图形账户。" : error.message);
               return null;
             }) : null,
             api("/terminals"),
           ]);
           if (!live) return;
-          const b = browserResult || browserSnapshot.current;
+          const b = supportsBrowser ? browserResult || browserSnapshot.current : { tabs: [] };
           const legacyMetadata = readLocal(clientStorageKey("cage-tab-layout"), {})[next.environment_identity_directory || next.environment_directory || next.workspace] || {};
           for (const item of t) {
             const saved = legacyMetadata["terminal:" + item.id];
@@ -782,10 +846,10 @@ function App() {
     return () => { live = false; };
   }, [settings, status, fatal, connectionError]);
   useEffect(() => {
-    if (!status?.ready) return;
+    if (!status?.ready || !browserAvailable) return;
     const stream = new EventSource(runtimeURL("/browser/events"));
     stream.addEventListener("clipboard", (event) => {
-      remote.current?.receiveCopy(JSON.parse(event.data));
+      remote.current?.receiveCopy?.(JSON.parse(event.data));
     });
     stream.onopen = () => { browserStreamReady.current = true; };
     stream.onerror = () => { browserStreamReady.current = false; };
@@ -815,6 +879,8 @@ function App() {
           ...b.tabs.filter((t) => !previous.some((p) => p.id === t.id)),
         ];
       });
+      const focusLogin = b.focus && b.tabs.some(tab => tab.native_window && tab.login);
+      if (focusLogin) browserDismissed.current = false;
       if (!browserDismissed.current && b.active && b.focus) {
         setDesktopOpen(false);
         setHome(false);
@@ -832,7 +898,7 @@ function App() {
       browserStreamReady.current = false;
       stream.close();
     };
-  }, [status?.ready]);
+  }, [status?.ready, browserAvailable]);
   useEffect(() => {
     if (current && current.kind !== "terminal")
       lastBrowserTab.current = current.id;
@@ -848,7 +914,43 @@ function App() {
     return () => clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
+    if (!tailnetLogin) return;
+    if (!status?.ready || managementPage || showHome || desktopOpen) {
+      setTailnetLogin(null);
+      return;
+    }
+    if (settingsOpen) return;
+    const controller = new AbortController();
+    let timer;
+    const check = async () => {
+      try {
+        const state = await api("/tailscale", undefined, undefined, {}, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        if (!state.enabled) { setTailnetLogin(null); return; }
+        if (["Running", "NeedsMachineAuth"].includes(state.backend) || state.return_id && state.return_id !== tailnetLogin.returnID) {
+          setTailnetLogin(null);
+          setManagementPage("tailscale");
+          return;
+        }
+      } catch { /* A temporary connection failure can recover during authorization. */ }
+      if (!controller.signal.aborted) timer = setTimeout(check, 1500);
+    };
+    void check();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [tailnetLogin, managementPage, settingsOpen, desktopOpen, showHome, status?.ready]);
+  useEffect(() => {
+    if (!managementPage) return;
+    document.getElementById(managementPage + "-title")?.focus();
+    const close = () => {
+      if (!document.querySelector('[role="dialog"], .settings-page')) setManagementPage("");
+    };
+    document.addEventListener("cage-close-modal", close);
+    return () => document.removeEventListener("cage-close-modal", close);
+  }, [managementPage]);
+  useEffect(() => {
     const key = (event) => {
+      // Workbench shortcuts can stop the event before remote input sees it.
+      window.dispatchEvent(new Event("cage-input-interrupted"));
       if (document.querySelector("[data-environment-dialog]") || !primaryModifier(event)) return;
       const k = event.key.toLowerCase();
       if (document.querySelector("[data-browser-dialog], .mac-login-fullscreen")) {
@@ -867,7 +969,7 @@ function App() {
         }
         return;
       }
-      if (k === "," && !projectDialog && !rename && !hostGitOpen) {
+      if (k === "," && !projectDialog && !rename) {
         event.preventDefault();
         event.stopImmediatePropagation();
         openSettings();
@@ -875,7 +977,7 @@ function App() {
       }
       if (
         settingsOpen ||
-        hostGitOpen ||
+        managementPage ||
         transfer ||
         details ||
         safetyOpen ||
@@ -890,6 +992,8 @@ function App() {
         }
         return;
       }
+      // The guest owns Chrome's address bar, tabs and browser shortcuts.
+      if (macGuest && !showHome && !desktopOpen && !terminal && event.target.closest?.(".mac-claude-frame")) return;
       let handle;
       if (k === "o") {
         event.preventDefault();
@@ -898,7 +1002,7 @@ function App() {
           document.dispatchEvent(new Event("cage-show-favorites"));
           return;
         }
-        if (!busy && running) setProjectDialog({ path: "" });
+        if (projectsAvailable && !busy && running) setProjectDialog({ path: "" });
         return;
       }
       if (k === "t" && !event.shiftKey) handle = newPage;
@@ -942,6 +1046,7 @@ function App() {
       if (document.querySelector(".mac-login-fullscreen")) return false;
       if (
         settingsOpen ||
+        managementPage ||
         transfer ||
         dialog ||
         details ||
@@ -957,17 +1062,13 @@ function App() {
       return remote.current?.edit(command) || false;
     };
     window.cageWorkbenchAction = async (command) => {
+      window.dispatchEvent(new Event("cage-input-interrupted"));
       if (document.querySelector(".mac-login-fullscreen")) {
         if (command === "closeTab" || command === "quit") document.dispatchEvent(new Event("cage-close-modal"));
         if (command !== "quit") return;
       }
       if (document.querySelector("[data-environment-dialog]")) {
         if (command === "closeTab") document.dispatchEvent(new Event("cage-close-modal"));
-        return;
-      }
-      if (hostGitOpen && command !== "quit") {
-        if (command === "closeTab")
-          document.dispatchEvent(new Event("cage-close-modal"));
         return;
       }
       if (command === "settings") {
@@ -980,9 +1081,11 @@ function App() {
       }
       if (command === "openProject") {
         if (
+          projectsAvailable &&
           !busy &&
           running &&
           !settingsOpen &&
+          !managementPage &&
           !dialog &&
           !projectDialog &&
           !rename
@@ -991,7 +1094,7 @@ function App() {
         return;
       }
       if (
-        (settingsOpen || dialog || projectDialog || terminalChoice || rename) &&
+        (settingsOpen || managementPage || dialog || projectDialog || terminalChoice || rename) &&
         ["newTab", "newTerminal"].includes(command)
       )
         return;
@@ -1007,6 +1110,7 @@ function App() {
           void finishDialog(false);
         } else if (
           settingsOpen ||
+          managementPage ||
           transfer ||
           details ||
           safetyOpen ||
@@ -1016,6 +1120,7 @@ function App() {
         )
           document.dispatchEvent(new Event("cage-close-modal"));
         else if (desktopOpen) setDesktopOpen(false);
+        else if (macGuest && current && !terminal && !showHome) remote.current?.closeNativeTab?.();
         else if (current) await closeTab(current);
       }
       if (command === "quit") {
@@ -1060,7 +1165,7 @@ function App() {
   }, [
     status,
     settingsOpen,
-    hostGitOpen,
+    managementPage,
     safetyOpen,
     details,
     transfer,
@@ -1076,10 +1181,11 @@ function App() {
     showHome,
     savedTabs,
     selectedProject,
+    macGuest,
     desktopOpen,
     terminalChoice,
   ]);
-  const project = projectName(contentWorkspace, status?.environment_directory);
+  const project = projectName(contentWorkspace, groups);
   const tabLayoutKey = status?.environment_identity_directory || status?.environment_directory || status?.workspace;
   const metadata = { ...(savedTabs[tabLayoutKey] || {}), ...(privateTabMetadata[tabLayoutKey] || {}) };
   for (const tab of tabs) {
@@ -1196,7 +1302,7 @@ function App() {
     const detail = tab?.terminalKind === "claude-login" ? `登录 · ${account || "新账号"}`
       : account ? `Claude · ${account}${tab.claude_account_source === "default" ? "（启动时账号）" : ""}` : "";
     const location = split && tab ? `heading-${tab.id}` : "heading";
-    return <TerminalHeader tab={tab} project={projectName(path, status?.environment_directory)} metadata={metadata}
+    return <TerminalHeader tab={tab} project={projectName(path, groups)} metadata={metadata}
       contentWorkspace={path} terminalDetail={detail} terminalDetailHint={tab?.claude_account_source === "default"
         ? "此终端按启动时的普通终端登录标记。若普通终端已换号，请重新打开工作会话确认身份。" : detail}
       busy={busy} onHome={() => setHome(true)}
@@ -1232,18 +1338,6 @@ function App() {
     onRecover={() => recoverEditor(tab)} />;
   const dialogs = (
     <>
-      {hostGitOpen && (
-        <HostGitPreparation
-          onClose={() => setStartOptions(null)}
-          onReady={async () => {
-            setStartRequest({ id: null });
-            setStartOptions(null);
-            const result = await action("/start", startOptions);
-            setStartRequest(result ? { id: result.id } : null);
-            if (result) refreshStatus.current?.();
-          }}
-        />
-      )}
       {dialog && (
         <Modal
           title={dialog.title}
@@ -1350,22 +1444,26 @@ function App() {
     <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <div
         className="workbench-shell"
-        inert={settingsOpen || hostGitOpen || undefined}
+        inert={settingsOpen || undefined}
       >
         {!sidebarCollapsed && (
           <WorkspaceSidebar
-            downloadAction={<BrowserDownloads sidebar downloads={downloads} ready={status.ready && !busy} onStatus={notify} />}
+            onClaudeAccounts={() => setManagementPage("claude-accounts")}
+            claudeAccountsOpen={managementPage === "claude-accounts"}
+            tailscaleOpen={managementPage === "tailscale"}
             updateAction={<AppUpdateButton updates={appUpdates} />}
             workspace={selectedProject || status.workspace}
             guestSystem={account?.guest_system || status.guest_system || guestSystem?.guest_system || "debian-13"}
-            defaultWorkspace={status.environment_directory}
             projects={projects}
+            projectGroups={groups}
             tabs={displayTabs}
             sessions={cliSessions.sessions.map(session => ({ ...session,
               claudeAccountNumber: claudeNumbers.get(session.account_id) }))}
             sessionError={cliSessions.error}
             sessionRefreshing={cliSessions.loading}
             onSessionRefresh={cliSessions.refresh}
+            onProjectRefresh={projectFilesCached ? refreshProjectFiles : undefined}
+            projectRefreshing={projectRefreshing}
             onSessionOpen={openSessionTerminal}
             openingSession={openingSession}
             sessionOpenError={sessionOpenError}
@@ -1373,14 +1471,17 @@ function App() {
             onSessionPin={pinSession}
             onSessionRename={session => setRename({id:session.id, title:session.title, session:true})}
             saved={metadata}
-            active={active}
-            home={showHome}
+            active={managementPage ? "" : active}
+            home={!managementPage && showHome}
             busy={busy || storageRecovery}
             ready={status.ready}
             running={running}
             runtimeLabel={runtimeLabel}
             network={network}
-            onHome={() => { setDesktopOpen(false); setHome(true); }}
+            onHome={() => { setManagementPage(""); setDesktopOpen(false); setHome(true); }}
+            browserAvailable={browserAvailable}
+            editorAvailable={editorAvailable}
+            projectsAvailable={projectsAvailable}
             onOpenProject={(path = "") => setProjectDialog({ path })}
             onSelect={select}
             onClose={closeTab}
@@ -1394,10 +1495,13 @@ function App() {
             onNewTerminal={newTerminal}
             terminalMenuAt={terminalMenuAt}
             onBrowser={openBrowser}
-            onTailscale={() => setTailscaleOpen(true)}
-            desktopOpen={desktopOpen}
+            onTailscale={() => {
+              setManagementPage("tailscale");
+              if (window.matchMedia("(max-width: 520px)").matches) setSidebarCollapsed(true);
+            }}
+            desktopOpen={!managementPage && desktopOpen}
             onClaudeWeb={() => openBrowserPage("https://claude.ai/")}
-            onClaudeDesktop={() => { setHome(false); setDesktopOpen(true); }}
+            onClaudeDesktop={() => { setManagementPage(""); setHome(false); setDesktopOpen(true); }}
             onEditor={openEditor}
             onSettings={openSettings}
             onAccountConfirm={confirm}
@@ -1409,8 +1513,15 @@ function App() {
           />
         )}
         <div className="workbench-main">
-          {showHome && terminalHeader(null)}
-          {browserError && running && !connectionError && <div className="connection-banner" role="status">
+          {!managementPage && showHome && terminalHeader(null)}
+          {!managementPage && status.ready && status.guest_system === "windows-remote" && !status.workload_ready && !connectionError && <div className="remote-capability-banner" role="status">
+            <span>{browserAvailable
+              ? `Windows 云端：隔离 PowerShell 和浏览器已接通，外网${guestCapability(status, "network") ? "已开放" : "尚未开放"}；桌面和外部项目仍在适配。`
+              : "Windows 云端适配中：隔离 PowerShell 已接通，浏览器、桌面和外部项目尚未接通。"}</span>
+            {browserAvailable && <button disabled={!status.ready || busy} onClick={() => openBrowser()}>打开浏览器</button>}
+            <button disabled={!status.ready || busy} onClick={() => createTerminal(status.workspace || "", "shell").catch(e => notify(e.message))}>打开 PowerShell</button>
+          </div>}
+          {browserAvailable && browserError && running && !connectionError && <div className="connection-banner" role="status">
             <span>客机浏览器暂时无法连接。{browserError}</span>
             <button onClick={() => refreshStatus.current?.()}>重试</button>
           </div>}
@@ -1426,16 +1537,40 @@ function App() {
               </button>
             </div>
           )}
-          <main className={`workspace ${split ? "workspace-split" : ""}`} ref={workspaceBox}
+          {managementPage && (
+            <main className="management-page" aria-labelledby={managementPage + "-title"}>
+              <header className="chrome management-header">
+                {sidebarButton()}
+                <h1 id={managementPage + "-title"} tabIndex={-1}>{managementPage === "tailscale" ? "Tailscale" : "Claude 账号管理"}</h1>
+              </header>
+              <div className="management-content">
+                {managementPage === "tailscale" ? <TailscalePanel status={status}
+                  onOpenBrowser={async url => Boolean(await openBrowserPage(url, false))}
+                  onOpenLogin={async (value) => {
+                    const tab = await openBrowserPage(value.auth_url, false);
+                    if (tab?.id) setTailnetLogin({ tabId: tab.id, returnID: value.return_id });
+                    return Boolean(tab?.id);
+                  }}
+                  onConfirm={confirm} onInstall={async () => {
+                    const nativeGuest = ["macos", "windows-11"].includes(status.guest_system);
+                    if (nativeGuest && !await confirm({ title: "更新环境组件？", body: "更新会重新连接浏览器和显示组件，请先保存工作。设备身份、公钥和个人数据保留。", confirm: "更新组件" })) return;
+                    await action(nativeGuest ? "/environment/update" : "/tailscale/install", {});
+                  }} /> : <ClaudeAccountsPanel store={claudeProfiles} tabs={tabs} onConfirm={confirm}
+                  running={status.vm_running} environmentBusy={busy || storageRecovery}
+                  login={(id) => createTerminal(workspace, "claude-login", id)} />}
+              </div>
+            </main>
+          )}
+          <main className={`workspace ${split ? "workspace-split" : ""}`} ref={workspaceBox} hidden={Boolean(managementPage)}
             style={{ "--split-left": `${100 * (dualBrowser && nativeSplit?.fraction || 0.5)}%` }}>
             {dropSide && <div aria-hidden="true" className={`split-drop split-${dropSide}`}>{dropSide === "left" ? "放到左侧" : "放到右侧"}</div>}
-            {!storageRecovery && desktopOpen && macGuest && <MacOSClaudeWindow uploads={desktopFiles.uploads} keyboard={status.keyboard} remoteRef={remote}
-              onStatus={notify} onFallback={(text, message) => setTransfer({ text, message })} visible={!settingsOpen} onConfirm={confirm}
+            {!storageRecovery && desktopOpen && macGuest && <MacOSAppWindow key="claude-desktop" uploads={desktopFiles.uploads} keyboard={status.keyboard} remoteRef={remote}
+              onStatus={notify} onFallback={(text, message) => setTransfer({ text, message })} visible={!settingsOpen && !managementPage} onConfirm={confirm}
               sidebarCollapsed={sidebarCollapsed} onExpand={() => persist("cage-sidebar-collapsed", false, setSidebarCollapsed)} />}
             {!storageRecovery && desktopOpen && !macGuest && <ClaudeDesktop
               uploads={desktopFiles.uploads}
               onProjectOpened={() => refreshStatus.current?.()}
-              status={status} visible={!settingsOpen} remoteRef={remote}
+              status={status} visible={!settingsOpen && !managementPage} remoteRef={remote}
               onStatus={notify} onFallback={(text, message) => setTransfer({ text, message })}
               onConfirm={confirm} onDetails={() => setDetails(true)}
               sidebarCollapsed={sidebarCollapsed}
@@ -1449,7 +1584,15 @@ function App() {
             )}
             {!storageRecovery && (status.vm_running || terminal) && (
               <>
-                {!desktopOpen && !showHome && webPanes.length > 0 && (
+                {macGuest && !desktopOpen && !showHome && webPanes.length > 0 && (
+                  <section className={`pane-lane browser-lane split-${paneSide(webPanes[0].id)}`}>
+                    {status.ready && <MacOSAppWindow key="chrome" browser onOpenPage={openBrowserPage} visible={!settingsOpen} uploads={desktopFiles.uploads}
+                      keyboard={status.keyboard} remoteRef={remote} onStatus={notify}
+                      sidebarCollapsed={sidebarCollapsed} onExpand={() => persist("cage-sidebar-collapsed", false, setSidebarCollapsed)}
+                      onFallback={(text, message) => setTransfer({ text, message })} />}
+                  </section>
+                )}
+                {!macGuest && !desktopOpen && !showHome && webPanes.length > 0 && (
                   <section className={`pane-lane browser-lane ${browserTabLayout === "vertical" ? "vertical-browser" : ""} ${dualBrowser ? "" : "split-" + paneSide(webPanes[0].id)}`}>
                     {browserTabLayout === "vertical" && <BrowserTabRail tabs={browserTabs} metadata={metadata}
                       active={liveBrowser?.id} ready={status.ready} busy={busy} splitDrag={splitDrag}
@@ -1480,7 +1623,7 @@ function App() {
                       {!status.ready && <div className="view-overlay">
                         <RefreshCw /><h3>浏览器连接暂时不可用</h3>
                         <p>环境和终端仍可运行；恢复浏览器不会停止现有终端。</p>
-                        <button className="primary" disabled={busy} onClick={() => setStartOptions({})}>恢复浏览器</button>
+                        <button className="primary" disabled={busy} onClick={() => startEnvironment({})}>恢复浏览器</button>
                       </div>}
                       {status.ready && !splitReady && <div className="view-overlay">正在调整浏览器布局…</div>}
                     </div>
@@ -1501,7 +1644,7 @@ function App() {
                             ? terminalControls.current.set(tab.id, control)
                             : terminalControls.current.delete(tab.id)
                         }
-                        visible={visible && !settingsOpen}
+                        visible={visible && !settingsOpen && !managementPage}
                         focused={active === tab.id}
                         onStatus={notify}
                         onAccountChanged={view => { if (view?.desktop_terminal_id && view.desktop_terminal_id !== tab.sessionId) void openSessionTerminal({id:tab.cli_session_id}); }}
@@ -1523,7 +1666,7 @@ function App() {
                   </> : setupProgress ? <>
                     <h1>{status.job.error ? "环境安装未完成" : "正在安装 Cage 环境"}</h1>
                     <SetupProgress job={status.job} onDetails={() => setDetails(true)}
-                      onStop={stop} onRetry={() => setStartOptions(status.job.kind === "guest-install" ? { guest_system: status.job.setup_progress.system } : {})} disconnected={Boolean(connectionError)} />
+                      onStop={stop} onRetry={() => startEnvironment(status.job.kind === "guest-install" ? { guest_system: status.job.setup_progress.system } : {})} disconnected={Boolean(connectionError)} />
                   </> : <>
                   <h1>
                     {busy
@@ -1549,8 +1692,8 @@ function App() {
                         ? !status.ready
                           ? status.environment_update_error || "浏览器连接尚未就绪，可以恢复连接或继续使用终端。"
                           : network.mode === "open"
-                            ? "环境已连接，网络检查通过。可以浏览网页或打开本地项目。"
-                            : `${network.label}。终端与本地文件仍可使用。`
+                            ? status.guest_system === "windows-remote" ? "环境已连接，网络检查通过。可以浏览网页或使用隔离 PowerShell。" : "环境已连接，网络检查通过。可以浏览网页或打开本地项目。"
+                            : `${network.label}。终端与${status.guest_system === "windows-remote" ? "隔离工作目录" : "本地文件"}仍可使用。`
                         : setupProxy
                           ? "先连接你的代理，再启动浏览器、终端和编辑器。无需安装额外的代理软件。"
                           : "准备独立的浏览器和终端，完成网络检查后开始工作。"} />
@@ -1614,12 +1757,12 @@ function App() {
                             api("/environment/guest-systems/activate", {}).then(() => native("reconnect")).catch((e) => setToast(e.message));
                           } else if (!running && setupProxy) openSettings("network");
                           else if (!running || !status.ready)
-                            setStartOptions(!running && guestSystem?.guest_system === "debian-13" && !guestSystem.clone ? { guest_system: "debian-13" } : !running && guestSystem ? {
+                            startEnvironment(!running && guestSystem?.guest_system === "debian-13" && !guestSystem.clone ? { guest_system: "debian-13" } : !running && guestSystem ? {
                               guest_system: guestSystem.guest_system, media: guestSystem.media, sha256: guestSystem.sha256,
                               clone_key: guestSystem.clone_key,
                               editor_terms: guestSystem.editor_terms,
                             } : {});
-                          else if (status.environment_workspace)
+                          else if (!workspace && projectsAvailable)
                             setProjectDialog({ path: "" });
                           else newTerminal(workspace, event.currentTarget);
                         }}
@@ -1632,7 +1775,7 @@ function App() {
                           <Power size={16} />
                         ) : !status.ready ? (
                           <RefreshCw size={16} />
-                        ) : status.environment_workspace ? (
+                        ) : !workspace && projectsAvailable ? (
                           <FolderOpen size={16} />
                         ) : (
                           <TerminalSquare size={16} />
@@ -1646,7 +1789,7 @@ function App() {
                                 guestSystem && guestSystem.guest_system !== "debian-13" ? "安装客户机" : "启动 Cage 环境"
                             : !status.ready
                               ? "恢复浏览器"
-                              : status.environment_workspace
+                              : !workspace && projectsAvailable
                                 ? "打开项目"
                                 : "新建终端"}
                       </button>
@@ -1662,7 +1805,8 @@ function App() {
                       </button>
                       <button
                         onClick={() => openEditor(contentWorkspace)}
-                        disabled={!status.ready || busy}
+                        disabled={!status.ready || busy || !editorAvailable}
+                        title={editorAvailable ? undefined : "当前环境尚未接通文件编辑器，可使用 PowerShell 管理隔离工作目录中的文件"}
                       >
                         <FileCode2 size={16} />
                         浏览文件
@@ -1679,10 +1823,9 @@ function App() {
                   )}
                   {running && status.ready && (
                     <p className="welcome-hint">
-                      打开项目后，在终端输入 <code>claude</code>
-                      ，按提示登录你的账户。
+                      {status.guest_system === "windows-remote" ? "PowerShell 和浏览器无需 Claude 登录。只有使用 Claude 时才需要登录账户。" : <>打开项目后，在终端输入 <code>claude</code>，按提示登录你的账户。</>}
                       <br />
-                      {isRemoteClient() ? "默认工作区和打开的项目位于云端，编辑和删除会直接影响云端文件。" : "默认工作区和打开的项目与本机共享，编辑和删除文件会同步。"}
+                      {status.guest_system === "windows-remote" ? "文件保存在云端隔离工作目录中，不会挂载你的本地文件夹。" : isRemoteClient() ? "打开的项目位于云端，编辑和删除会直接影响云端文件。" : "打开的项目与本机共享，编辑和删除文件会同步。"}
                     </p>
                   )}
                   </>}
@@ -1694,7 +1837,7 @@ function App() {
                         <ul className="project-connection-errors">
                           {status.project_errors.map(({ path, message, recovery }) => (
                             <li key={path}>
-                              <strong>{projectName(path, status.environment_directory)}</strong>
+                              <strong>{projectName(path, groups)}</strong>
                               <span className="project-error-path">{path}</span>
                               <p>{message}</p>
                               <ProjectRecovery recovery={recovery} disabled={!status.ready || busy}
@@ -1770,6 +1913,7 @@ function App() {
             />
             <span className="status-spacer" />
             <AudioControls audio={audio} />
+            <EnvironmentClock timezone={settings.timezone} clock12Hour={settings.clock_12_hour} />
             <span className="status-feedback" role="status">
               <SafetyMessage message={toast ||
                 (busy
@@ -1804,21 +1948,11 @@ function App() {
           current={settings}
           status={status}
           initialSection={settingsSection}
-          claudeProfiles={claudeProfiles}
-          terminalTabs={tabs}
-          onClaudeLogin={(id) => createTerminal(workspace, "claude-login", id)}
           onClose={() => setSettingsOpen(false)}
           onSaved={refreshSettings}
           onConfirm={confirm}
         />
       )}
-      {tailscaleOpen && <TailscalePanel status={status} onClose={() => setTailscaleOpen(false)}
-        onConfirm={confirm} onInstall={async () => {
-          const nativeGuest = ["macos", "windows-11"].includes(status.guest_system);
-          if (nativeGuest && !await confirm({ title: "更新环境组件？", body: "更新会重新连接浏览器和显示组件，请先保存工作。设备身份、公钥和个人数据保留。", confirm: "更新组件" })) return;
-          await action(nativeGuest ? "/environment/update" : "/tailscale/install", {});
-        }}
-        onOpenBrowser={async url => { const result = await openBrowserPage(url, false); if (result) setTailscaleOpen(false); return Boolean(result); }} />}
       {projectDialog && (
         <ProjectDialog
           current={settings}
@@ -1830,7 +1964,7 @@ function App() {
           onRemoved={async (removed, workspace) => {
             await refreshSettings();
             await refreshStatus.current?.();
-            if (selectedProject === removed) setSelectedProject(workspace);
+            if ((groups.find(group => group.workspace === removed)?.folders || [removed]).includes(selectedProject)) setSelectedProject(workspace);
           }}
         />
       )}

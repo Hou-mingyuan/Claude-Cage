@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sylvinus/agent-vm/internal/transfermeta"
 )
 
 const maxImageBytes = 20 << 20
@@ -18,6 +20,7 @@ const maxImageBytes = 20 << 20
 type imageInputRequest struct {
 	PNG      string  `json:"png"`
 	Text     *string `json:"text,omitempty"`
+	Surface  string  `json:"surface,omitempty"`
 	Target   string  `json:"target"`
 	ID       string  `json:"id"`
 	Transfer string  `json:"transfer,omitempty"`
@@ -46,7 +49,7 @@ func (s *Server) pasteInputStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Target == "desktop" {
-		body, _ := json.Marshal(map[string]any{"kind": "image", "window": input.Window, "pid": input.PID})
+		body, _ := json.Marshal(map[string]any{"kind": "image", "window": input.Window, "pid": input.PID, "surface": input.Surface})
 		result, err := s.guestFiles(ctx, "desktop", "POST", "/start", bytes.NewReader(body), "")
 		id, _ := result["id"].(string)
 		if err != nil || !browserFileID.MatchString(id) {
@@ -162,7 +165,7 @@ func validateInputImage(data []byte) ([]byte, error) {
 	if _, err := png.Decode(bytes.NewReader(data)); err != nil {
 		return nil, errors.New("图片已损坏，请重新复制或选择图片")
 	}
-	return data, nil
+	return transfermeta.SanitizeBytes("image.png", data)
 }
 
 func (s *Server) imageInput(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +216,7 @@ func (s *Server) imageInput(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		body, _ := json.Marshal(map[string]string{"id": input.ID, "png": input.PNG, "transfer": input.Transfer})
+		body, _ := json.Marshal(map[string]string{"id": input.ID, "png": base64.StdEncoding.EncodeToString(data), "transfer": input.Transfer})
 		if _, err = s.guestAPI(ctx, token, "POST", "/paste-image", body); err != nil {
 			http.Error(w, "图片未能粘贴，请点击支持图片的输入框后重试；环境组件过旧时请先更新环境", 502)
 			return
@@ -273,6 +276,10 @@ func (s *Server) guestImage(ctx context.Context, target string, data []byte, win
 	if target == "desktop" {
 		script = "systemctl is-active --quiet cage-claude-desktop.service && sudo -H -u cage env DISPLAY=:78 XAUTHORITY=/run/cage-desktop/Xauthority /usr/local/bin/cage-image-input paste"
 	}
+	script, err := s.linuxTemplate(script)
+	if err != nil {
+		return nil, err
+	}
 	cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", script)
 	cmd.Stdin = bytes.NewReader(data)
 	pipe, err := cmd.StdoutPipe()
@@ -297,7 +304,7 @@ func (s *Server) guestImage(ctx context.Context, target string, data []byte, win
 	}
 	if target == "terminal" {
 		path, ok := result["path"].(string)
-		if !ok || !strings.HasPrefix(path, "/home/cage/.local/share/cage/attachments/image-") || strings.ContainsAny(path, "'\r\n\x00") {
+		if !ok || !s.linuxPathHasPrefix(path, "/home/cage/.local/share/cage/attachments/image-") || strings.ContainsAny(path, "'\r\n\x00") {
 			return nil, errors.New("图片保存路径无效")
 		}
 	}

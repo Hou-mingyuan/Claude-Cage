@@ -341,7 +341,7 @@ func qemuHelp(ctx context.Context, exe string, args ...string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("failed to run %v: stdout=%#q, stderr=%#q", cmd.Args, stdout.String(), stderr.String())
+		return nil, fmt.Errorf("failed to run %v: stdout=%#q, stderr=%#q: %w", cmd.Args, stdout.String(), stderr.String(), qemuExecutionError(err))
 	}
 	// on older versions qemu will write "help" output to stderr
 	if stdout.Len() == 0 {
@@ -490,6 +490,16 @@ func Cmdline(ctx context.Context, cfg Config) (exe string, args []string, err er
 
 func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, args []string, err error) {
 	y := cfg.LimaYAML
+	var macOpts limatype.QEMUOpts
+	if err := limayaml.Convert(y.VMOpts[limatype.QEMU], &macOpts, "vmOpts.qemu"); err != nil {
+		return "", nil, err
+	}
+	if macOpts.MacOS != nil {
+		return macOSCmdline(ctx, cfg, macOpts.MacOS)
+	}
+	if y.OS != nil && *y.OS == limatype.DARWIN {
+		return "", nil, errors.New("QEMU macOS guests require the explicit native macOS device model")
+	}
 	exe, args, err = Exe(*y.Arch)
 	if err != nil {
 		return "", nil, err
@@ -843,7 +853,7 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 		// https://github.com/lima-vm/lima/pull/3319/files#r1986388345
 		virtioNet = "virtio-net-ccw"
 	}
-	args = append(args, "-device", virtioNet+",netdev=net0,mac="+limayaml.MACAddress(cfg.InstanceDir))
+	args = append(args, "-device", virtioNet+",netdev=net0,mac="+limayaml.GuestMACAddress(y, cfg.InstanceDir))
 
 	for i, nw := range y.Networks {
 		if nw.Lima != "" {
@@ -938,6 +948,9 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 		}
 	}
 	// Graphics
+	if *y.Video.Display == "egl-headless" && (runtime.GOOS != "linux" || *y.OS != limatype.LINUX) {
+		return "", nil, errors.New("egl-headless VirGL requires a Linux host and Linux guest")
+	}
 	if *y.Video.Display != "" {
 		display := *y.Video.Display
 		if display == "vnc" {
@@ -950,17 +963,7 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 	}
 
 	if *y.Video.Display != "none" {
-		switch *y.Arch {
-		// FIXME: use virtio-gpu on all the architectures
-		case limatype.X8664, limatype.RISCV64:
-			args = append(args, "-device", "virtio-vga")
-		default:
-			if *y.OS == limatype.WINDOWS {
-				args = append(args, "-device", "ramfb")
-			} else {
-				args = append(args, "-device", "virtio-gpu")
-			}
-		}
+		args = append(args, "-device", graphicsDevice(string(*y.Arch), *y.OS == limatype.WINDOWS, *y.Video.Display == "egl-headless"))
 		args = append(args, "-device", "virtio-keyboard-pci")
 		args = append(args, "-device", "virtio-"+input+"-pci")
 	} else {
@@ -1077,6 +1080,10 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 		args = append(args, "-chardev", fmt.Sprintf("socket,path=%s,server=on,wait=off,id=qga0", guestSock))
 		args = append(args, "-device", "virtio-serial")
 		args = append(args, "-device", "virtserialport,chardev=qga0,name="+filenames.VirtioPort)
+	}
+
+	if y.GuestIdentity != nil {
+		args = append(args, "-uuid", y.GuestIdentity.UUID)
 	}
 
 	// QEMU process
@@ -1304,7 +1311,7 @@ func getQemuVersion(ctx context.Context, qemuExe string) (*semver.Version, error
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("failed to run %v: stdout=%#q, stderr=%#q", cmd.Args, stdout.String(), stderr.String())
+		return nil, fmt.Errorf("failed to run %v: stdout=%#q, stderr=%#q: %w", cmd.Args, stdout.String(), stderr.String(), qemuExecutionError(err))
 	}
 
 	return parseQemuVersion(stdout.String())

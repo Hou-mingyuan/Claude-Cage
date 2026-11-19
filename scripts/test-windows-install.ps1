@@ -1,7 +1,7 @@
 #requires -Version 7.0
 # Runs only on a disposable Windows test user. Does not start a VM.
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Installer)
+param([Parameter(Mandatory)][string]$Installer, [switch]$RequireSignedQemu)
 . (Join-Path $PSScriptRoot 'windows-common.ps1')
 if (-not $IsWindows) { throw 'Installation smoke tests must run on Windows.' }
 $target = Join-Path $env:LOCALAPPDATA ('Programs/Cage-test-' + [guid]::NewGuid().ToString('N'))
@@ -16,7 +16,7 @@ function Assert-PersonalData {
 function Run-Installer {
     param([switch]$Update, [int]$ExpectedExitCode = 0, [string[]]$ShortcutOptions = @())
     $installationReport = Join-Path (Get-WindowsWorkbenchTestBase) ('cage-smoke-installation-' + [guid]::NewGuid().ToString('N') + '.json')
-    $arguments = @('/S', "/DIAGNOSTICS=$installationReport")
+    $arguments = @('/S', ('/DIAGNOSTICS="' + $installationReport + '"'))
     if ($Update) { $arguments += '/UPDATE' }
     $arguments += $ShortcutOptions
     $arguments += "/D=$target"
@@ -71,7 +71,11 @@ Invoke-BuildTool (Join-Path $target 'resources/cage.exe') @('--help')
 Invoke-BuildTool (Join-Path $target 'resources/cage.exe') @('verify-vm-assets')
 Invoke-BuildTool (Join-Path $target 'resources/cage.exe') @('verify-web-assets')
 Invoke-BuildTool (Join-Path $target 'resources/mihomo.exe') @('-v')
-Invoke-BuildTool (Join-Path $target 'resources/runtime/qemu/qemu-system-x86_64.exe') @('--version')
+$qemu = Join-Path $target 'resources/runtime/qemu'
+if ($RequireSignedQemu) {
+    foreach ($file in (Get-WindowsQemuBinaries $qemu)) { Assert-CageReleaseSignature $file.FullName }
+}
+Assert-WindowsQemuRuntime $qemu -Firmware
 Invoke-BuildTool (Join-Path $target 'resources/runtime/openssh/ssh.exe') @('-V')
 # Use the same isolated profile, process lifetime and retained diagnostics as
 # build acceptance. The pre-existing default profile holds preservation markers.

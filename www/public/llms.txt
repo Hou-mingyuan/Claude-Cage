@@ -2,10 +2,10 @@
 
 > Cage is a local and remote isolated development workbench. External agents can help users download, install, configure and diagnose it through the versioned JSON CLI.
 
-- [Agent guide](https://lee-xeo.github.io/Claude-Cage/agent.md): Read this first. Installation paths, protocol discovery, JSON input, tasks, recovery and user authorization boundaries.
-- [Full agent guide](https://lee-xeo.github.io/Claude-Cage/llms-full.txt): Plain-text copy of the same source.
-- [User guide](https://lee-xeo.github.io/Claude-Cage/docs/agent/): Rendered guide.
-- [Download helper](https://lee-xeo.github.io/Claude-Cage/agent-bootstrap.mjs): Node.js 20+, public release discovery and verified package download. Returns an installation plan; does not install.
+- [Agent guide](https://claude-cage.com/agent.md): Read this first. Installation paths, protocol discovery, JSON input, tasks, recovery and user authorization boundaries.
+- [Full agent guide](https://claude-cage.com/llms-full.txt): Plain-text copy of the same source.
+- [User guide](https://claude-cage.com/docs/agent/): Rendered guide.
+- [Download helper](https://claude-cage.com/agent-bootstrap.mjs): Node.js 20+, public release discovery and verified package download. Returns an installation plan; does not install.
 - [Releases](https://github.com/Lee-xeo/Claude-Cage/releases): Published packages and platform-specific validation limits.
 
 Discover installed capabilities before changing anything: <installed CLI> agent capabilities

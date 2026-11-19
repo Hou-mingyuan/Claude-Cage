@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import zipfile
 from unittest.mock import patch
 
 
@@ -26,7 +27,7 @@ class NativeMaintenance(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='cage-native-maintenance-')
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        self.root = Path(self.directory.name).resolve()
         self.kit = self.root / 'kit'
         self.kit.mkdir()
         for name in ('Applications', 'usr/local/libexec', 'private/var/tmp', 'var/db', 'var/run', 'Users/cage'):
@@ -53,12 +54,13 @@ class NativeMaintenance(unittest.TestCase):
             self.skipTest('The production lockf check requires a Mac host')
         runtime = 'usr/local/libexec/cage-cli-runtime-2.1.311-py3.13.18-git2.56.0/bin'
         for name in ('python3', 'claude', 'git'):
-            self.write(f'{runtime}/{name}', '#!/bin/sh\nprintf "fixture version\\n"\n', 0o755)
+            version = '2.1.311 (Claude Code)' if name == 'claude' else 'fixture version'
+            self.write(f'{runtime}/{name}', f'#!/bin/sh\nprintf "{version}\\n"\n', 0o755)
         self.write('usr/local/libexec/cage-cli-2.previous/marker', 'previous-helpers')
         os.symlink(self.root / 'usr/local/libexec/cage-cli-2.previous', self.root / 'usr/local/libexec/cage-cli')
         self.write('usr/local/libexec/cage-sshfs', 'previous-project-helper')
         self.write('Applications/Cage Guest Window.app/Contents/MacOS/CageGuestWindow', 'previous-window')
-        helper_sources = ('macos-cli.py', 'cli_channel.py', 'cli_channel.resume.md', 'claude_account_resume.md', 'claude-account.py')
+        helper_sources = ('macos-cli.py', 'cli_channel.py', 'cli_channel.resume.md', 'claude_account_resume.md', 'claude-account.py', 'client_runtime.py')
         files = []
         for name in helper_sources:
             self.write('kit/' + name, '#!fixture\ncurrent-' + name)
@@ -77,7 +79,10 @@ class NativeMaintenance(unittest.TestCase):
                 ('native-browser/macos-phone-browser.mjs', 'usr/local/libexec/cage-workbench-browser-4.145.0-pw1.65.0/controller/macos-phone-browser.mjs')):
             self.write('kit/' + source, 'current-' + source)
             files.append((source, target))
-        for label, source in (('claude-window', 'register-macos-claude-window.sh'), ('clipboard', 'register-macos-clipboard.sh')):
+        self.write('kit/enable-macos-screensharing.sh', '#!/bin/sh\nexit 73\n')
+        files.append(('enable-macos-screensharing.sh', 'usr/local/libexec/cage-enable-screensharing'))
+        for label, source in (('claude-window', 'register-macos-claude-window.sh'), ('clipboard', 'register-macos-clipboard.sh'),
+                              ('browser', 'register-macos-browser.sh')):
             # Source deliberately has mode 0644, as the clipboard source does.
             self.write('kit/' + source, '''#!/bin/sh
 if [ -n "${CAGE_TEST_HOLD:-}" ]; then
@@ -92,10 +97,12 @@ exit "${CAGE_TEST_FAIL_REGISTER:-0}"
         perl = perl.replace('$> == 0', '$> == ' + str(os.getuid()))
         self.write('kit/native-component-manifest.pl', perl)
         self.write('kit/install-macos-cli.sh', self.translate((SOURCE / 'install-macos-cli.sh').read_text()))
+        self.write('kit/macos-guest-arch.sh', (SOURCE / 'macos-guest-arch.sh').read_text())
         script = self.translate((SOURCE / 'maintain-macos-workbench.sh').read_text())
         script = script.replace('/usr/libexec/PlistBuddy', str(self.root / 'plist-buddy'))
         script = script.replace('/bin/launchctl', str(self.root / 'launchctl'))
         self.write('kit/maintain-macos-workbench.sh', script)
+        self.write('kit/claude-desktop-macos.sh', self.translate((SOURCE / 'claude-desktop-macos.sh').read_text()))
         self.write('plist-buddy', '#!/bin/sh\necho dev.cage.fixture\n', 0o755)
         self.write('launchctl', '''#!/bin/sh
 if [ -n "${CAGE_TEST_LOGIN_WINDOW:-}" ]; then exit 1; fi
@@ -106,9 +113,10 @@ fi
 exit 0
 ''', 0o755)
         self.write('environment.sh', '''
-uname() { printf 'Darwin arm64\\n'; }
+uname() { case "$1" in -s) printf 'Darwin\\n';; -m) printf 'arm64\\n';; *) printf 'Darwin arm64\\n';; esac; }
 sysctl() { printf 'VirtualMac2,1\\n'; }
 id() { if [[ $1 == -u ]]; then echo 501; else echo staff; fi; }
+dscl() { printf 'NFSHomeDirectory: %s\\n' "$3"; }
 stat() {
     if [[ $* == *'/dev/console'* ]]; then if [[ -n ${CAGE_TEST_LOGIN_WINDOW:-} ]]; then echo 0; else echo 501; fi
     elif [[ $* == *'/Users/cage/Library/LaunchAgents/'* ]]; then echo 501
@@ -132,10 +140,143 @@ ps() { :; }
         self.write('kit/native-components.json', json.dumps(manifest))
         return manifest
 
+    def test_screen_sharing_helper_authorizes_only_the_ordinary_guest_user(self):
+        script = self.translate((SOURCE / 'enable-macos-screensharing.sh').read_text())
+        plist = '/System/Library/LaunchDaemons/com.apple.screensharing.plist'
+        script = script.replace(plist, str(self.write('screensharing.plist', 'fixture')))
+        helper = self.write('enable.sh', script)
+        self.write('usr/local/libexec/cage-guest-check', '#!/bin/sh\n[ "$VERIFIED_INTEL" = yes ]\n', 0o755)
+        env_file = self.write('screen-environment.sh', """
+uname() { echo Darwin; }
+sysctl() { echo "$MODEL"; }
+id() { if [[ $1 == -u ]]; then echo 501; else echo "$GROUPS_FIXTURE"; fi; }
+stat() { echo 0; }
+dscl() { test -f "$QA_ROOT/group"; }
+dseditgroup() {
+    case "$2" in create) touch "$QA_ROOT/group";; edit) touch "$QA_ROOT/member";;
+        checkmember) test -f "$QA_ROOT/member";; *) return 1;; esac
+}
+launchctl() {
+    test -f "$QA_ROOT/member" || return 1
+    case "$1" in print) test -f "$QA_ROOT/loaded";; bootstrap) echo loaded >> "$QA_ROOT/loaded";;
+        enable) :;; *) return 1;; esac
+}
+nc() { test "$1/$2/$3" = "-z/127.0.0.1/5900" && test -f "$QA_ROOT/loaded"; }
+""")
+        env = dict(os.environ, BASH_ENV=str(env_file), QA_ROOT=str(self.root), MODEL='Macmini8,1',
+                   VERIFIED_INTEL='no', GROUPS_FIXTURE='staff')
+
+        def enable(user):
+            return subprocess.run(['/bin/bash', str(helper), user], cwd=self.root, env=env,
+                                  capture_output=True, text=True, timeout=10)
+
+        self.assertNotEqual(enable('blue').returncode, 0)
+        env['VERIFIED_INTEL'] = 'yes'
+        for user in ('root', 'cagesetup', 'cageprovision'):
+            self.assertNotEqual(enable(user).returncode, 0, user)
+        env['GROUPS_FIXTURE'] = 'staff admin'
+        self.assertNotEqual(enable('blue').returncode, 0)
+        self.assertFalse((self.root / 'group').exists())
+        env['GROUPS_FIXTURE'] = 'staff'
+        for model in ('Macmini8,1', 'VirtualMac2,1'):
+            env['MODEL'] = model
+            result = enable('blue')
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / 'loaded').read_text(), 'loaded\n')
+
     def run_install(self, fail=False):
         env = {**os.environ, 'BASH_ENV': str(self.root / 'environment.sh'), 'CAGE_TEST_FAIL_REGISTER': '1' if fail else '0'}
         return subprocess.run(['/bin/bash', str(self.kit / 'maintain-macos-workbench.sh'), str(self.kit), 'cage', 'components'],
                               capture_output=True, text=True, env=env, timeout=15)
+
+    def test_cli_tool_update_adds_github_and_preserves_login(self):
+        self.prepare_installer()
+        script = (self.kit / 'install-macos-cli.sh').read_text()
+        # Keep the real installer, ZIP layout, executable and hash checks.
+        # Large already-installed runtime packages use small fixed fixtures.
+        for name in ('claude', 'uv.tar.gz', 'python.tar.gz', 'git.tar.gz'):
+            contents = '#!/bin/sh\nprintf "2.1.322 (Claude Code)\\n"\n' if name == 'claude' else 'runtime-package-fixture'
+            package = self.write('kit/' + name, contents)
+            checksum = hashlib.sha256(package.read_bytes()).hexdigest()
+            script = re.sub(r'check "\$CAGE_MACOS_[A-Z]+_SHA256" ' + re.escape(name) + r'\n', f'check {checksum} {name}\n', script)
+            if name == 'claude':
+                self.write('kit/claude-manifest.json', json.dumps({'version': '2.1.322', 'platforms': {'darwin-arm64': {'binary': 'claude', 'checksum': checksum}}}))
+        archive = self.kit / 'gh.zip'
+        with zipfile.ZipFile(archive, 'w') as output:
+            info = zipfile.ZipInfo('gh_2.103.3_macOS_arm64/bin/gh')
+            info.external_attr = 0o100755 << 16
+            output.writestr(info, '#!/bin/sh\nprintf "gh version 2.103.3 (fixture)\\n"\n')
+            output.writestr('gh_2.103.3_macOS_arm64/LICENSE', 'license-fixture')
+        checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+        script = re.sub(r'check "\$CAGE_MACOS_GH_SHA256" gh.zip\n', f'check {checksum} gh.zip\n', script)
+        self.write('kit/install-macos-cli.sh', script)
+        auth = self.write('Users/cage/.config/gh/hosts.yml', 'login-marker', 0o600)
+        env = {**os.environ, 'BASH_ENV': str(self.root / 'environment.sh')}
+        for _ in range(2):
+            result = subprocess.run(['/bin/bash', str(self.kit / 'install-macos-cli.sh'), str(self.kit)],
+                                    capture_output=True, text=True, env=env, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            gh = self.root / 'usr/local/libexec/cage-cli/bin/gh'
+            self.assertIn('gh version 2.103.3', subprocess.check_output([gh], text=True))
+            self.assertEqual(auth.read_text(), 'login-marker')
+            self.assertEqual((self.root / 'usr/local/libexec/cage-gh-2.103.3/LICENSE').read_text(), 'license-fixture')
+            self.assertIn('2.1.322', subprocess.check_output([self.root / 'usr/local/libexec/cage-cli/bin/claude', '--version'], text=True))
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / 'usr/local/libexec/cage-cli/bin/gh').is_file())
+        self.assertEqual(auth.read_text(), 'login-marker')
+        current = os.readlink(self.root / 'usr/local/libexec/cage-cli')
+        older = self.write('kit/claude', '#!/bin/sh\nprintf "2.1.311 (Claude Code)\\n"\n')
+        metadata = {'version': '2.1.311', 'platforms': {'darwin-arm64': {'binary': 'claude', 'checksum': hashlib.sha256(older.read_bytes()).hexdigest()}}}
+        self.write('kit/claude-manifest.json', json.dumps(metadata))
+        result = subprocess.run(['/bin/bash', str(self.kit / 'install-macos-cli.sh'), str(self.kit)],
+                                capture_output=True, text=True, env=env, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn('2.1.322', subprocess.check_output([self.root / 'usr/local/libexec/cage-cli/bin/claude', '--version'], text=True))
+        self.assertEqual(os.readlink(self.root / 'usr/local/libexec/cage-cli'), current)
+        metadata['platforms']['darwin-arm64']['checksum'] = '0' * 64
+        self.write('kit/claude-manifest.json', json.dumps(metadata))
+        result = subprocess.run(['/bin/bash', str(self.kit / 'install-macos-cli.sh'), str(self.kit)],
+                                capture_output=True, text=True, env=env, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(os.readlink(self.root / 'usr/local/libexec/cage-cli'), current)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(os.readlink(self.root / 'usr/local/libexec/cage-cli'), current)
+        self.assertEqual(auth.read_text(), 'login-marker')
+
+    def test_desktop_install_keeps_a_newer_signed_application(self):
+        self.prepare_installer()
+        application = self.root / 'Applications/Claude.app'
+        properties = {'CFBundleIdentifier': 'com.anthropic.claudefordesktop', 'CFBundleShortVersionString': '5.1231.3', 'CFBundleVersion': '123'}
+        self.write('Applications/Claude.app/Contents/Info.plist', json.dumps(properties))
+        self.write('Applications/Claude.app/account-marker', 'keep existing application')
+        original = (application / 'Contents/Info.plist').read_bytes()
+        older = {**properties, 'CFBundleShortVersionString': '5.1231.2', 'CFBundleVersion': '122'}
+        self.write('older.plist', json.dumps(older))
+        with (self.root / 'environment.sh').open('a') as environment:
+            environment.write('''
+hdiutil() {
+    if [[ $1 == attach ]]; then
+        local previous='' argument destination=''
+        for argument in "$@"; do
+            if [[ $previous == -mountpoint ]]; then destination=$argument; fi
+            previous=$argument
+        done
+        mkdir -p "$destination/Claude.app/Contents"
+        cp "$FIXTURE_DESKTOP_PLIST" "$destination/Claude.app/Contents/Info.plist"
+    fi
+}
+''')
+        script = self.write('kit/claude-desktop-macos.sh', self.translate((SOURCE / 'claude-desktop-macos.sh').read_text()))
+        dmg = self.write('Claude.dmg', 'media fixture')
+        result = subprocess.run(['/bin/bash', str(script), 'install', str(dmg)],
+                                env={**os.environ, 'BASH_ENV': str(self.root / 'environment.sh'), 'FIXTURE_DESKTOP_PLIST': str(self.root / 'older.plist')},
+                                text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual((application / 'Contents/Info.plist').read_bytes(), original)
+        self.assertEqual((application / 'account-marker').read_text(), 'keep existing application')
+        self.assertEqual((self.root / 'Users/cage/account.json').read_text(), 'account-and-login-marker')
 
     def test_existing_guest_failure_rollback_retry_and_new_helpers(self):
         manifest = self.prepare_installer()
@@ -147,6 +288,8 @@ ps() { :; }
         self.assertFalse((self.root / 'Applications/Cage Guest Clipboard.app').exists())
         self.assertEqual(os.readlink(self.root / 'usr/local/libexec/cage-cli'), previous)
         self.assertFalse((self.root / 'var/db/cage-components.json').exists())
+        sharing = self.root / 'usr/local/libexec/cage-enable-screensharing'
+        self.assertFalse(sharing.exists())
         for attempt in range(2):
             result = self.run_install()
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -155,6 +298,7 @@ ps() { :; }
             self.assertEqual((self.root / 'Users/cage/account.json').read_text(), 'account-and-login-marker')
             self.assertEqual((self.root / 'Users/cage/project.txt').read_text(), 'project-marker')
             self.assertTrue(os.access(self.root / 'usr/local/libexec/cage-register-clipboard', os.X_OK))
+            self.assertTrue(os.access(sharing, os.X_OK))
         old_receipt = (self.root / 'var/db/cage-components.json').read_bytes()
         original_source = (self.kit / 'project/cage-sshfs').read_bytes()
         self.write('kit/project/cage-sshfs', 'next-project-helper')

@@ -130,6 +130,7 @@ rm -f /etc/ssh/ssh_host_* /etc/ssh/cage_authorized_keys
 rm -rf /home/cage/.cache/cage/downloads /home/cage/.cache/mise /home/cage/.npm /home/cage/.config/code-server /home/cage/.config/pulse
 rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /var/log/journal/* /run/log/journal/*
 find /var/log -type f -exec truncate -s 0 {} +
+rm -f /var/lib/dbus/machine-id
 : > /etc/machine-id
 chmod 0755 /usr/local/lib/cage-runtime
 GUEST
@@ -140,7 +141,7 @@ cage_image_id=$(cat "$cage_stage/image-id")
 [[ "$cage_image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Invalid committed image identity.' >&2; exit 1; }
 engine run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
   --cgroup-parent "$cage_slice" --cpus 1 --memory 256m --pids-limit 64 --entrypoint /bin/sh "$cage_image_id" -ec \
-  'test ! -s /etc/machine-id; test -z "$(find /etc/ssh -maxdepth 1 -name "ssh_host_*" -print -quit)"; test ! -e /etc/ssh/cage_authorized_keys; test ! -e /etc/claude-cage/browser-control.json; test ! -e /home/cage/.config/claude-cage/browser-password; test ! -e /home/cage/.claude/.credentials.json; test ! -e /home/cage/.claude-cage; test ! -e /home/cage/.config/code-server/config.yaml; test ! -e /home/cage/.config/pulse/cookie; test ! -e /etc/systemd/system/cage-memory.service; test -x /usr/local/lib/cage-runtime; test -s /usr/local/lib/cage-browser-agent.mjs; grep -qx "URIs: http://deb.debian.org/debian" /etc/apt/sources.list.d/debian.sources; grep -qx "URIs: http://deb.debian.org/debian-security" /etc/apt/sources.list.d/debian.sources; test "$(grep -c "^URIs:" /etc/apt/sources.list.d/debian.sources)" = 2; printf "image identity and software source checks passed\n"' \
+  'test ! -s /etc/machine-id; test ! -e /var/lib/dbus/machine-id; test ! -L /var/lib/dbus/machine-id; test -z "$(find /etc/ssh -maxdepth 1 -name "ssh_host_*" -print -quit)"; test ! -e /etc/ssh/cage_authorized_keys; test ! -e /etc/claude-cage/browser-control.json; test ! -e /home/cage/.config/claude-cage/browser-password; test ! -e /home/cage/.claude/.credentials.json; test ! -e /home/cage/.claude-cage; test ! -e /home/cage/.config/code-server/config.yaml; test ! -e /home/cage/.config/pulse/cookie; test ! -e /etc/systemd/system/cage-memory.service; test -x /usr/local/lib/cage-runtime; test -s /usr/local/lib/cage-browser-agent.mjs; grep -qx "URIs: http://deb.debian.org/debian" /etc/apt/sources.list.d/debian.sources; grep -qx "URIs: http://deb.debian.org/debian-security" /etc/apt/sources.list.d/debian.sources; test "$(grep -c "^URIs:" /etc/apt/sources.list.d/debian.sources)" = 2; printf "image identity and software source checks passed\n"' \
   > "$cage_stage/image-check.log"
 if [[ -n "${CAGE_IMAGE_ID_OUTPUT:-}" ]]; then
   cp "$cage_stage/image-id" "$CAGE_IMAGE_ID_OUTPUT"

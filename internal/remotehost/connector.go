@@ -3,6 +3,8 @@ package remotehost
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"github.com/sylvinus/agent-vm/internal/host"
 	"golang.org/x/crypto/ssh"
@@ -29,6 +32,24 @@ func ServerEntryCommand(p HostProfile) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if p.Platform == "windows" {
+		// PowerShell also treats the four typographic single quotes as delimiters.
+		quotes := strings.NewReplacer("'", "''", "‘", "'‘", "’", "'’", "‚", "'‚", "‛", "'‛")
+		quote := func(value string) string { return "'" + quotes.Replace(value) + "'" }
+		command := "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); "
+		if p.ConfigPath != "" {
+			command += "$env:CLAUDE_CAGE_CONFIG=" + quote(p.ConfigPath) + "; "
+		}
+		command += "& " + quote(p.Executable) + " server-entry --json; exit $LASTEXITCODE"
+		// EncodedCommand is understood by Windows PowerShell whether OpenSSH's
+		// default shell is cmd.exe or PowerShell. Paths remain literal strings.
+		units := utf16.Encode([]rune(command))
+		encoded := make([]byte, 2*len(units))
+		for i, unit := range units {
+			binary.LittleEndian.PutUint16(encoded[2*i:], unit)
+		}
+		return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(encoded), nil
+	}
 	command := shellQuote(p.Executable) + " server-entry --json"
 	if p.ConfigPath != "" {
 		command = "env CLAUDE_CAGE_CONFIG=" + shellQuote(p.ConfigPath) + " " + command
@@ -42,7 +63,9 @@ func ValidateManifest(m ServerManifest) error {
 	if m.APIProtocol != APIProtocol {
 		return failure("protocol_incompatible", "云端 Cage 协议与客户端不兼容，请更新到兼容版本")
 	}
-	if !instancePattern.MatchString(m.InstanceID) || m.Platform != "linux" || (m.Runtime != "container" && m.Runtime != "lima") || len(m.Version) > 128 || hasControl(m.Version) {
+	supported := m.Platform == "linux" && (m.Runtime == "container" || m.Runtime == "lima") ||
+		m.Platform == "windows" && m.Runtime == "windows-remote"
+	if !instancePattern.MatchString(m.InstanceID) || !supported || len(m.Version) > 128 || hasControl(m.Version) {
 		return failure("manifest_invalid", "云端 Cage 身份响应无效")
 	}
 	u, err := url.Parse(m.Origin)
@@ -55,6 +78,9 @@ func ValidateManifest(m ServerManifest) error {
 	}
 	if len(m.Ticket) < 32 || len(m.Ticket) > 512 || hasControl(m.Ticket) || len(m.Capabilities) > 64 {
 		return failure("manifest_invalid", "云端 Cage 连接票据无效")
+	}
+	if m.Runtime == "windows-remote" && !instancePattern.MatchString(m.RemoteView) || m.Runtime != "windows-remote" && m.RemoteView != "" {
+		return failure("manifest_invalid", "云端 Windows 视图凭据无效")
 	}
 	for key := range m.Capabilities {
 		if key == "" || len(key) > 64 || hasControl(key) {
@@ -213,6 +239,9 @@ func connect(lifetime context.Context, p HostProfile, secrets ConnectSecrets, ph
 	if err = ValidateManifest(manifest); err != nil {
 		return nil, err
 	}
+	if manifest.Platform != p.Platform {
+		return nil, failure("platform_mismatch", "云端系统与保存的主机类型不一致，请检查远程主机设置")
+	}
 	origin, _ := url.Parse(manifest.Origin)
 	targetHost := origin.Hostname()
 	if targetHost == "localhost" {
@@ -257,6 +286,10 @@ func connect(lifetime context.Context, p HostProfile, secrets ConnectSecrets, ph
 	if ready.Err() != nil {
 		s.Close()
 		return nil, failure("connection_cancelled", "远程连接已取消")
+	}
+	if manifest.RemoteView != "" {
+		jar.SetCookies(origin, []*http.Cookie{{Name: "cage_remote_view_" + origin.Port(), Value: manifest.RemoteView, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode}})
+		manifest.RemoteView = ""
 	}
 	stopReady()
 	complete = true

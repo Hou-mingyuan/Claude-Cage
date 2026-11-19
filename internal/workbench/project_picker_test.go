@@ -52,7 +52,7 @@ func TestProjectPickerConsumerAddsOnceAndReusesAuthorizedDirectory(t *testing.T)
 		}
 	}
 	projects, err := s.projectPaths()
-	if err != nil || !slices.Equal(projects, []string{s.environmentDir(), a, b}) {
+	if err != nil || !slices.Equal(projects, []string{a, b}) {
 		t.Fatal("list diverged or repeated grants", projects, err)
 	}
 	reloaded := testServer(t)

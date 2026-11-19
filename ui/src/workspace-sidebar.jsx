@@ -9,16 +9,17 @@ import {
   Home,
   Monitor,
   Network,
-  MessageCircle,
   PanelLeftClose,
   Plus,
   RefreshCw,
   Settings,
   Server,
   SquareTerminal,
+  UsersRound,
 } from "lucide-react";
 import { EnvironmentShield } from "./environment-shield";
 import logo from "./logo.png";
+import claudeLogo from "./claude-logo.svg";
 import { projectName } from "./workspace-state.mjs";
 import { WorkspaceTabs } from "./workspace-tabs";
 import { projectSessionRows, sessionKey } from "./session-order.mjs";
@@ -26,16 +27,20 @@ import { AccountMenu } from "./account";
 import { useSSHNavigation } from "./remote-hosts";
 import { GuestSystemIcon } from "./guest-system-icon";
 
+const SESSION_PREVIEW_LIMIT = 5;
+
 export function WorkspaceSidebar({
   workspace,
   guestSystem,
-  defaultWorkspace,
   projects,
+  projectGroups = [],
   tabs,
   sessions = [],
   sessionError,
   sessionRefreshing,
   onSessionRefresh,
+  onProjectRefresh,
+  projectRefreshing,
   onSessionOpen,
   openingSession,
   sessionOpenError,
@@ -51,6 +56,9 @@ export function WorkspaceSidebar({
   runtimeLabel,
   network,
   onHome,
+  browserAvailable = true,
+  editorAvailable = true,
+  projectsAvailable = true,
   onOpenProject,
   onProjectSelect,
   onSelect,
@@ -63,7 +71,9 @@ export function WorkspaceSidebar({
   terminalMenuAt,
   onBrowser,
   onTailscale,
-  downloadAction,
+  tailscaleOpen,
+  onClaudeAccounts,
+  claudeAccountsOpen,
   onClaudeWeb,
   onClaudeDesktop,
   desktopOpen,
@@ -77,8 +87,10 @@ export function WorkspaceSidebar({
 }) {
   const ssh = useSSHNavigation();
   const [collapsed, setCollapsed] = useState({});
+  const [allSessionsShown, setAllSessionsShown] = useState({});
   const sessionBaseline = useRef(new Map());
-  const activeWorkspace = tabs.find((tab) => tab.id === active)?.workspace;
+  const activeFolder = tabs.find((tab) => tab.id === active)?.workspace;
+  const activeWorkspace = projectGroups.find(group => group.folders.includes(activeFolder))?.workspace || activeFolder;
   useEffect(() => {
     if (activeWorkspace)
       setCollapsed((previous) => ({ ...previous, [activeWorkspace]: false }));
@@ -110,36 +122,60 @@ export function WorkspaceSidebar({
           <Home size={17} />
           工作台
         </button>
-        <button
-          className={`sidebar-link ${!desktopOpen && !home && tabs.some((tab) => tab.id === active && tab.kind !== "terminal") ? "selected" : ""}`}
-          onClick={onBrowser}
-          disabled={!ready || busy}
-          aria-label="打开浏览器"
-          title="打开浏览器"
-        >
-          <Globe2 size={17} />
-          浏览器
-        </button>
-        <button className="sidebar-link" onClick={onTailscale} aria-label="打开 Tailscale"><Network size={17} />Tailscale</button>
-        {ssh && <button className="sidebar-link ssh-navigation" onClick={ssh.open} aria-label="SSH 主机"><Server size={17} />SSH</button>}
-        <div className="claude-shortcuts">
-          <button className="sidebar-link" onClick={onClaudeWeb} disabled={!ready || busy} title="在 Cage 浏览器打开 claude.ai"><MessageCircle size={17} />claude.ai</button>
-          <button className={`sidebar-link ${desktopOpen ? "selected" : ""}`} onClick={onClaudeDesktop} disabled={!running || busy} title="安装或打开 Claude Desktop"><Monitor size={17} />Claude Desktop</button>
+        <div className={`sidebar-browser-row ${!desktopOpen && !home && tabs.some((tab) => tab.id === active && tab.kind !== "terminal") ? "selected" : ""}`}>
+          <button
+            className="sidebar-link"
+            onClick={onBrowser}
+            disabled={!ready || busy || !browserAvailable}
+            aria-label="打开浏览器"
+            title="打开浏览器"
+          >
+            <Globe2 size={17} />
+            浏览器
+          </button>
+          <button
+            className="icon-button sidebar-claude-shortcut"
+            onClick={onClaudeWeb}
+            disabled={!ready || busy || !browserAvailable}
+            aria-label="claude.ai"
+            title="打开 claude.ai"
+          >
+            <img src={claudeLogo} width="18" height="18" alt="" />
+          </button>
         </div>
-        {downloadAction}
+        <button className={`sidebar-link ${tailscaleOpen ? "selected" : ""}`} aria-current={tailscaleOpen ? "page" : undefined} onClick={onTailscale} aria-label="打开 Tailscale"><Network size={17} />Tailscale</button>
+        {ssh && <button className="sidebar-link ssh-navigation" onClick={ssh.open} aria-label="SSH 主机"><Server size={17} />SSH</button>}
+        <button className={`sidebar-link ${desktopOpen ? "selected" : ""}`} onClick={onClaudeDesktop} disabled={!running || busy} title="安装或打开 Claude Desktop"><Monitor size={17} />Claude Desktop</button>
+        <button className={`sidebar-link ${claudeAccountsOpen ? "selected" : ""}`} onClick={onClaudeAccounts}
+          aria-current={claudeAccountsOpen ? "page" : undefined}>
+          <UsersRound size={17} />Claude 账号管理
+        </button>
       </nav>
       <div className="sidebar-scroll">
         <div className="sidebar-section-heading">
           <span>项目</span>
-          <button
-            className="icon-button"
-            onClick={() => onOpenProject()}
-            aria-label="添加项目"
-            title="添加项目"
-            disabled={busy}
-          >
-            <Plus size={15} />
-          </button>
+          <span className="sidebar-section-actions">
+            {onProjectRefresh && (
+              <button
+                className="icon-button"
+                onClick={onProjectRefresh}
+                aria-label="刷新项目文件"
+                title="刷新项目文件：让环境立即看到在本机上所做的改动"
+                disabled={busy || !running || projectRefreshing}
+              >
+                <RefreshCw size={14} className={projectRefreshing ? "spin" : undefined} />
+              </button>
+            )}
+            <button
+              className="icon-button"
+              onClick={() => onOpenProject()}
+              aria-label="添加项目"
+              title={projectsAvailable ? "添加项目" : "当前环境尚未支持外部项目，文件保存在隔离工作目录中"}
+              disabled={busy || !projectsAvailable}
+            >
+              <Plus size={15} />
+            </button>
+          </span>
         </div>
         {sessionError && (
           <div className="sidebar-session-error">
@@ -161,12 +197,16 @@ export function WorkspaceSidebar({
           </div>
         )}
         {projects.map((path) => {
-          const project = projectName(path, defaultWorkspace);
-          const rows = projectSessionRows(tabs.filter(tab => tab.kind === "terminal" && tab.workspace === path),
-            sessions.filter(session => session.workspace === path), saved, saved.sessionOrder?.[path], sessionBaseline.current);
+          const group = projectGroups.find(group => group.workspace === path);
+          const folders = group?.folders || [path];
+          const project = projectName(path, projectGroups);
+          const rows = projectSessionRows(tabs.filter(tab => tab.kind === "terminal" && folders.includes(tab.workspace)),
+            sessions.filter(session => folders.includes(session.workspace)), saved, saved.sessionOrder?.[path], sessionBaseline.current);
           const rowMetadata = { ...saved };
           for (const row of rows) rowMetadata[row.id] = { ...saved[row.id], pinned: row.sessionPinned };
           const expanded = !collapsed[path];
+          const showAllSessions = Boolean(allSessionsShown[path]);
+          const visibleRows = showAllSessions ? rows : rows.slice(0, SESSION_PREVIEW_LIMIT);
           return (
             <section
               className="sidebar-project"
@@ -174,17 +214,18 @@ export function WorkspaceSidebar({
               aria-label={`项目 ${project}`}
             >
               <div
-                className={`project-heading ${workspace === path ? "current-project" : ""}`}
+                className={`project-heading ${folders.includes(workspace) ? "current-project" : ""}`}
               >
                 <button
                   className="project-disclosure"
-                  title={path}
+                  title={folders.join("\n")}
                   aria-expanded={expanded}
                   onClick={() => {
                     setCollapsed((previous) => ({
                       ...previous,
                       [path]: expanded,
                     }));
+                    setAllSessionsShown((previous) => ({ ...previous, [path]: false }));
                     onProjectSelect(path);
                   }}
                 >
@@ -195,7 +236,7 @@ export function WorkspaceSidebar({
                   className="icon-button"
                   aria-label={`打开 ${project} 的编辑器`}
                   title="在 code-server 中打开项目目录"
-                  disabled={!ready || busy}
+                  disabled={!ready || busy || !editorAvailable}
                   onClick={() => onEditor(path)}
                 >
                   <ExternalLink size={15} />
@@ -219,6 +260,9 @@ export function WorkspaceSidebar({
                 </button>
               </div>
               {terminalMenuAt(path)}
+              {expanded && folders.length > 1 && <div className="sidebar-project-folders" aria-label={`${project} 的文件夹`}>
+                {folders.map((folder, index) => <button key={folder} title={folder} disabled={!ready || busy || !editorAvailable} onClick={() => onEditor(folder)} aria-label={`打开文件夹 ${projectName(folder)} 的编辑器`}><Folder size={13} /><span>{projectName(folder)}</span>{index === 0 && <small>默认</small>}</button>)}
+              </div>}
               <div
                 className={`project-children ${expanded ? "expanded" : ""}`}
                 inert={!expanded}
@@ -226,7 +270,7 @@ export function WorkspaceSidebar({
                 <div>
                   {!!rows.length && (
                     <WorkspaceTabs
-                      tabs={rows}
+                      tabs={visibleRows}
                       saved={rowMetadata}
                       openingSession={openingSession}
                       sessionOpenError={sessionOpenError}
@@ -255,6 +299,18 @@ export function WorkspaceSidebar({
                       splitDrag={splitDrag}
                     />
                   )}
+                  {rows.length > SESSION_PREVIEW_LIMIT && (
+                    <button
+                      className="project-session-toggle"
+                      aria-expanded={showAllSessions}
+                      onClick={() => setAllSessionsShown((previous) => ({
+                        ...previous,
+                        [path]: !showAllSessions,
+                      }))}
+                    >
+                      {showAllSessions ? "收起显示" : "展开显示"}
+                    </button>
+                  )}
                   {!rows.length && !running && (
                     <p className="sidebar-empty">启动后可新建终端</p>
                   )}
@@ -264,7 +320,7 @@ export function WorkspaceSidebar({
           );
         })}
         {!projects.length && (
-          <p className="sidebar-empty">打开本地文件夹开始工作</p>
+          <p className="sidebar-empty">{projectsAvailable ? "打开本地文件夹开始工作" : "使用 PowerShell 管理隔离工作目录中的文件"}</p>
         )}
       </div>
       <div className="sidebar-bottom">

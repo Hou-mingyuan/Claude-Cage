@@ -7,68 +7,6 @@ cage_tool_version() {
   awk '$1 ~ /^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$/ && !found { print $1; found=1 }'
 }
 
-# curl flushes every received chunk with --no-buffer. Watch actual file growth,
-# including single bytes, instead of imposing a minimum speed or total duration.
-# Keep curl's HTTP status output and exit codes for the caller's retry policy.
-cage_curl_download() {
-  python3 - "$@" <<'CAGE_DOWNLOAD_IDLE'
-import os
-import signal
-import subprocess
-import sys
-import time
-
-artifact = sys.argv[1]
-idle_timeout = 60
-
-def size():
-    try:
-        return os.stat(artifact).st_size
-    except FileNotFoundError:
-        return 0
-
-def stop(signum, frame):
-    sys.exit(128 + signum)
-
-signal.signal(signal.SIGTERM, stop)
-received = size()
-name = os.path.basename(artifact).removesuffix(".part").removesuffix(".mirror")
-show_progress = os.environ.get("CAGE_SETUP_PROGRESS") == "1"
-def report(count):
-    if show_progress:
-        print(f"CAGE_TOOL_BYTES {name} {count}", file=sys.stderr, flush=True)
-report(received)
-last_received = time.monotonic()
-meter = ["--silent", "--show-error"] if show_progress else []
-process = subprocess.Popen(["curl", "--no-buffer", *meter, *sys.argv[2:]], stdin=subprocess.DEVNULL)
-try:
-    while True:
-        try:
-            status = process.wait(timeout=min(1, idle_timeout))
-            report(size())
-            break
-        except subprocess.TimeoutExpired:
-            current = size()
-            if current > received:
-                report(current)
-                last_received = time.monotonic()
-            received = current
-            if time.monotonic() - last_received >= idle_timeout:
-                print("Download received no data for 60 seconds; retrying with saved partial data.", file=sys.stderr)
-                status = 28
-                break
-finally:
-    if process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-sys.exit(status if status >= 0 else 128 - status)
-CAGE_DOWNLOAD_IDLE
-}
-
 # The caller holds the checksum directory lock. Partial files survive a failed
 # attempt; only a complete checksum-verified artifact is eligible for install.
 cage_download_tool() (
@@ -82,7 +20,9 @@ cage_download_tool() (
   for ((attempt=1; attempt<=attempts; attempt++)); do
     url="$upstream"
     part="$artifact.part"
-    if [ "$attempt" = 2 ] && [ -n "$mirror" ] && [ ! -s "$part" ]; then
+    # Keep each source's partial separate so a failed mirror can return to the
+    # official source's saved offset, even when it stopped after receiving data.
+    if [ "$attempt" = 2 ] && [ -n "$mirror" ]; then
       url="$mirror"
       part="$artifact.mirror.part"
     fi
@@ -99,10 +39,12 @@ cage_download_tool() (
     if [ "$status" = 0 ] || [ "$http" = 416 ]; then
       if printf '%s  %s\n' "$checksum" "$part" | "$hash" --check --status; then
         mv -f "$part" "$artifact" || return 1
-        rm -f "$artifact.mirror.part"
+        rm -rf "$artifact.part.ranges" "$artifact.mirror.part.ranges"
+        rm -f "$artifact.part" "$artifact.mirror.part"
         return 0
       fi
       rm -f "$part"
+      rm -rf "$part.ranges"
       if [ "$url" != "$upstream" ]; then
         echo 'Mirror checksum mismatch; retrying from the official source.' >&2
         continue
@@ -118,7 +60,7 @@ cage_download_tool() (
       fi
       continue
     fi
-    if [ "$attempt" = 1 ] && [ -n "$mirror" ] && [ ! -s "$part" ]; then
+    if [ "$attempt" = 1 ] && [ -n "$mirror" ]; then
       echo 'Official download unavailable; trying the fallback mirror.' >&2
       continue
     fi
@@ -192,12 +134,28 @@ cage_install_mise() (
   mv -f "$stage" "$HOME/.local/bin/mise"
 )
 
+cage_configure_claude_npm_prefix() {
+  local prefix="$HOME/.local" current_prefix
+  # Claude's updater starts a new npm process without the install command's --prefix.
+  current_prefix="$(npm prefix --global </dev/null)" || return
+  if [ "$current_prefix" != "$prefix" ]; then
+    npm config set --location=user "prefix=$prefix" </dev/null
+  fi
+}
+
 cage_install_tool() (
   set -euo pipefail
   local tool="$1" arch current='' wanted url checksum artifact mirror=''
   arch="$(dpkg --print-architecture)"
   case "$arch" in arm64|amd64) ;; *) echo 'Cage tool packages support arm64 and amd64.' >&2; exit 1 ;; esac
   case "$tool" in
+    gh)
+      wanted="$CAGE_GH_VERSION"
+      if command -v gh >/dev/null; then current="$(gh --version | awk '$1 == "gh" && $2 == "version" { print $3 }' | cage_tool_version)" || current=''; fi
+      url="https://github.com/cli/cli/releases/download/v$wanted/gh_${wanted}_linux_${arch}.deb"
+      if [ "$arch" = arm64 ]; then checksum="$CAGE_GH_ARM64_SHA256"; else checksum="$CAGE_GH_AMD64_SHA256"; fi
+      artifact=gh.deb
+      ;;
     code-server)
       wanted="$CAGE_CODE_SERVER_VERSION"
       if command -v code-server >/dev/null; then current="$(code-server --version | cage_tool_version)" || current=''; fi
@@ -218,12 +176,21 @@ cage_install_tool() (
         echo 'Claude Code 需要 SSE4.2 指令。当前 x86_64 客机未提供该指令，请检查宿主 CPU、虚拟化平台和虚拟 CPU 配置后重启环境。' >&2
         exit 1
       fi
-      wanted="$CAGE_CLAUDE_VERSION"
+      # Resolve at installation/update time, then keep that exact version for
+      # both the integrity-checked native cache and the npm installation.
+      export npm_config_fetch_retries=3 npm_config_fetch_timeout=120000
+      wanted="$(npm view --registry=https://registry.npmjs.org @anthropic-ai/claude-code@latest version --json </dev/null | jq -er 'select(type == "string") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))')"
       if command -v claude >/dev/null; then current="$(DISABLE_AUTOUPDATER=1 claude --version | cage_tool_version)" || current=''; fi
       ;;
     *) echo 'Unknown Cage tool.' >&2; exit 2 ;;
   esac
   if [ -n "$current" ] && dpkg --compare-versions "${current#v}" ge "$wanted"; then
+    # Repair existing Cage npm installs even when no package upgrade is needed.
+    local claude_package="$HOME/.local/lib/node_modules/@anthropic-ai/claude-code"
+    if [ "$tool" = claude ] && [ -d "$claude_package" ] &&
+      [[ "$(readlink -f -- "$(command -v claude)")" == "$(cd "$claude_package" && pwd -P)/"* ]]; then
+      cage_configure_claude_npm_prefix
+    fi
     printf '%s already meets required version %s.\n' "$tool" "$wanted"
     exit 0
   fi
@@ -232,6 +199,7 @@ cage_install_tool() (
     cage_cache_claude "$arch" "$wanted"
     if [ "${CAGE_SETUP_PROGRESS:-}" = 1 ]; then echo "Installing Claude Code..."; fi
     npm install --registry=https://registry.npmjs.org --prefix "$HOME/.local" --global "@anthropic-ai/claude-code@$wanted" </dev/null
+    cage_configure_claude_npm_prefix
     exit 0
   fi
   local cache="$HOME/.cache/cage/downloads/$checksum"

@@ -18,9 +18,20 @@ import (
 
 // RunTAP is an internal guest-only helper. Its stdout is exclusively framed
 // Ethernet data. The caller connects it to the host-owned network stack.
-func RunTAP(ctx context.Context, input io.Reader, output io.Writer) error {
+func RunTAP(ctx context.Context, input io.Reader, output io.Writer, macs ...string) error {
 	if err := requirePrivateGuestNetwork(); err != nil {
 		return err
+	}
+	guestMAC := GuestMAC
+	if len(macs) > 1 {
+		return errors.New("expected at most one guest MAC")
+	}
+	if len(macs) == 1 {
+		mac, err := net.ParseMAC(macs[0])
+		if err != nil || len(mac) != 6 || mac[0]&3 != 2 {
+			return errors.New("invalid guest MAC")
+		}
+		guestMAC = mac.String()
 	}
 	// A disconnected engine exec can take a moment to deliver EOF to its old
 	// helper. Wait for that non-persistent TAP to vanish; never delete an
@@ -73,7 +84,7 @@ func RunTAP(ctx context.Context, input io.Reader, output io.Writer) error {
 	}
 	defer file.Close()
 	for _, arguments := range [][]string{
-		{"link", "set", "dev", TapName, "address", GuestMAC, "mtu", fmt.Sprint(NetworkMTU)},
+		{"link", "set", "dev", TapName, "address", guestMAC, "mtu", fmt.Sprint(NetworkMTU)},
 		{"link", "set", "dev", "lo", "up"},
 		{"address", "add", GuestIP + "/24", "dev", TapName},
 		{"link", "set", "dev", TapName, "up"},

@@ -95,6 +95,11 @@ func (r *Runtime) readParentLimits(ctx context.Context, connection *systemd.Conn
 	if !ok || !strings.HasPrefix(parentPath, "/") || filepath.Clean(parentPath) != parentPath || filepath.Base(parentPath) != r.resourceSlice() {
 		return resourceEvidence{}, errors.New("宿主资源 cgroup 路径无效")
 	}
+	slice, err := readCgroupLimits(parentPath)
+	if err != nil {
+		return resourceEvidence{}, err
+	}
+	var scopeLimits *cgroupLimits
 	if containerID != "" {
 		prefix := "docker-"
 		if r.config.Engine == "podman" {
@@ -105,26 +110,32 @@ func (r *Runtime) readParentLimits(ctx context.Context, connection *systemd.Conn
 			return resourceEvidence{}, err
 		}
 		path, ok := scope["ControlGroup"].(string)
-		if !ok || !strings.HasPrefix(path, parentPath+"/") || scope["ActiveState"] != "active" {
+		if !ok || !strings.HasPrefix(path, parentPath+"/") || filepath.Clean(path) != path || scope["ActiveState"] != "active" {
 			return resourceEvidence{}, errors.New("实际容器未处于 Cage 的宿主资源边界内")
 		}
-	}
-	root := filepath.Join("/sys/fs/cgroup", parentPath)
-	var evidence strings.Builder
-	for _, file := range []string{"memory.max", "cpu.max", "pids.max"} {
-		data, err := os.ReadFile(filepath.Join(root, file))
+		limits, err := readCgroupLimits(path)
 		if err != nil {
 			return resourceEvidence{}, err
 		}
-		evidence.WriteString(strings.TrimSpace(string(data)))
-		evidence.WriteByte('\n')
+		scopeLimits = &limits
 	}
 	mounts, err := os.ReadFile("/proc/self/mountinfo")
 	if err != nil {
 		return resourceEvidence{}, err
 	}
-	evidence.Write(mounts)
-	return parseResourceEvidence(evidence.String(), r.config)
+	return parseResourceEvidence(slice, scopeLimits, string(mounts), r.config)
+}
+
+func readCgroupLimits(path string) (cgroupLimits, error) {
+	var values [3]string
+	for i, file := range []string{"memory.max", "cpu.max", "pids.max"} {
+		data, err := os.ReadFile(filepath.Join("/sys/fs/cgroup", path, file))
+		if err != nil {
+			return cgroupLimits{}, err
+		}
+		values[i] = strings.TrimSpace(string(data))
+	}
+	return cgroupLimits{memory: values[0], cpu: values[1], pids: values[2]}, nil
 }
 
 func (r *Runtime) verifyHostResources(ctx context.Context, containerID string) (resourceEvidence, error) {

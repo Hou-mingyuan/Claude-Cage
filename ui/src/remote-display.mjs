@@ -7,11 +7,18 @@
 export function displayGeometry({ width, height }, { desktop = false, zoom = 1, density = 2, pixelRatio } = {}) {
   if (width < (desktop ? 320 : 160) || height < 240) return null;
   const follow = pixelRatio > 0;
-  let scale = density === 1.5 ? 1.5 : 2, ratio = scale / zoom;
+  const automatic = desktop && zoom === "auto" && !follow;
+  const zoomFactor = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  let scale = !follow && desktop && Number.isFinite(density) && density >= 1 && density <= 8
+    ? density : density === 1.5 ? 1.5 : 2;
+  let ratio = scale / zoomFactor;
   if (follow) ratio = Math.max(1, Math.max(1, Math.min(2, pixelRatio)) * scale / 2);
-  const limit = Math.min(1, 8192 / (width * ratio), 8192 / (height * ratio));
+  // Native Windows uses guest DPI; Linux follows the host screen density.
+  // Only native automatic mode limits allocation to twelve million pixels.
+  const limit = Math.min(1, 8192 / (width * ratio), 8192 / (height * ratio),
+    automatic ? Math.sqrt(12_000_000 / (width * height * ratio * ratio)) : 1);
   // Chromium applies a density in steps of 1/64.
-  if (follow) scale = Math.round(Math.max(0.75, Math.min(4, ratio * limit * zoom)) * 64) / 64;
+  if (follow) scale = Math.round(Math.max(0.75, Math.min(4, ratio * limit * zoomFactor)) * 64) / 64;
   return {
     width: Math.max(desktop ? 320 : Math.ceil(160 * scale), Math.floor(width * ratio * limit)),
     height: Math.max(desktop ? 240 : Math.ceil(240 * scale), Math.floor(height * ratio * limit)),

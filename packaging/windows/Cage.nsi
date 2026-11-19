@@ -73,17 +73,14 @@ LangString CageDesktopShortcut ${LANG_SIMPCHINESE} "添加桌面快捷方式"
 LangString CageStartMenuShortcuts ${LANG_ENGLISH} "Add to the Start menu"
 LangString CageStartMenuShortcuts ${LANG_SIMPCHINESE} "添加到开始菜单"
 
-Var UpdateMode
+!include "CageInstallerOptions.nsh"
 Var StageDir
 Var BackupDir
 Var ExistingInstall
-Var DesktopShortcut
-Var StartMenuShortcuts
 Var DesktopShortcutControl
 Var StartMenuShortcutsControl
 Var InstallationMutex
 Var TransactionRecord
-Var DiagnosticFile
 Var InstallPhase
 Var InstallOutcome
 Var HelperExit
@@ -218,27 +215,6 @@ Function LoadShortcutOptions
   ${IfNot} ${Errors}
     StrCpy $StartMenuShortcuts $0
   ${EndIf}
-  ${GetParameters} $0
-  ClearErrors
-  ${GetOptions} $0 "/DESKTOPSHORTCUT=" $1
-  ${IfNot} ${Errors}
-    ${If} $1 != "0"
-    ${AndIf} $1 != "1"
-      SetErrorLevel 2
-      Abort "DESKTOPSHORTCUT must be 0 or 1."
-    ${EndIf}
-    StrCpy $DesktopShortcut $1
-  ${EndIf}
-  ClearErrors
-  ${GetOptions} $0 "/STARTMENUSHORTCUT=" $1
-  ${IfNot} ${Errors}
-    ${If} $1 != "0"
-    ${AndIf} $1 != "1"
-      SetErrorLevel 2
-      Abort "STARTMENUSHORTCUT must be 0 or 1."
-    ${EndIf}
-    StrCpy $StartMenuShortcuts $1
-  ${EndIf}
 FunctionEnd
 
 Function ShortcutOptionsPage
@@ -264,11 +240,8 @@ Function ShortcutOptionsLeave
 FunctionEnd
 
 Function SetDefaultInstallDirectory
-  ; NSIS removes /D= from $CMDLINE, so inspect the original command line.
-  System::Call 'kernel32::GetCommandLineW() w .r0'
-  ClearErrors
-  ${GetOptions} $0 "/D=" $1
-  ${IfNot} ${Errors}
+  ${If} $CageInstallDirectory != ""
+    StrCpy $INSTDIR $CageInstallDirectory
     Return
   ${EndIf}
   ; Keep upgrades in the registered location, including installations on C:.
@@ -286,7 +259,29 @@ FunctionEnd
 !macro CheckStopped FILE
   ${If} ${FileExists} "$INSTDIR\${FILE}"
     ; Exclusive write access also detects images whose VM/controller has no window.
-    System::Call 'kernel32::CreateFileW(w "$INSTDIR\${FILE}", i 0x40000000, i 0, p 0, i 3, i 0, p 0) p .r0'
+    ; Process exit can precede release of its executable's sharing lock.
+    ; Retry sharing/lock violations briefly; never replace an image still in use.
+    Push $1
+    Push $2
+    StrCpy $1 0
+    ${Do}
+      System::Call 'kernel32::CreateFileW(w "$INSTDIR\${FILE}", i 0x40000000, i 0, p 0, i 3, i 0, p 0) p .r0 ?e'
+      Pop $2
+      ${If} $0 != -1
+        ${ExitDo}
+      ${EndIf}
+      ${If} $2 != 32
+      ${AndIf} $2 != 33
+        ${ExitDo}
+      ${EndIf}
+      IntOp $1 $1 + 1
+      ${If} $1 >= 30
+        ${ExitDo}
+      ${EndIf}
+      Sleep 100
+    ${Loop}
+    Pop $2
+    Pop $1
     ${If} $0 == -1
       StrCpy $HelperExit "application_file_in_use"
       SetErrorLevel 2
@@ -299,15 +294,24 @@ FunctionEnd
 Function .onInit
   StrCpy $InstallOutcome "running"
   StrCpy $HelperExit ""
-  ${GetParameters} $0
-  ${GetOptions} $0 "/DIAGNOSTICS=" $DiagnosticFile
+  SetShellVarContext current
+  SetRegView 64
+  Call LoadShortcutOptions
+  Call ParseCageInstallOptions
+  ${If} $CageOptionError != ""
+    StrCpy $InstallPhase "parsing_arguments"
+    StrCpy $InstallOutcome "failed"
+    StrCpy $HelperExit "invalid_installer_arguments"
+    Call WriteInstallDiagnostic
+    MessageBox MB_ICONSTOP "$CageOptionError" /SD IDOK
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
   StrCpy $DiagnosticArguments ""
   ${If} $DiagnosticFile != ""
     StrCpy $DiagnosticArguments '-Diagnostics "$DiagnosticFile.helper.json"'
   ${EndIf}
   !insertmacro InstallPhase "initializing"
-  SetShellVarContext current
-  SetRegView 64
   ${IfNot} ${IsNativeAMD64}
     MessageBox MB_ICONSTOP "This Cage package requires an Intel/AMD 64-bit version of Windows. Windows on ARM and 32-bit Windows are not supported."
     SetErrorLevel 1633
@@ -320,15 +324,6 @@ Function .onInit
     Quit
   ${EndIf}
   Call SetDefaultInstallDirectory
-  Call LoadShortcutOptions
-  StrCpy $UpdateMode "0"
-  ${GetParameters} $0
-  ClearErrors
-  ${GetOptions} $0 "/UPDATE" $1
-  ${IfNot} ${Errors}
-    StrCpy $UpdateMode "1"
-    SetSilent silent
-  ${EndIf}
 FunctionEnd
 
 Function CheckDestination
@@ -374,9 +369,12 @@ Function RestorePreservedFiles
     SetErrorLevel 2
     Abort "安装恢复尚未完成。文件分别保留在 $BackupDir 和 $StageDir，请保留这两个目录后重试。"
   ${EndIf}
-  ClearErrors
-  Rename "$BackupDir" "$INSTDIR"
-  ${If} ${Errors}
+  ; The installation folder was kept, so the previous entries move back into it.
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\installation-files.ps1" -Operation attach -Target "$INSTDIR" -Source "$BackupDir" $DiagnosticArguments'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    DetailPrint "$1"
     SetErrorLevel 2
     Abort "原安装目录未能恢复。文件保留在 $BackupDir，新程序保留在 $StageDir。"
   ${EndIf}
@@ -457,7 +455,9 @@ Section "Cage" Main
   File /oname=verified-file-deletion.cs "verified-file-deletion.cs"
   DetailPrint "正在检查并保留已有项目和修改文件…"
   !insertmacro InstallPhase "preparing_file_transaction"
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\installation-files.ps1" -Operation prepare -Target "$StageDir" -Source "$INSTDIR" -Backup "$BackupDir" -Receipt "$TransactionRecord" $DiagnosticArguments'
+  ; CageData is the default storage of a packaged Windows installation. It
+  ; stays in place: a VM registered on it keeps its paths and open handles.
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\installation-files.ps1" -Operation prepare -Target "$StageDir" -Source "$INSTDIR" -Backup "$BackupDir" -Receipt "$TransactionRecord" -KeepInPlace CageData $DiagnosticArguments'
   Pop $0
   Pop $1
   StrCpy $HelperExit $0
@@ -472,15 +472,21 @@ Section "Cage" Main
   SetOutPath "$TEMP"
   ${If} $ExistingInstall == "1"
     !insertmacro InstallPhase "moving_previous_application"
-    ClearErrors
-    Rename "$INSTDIR" "$BackupDir"
-    ${If} ${Errors}
+    ; The installation folder itself stays; only its program and personal
+    ; entries move, so kept data and open handles below it are untouched.
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\installation-files.ps1" -Operation detach -Target "$BackupDir" -Source "$INSTDIR" -Receipt "$TransactionRecord" $DiagnosticArguments'
+    Pop $0
+    Pop $1
+    StrCpy $HelperExit $0
+    Call WriteInstallDiagnostic
+    ${If} $0 != 0
+      DetailPrint "$1"
       nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\installation-files.ps1" -Operation complete -Target "$INSTDIR" -Receipt "$TransactionRecord" $DiagnosticArguments'
       Pop $0
       Pop $1
       RMDir /r "$StageDir"
       SetErrorLevel 2
-      Abort "Could not move the installed application. Quit Cage and retry."
+      Abort "Could not move the installed application. Quit Cage, close programs using files in its folder, and retry."
     ${EndIf}
     DetailPrint "正在迁入个人文件并保留原有链接…"
     !insertmacro InstallPhase "moving_personal_files"
@@ -501,7 +507,20 @@ Section "Cage" Main
   ${EndIf}
   !insertmacro InstallPhase "publishing_application"
   ClearErrors
-  Rename "$StageDir" "$INSTDIR"
+  ${If} $BackupDir != ""
+    ; The kept installation folder receives the staged entries one by one.
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\installation-files.ps1" -Operation attach -Target "$INSTDIR" -Source "$StageDir" $DiagnosticArguments'
+    Pop $0
+    Pop $1
+    StrCpy $HelperExit $0
+    Call WriteInstallDiagnostic
+    ${If} $0 != 0
+      DetailPrint "$1"
+      SetErrors
+    ${EndIf}
+  ${Else}
+    Rename "$StageDir" "$INSTDIR"
+  ${EndIf}
   ${If} ${Errors}
     ${If} $BackupDir != ""
       Call RestorePreservedFiles

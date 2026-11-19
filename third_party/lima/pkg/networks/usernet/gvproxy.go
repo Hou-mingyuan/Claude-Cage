@@ -27,7 +27,8 @@ import (
 )
 
 type GVisorNetstackOpts struct {
-	MTU int
+	GatewayMACAddress string
+	MTU               int
 
 	QemuSocket string
 	FdSocket   string
@@ -122,7 +123,15 @@ func StartGVisorNetstack(ctx context.Context, gVisorOpts *GVisorNetstackOpts) er
 			}
 		}
 	}
-	leases[gatewayIP] = gatewayMacAddr
+	gatewayMAC := gatewayMacAddr
+	if opts.GatewayMACAddress != "" {
+		mac, err := net.ParseMAC(opts.GatewayMACAddress)
+		if err != nil || len(mac) != 6 || mac[0]&3 != 2 {
+			return fmt.Errorf("invalid gateway MAC address")
+		}
+		gatewayMAC = mac.String()
+	}
+	leases[gatewayIP] = gatewayMAC
 
 	// The way gvisor-tap-vsock implemented slirp is different from tradition SLIRP,
 	// - GatewayIP handling all request, also answers DNS queries
@@ -135,7 +144,7 @@ func StartGVisorNetstack(ctx context.Context, gVisorOpts *GVisorNetstackOpts) er
 		MTU:               opts.MTU,
 		Subnet:            opts.Subnet,
 		GatewayIP:         gatewayIP,
-		GatewayMacAddress: gatewayMacAddr,
+		GatewayMacAddress: gatewayMAC,
 		DHCPStaticLeases:  leases,
 		Forwards:          map[string]string{},
 		DNS:               []types.Zone{},

@@ -10,7 +10,7 @@ import (
 )
 
 func TestBrowserLanguagePackageMigration(t *testing.T) {
-	start := strings.Index(guestStart, "if ! cage_is_ubuntu")
+	start := strings.Index(guestStart, "if ! cage_is_ubuntu && ! dpkg-query")
 	if start < 0 {
 		t.Fatal("existing guests have no language package migration")
 	}
@@ -19,9 +19,23 @@ func TestBrowserLanguagePackageMigration(t *testing.T) {
 		t.Fatal("unterminated migration")
 	}
 	script := "set -euo pipefail\ncage_is_ubuntu() { [ \"$MODE\" = ubuntu ]; }\n" + guestStart[start:start+end+4] + "\nprintf continued\n"
+	script = strings.ReplaceAll(script, "/var/lib/apt/lists", `"$FIXTURE/lists"`)
 	for _, mode := range []string{"installed", "ubuntu", "missing", "update-failure", "install-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
+			lists := filepath.Join(dir, "lists")
+			if err := os.Mkdir(lists, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for name, contents := range map[string]string{
+				"security_Packages.lz4": "",
+				"archive_Packages":      "package index",
+				"lock":                  "",
+			} {
+				if err := os.WriteFile(filepath.Join(lists, name), []byte(contents), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			commands := map[string]string{
 				"dpkg-query": "#!/bin/sh\nif [ \"$MODE\" = installed ] || [ -f \"$FIXTURE/installed\" ]; then printf 'install ok installed'; else exit 1; fi\n",
 				"sudo":       "#!/bin/sh\nexec \"$@\"\n",
@@ -31,10 +45,22 @@ set -eu
 [ "$APT_CONFIG" = "$FIXTURE/apt.conf" ]
 printf '%s\n' "$*" >> "$FIXTURE/requests"
 case "$1" in
- update) [ "$MODE" != update-failure ];;
+ -o)
+  [ "$#" = 5 ]
+  case "$2" in
+   APT::Update::Pre-Invoke::=*) sh -ec "${2#*=}";;
+   *) exit 92;;
+  esac
+  [ ! -e "$FIXTURE/lists/security_Packages.lz4" ]
+  [ -s "$FIXTURE/lists/archive_Packages" ]
+  [ -f "$FIXTURE/lists/lock" ]
+  [ "$3" = -o ]
+  [ "$4" = 'APT::Update::Error-Mode=any' ]
+  [ "$5" = update ]
+  [ "$MODE" != update-failure ];;
  install)
   [ "$MODE" != install-failure ] || exit 100
-  [ "$*" = 'install -y --no-install-recommends chromium-l10n' ]
+  [ "$*" = 'install -y --no-install-recommends --no-remove chromium-l10n' ]
   touch "$FIXTURE/installed";;
  *) exit 91;;
 esac

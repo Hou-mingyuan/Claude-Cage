@@ -20,10 +20,22 @@ func ResourceAllocationPath(configPath string) string {
 	return filepath.Join(filepath.Dir(configPath), "resource-limits.json")
 }
 
+// AutomaticMemoryCapGiB bounds the memory an automatically sized VM may grow
+// to. The host share (half of host memory by default) stays the ceiling for a
+// manually chosen allocation, so a 64 GiB host no longer starts every VM with
+// a 32 GiB budget the guest rarely needs.
+const AutomaticMemoryCapGiB = 8
+
+// AutomaticMemoryGiB is the memory ceiling of an automatic allocation on a
+// host whose share is shareGiB.
+func AutomaticMemoryGiB(shareGiB int) int {
+	return min(shareGiB, AutomaticMemoryCapGiB)
+}
+
 func (a ResourceAllocation) Limits() (memory, cpus int, err error) {
 	memory, cpus = ResourceLimits()
 	if a.Automatic {
-		return memory, cpus, nil
+		return AutomaticMemoryGiB(memory), cpus, nil
 	}
 	if a.MemoryGiB < 2 || a.MemoryGiB > memory || a.CPUs < 1 || a.CPUs > cpus {
 		return 0, 0, fmt.Errorf("内存上限须为 2–%d GiB，CPU 须为 1–%d 个逻辑核心", memory, cpus)

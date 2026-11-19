@@ -12,7 +12,8 @@ import (
 // the shared netstack allocates packets or indexes the Ethernet header.
 type boundedFrameConnection struct {
 	net.Conn
-	pending []byte
+	pending   []byte
+	sourceMAC net.HardwareAddr
 }
 
 func (c *boundedFrameConnection) Read(output []byte) (int, error) {
@@ -25,7 +26,10 @@ func (c *boundedFrameConnection) Read(output []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		mac, _ := net.ParseMAC(GuestMAC)
+		mac := c.sourceMAC
+		if len(mac) == 0 {
+			mac, _ = net.ParseMAC(GuestMAC)
+		}
 		if !bytes.Equal(frame[6:12], mac) {
 			return 0, errors.New("unexpected container Ethernet source")
 		}

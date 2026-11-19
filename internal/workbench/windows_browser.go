@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
+	"github.com/sylvinus/agent-vm/internal/guestos"
 )
 
 func (s *Server) nativeBrowserClient() *windowsBrowserClient {
@@ -24,8 +25,11 @@ func (s *Server) nativeBrowserClient() *windowsBrowserClient {
 		if s.macosGuest != nil {
 			ctx, cancel := context.WithCancel(s.lifetimeContextLocked())
 			s.windowsBrowserControl = &windowsBrowserClient{ctx: ctx, cancel: cancel, ownsBrowser: true, start: func(ctx context.Context) (*exec.Cmd, error) {
-				const base = "/usr/local/libexec/cage-workbench-browser-4.145.0-pw1.65.0/"
-				return s.macOSSSHCommand(ctx, "-T", s.sshTarget(), "--", "exec "+base+"editor/lib/node "+base+"controller/macos-native-browser.mjs"), nil
+				const base = guestos.MacOSBrowserTools + "/"
+				// Older guests launch their headless browser even on a tabs/health poll.
+				const command = "test -f " + base + "controller/macos-browser-window.mjs || exit 78; exec " +
+					base + "editor/lib/node " + base + "controller/macos-native-browser.mjs"
+				return s.macOSSSHCommand(ctx, "-T", s.sshTarget(), "--", command), nil
 			}}
 		} else {
 			s.windowsBrowserControl = newWindowsBrowserClient(s.lifetimeContextLocked(), s.profile)
@@ -130,14 +134,35 @@ func (s *Server) browserClipboard(w http.ResponseWriter, r *http.Request) {
 	jsonReply(w, map[string]string{"png": base64.StdEncoding.EncodeToString(data)})
 }
 
+const (
+	nativeBrowserEventPoll     = 300 * time.Millisecond
+	nativeBrowserEventIdlePoll = 1200 * time.Millisecond
+	nativeBrowserEventActive   = 10 * time.Second
+)
+
+// noteNativeBrowserUse records that a viewer is watching or operating the
+// guest browser, which keeps its event poll at the interactive rate.
+func (s *Server) noteNativeBrowserUse() { s.nativeBrowserUsed.Store(time.Now().UnixNano()) }
+
+// nativeBrowserEventDelay is the wait before the next event poll. Copies and
+// tab changes follow a viewer's input or a page that is still changing; with
+// neither, each poll only makes the guest answer that nothing happened.
+func nativeBrowserEventDelay(now, used, changed time.Time) time.Duration {
+	if now.Sub(used) < nativeBrowserEventActive || now.Sub(changed) < nativeBrowserEventActive {
+		return nativeBrowserEventPoll
+	}
+	return nativeBrowserEventIdlePoll
+}
+
 func (s *Server) subscribeNativeBrowser(parent context.Context) io.ReadCloser {
 	ctx, cancel := context.WithCancel(parent)
 	reader, writer := io.Pipe()
 	go func() {
 		defer writer.Close()
 		defer cancel()
-		ticker := time.NewTicker(300 * time.Millisecond)
-		defer ticker.Stop()
+		timer := time.NewTimer(nativeBrowserEventPoll)
+		defer timer.Stop()
+		changed := time.Now()
 		var previous string
 		var latest json.RawMessage
 		var sequence uint64
@@ -172,6 +197,7 @@ func (s *Server) subscribeNativeBrowser(parent context.Context) io.ReadCloser {
 				if event.Sequence <= sequence || event.Sequence > update.Sequence {
 					continue
 				}
+				changed = time.Now()
 				switch event.Type {
 				case "clipboard", "native-clipboard", "copy-expired":
 					if len(event.Value) == 0 {
@@ -196,11 +222,13 @@ func (s *Server) subscribeNativeBrowser(parent context.Context) io.ReadCloser {
 					return
 				}
 				previous, downloadRevision = string(latest), revision
+				changed = time.Now()
 			}
+			timer.Reset(nativeBrowserEventDelay(time.Now(), time.Unix(0, s.nativeBrowserUsed.Load()), changed))
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-timer.C:
 			}
 		}
 	}()
@@ -214,7 +242,7 @@ type windowsBrowserEventStream struct {
 
 func (s *windowsBrowserEventStream) Close() error { s.cancel(); return s.ReadCloser.Close() }
 
-func (s *Server) nativeBrowserFile(w http.ResponseWriter, r *http.Request, method, path string, body io.Reader) {
+func (s *Server) nativeBrowserFile(w http.ResponseWriter, r *http.Request, method, path string, body io.Reader, length int64) {
 	request, err := url.Parse(path)
 	if err != nil {
 		http.Error(w, "浏览器文件操作无效", 400)
@@ -222,7 +250,7 @@ func (s *Server) nativeBrowserFile(w http.ResponseWriter, r *http.Request, metho
 	}
 	query := request.Query()
 	if method == "POST" && request.Path == "/upload-file" {
-		result, err := s.nativeBrowserClient().upload(r.Context(), query.Get("id"), query.Get("name"), body, r.ContentLength)
+		result, err := s.nativeBrowserClient().upload(r.Context(), query.Get("id"), query.Get("name"), body, length)
 		if err != nil {
 			http.Error(w, err.Error(), 502)
 			return
@@ -270,6 +298,7 @@ func (s *Server) nativeBrowserVNC(w http.ResponseWriter, r *http.Request) {
 	request := func(input map[string]any, output any) error {
 		var data []byte
 		var err error
+		s.noteNativeBrowserUse()
 		switch input["action"] {
 		case "frame":
 			if inputSuspended {
@@ -366,7 +395,12 @@ func (s *Server) nativeBrowserVNC(w http.ResponseWriter, r *http.Request) {
 func recoverBrowserInputFocus(ctx context.Context, request func(context.Context, string, string, any) ([]byte, error), input map[string]any, release func()) ([]byte, error) {
 	data, err := request(ctx, "POST", "/input", input)
 	var failure windowsBrowserFailure
-	if release == nil || !errors.As(err, &failure) || (failure.code != "browser_focus_required" && failure.code != "browser_target_changed" && failure.code != "target_changed") {
+	if release == nil || !errors.As(err, &failure) {
+		return data, err
+	}
+	switch failure.code {
+	case "browser_focus_required", "browser_window_unavailable", "browser_target_changed", "target_changed":
+	default:
 		return data, err
 	}
 	// End this viewer's input lease so a rejected key-up cannot leave a held

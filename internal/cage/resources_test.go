@@ -84,16 +84,16 @@ func TestMemoryPolicyBurstIdleAndHostPressure(t *testing.T) {
 		t.Fatal("premature shrink", got)
 	}
 	next := p.next(now.Add(31*time.Second), idle, false)
-	if next != p.maximum-256<<20 {
+	if next >= p.maximum-256<<20 || next < 2*gib {
 		t.Fatalf("reclamation step %d", next)
 	}
 	p.target = next
 	if got := p.next(now.Add(33*time.Second), idle, false); got != next {
 		t.Fatal("repeated shrink before guest acknowledgement", got)
 	}
-	idle.Total -= 256 << 20
-	idle.Available -= 256 << 20
-	idle.Balloon = 256 << 20
+	idle.Total -= p.maximum - next
+	idle.Available -= p.maximum - next
+	idle.Balloon = p.maximum - next
 	if got := p.next(now.Add(35*time.Second), idle, false); got >= next {
 		t.Fatal("no reclamation after acknowledgement", got)
 	}
@@ -144,5 +144,58 @@ func TestResourceManagerCancellationAndFreshness(t *testing.T) {
 		if (err != nil) != (age > 0) {
 			t.Fatal(age, err)
 		}
+	}
+}
+
+func TestAutomaticAllocationIsCappedButManualKeepsHostShare(t *testing.T) {
+	oldMem, oldCPU := host.MemGiB, host.CPUs
+	t.Cleanup(func() { host.MemGiB, host.CPUs = oldMem, oldCPU })
+	t.Setenv("AGENT_VM_HOST_SHARE", "2")
+	host.CPUs = func() int { return 10 }
+	for _, tc := range []struct{ host, automatic, share int }{{64, 8, 32}, {24, 8, 12}, {16, 8, 8}, {8, 4, 4}, {4, 2, 2}} {
+		host.MemGiB = func() int { return tc.host }
+		memory, _, err := ResourceAllocation{Automatic: true}.Limits()
+		if err != nil || memory != tc.automatic {
+			t.Fatalf("automatic on %d GiB host: %d %v", tc.host, memory, err)
+		}
+		if share, _ := ResourceLimits(); share != tc.share {
+			t.Fatalf("share on %d GiB host: %d", tc.host, share)
+		}
+		memory, _, err = ResourceAllocation{MemoryGiB: tc.share, CPUs: 2}.Limits()
+		if err != nil || memory != tc.share {
+			t.Fatalf("manual allocation up to the host share rejected: %d %v", memory, err)
+		}
+	}
+}
+
+func TestMemoryPolicyGrowsGraduallyAndReclaimsQuickly(t *testing.T) {
+	now := time.Now()
+	gib := uint64(1 << 30)
+	maximum := 32 * gib
+	p := memoryPolicy{maximum: maximum, target: 3 * gib}
+	// A short stall is not an out-of-memory emergency: it must not buy the whole budget.
+	brief := ResourceSample{Total: 3*gib - 128<<20, Available: 600 << 20, Stall: 1.5}
+	if got := p.next(now, brief, false); got <= p.target || got >= maximum/2 {
+		t.Fatalf("brief stall changed the target to %d", got)
+	}
+	// Sustained pressure still reaches the maximum within a few probes.
+	probes := 0
+	for p.target < maximum && probes < 20 {
+		p.target = p.next(now, ResourceSample{Total: p.target - 128<<20, Available: 600 << 20, Stall: 1.5}, false)
+		probes++
+	}
+	if p.target != maximum || probes > 8 {
+		t.Fatalf("sustained pressure reached %d after %d probes", p.target, probes)
+	}
+	// An idle guest that booted at the maximum returns its memory within about a minute
+	// (30 s idle window plus 2 s probes), assuming the guest acknowledges each step.
+	balloon, elapsed := uint64(0), 0
+	for ; elapsed <= 120 && p.target > 3*gib; elapsed += 2 {
+		total := maximum - balloon
+		target := p.next(now.Add(time.Duration(elapsed)*time.Second), ResourceSample{Total: total, Available: total - gib, Balloon: balloon}, false)
+		p.target, balloon = target, maximum-target
+	}
+	if p.target > 3*gib || elapsed > 90 {
+		t.Fatalf("idle reclamation left %d after %d seconds", p.target, elapsed)
 	}
 }

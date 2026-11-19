@@ -1,8 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
-for app in code-server chromium X0tigervnc Xtigervnc openbox websockify; do
+# Ubuntu installs or migrates its workbench launcher in the service setup.
+if ! cage_is_ubuntu && [[ ! -x /usr/bin/chromium ]]; then
+  echo 'Missing chromium; run cage setup first.' >&2
+  exit 1
+fi
+for app in code-server Xtigervnc openbox websockify; do
   command -v "$app" >/dev/null || { echo "Missing $app; run cage setup first." >&2; exit 1; }
 done
+# English text keeps its requested fonts. For missing Han glyphs, prefer the
+# Simplified Chinese face of the installed Noto collection.
+sudo tee /etc/fonts/conf.d/71-english-cjk-fallback.conf >/dev/null <<'FONTCONFIG'
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <match target="pattern">
+    <test name="lang" qual="first" compare="contains"><string>en</string></test>
+    <test name="family"><string>sans-serif</string></test>
+    <edit name="family" mode="append_last" binding="weak"><string>Noto Sans CJK SC</string></edit>
+  </match>
+  <match target="pattern">
+    <test name="lang" qual="first" compare="contains"><string>en</string></test>
+    <test name="family"><string>serif</string></test>
+    <edit name="family" mode="append_last" binding="weak"><string>Noto Serif CJK SC</string></edit>
+  </match>
+  <match target="pattern">
+    <test name="lang" qual="first" compare="contains"><string>en</string></test>
+    <test name="family"><string>monospace</string></test>
+    <edit name="family" mode="append_last" binding="weak"><string>Noto Sans Mono CJK SC</string></edit>
+  </match>
+</fontconfig>
+FONTCONFIG
 mkdir -p "$HOME/.config/claude-cage"
 chmod 700 "$HOME/.config/claude-cage"
 if [ ! -s "$HOME/.config/claude-cage/code-server.yaml" ]; then
@@ -17,8 +45,12 @@ sudo systemctl stop cage-browser || true
 # Existing images may predate the explicit locale dependency. The scoped
 # maintenance channel can install it while business networking stays closed.
 if ! cage_is_ubuntu && ! dpkg-query -W -f='${Status}' chromium-l10n 2>/dev/null | grep -qx 'install ok installed'; then
-  sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get update </dev/null
-  sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get install -y --no-install-recommends chromium-l10n </dev/null
+  # APT can reuse an empty Packages file after an InRelease cache hit. Clear
+  # empty package indexes under APT's lists lock so they are fetched again.
+  sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get \
+    -o 'APT::Update::Pre-Invoke::=find /var/lib/apt/lists -maxdepth 1 -type f -name "*_Packages*" -empty -delete' \
+    -o APT::Update::Error-Mode=any update </dev/null
+  sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get install -y --no-install-recommends --no-remove chromium-l10n </dev/null
 fi
 # Publish per-VM control credentials for the browser process and SSH owner only.
 sudo env CAGE_DISPLAY_SCALE="${CAGE_DISPLAY_SCALE:-2}" CAGE_WORKSPACE="$PWD" CAGE_USER_HOME="$HOME" python3 - <<'PYCONTROL'
@@ -53,9 +85,9 @@ d["credentials_enable_service"] = False
 d.setdefault("profile", {})["password_manager_enabled"] = False
 p.write_text(json.dumps(d))
 PYCODE
-sudo systemctl reset-failed cage-display cage-window-manager cage-browser cage-vnc cage-webvnc 2>/dev/null || true
+sudo systemctl reset-failed cage-display cage-window-manager cage-browser cage-webvnc 2>/dev/null || true
 sudo systemctl reset-failed cage-display-governor 2>/dev/null || true
-sudo systemctl restart cage-display cage-window-manager cage-browser cage-vnc cage-webvnc
+sudo systemctl restart cage-display cage-window-manager cage-browser cage-webvnc
 # Seed only appearance settings for a new editor profile. Existing preferences stay intact.
 python3 - <<'PYEDITOR'
 import shutil

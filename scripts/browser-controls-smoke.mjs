@@ -109,17 +109,19 @@ async function stop() {
   clearTimeout(force);
 }
 try {
-  // Redirect deployment paths and the control listener only. The Chromium
-  // flags and all browser-control handlers come from the production agent.
+  // Redirect deployment paths and the control listener; keep host credentials
+  // out of the disposable profile. Browser-control handlers stay unchanged.
   const source = await readFile(new URL("../internal/cage/browser-agent.mjs", import.meta.url), "utf8");
   const listen = 'server.listen(18500, "127.0.0.1");';
   assert.ok(source.includes(listen), "Update the isolated control-listener adapter");
+  assert.ok(source.includes('spawn(browserBinary, flags'), "Update the isolated browser launch adapter");
   await writeFile(join(directory, "agent.mjs"), source
     .replaceAll("/home/cage-browser", directory)
     .replaceAll("/usr/local/lib/cage-split", join(directory, "split-extension"))
     .replace("/etc/claude-cage/browser-control.json", join(directory, "control.json"))
+    .replace('spawn(browserBinary, flags', 'spawn(browserBinary, [...flags, "--use-mock-keychain", "--password-store=basic"]')
     .replace(listen, 'server.listen(0, "127.0.0.1", () => console.log("CONTROL_PORT=" + server.address().port));'));
-  for (const name of ["browser-audit", "browser-downloads", "browser-uploads", "browser-login", "browser-private", "browser-cookies", "browser-extensions", "browser-vault", "browser-clipboard", "native-input"])
+  for (const name of ["browser-audit", "device-observation", "display-density", "tailnet-client", "browser-visibility", "browser-wheel", "browser-downloads", "browser-uploads", "browser-login", "browser-private", "browser-cookies", "browser-extensions", "browser-vault", "browser-clipboard", "native-input"])
     await copyFile(new URL(`../internal/cage/${name}.mjs`, import.meta.url), join(directory, `${name}.mjs`));
   await cp(new URL("../internal/cage/split-extension", import.meta.url), join(directory, "split-extension"), { recursive: true });
   await writeFile(join(directory, "control.json"), JSON.stringify({ token, workspace: directory }));

@@ -6,6 +6,7 @@ No clipboard payload is logged. File bytes use a separate streaming archive.
 import base64
 from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -303,6 +304,27 @@ def materialize_guest_files(paths, user, session=''):
             process.terminate(); process.join(timeout=2)
 
 
+RICH_TEXT_TARGETS = {'text/rtf', 'application/rtf', 'text/richtext'}
+PLAIN_TEXT_TARGETS = {'UTF8_STRING', 'STRING', 'TEXT', 'COMPOUND_TEXT', 'text/plain', 'text/plain;charset=utf-8'}
+
+
+def copies_rich_text(targets):
+    """Word processors and spreadsheets publish a rendered picture next to the
+    text they copied. Such a copy is text, never the picture."""
+    names = set(targets)
+    return bool(names & RICH_TEXT_TARGETS and names & PLAIN_TEXT_TARGETS)
+
+
+def pixel_signature(width, height, rowstride, channels, pixels):
+    """Identify decoded pixels, so a picture written here is recognised when
+    the clipboard hands it back re-encoded as different PNG bytes."""
+    digest = hashlib.sha256(('%d:%d:%d:' % (width, height, channels)).encode())
+    view = memoryview(pixels)
+    for row in range(height):
+        digest.update(view[row * rowstride:row * rowstride + width * channels])
+    return digest.digest()
+
+
 def clipboard_worker(name, connection):
     os.environ['NO_AT_BRIDGE'] = '1'
     os.environ['DISPLAY'] = name
@@ -325,6 +347,9 @@ def clipboard_worker(name, connection):
     initialized = False
     commands = queue.Queue()
     changes = {}
+    written = None
+    def signature(image):
+        return pixel_signature(image.get_width(), image.get_height(), image.get_rowstride(), image.get_n_channels(), image.get_pixels())
     # Bytes are owned by Gtk and retained until another application copies.
     def write(clipboard, payload):
         if 'text' in payload:
@@ -336,6 +361,8 @@ def clipboard_worker(name, connection):
             image = loader.get_pixbuf()
             if image.get_width() * image.get_height() > 40_000_000:
                 raise ValueError('Clipboard image too large')
+            nonlocal written
+            written = signature(image)
             clipboard.set_image(image)
         else:
             uris = [Path(path).as_uri() for path in payload['files']]
@@ -420,12 +447,30 @@ def clipboard_worker(name, connection):
             try:
                 if image.get_width() * image.get_height() > 40_000_000:
                     raise ValueError('Clipboard image too large')
+                # Reading back the picture this process just wrote is not a
+                # new copy; publishing it would overwrite its source.
+                if last and 'png' in last and signature(image) == written:
+                    return
                 ok, data = image.save_to_bufferv('png', [], [])
                 if not ok or len(data) > IMAGE_LIMIT:
                     raise ValueError('Clipboard image too large')
                 publish({'png': base64.b64encode(data).decode()}, name)
             except (ValueError, OSError, GLib.Error):
                 failure()
+        def rich_text_ready(_clipboard, text, _data):
+            if not valid():
+                return
+            if text:
+                text_ready(clipboard, text, None)
+            else:
+                clipboard.request_image(image_ready, None)
+        def targets_ready(_clipboard, targets, _count, _data=None):
+            if not valid():
+                return
+            if copies_rich_text(target.name() for target in targets or []):
+                clipboard.request_text(rich_text_ready, None)
+            else:
+                clipboard.request_image(image_ready, None)
         def selected_files(uris):
             if not valid():
                 return
@@ -438,7 +483,7 @@ def clipboard_worker(name, connection):
                     failure()
             else:
                 connection.send({'clipboard_files': []})
-                clipboard.request_image(image_ready, None)
+                clipboard.request_targets(targets_ready, None)
         def gnome_ready(_clipboard, selection, _data):
             data = selection.get_data() or b''
             if len(data) > TEXT_LIMIT:

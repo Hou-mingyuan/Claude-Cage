@@ -5,14 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/sylvinus/agent-vm/internal/cage"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/guestos"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 )
@@ -26,6 +27,10 @@ type windowsGuestState struct {
 	Available            bool                             `json:"available"`
 	Reason               string                           `json:"reason"`
 	Capabilities         []string                         `json:"capabilities"`
+	Execution            string                           `json:"execution,omitempty"`
+	ProcessSession       int                              `json:"process_session,omitempty"`
+	SandboxSID           string                           `json:"sandbox_sid,omitempty"`
+	Home                 string                           `json:"home,omitempty"`
 	Browser              windowsBrowserState              `json:"browser"`
 	Components           map[string]windowsComponentState `json:"components"`
 	Running              bool                             `json:"-"`
@@ -73,22 +78,29 @@ func (s *Server) windowsStatus(ctx context.Context) (windowsGuestState, error) {
 		return windowsGuestState{}, errors.New("Windows 客机需要 Windows Hyper-V 主机")
 	}
 	binding := s.windowsGuest
-	report, err := guestos.InspectHyperV(ctx, binding.VMID)
-	state := windowsGuestState{Running: err == nil && report.VM != nil && report.VM.State == "Running"}
-	if err != nil || report.Lookup != "found" || report.VM == nil {
-		return state, errors.New("无法核验已绑定的 Windows 客机")
+	state := windowsGuestState{}
+	if !binding.Remote() {
+		report, err := guestos.InspectHyperV(ctx, binding.VMID)
+		state.Running = err == nil && report.VM != nil && report.VM.State == "Running"
+		if err != nil || report.Lookup != "found" || report.VM == nil {
+			return state, errors.New("无法核验已绑定的 Windows 客机")
+		}
+		vm := report.VM
+		if vm.Generation != 2 || !vm.SecureBoot || vm.SecureBootTemplate != "MicrosoftWindows" || !vm.VirtualTPM {
+			return state, errors.New("Windows 客机安全启动与虚拟 TPM 尚未就绪")
+		}
+		if vm.NetworkAdapterCount != 0 {
+			return state, errors.New("Windows 客机受控网络出口尚未就绪，请使用已隔离的离线客机")
+		}
+		if !state.Running {
+			return state, errors.New("Windows 客机尚未启动")
+		}
 	}
-	vm := report.VM
-	if vm.Generation != 2 || !vm.SecureBoot || vm.SecureBootTemplate != "MicrosoftWindows" || !vm.VirtualTPM {
-		return state, errors.New("Windows 客机安全启动与虚拟 TPM 尚未就绪")
+	operation := "status"
+	if binding.Remote() {
+		operation = "headless-status"
 	}
-	if vm.NetworkAdapterCount != 0 {
-		return state, errors.New("Windows 客机受控网络出口尚未就绪，请使用已隔离的离线客机")
-	}
-	if !state.Running {
-		return state, errors.New("Windows 客机尚未启动")
-	}
-	cmd, err := guestos.WindowsRelayCommand(ctx, s.profile, "status")
+	cmd, err := guestos.WindowsRelayCommand(ctx, s.profile, operation)
 	if err != nil {
 		return state, err
 	}
@@ -96,6 +108,9 @@ func (s *Server) windowsStatus(ctx context.Context) (windowsGuestState, error) {
 	cmd.Stdout = &boundedWindowsStatusWriter{buffer: &output, remaining: 64 << 10}
 	cmd.Stderr = io.Discard
 	if err = cmd.Run(); err != nil {
+		if binding.Remote() {
+			return state, errors.New("Windows 云端后台终端未连接，请检查普通账户后台服务")
+		}
 		return state, errWindowsAgentPending
 	}
 	running := state.Running
@@ -108,6 +123,14 @@ func (s *Server) windowsStatus(ctx context.Context) (windowsGuestState, error) {
 		return state, errors.New("Windows 客机或图形用户身份不匹配")
 	}
 	state.ComponentsChecked = time.Now()
+	if binding.Remote() {
+		if state.Execution != "appcontainer-headless" || state.ProcessSession != 0 ||
+			!strings.HasPrefix(state.SandboxSID, "S-1-15-2-") || !filepath.IsAbs(state.Home) ||
+			!strings.HasPrefix(state.Session, "headless-") {
+			return state, errors.New("Windows 云端沙箱身份不匹配")
+		}
+		state.Running = true
+	}
 	if !state.Available {
 		return state, errWindowsLoginRequired
 	}
@@ -138,6 +161,21 @@ func (s *Server) attachWindowsGuestContext(parent context.Context) error {
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
 	state, err := s.windowsStatus(ctx)
+	if s.windowsGuest.Remote() {
+		// Only the authenticated AppContainer home terminal is attached here.
+		// No GUI, host project, safety report or network authorization is implied.
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.storageRecoveryError != "" {
+			return errors.New(s.storageRecoveryError)
+		}
+		s.windowsState, s.ready = state, err == nil
+		s.guestUpdateError = ""
+		if err != nil {
+			s.guestUpdateError = err.Error()
+		}
+		return err
+	}
 	if err == nil {
 		err = s.requireStorageReady()
 	}
@@ -158,6 +196,9 @@ func (s *Server) attachWindowsGuestContext(parent context.Context) error {
 	}
 	if err == nil {
 		err = s.ensureProjectShare(s.environmentDir())
+	}
+	if err == nil {
+		err = s.syncNativeBrowserProfile(ctx)
 	}
 	s.mu.Lock()
 	if s.storageRecoveryError != "" {
@@ -211,10 +252,10 @@ func waitWindowsBoot(ctx context.Context, interval time.Duration, attach func(co
 }
 
 func (s *Server) startWindowsGuest() error {
-	if err := s.requireStorageReady(); err != nil {
-		return err
+	if s.windowsGuest.Remote() {
+		return s.attachWindowsGuest()
 	}
-	if err := requireHostGit(s.operationContext()); err != nil {
+	if err := s.requireStorageReady(); err != nil {
 		return err
 	}
 	cfg, err := loadConfig(s.configPath)
@@ -277,6 +318,17 @@ func (s *Server) stopWindowsGuest() error {
 	s.closeWindowsBrowser()
 	s.closeWindowsNetwork()
 	s.closeProjectShares()
+	if s.windowsGuest.Remote() {
+		// The remote broker outlives this controller. Revoke its grant on detach.
+		err := s.revokeNetworkNow("正在停止 Windows 云端环境", false)
+		s.mu.Lock()
+		s.windowsState = windowsGuestState{}
+		s.mu.Unlock()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // Offline installations have no broker.
+		}
+		return err
+	}
 	ctx, cancel := context.WithTimeout(s.operationContext(), 5*time.Minute)
 	defer cancel()
 	err := guestos.WindowsVMAction(ctx, s.profile, "stop")
@@ -288,9 +340,44 @@ func (s *Server) stopWindowsGuest() error {
 	return err
 }
 func (s *Server) createWindowsTerminal(input terminalRequest) (*terminalSession, error) {
+	if s.windowsGuest.Remote() {
+		return s.createRemoteWindowsTerminal(input)
+	}
 	return s.createWindowsCLITerminal(input)
 }
 func (s *Server) windowsCapabilitiesLocked() map[string]any {
+	if s.windowsGuest.Remote() {
+		ready := s.ready && !s.closing && s.windowsState.Available && s.windowsState.Execution == "appcontainer-headless"
+		browser := false
+		for _, capability := range s.windowsState.Capabilities {
+			browser = browser || capability == "headless-browser"
+		}
+		browser = browser && s.windowsState.Browser.Installed
+		cli := false
+		for _, capability := range s.windowsState.Capabilities {
+			cli = cli || capability == "headless-cli"
+		}
+		cli = cli && s.windowsState.Components["cli"].Ready
+		networkMode := "offline"
+		network := false
+		if gate := s.safety.Gate; gate != nil && gate.PolicyVerified {
+			networkMode = gate.Mode
+			cfg, err := loadConfig(s.configPath)
+			now := time.Now()
+			network = ready && !s.networkPaused && !s.proxyNetworkLost && err == nil && gate.Configuration == cfg.Fingerprint() &&
+				gate.Mode == cage.GateOpen && !gate.Fault && gate.Until.After(now) && gate.Report != nil && gate.Report.Authorizes(gate.RunID, gate.Configuration, now) == nil
+		}
+		unavailable := []string{"desktop", "editor", "projects", "audio"}
+		if !cli {
+			unavailable = append(unavailable, "claude-cli")
+		}
+		if !network {
+			unavailable = append(unavailable, "network")
+		}
+		return map[string]any{"registered": map[string]bool{"terminal": true, "browser": browser, "claude-cli": cli}, "installed": map[string]bool{"terminal": true, "browser": browser, "claude-cli": cli},
+			"available": map[string]bool{"terminal": ready, "browser": ready && browser, "claude-cli": ready && cli, "network": network}, "network": networkMode, "execution": "appcontainer-headless",
+			"unavailable": unavailable}
+	}
 	available := map[string]bool{}
 	installed := map[string]bool{}
 	registered := map[string]bool{}

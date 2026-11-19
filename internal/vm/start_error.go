@@ -20,6 +20,10 @@ func vmStartError(cause error, instanceDir string, since time.Time) error {
 	if cause == nil || errors.Is(cause, context.Canceled) {
 		return cause
 	}
+	if _, message, ok := strings.Cut(cause.Error(), "qemu[loader]: "); ok {
+		message, _, _ = strings.Cut(message, "\n")
+		return fmt.Errorf("QEMU 启动失败：%s；%w", diagnostics.Redact(message), cause)
+	}
 	f, err := os.Open(filepath.Join(instanceDir, "ha.stderr.log"))
 	if err != nil {
 		return cause
@@ -57,7 +61,10 @@ func vmStartError(cause error, instanceDir string, since time.Time) error {
 		if json.Unmarshal([]byte(line), &record) == nil && record.Message != "" {
 			line = record.Message
 		}
-		_, message, ok := strings.Cut(line, "qemu[stderr]")
+		_, message, ok := strings.Cut(line, "qemu[loader]")
+		if !ok {
+			_, message, ok = strings.Cut(line, "qemu[stderr]")
+		}
 		if !ok {
 			continue
 		}

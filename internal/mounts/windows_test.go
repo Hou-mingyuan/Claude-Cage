@@ -3,6 +3,7 @@ package mounts
 import (
 	"bytes"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,35 +12,66 @@ import (
 
 // A repository's own folder is found up to the drive, the drive's root
 // excepted, as "/" is elsewhere.
-func TestWindowsGitDirShare(t *testing.T) {
+func windowsFixture(t *testing.T) string {
+	t.Helper()
 	old := paths.Windows
 	paths.Windows = func() bool { return true }
 	t.Cleanup(func() { paths.Windows = old })
-	t.Chdir(t.TempDir())
-	for _, d := range []string{"C:/objects", "C:/refs", "C:/proj", "C:/bare/objects", "C:/bare/refs", "C:/bare/sub"} {
-		os.MkdirAll(d, 0o755)
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		return paths.Host(dir) + "/"
 	}
-	os.WriteFile("C:/HEAD", nil, 0o644)
-	os.WriteFile("C:/bare/HEAD", nil, 0o644)
-	if why, bad := GitDirShare("C:/proj"); bad {
+	t.Chdir(dir)
+	return "C:/"
+}
+
+func TestWindowsGitDirShare(t *testing.T) {
+	root := windowsFixture(t)
+	mkdir := func(s string) {
+		t.Helper()
+		if err := os.MkdirAll(root+s, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only simulate a bare repository at the drive root on POSIX.
+	if runtime.GOOS != "windows" {
+		mkdir("objects")
+		mkdir("refs")
+		if err := os.WriteFile(root+"HEAD", nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, d := range []string{"proj", "bare/objects", "bare/refs", "bare/sub"} {
+		mkdir(d)
+	}
+	if err := os.WriteFile(root+"bare/HEAD", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if why, bad := GitDirShare(root + "proj"); bad {
 		t.Errorf("the root taken for a repository: %s", why)
 	}
-	if why, bad := GitDirShare("C:/bare/sub"); !bad || !strings.Contains(why, "(C:/bare)") {
+	bare, err := paths.Real(root + "bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why, bad := GitDirShare(root + "bare/sub"); !bad || !strings.Contains(why, "("+bare+")") {
 		t.Errorf("inside a bare repository: %q %v", why, bad)
 	}
 }
 
-// The volumes file and the shares on Windows, on any host: paths.Windows on,
-// and, from a temporary folder, C:/... a relative path that exists.
+// The volumes file and the shares on Windows, on any host.
 func TestWindowsVolumes(t *testing.T) {
-	old := paths.Windows
-	paths.Windows = func() bool { return true }
-	t.Cleanup(func() { paths.Windows = old })
-	t.Chdir(t.TempDir())
-	for _, d := range []string{"C:/Users/me/proj", "C:/data", "C:/data2", "C:/data3", "C:/data4", "C:/data5", "C:/data6", "C:/st"} {
-		os.MkdirAll(d, 0o755)
+	root := windowsFixture(t)
+	host := func(p string) string { return root + p }
+	guest := func(p string) string { return paths.Guest(host(p)) }
+	for _, d := range []string{"Users/me/proj", "data", "data2", "data3", "data4", "data5", "data6", "st"} {
+		if err := os.MkdirAll(host(d), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	os.WriteFile("C:/f.txt", []byte("x"), 0o644)
+	if err := os.WriteFile(host("f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := hideDrives(`C:/data:/mnt/d:rw:C:/work/*`); got != "C"+driveColon+"/data:/mnt/d:rw:C"+driveColon+"/work/*" {
 		t.Errorf("hideDrives: %q", got)
@@ -49,41 +81,51 @@ func TestWindowsVolumes(t *testing.T) {
 	}
 
 	vols := strings.Join([]string{
-		"C:/data",                              // its own path in the VM: /c/data
-		`C:\data2:/mnt/d2:rw`,                  // backslashes
-		"/c/data3",                             // 0.2's Git Bash spelling
-		"C:/data4:sub:ro:C:/Users/me/*",        // a filter with a drive, matched
-		"C:/data5:/mnt/x:ro:C:/other/*",        // not matched
-		"C:/data6:/mnt/d6:ro:/c/Users/me/proj", // 0.2's filter spelling, matched
-		"C:/data6:C:/x",                        // a destination with a drive: refused
-		"C:/f.txt",                             // a single file, bound at /c/f.txt
-		"C:/Users",                             // at /c/Users: over the project, refused
+		host("data"), // its own path in the VM
+		strings.ReplaceAll(host("data2"), "/", `\`) + ":/mnt/d2:rw",
+		guest("data3"), // Git Bash spelling
+		host("data4") + ":sub:ro:" + host("Users/me/*"),
+		host("data5") + ":/mnt/x:ro:" + host("other/*"), // not matched
+		host("data6") + ":/mnt/d6:ro:" + guest("Users/me/proj"),
+		host("data6") + ":C:/x", // destination with a drive: refused
+		host("f.txt"),
+		host("Users"), // would cover the project
 	}, "\n") + "\n"
-	os.WriteFile("vols", []byte(vols), 0o644)
+	if err := os.WriteFile(host("vols"), []byte(vols), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var warn bytes.Buffer
-	es := Entries("vols", "C:/Users/me/proj", "C:/Users/me", nil, &warn)
+	es := Entries(host("vols"), host("Users/me/proj"), host("Users/me"), nil, &warn)
 	var got []string
 	for _, e := range es {
 		got = append(got, e.Src+">"+e.Dst+">"+e.Mode)
 	}
-	want := "C:/data>>ro C:/data2>/mnt/d2>rw C:/data3>>ro C:/data4>sub>ro C:/data6>/mnt/d6>ro C:/f.txt>>ro"
+	want := strings.Join([]string{host("data") + ">>ro", host("data2") + ">/mnt/d2>rw", host("data3") + ">>ro",
+		host("data4") + ">sub>ro", host("data6") + ">/mnt/d6>ro", host("f.txt") + ">>ro"}, " ")
 	if strings.Join(got, " ") != want {
 		t.Errorf("entries:\n got  %s\n want %s\n%s", strings.Join(got, " "), want, warn.String())
 	}
-	if !strings.Contains(warn.String(), "'C:/data6:C:/x'") || !strings.Contains(warn.String(), "'C:/Users' (from ~/.agent-vm/volumes) would be mounted at /c/Users, which covers the project") ||
+	if !strings.Contains(warn.String(), "'"+host("data6")+":C:/x'") ||
+		!strings.Contains(warn.String(), "'"+host("Users")+"' (from ~/.agent-vm/volumes) would be mounted at "+guest("Users")+", which covers the project") ||
 		strings.Count(warn.String(), "Warning") != 2 {
 		t.Errorf("warnings: %s", warn.String())
 	}
 
-	ms, files := Build(Shares{VM: "v", Dir: "C:/Users/me/proj", Writable: true, Entries: es, StateDir: "C:/st", Warn: &warn})
+	ms, files := Build(Shares{VM: "v", Dir: host("Users/me/proj"), Writable: true, Entries: es, StateDir: host("st"), Warn: &warn})
+	if len(ms) == 0 {
+		t.Fatal("no mounts")
+	}
 	var mounts []string
 	for _, m := range ms[:len(ms)-1] {
 		mounts = append(mounts, m.Location+">"+m.MountPoint)
 	}
-	if want := "C:/Users/me/proj>/c/Users/me/proj C:/data>/c/data C:/data2>/mnt/d2 C:/data3>/c/data3 C:/data4>/c/Users/me/proj/sub C:/data6>/mnt/d6"; strings.Join(mounts, " ") != want {
+	want = strings.Join([]string{host("Users/me/proj") + ">" + guest("Users/me/proj"), host("data") + ">" + guest("data"),
+		host("data2") + ">/mnt/d2", host("data3") + ">" + guest("data3"), host("data4") + ">" + guest("Users/me/proj/sub"),
+		host("data6") + ">/mnt/d6"}, " ")
+	if strings.Join(mounts, " ") != want {
 		t.Errorf("mounts:\n got  %s\n want %s", strings.Join(mounts, " "), want)
 	}
-	if len(files) != 1 || files[0].BindDst != "/c/f.txt" || !strings.HasPrefix(files[0].Staging, "C:/st/file-mounts/v/") || ms[len(ms)-1].MountPoint != "/tmp/.agent-vm-file-mounts/0" {
+	if len(files) != 1 || files[0].BindDst != guest("f.txt") || !strings.HasPrefix(files[0].Staging, host("st/file-mounts/v/")) || ms[len(ms)-1].MountPoint != "/tmp/.agent-vm-file-mounts/0" {
 		t.Errorf("single file: %+v %+v", files, ms[len(ms)-1])
 	}
 }

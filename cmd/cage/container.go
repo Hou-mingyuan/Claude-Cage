@@ -46,7 +46,7 @@ func configureContainer(configPath string) error {
 	return json.NewEncoder(os.Stdout).Encode(map[string]bool{"configured": true})
 }
 
-func containerOperation(configPath string, args []string, cfg cage.Config) (bool, error) {
+func containerOperation(configPath string, args []string, cfg cage.Config, keepProxy bool) (bool, error) {
 	profile := filepath.Dir(configPath)
 	if !containerenv.Configured(profile) {
 		return false, nil
@@ -78,6 +78,9 @@ func containerOperation(configPath string, args []string, cfg cage.Config) (bool
 		}
 		if err := environment.Stop(ctx); err != nil {
 			return true, err
+		}
+		if keepProxy {
+			return true, nil
 		}
 		return true, managedproxy.Stop(profile)
 	case "list", "info":
@@ -119,7 +122,7 @@ func containerOperation(configPath string, args []string, cfg cage.Config) (bool
 		return true, err
 	}
 	if needsServices {
-		if err := workbench.StartGuestServices(ctx, configPath, cfg, os.Stdout, os.Stderr); err != nil {
+		if err := workbench.StartGuestServices(ctx, configPath, os.Stdout, os.Stderr); err != nil {
 			return true, err
 		}
 	}

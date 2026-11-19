@@ -11,7 +11,7 @@ namespace Cage.GuestClipboard;
 // never accepted from the wire; a future project grant must be resolved here.
 internal static class TerminalRpc
 {
-    internal sealed record Launch(string Executable, string[] Arguments, string Directory, Dictionary<string, string> Environment);
+    internal sealed record Launch(string Executable, string[] Arguments, string Directory, Dictionary<string, string> Environment, RemoteSandbox? Sandbox = null);
     private static readonly SemaphoreSlim Slots = new(12, 12);
     [ModuleInitializer]
     internal static void Register() => GuestOperations.Register("terminal", Run);
@@ -22,7 +22,12 @@ internal static class TerminalRpc
     }
     internal static Task Run(Stream stream, CancellationToken token, Func<bool> sessionAvailable) => RunCore(stream, token, sessionAvailable, null);
     internal static Task RunWithLaunch(Stream stream, CancellationToken token, Func<bool> sessionAvailable, Launch launch) => RunCore(stream, token, sessionAvailable, launch);
-    private static async Task RunCore(Stream stream, CancellationToken token, Func<bool> sessionAvailable, Launch? launch)
+    internal static Task RunHeadless(Stream stream, CancellationToken token, Launch launch, bool cli = false)
+    {
+        if (launch.Sandbox is null) throw new InvalidDataException("headless_sandbox_required");
+        return RunCore(stream, token, () => !token.IsCancellationRequested, launch, true, cli);
+    }
+    private static async Task RunCore(Stream stream, CancellationToken token, Func<bool> sessionAvailable, Launch? launch, bool headless = false, bool cli = false)
     {
         if (!sessionAvailable()) throw new InvalidDataException("requires_gui_login");
         if (!await Slots.WaitAsync(0, token)) throw new InvalidDataException("terminal_limit");
@@ -41,11 +46,12 @@ internal static class TerminalRpc
         try
         {
             var open = await Protocol.Read(stream, 65536, lifetime.Token) ?? throw new EndOfStreamException();
-            if (open["action"]?.GetValue<string>() != "open" || open["shell"]?.GetValue<string>() != (launch is null ? "powershell" : "claude") || !sessionAvailable())
+            if (open["action"]?.GetValue<string>() != "open" || open["shell"]?.GetValue<string>() != (launch is null || headless && !cli ? "powershell" : "claude") || !sessionAvailable())
                 throw new InvalidDataException("terminal_request_invalid");
+            if (headless && open["workspace"]?.GetValue<string>() != "home") throw new InvalidDataException("headless_project_not_granted");
             var directory = open["workspace"]?.GetValue<string>() switch
             {
-                "home" => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "home" => headless ? launch!.Sandbox!.Home : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 "project" => ProjectRpc.Resolve(open["project_id"]?.GetValue<string>() ?? "", open["grant"]?.GetValue<string>() ?? ""),
                 _ => throw new InvalidDataException("terminal_request_invalid")
             };
@@ -127,44 +133,73 @@ internal static class TerminalRpc
         return (short)size;
     }
 
-    private sealed class NativeTerminal : IDisposable
+    internal sealed class NativeTerminal : IDisposable
     {
         internal FileStream Input { get; }
         internal FileStream Output { get; }
+        internal FileStream? Error { get; }
         private nint console, process, job;
         private readonly object gate = new();
         private int disposed;
-        internal NativeTerminal(short cols, short rows, string directory, Launch? launch)
+        internal NativeTerminal(short cols, short rows, string directory, Launch? launch, bool pipes = false)
         {
             SafeFileHandle? inputRead = null, inputWrite = null, outputRead = null, outputWrite = null;
-            nint attributes = 0, environment = 0;
+            SafeFileHandle? errorRead = null, errorWrite = null;
+            nint attributes = 0, environment = 0, desktop = 0, inherited = 0;
             try
             {
+                if (pipes && launch?.Sandbox is null) throw new InvalidDataException("pipe_sandbox_required");
                 Check(CreatePipe(out inputRead, out inputWrite, 0, 0));
                 Check(CreatePipe(out outputRead, out outputWrite, 0, 0));
-                Marshal.ThrowExceptionForHR(CreatePseudoConsole(new Coord(cols, rows), inputRead, outputWrite, 0, out console));
-                nuint bytes = 0; InitializeProcThreadAttributeList(0, 1, 0, ref bytes);
+                if (pipes)
+                {
+                    Check(CreatePipe(out errorRead, out errorWrite, 0, 0));
+                    // Only these three child ends are inherited, never the
+                    // bridge's pairing files or authenticated transport.
+                    var handles = new[] { inputRead.DangerousGetHandle(), outputWrite.DangerousGetHandle(), errorWrite.DangerousGetHandle() };
+                    inherited = Marshal.AllocHGlobal(handles.Length * IntPtr.Size);
+                    for (var i = 0; i < handles.Length; i++)
+                    { Check(SetHandleInformation(handles[i], 1, 1)); Marshal.WriteIntPtr(inherited, i * IntPtr.Size, handles[i]); }
+                }
+                else Marshal.ThrowExceptionForHR(CreatePseudoConsole(new Coord(cols, rows), inputRead, outputWrite, 0, out console));
+                var attributeCount = launch?.Sandbox is null ? 1 : 2;
+                nuint bytes = 0; InitializeProcThreadAttributeList(0, attributeCount, 0, ref bytes);
                 attributes = Marshal.AllocHGlobal((nint)bytes);
-                Check(InitializeProcThreadAttributeList(attributes, 1, 0, ref bytes));
-                Check(UpdateProcThreadAttribute(attributes, 0, 0x00020016, console, (nuint)IntPtr.Size, 0, 0));
+                Check(InitializeProcThreadAttributeList(attributes, attributeCount, 0, ref bytes));
+                Check(UpdateProcThreadAttribute(attributes, 0, pipes ? 0x00020002u : 0x00020016u,
+                    pipes ? inherited : console, (nuint)(IntPtr.Size * (pipes ? 3 : 1)), 0, 0));
+                launch?.Sandbox?.Apply(attributes);
                 var startup = new StartupInfoEx(); startup.Startup.cb = Marshal.SizeOf<StartupInfoEx>();
                 startup.Startup.flags = 0x100; startup.Attributes = attributes;
+                if (pipes)
+                {
+                    startup.Startup.input = inputRead.DangerousGetHandle();
+                    startup.Startup.output = outputWrite.DangerousGetHandle();
+                    startup.Startup.error = errorWrite!.DangerousGetHandle();
+                }
+                if (launch?.Sandbox is { } sandbox)
+                {
+                    desktop = Marshal.StringToHGlobalUni(sandbox.Desktop);
+                    startup.Startup.desktop = desktop;
+                }
                 var shell = PowerShellPath();
                 var arguments = new[] { "-NoLogo" };
                 if (launch is not null)
                 {
                     shell = launch.Executable; arguments = launch.Arguments;
-                    environment = Marshal.StringToHGlobalUni(string.Join('\0', launch.Environment.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase).Select(x => x.Key + "=" + x.Value)) + "\0\0");
                 }
+                var variables = launch?.Environment ?? WindowsCliRpc.ToolEnvironment();
+                environment = Marshal.StringToHGlobalUni(string.Join('\0', variables.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase).Select(x => x.Key + "=" + x.Value)) + "\0\0");
                 if (!File.Exists(shell)) throw new InvalidDataException("terminal_shell_missing");
                 job = CreateJobObject(0, null); Check(job != 0);
                 var limits = new JobLimits(); limits.Basic.flags = 0x2000; // KILL_ON_JOB_CLOSE
                 Check(SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf<JobLimits>()));
-                Check(CreateProcess(shell, new StringBuilder(string.Join(' ', new[] { shell }.Concat(arguments).Select(QuoteArgument))), 0, 0, false,
-                    0x00080000 | 0x00000400 | 0x00000004, environment, directory, ref startup, out var created));
+                Check(CreateProcess(shell, new StringBuilder(string.Join(' ', new[] { shell }.Concat(arguments).Select(QuoteArgument))), 0, 0, pipes,
+                    0x00080000 | 0x00000400 | 0x00000004 | (pipes ? 0x08000000u : 0), environment, directory, ref startup, out var created));
                 process = created.Process;
                 try
                 {
+                    launch?.Sandbox?.VerifyProcess(process);
                     Check(AssignProcessToJobObject(job, process));
                     if (ResumeThread(created.Thread) == uint.MaxValue) throw new Win32Exception();
                 }
@@ -172,13 +207,17 @@ internal static class TerminalRpc
                 finally { CloseHandle(created.Thread); }
                 Input = new FileStream(inputWrite, FileAccess.Write, 65536, false); inputWrite = null;
                 Output = new FileStream(outputRead, FileAccess.Read, 65536, false); outputRead = null;
+                if (pipes) { Error = new FileStream(errorRead!, FileAccess.Read, 4096, false); errorRead = null; }
             }
             catch { Dispose(); throw; }
             finally
             {
                 inputRead?.Dispose(); inputWrite?.Dispose(); outputRead?.Dispose(); outputWrite?.Dispose();
+                errorRead?.Dispose(); errorWrite?.Dispose();
                 if (attributes != 0) { DeleteProcThreadAttributeList(attributes); Marshal.FreeHGlobal(attributes); }
                 if (environment != 0) Marshal.FreeHGlobal(environment);
+                if (desktop != 0) Marshal.FreeHGlobal(desktop);
+                if (inherited != 0) Marshal.FreeHGlobal(inherited);
             }
         }
         internal void Resize(short cols, short rows) { lock (gate) { if (console == 0) throw new ObjectDisposedException(nameof(NativeTerminal)); Marshal.ThrowExceptionForHR(ResizePseudoConsole(console, new Coord(cols, rows))); } }
@@ -196,7 +235,7 @@ internal static class TerminalRpc
             KillOwnJob();
             Input?.Dispose();
             // Keep output readable until ConPTY flushes; the active output pump drains it.
-            CloseConsole(); Output?.Dispose();
+            CloseConsole(); Output?.Dispose(); Error?.Dispose();
         }
         public void Dispose()
         {
@@ -223,6 +262,7 @@ internal static class TerminalRpc
     [StructLayout(LayoutKind.Sequential)] private struct IoCounters { internal ulong readOperations,writeOperations,otherOperations,readBytes,writeBytes,otherBytes; }
     [StructLayout(LayoutKind.Sequential)] private struct JobLimits { internal BasicLimits Basic; internal IoCounters Io; internal nuint processMemory,jobMemory,peakProcessMemory,peakJobMemory; }
     [DllImport("kernel32.dll",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] private static extern bool CreatePipe(out SafeFileHandle read,out SafeFileHandle write,nint attributes,uint size);
+    [DllImport("kernel32.dll",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] private static extern bool SetHandleInformation(nint handle,uint mask,uint flags);
     [DllImport("kernel32.dll")] private static extern int CreatePseudoConsole(Coord size,SafeFileHandle input,SafeFileHandle output,uint flags,out nint console);
     [DllImport("kernel32.dll")] private static extern int ResizePseudoConsole(nint console,Coord size);
     [DllImport("kernel32.dll")] private static extern void ClosePseudoConsole(nint console);

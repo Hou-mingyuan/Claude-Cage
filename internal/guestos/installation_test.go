@@ -2,8 +2,12 @@ package guestos
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 	"os"
@@ -64,6 +68,43 @@ func TestWindowsInstallRequiresMediaDigestAndEditorAgreement(t *testing.T) {
 	i.SHA256 = "bad"
 	if err := i.Validate(); err == nil {
 		t.Fatal("accepted an incomplete ISO digest")
+	}
+}
+
+func TestMacInstallAcceptsLocalRestoreImageDigest(t *testing.T) {
+	dir := t.TempDir()
+	media := filepath.Join(dir, "system.ipsw")
+	if err := os.WriteFile(media, []byte("restore image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("restore image"))
+	digest := hex.EncodeToString(sum[:])
+	i := Installation{Version: 1, System: MacOS, ID: uuid.New(), Media: media, SHA256: digest}
+	if err := i.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, bad := range map[string]Installation{
+		"short digest":         {Version: 1, System: MacOS, ID: i.ID, Media: media, SHA256: "bad"},
+		"digest without media": {Version: 1, System: MacOS, ID: i.ID, SHA256: digest},
+		"other image format":   {Version: 1, System: MacOS, ID: i.ID, Media: filepath.Join(dir, "system.iso"), SHA256: digest},
+	} {
+		if err := bad.Validate(); err == nil {
+			t.Fatalf("accepted %s", name)
+		}
+	}
+	if err := (Installation{Version: 1, System: MacOS, ID: i.ID, Media: media, SHA256: "bad"}).Validate(); err == nil || strings.Contains(err.Error(), ".ipsw") {
+		t.Fatalf("digest error should not blame the image format: %v", err)
+	}
+	if err := VerifyMediaDigest(context.Background(), media, strings.ToUpper(digest)); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyMediaDigest(context.Background(), media, strings.Repeat("a", 64)); err == nil {
+		t.Fatal("accepted a mismatched digest")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := VerifyMediaDigest(ctx, media, digest); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled verification returned %v", err)
 	}
 }
 

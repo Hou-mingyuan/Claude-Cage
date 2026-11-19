@@ -1,0 +1,160 @@
+name: Build Cage for Intel Mac
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact source commit SHA to build
+        required: true
+        type: string
+      artifact_name:
+        description: Name of the resulting workflow artifact
+        required: true
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    # The runtime is built natively; hosted runners cannot boot nested guests.
+    runs-on: macos-15-intel
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Verify the exact source and Intel runner
+        env:
+          BUILD_REF: ${{ inputs.ref }}
+        run: |
+          [[ "$BUILD_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'Pass an exact commit SHA.' >&2; exit 1; }
+          [[ "$(git rev-parse HEAD)" == "$BUILD_REF" ]]
+          [[ "$(uname -s)" == Darwin && "$(uname -m)" == x86_64 ]]
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Application version consistency
+        run: |
+          node scripts/check-version.mjs
+          node --test scripts/macos-sshfs-sources.test.mjs scripts/guest-os/tests/install-macos-project-tools.test.mjs
+      - name: Install native guest and Intel runtime build dependencies
+        run: |
+          brew install glib gettext pcre2 libffi pixman pkgconf meson ninja
+          brew upgrade glib gettext pcre2
+      # The runtime build is incremental inside _output/intel-runtime. The key
+      # names every input its compiled files depend on, so any change rebuilds.
+      - name: Describe the Intel runtime build inputs
+        id: runtime-inputs
+        run: |
+          {
+            sw_vers -productVersion
+            xcrun --show-sdk-path
+            xcrun --show-sdk-version
+            xcodebuild -version
+            python3 --version
+            command -v python3
+            brew list --versions
+          } > "$RUNNER_TEMP/intel-runtime-inputs"
+          printf 'digest=%s\n' "$(shasum -a 256 "$RUNNER_TEMP/intel-runtime-inputs" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: _output/intel-runtime
+          key: intel-runtime-${{ hashFiles('scripts/build-intel-macos-runtime.sh') }}-${{ steps.runtime-inputs.outputs.digest }}
+      - name: Build the macOS application without release credentials
+        env:
+          CAGE_SIGNING_IDENTITY: '-'
+          CAGE_BUILD_PYTHON: python3
+          CAGE_BUILD_JOBS: '4'
+        run: bash scripts/build-app.sh
+      - name: Workbench checks
+        run: |
+          npm run --prefix ui lint
+          npm test --prefix ui
+          node --test internal/cage/clipboard.test.cjs internal/cage/browser-audit.test.mjs internal/cage/browser-downloads.test.mjs internal/cage/browser-uploads.test.mjs internal/cage/browser-login.test.mjs internal/cage/browser-clipboard.test.mjs internal/cage/native-input.test.mjs internal/cage/display-density.test.mjs internal/cage/browser-wheel.test.mjs
+          uv run internal/cage/claude-account.test.py
+          uv run internal/cage/display-governor.test.py
+          uv run internal/cage/save-download.test.py
+          uv run internal/cage/editor-migrate.test.py
+          uv run --no-project scripts/guest-os/tests/native-maintenance.py
+          uv run --no-project scripts/guest-os/tests/macos-release-downloads.py
+          uv run --no-project internal/workbench/cache_maintenance_test.py
+      - name: Native Chrome capture window selection
+        run: |
+          check=$(mktemp -d "$RUNNER_TEMP/cage-window-selection.XXXXXX")
+          trap 'rm -rf "$check"' EXIT
+          xcrun swiftc -parse-as-library -O scripts/guest-os/macos-chrome-window-selection.swift scripts/guest-os/tests/macos-chrome-window-selection-test.swift -o "$check/test"
+          "$check/test"
+          xcrun swiftc -parse-as-library -O scripts/guest-os/macos-maintenance-compositor.swift scripts/guest-os/tests/macos-maintenance-compositor-test.swift -o "$check/maintenance-test"
+          "$check/maintenance-test"
+          xcrun swiftc -parse-as-library -O scripts/guest-os/macos-window-socket.swift scripts/guest-os/tests/macos-window-socket-test.swift -o "$check/socket-test"
+          LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 "$check/socket-test"
+          xcrun swiftc -parse-as-library -O scripts/guest-os/macos-project-panel.swift scripts/guest-os/tests/macos-project-panel-test.swift -o "$check/panel-test"
+          "$check/panel-test"
+      - name: Go tests and vet
+        run: |
+          # Intel 上 Lima 使用 QEMU 驱动；与 internal/host/runtime_darwin_amd64.go 一致，使用随包构建的 QEMU
+          runtime="$PWD/_output/Cage.app/Contents/Resources/intel-macos/runtime/bin"
+          test -x "$runtime/qemu-system-x86_64"
+          export PATH="$runtime:$PATH"
+          make test-go
+          go test -race ./internal/cage ./internal/managedproxy ./internal/workbench
+          go vet ./cmd/cage ./internal/cage ./internal/managedproxy ./internal/workbench
+      - name: Native application updater
+        run: bash scripts/test-app-updates.sh
+      - name: External Agent CLI with an isolated profile
+        run: node scripts/agent-cli-smoke.mjs "$PWD/_output/Cage.app/Contents/Resources/cage"
+      - name: Native account credential status
+        run: bash scripts/test-account-device.sh
+      - name: Intel QEMU, guest architecture, networking and shared files
+        run: go test github.com/lima-vm/lima/v2/pkg/driver/qemu github.com/lima-vm/lima/v2/pkg/limatype github.com/lima-vm/lima/v2/pkg/limayaml github.com/containers/gvisor-tap-vsock/pkg/services/dns github.com/lima-vm/lima/v2/pkg/hostagent/dns github.com/lima-vm/lima/v2/pkg/networks/usernet github.com/lima-vm/sshocker/pkg/reversesshfs
+      - name: Dependency licenses
+        run: bash scripts/licenses --check
+      - name: Verify the application bundle
+        run: |
+          codesign --verify --deep --strict _output/Cage.app
+          _output/Cage.app/Contents/Resources/cage --help
+          _output/Cage.app/Contents/Resources/mihomo -v
+          for executable in Contents/MacOS/Cage Contents/Resources/cage Contents/Resources/mihomo Contents/Resources/intel-macos/runtime/bin/qemu-system-x86_64 Contents/Resources/intel-macos/runtime/bin/qemu-img; do
+            [[ "$(lipo -archs "_output/Cage.app/$executable")" == x86_64 ]]
+          done
+          runtime=_output/Cage.app/Contents/Resources/intel-macos/runtime
+          "$runtime/bin/qemu-system-x86_64" --version
+          "$runtime/bin/qemu-system-x86_64" -accel help | grep -Fx hvf
+          "$runtime/bin/qemu-img" --version
+          for firmware in linuxboot_dma.bin multiboot_dma.bin pvh.bin; do
+            test -s "$runtime/share/qemu/$firmware"
+          done
+      - name: Archive a complete development App with executable permissions
+        run: |
+          version=$(tr -d '\r\n' < VERSION)
+          mkdir -p _output/ci-macos-test
+          archive="$PWD/_output/ci-macos-test/Cage-$version-macos-amd64-test.tar.gz"
+          tar -czf "$archive" -C _output Cage.app
+          check=$(mktemp -d "$RUNNER_TEMP/cage-app-archive.XXXXXX")
+          trap 'rm -rf "$check"' EXIT
+          tar -xzf "$archive" -C "$check"
+          codesign --verify --deep --strict "$check/Cage.app"
+          for executable in Contents/MacOS/Cage Contents/Resources/cage Contents/Resources/mihomo Contents/Resources/CageUpdateInstaller Contents/Resources/intel-macos/runtime/bin/qemu-system-x86_64 Contents/Resources/intel-macos/runtime/bin/qemu-img; do
+            test -x "$check/Cage.app/$executable"
+          done
+          (cd _output/ci-macos-test && shasum -a 256 "${archive##*/}" > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: _output/ci-macos-test/
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+          retention-days: 14

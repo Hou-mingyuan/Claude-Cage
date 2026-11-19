@@ -10,6 +10,22 @@ struct ProjectPanel: Decodable, Equatable {
     let windowNumber: CGWindowID
 }
 
+// File lists can expose thousands of AX nodes before the panel's action bar.
+// Visit shallow controls first, keeping the same depth and node bounds.
+func findProjectPanelElement<Element>(_ root: Element, children: (Element) -> [Element], matching: (Element) -> Bool) -> Element? {
+    var pending: [(Element, Int)] = [(root, 0)]
+    var index = 0
+    while index < pending.count {
+        let (element, depth) = pending[index]
+        index += 1
+        if matching(element) { return element }
+        if depth < 14 {
+            pending.append(contentsOf: children(element).prefix(2048 - pending.count).map { ($0, depth + 1) })
+        }
+    }
+    return nil
+}
+
 private func matchesInstalledProjectApp(pid: pid_t) -> Bool {
     let path = "/Applications/CageProjectAccess.app"
     guard NSRunningApplication(processIdentifier: pid)?.bundleURL?.path == path else { return false }
@@ -72,9 +88,12 @@ func visibleProjectPanel(_ panel: ProjectPanel) async throws -> SCWindow {
     guard CGPreflightScreenCaptureAccess() else { throw Failure(6, "project_screen_permission") }
     let candidates = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
     guard let window = candidates.windows.first(where: { $0.windowID == panel.windowNumber && $0.isOnScreen }),
-          let owner = window.owningApplication, NSWorkspace.shared.frontmostApplication?.processIdentifier == panel.pid,
+          let owner = window.owningApplication,
           owner.processID == panel.pid, owner.bundleIdentifier == "dev.cage.guest.project-access" else {
         throw Failure(7, "no_project_panel")
+    }
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == panel.pid else {
+        throw Failure(7, "project_window_not_frontmost")
     }
     return window
 }

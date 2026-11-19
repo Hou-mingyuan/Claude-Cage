@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -363,7 +364,23 @@ func (s *Server) runClaudeRefresh(parent context.Context, id, guestID string, ca
 						err = list.observe(existing.ID, reading, time.Now())
 						notice = "已为已有账号绑定独立登录，保留原备注和参与设置"
 					} else {
-						notice = "此登录身份已经在账号列表中"
+						// Rebinding ProfileID would strand conversations pinned to
+						// the old directory. Recover its missing login in the guest.
+						recovered, recoveryErr := s.recoverClaudeLogin(ctx, existing.ID, existing.guestID(), id, reading.subject())
+						if epoch.Err() != nil {
+							err = errClaudeAccessLost
+							return
+						}
+						if ctx.Err() != nil {
+							err = errors.New("账号状态检查已取消")
+							return
+						}
+						if recoveryErr == nil && recovered.subject() == reading.subject() {
+							err = list.observe(existing.ID, recovered, time.Now())
+							notice = "已恢复已有账号的登录，保留原目录、会话和参与设置"
+						} else {
+							notice = "此身份已在账号列表中，本次登录未更新原账号。请先等待该账号的手机任务结束，并关闭仍使用它的终端，再从原账号卡片重新登录。"
+						}
 					}
 				} else {
 					list.Accounts = append(list.Accounts, claudeAccount{ID: id, Source: "managed", Label: reading.email(), Enabled: true})
@@ -392,4 +409,31 @@ func (s *Server) runClaudeRefresh(parent context.Context, id, guestID string, ca
 			m.loginNotice = notice
 		}
 	}
+}
+
+func (s *Server) recoverClaudeLogin(ctx context.Context, accountID, target, source, subject string) (claudeGuestSnapshot, error) {
+	// Refresh holds the account lock. TryLock preserves terminal admission's
+	// op -> account lock order and keeps the original login exclusion in force.
+	if !s.op.TryLock() {
+		return claudeGuestSnapshot{}, errTerminalBusy
+	}
+	defer s.op.Unlock()
+	if s.mobileCLI.activeAccounts()[accountID] > 0 {
+		return claudeGuestSnapshot{}, errors.New("请先结束该账号正在执行的移动 CLI 轮次，再重新登录")
+	}
+	if login, err := s.terminals.existingClaudeLogin(accountID, true); err != nil {
+		return claudeGuestSnapshot{}, err
+	} else if login != nil {
+		return claudeGuestSnapshot{}, errors.New("请先完成原账号的登录")
+	}
+	if recover := s.claudeAccounts.recoverLogin; recover != nil {
+		return recover(ctx, target, source, subject)
+	}
+	if s.windowsGuest != nil {
+		return claudeGuestSnapshot{}, errors.New("请从原账号入口重新登录")
+	}
+	if !validClaudeID(target) || !validClaudeID(source) || len(subject) != 64 || strings.Trim(subject, "0123456789abcdef") != "" {
+		return claudeGuestSnapshot{}, errors.New("Claude 登录恢复参数无效")
+	}
+	return s.readClaudeGuestReport(ctx, target, "exec /usr/local/bin/cage-claude-account recover-login "+target+" "+source+" "+subject)
 }

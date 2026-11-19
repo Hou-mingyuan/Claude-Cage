@@ -89,7 +89,7 @@ func (s *Server) resourceStatus(w http.ResponseWriter, r *http.Request) {
 		"memory_gib": memory, "cpus": cpus,
 		"max_memory_gib": maxMemory, "max_cpus": maxCPUs,
 		"resource_error":           allocationError,
-		"recommended_memory_bytes": uint64(maxMemory) << 30, "recommended_cpus": maxCPUs,
+		"recommended_memory_bytes": uint64(cage.AutomaticMemoryGiB(maxMemory)) << 30, "recommended_cpus": maxCPUs,
 		"configured_memory_bytes": maximum, "configured_cpus": configured.CPUs,
 		"restart_required": running && (maximum != int64(memory)<<30 || configured.CPUs != cpus || observation == nil),
 		"observation":      observation,

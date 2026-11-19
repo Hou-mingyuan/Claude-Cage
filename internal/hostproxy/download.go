@@ -14,14 +14,15 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/lima-vm/lima/v2/pkg/lockutil"
 )
 
 // Download uses a shared, digest-specific partial file only for pinned media.
 // The caller supplies a private staging target on the same volume.
 func Download(ctx context.Context, address, target, name, accept, cache, digest string, out io.Writer) error {
+	out = &downloadOutput{Writer: out}
 	tr := NewTransport()
+	// Parallel ranges need separate TCP connections, including behind proxies.
+	tr.ForceAttemptHTTP2 = false
 	defer tr.CloseIdleConnections()
 	resolve := tr.Proxy
 	tr.Proxy = func(req *http.Request) (*url.URL, error) {
@@ -59,12 +60,15 @@ func Download(ctx context.Context, address, target, name, accept, cache, digest 
 			return errors.New("安装包缓存目录无效")
 		}
 	}
-	return lockutil.WithDirLock(dir, func() error {
+	return withDownloadLock(ctx, dir, func() error {
 		partial := filepath.Join(dir, "partial")
 		if err := downloadAttempts(ctx, client, address, partial, name, accept, digest, out); err != nil {
 			return err
 		}
-		return os.Rename(partial, target)
+		if err := os.Rename(partial, target); err != nil {
+			return err
+		}
+		return os.RemoveAll(partial + ".ranges")
 	})
 }
 
@@ -87,7 +91,7 @@ func downloadAttempts(ctx context.Context, client *http.Client, address, target,
 		case !errors.Is(err, os.ErrNotExist):
 			return err
 		}
-		err = downloadOnce(ctx, client, address, target, name, accept, out, 60*time.Second, offset)
+		err = downloadStream(ctx, client, address, target, name, accept, out, 60*time.Second, offset, digest != "")
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -109,6 +113,9 @@ func downloadAttempts(ctx context.Context, client *http.Client, address, target,
 				return nil
 			}
 			if err = os.Remove(target); err != nil {
+				return err
+			}
+			if err = os.RemoveAll(target + ".ranges"); err != nil {
 				return err
 			}
 			err = errors.New("SHA-256 校验失败")
@@ -134,6 +141,10 @@ var errInvalidRange = errors.New("服务器返回的续传范围与现有进度�
 var errRangeExhausted = errors.New("服务器没有更多可续传的数据")
 
 func downloadOnce(parent context.Context, client *http.Client, address, target, name, accept string, out io.Writer, idle time.Duration, offset int64) error {
+	return downloadStream(parent, client, address, target, name, accept, out, idle, offset, false)
+}
+
+func downloadStream(parent context.Context, client *http.Client, address, target, name, accept string, out io.Writer, idle time.Duration, offset int64, parallel bool) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
@@ -179,11 +190,43 @@ func downloadOnce(parent context.Context, client *http.Client, address, target, 
 	if encoding := response.Header.Get("Content-Encoding"); encoding != "" && !strings.EqualFold(encoding, "identity") {
 		return errors.New("下载编码不支持字节校验")
 	}
+	ranges, _ := os.Lstat(target + ".ranges")
+	if parallel && total > offset && (total-offset >= parallelDownloadMinimum || (ranges != nil && ranges.IsDir())) {
+		response.Body.Close()
+		if err := downloadRanges(parent, client, address, target, name, accept, out, idle, offset, total); err == nil {
+			return nil
+		} else if parent.Err() != nil {
+			return parent.Err()
+		}
+		fmt.Fprintf(out, "%s：分段下载未完成，使用单连接继续\n", name)
+		info, err := os.Stat(target)
+		if err != nil {
+			return err
+		}
+		return downloadOnce(parent, client, address, target, name, accept, out, idle, info.Size())
+	}
 	file, err := os.OpenFile(target, flags, 0600)
 	if err != nil {
 		return errors.New("无法写入安装缓存")
 	}
 	defer file.Close()
+	received := offset
+	report := func(n int) {
+		received += int64(n)
+		fmt.Fprintf(out, "CAGE_HOST_BYTES %s %d %d\n", name, received, total)
+	}
+	report(0)
+	expected := int64(-1)
+	if total > 0 {
+		expected = total - offset
+	}
+	if err := copyDownload(ctx, cancel, response.Body, file, idle, expected, report); err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+func copyDownload(ctx context.Context, cancel context.CancelFunc, body io.Reader, file io.Writer, idle time.Duration, expected int64, report func(int)) error {
 	// Check the latest activity while holding the same lock used by the body
 	// reader, so a timer already queued cannot cancel a resumed stream.
 	var mu sync.Mutex
@@ -205,31 +248,41 @@ func downloadOnce(parent context.Context, client *http.Client, address, target, 
 	}
 	timer = time.AfterFunc(idle, check)
 	defer func() { mu.Lock(); defer mu.Unlock(); stopped = true; timer.Stop() }()
-	received := offset
-	report := func() { fmt.Fprintf(out, "CAGE_HOST_BYTES %s %d %d\n", name, received, total) }
-	report()
+	var received int64
+	var pending int
 	reported := time.Now()
 	buffer := make([]byte, 128<<10)
 	for {
-		n, readErr := response.Body.Read(buffer)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, readErr := body.Read(buffer)
 		if n > 0 {
+			if expected >= 0 && received+int64(n) > expected {
+				return errInvalidRange
+			}
 			mu.Lock()
 			last = time.Now()
 			mu.Unlock()
-			if _, err = file.Write(buffer[:n]); err != nil {
+			if _, err := file.Write(buffer[:n]); err != nil {
 				return errors.New("写入安装缓存失败")
 			}
 			received += int64(n)
+			pending += n
 		}
 		if time.Since(reported) >= time.Second || readErr != nil {
-			report()
+			report(pending)
+			pending = 0
 			reported = time.Now()
 		}
 		if readErr == io.EOF {
-			if total > 0 && received != total {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if expected >= 0 && received != expected {
 				return errors.New("下载未收到预期的全部字节")
 			}
-			return file.Close()
+			return nil
 		}
 		if readErr != nil {
 			return errors.New("下载中断或长时间未收到数据")

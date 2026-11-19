@@ -1,17 +1,21 @@
 ---
 import '@fontsource-variable/inter';
+import GoogleAnalytics from './GoogleAnalytics.astro';
 import '../styles/cage.css';
 import { cageCopy, languages, type CageLocale } from '../i18n/cage';
 import releaseData from '../data/release.json';
 import art from '../../../assets/claude-cage-character.png';
 import checks from '../../../assets/network-checks.png';
 import communityCheck from '../../../assets/community-browser-check.png';
-import qr from '../../../assets/community-qq.png';
+import communityCheckPreview from '../../../assets/community-browser-check-cropped.png';
+import qqQr from '../../../assets/community-qq.png';
+import wechatQr from '../assets/community-wechat.png';
 interface Props { locale: CageLocale }
 const { locale } = Astro.props;
 const c = cageCopy[locale];
-type PlatformRelease = { version: string; releaseURL: string; downloadURL: string };
-const published: PlatformRelease & { windowsDownloadURL?: string; linuxDownloadURL?: string; androidDownloadURL?: string; windowsPreview?: PlatformRelease } = releaseData;
+type PlatformRelease = { version: string; releaseURL: string; downloadURL: string; unsigned?: boolean };
+const published: { version: string; releaseURL: string; platforms: Partial<Record<'macos' | 'windows' | 'linux' | 'android', PlatformRelease>> } = releaseData;
+const downloads = published.platforms;
 const base = import.meta.env.BASE_URL;
 const repo = 'https://github.com/Lee-xeo/Claude-Cage';
 const guideLabels: Record<CageLocale, string> = {
@@ -20,23 +24,20 @@ const guideLabels: Record<CageLocale, string> = {
   ps: 'لارښود · 中文', prs: 'راهنما · 中文', am: 'መመሪያ · 中文', so: 'Hagaha · 中文', ti: 'መምርሒ · 中文', fr: 'Documentation · 中文',
 };
 const guideLabel = guideLabels[locale];
-const docHref = (href: string) => href.replace('https://lee-xeo.github.io/Claude-Cage/docs/', `${base}docs/`);
+const docHref = (href: string) => href.replace('https://claude-cage.com/docs/', `${base}docs/`);
 const platforms = [
   { name: 'macOS', icon: 'apple', requirements: 'Apple Silicon · macOS 14+', format: '.dmg',
-    url: published.downloadURL, version: published.version, notes: published.releaseURL, guideURL: `${repo}/blob/main/docs/getting-started.md` },
+    url: downloads.macos?.downloadURL, version: downloads.macos?.version, notes: downloads.macos?.releaseURL, guideURL: `${repo}/blob/main/docs/getting-started.md` },
   { name: 'Windows', icon: 'windows', requirements: 'Windows 10 22H2 / 11 · x64', format: '.exe',
-    url: published.windowsDownloadURL || published.windowsPreview?.downloadURL,
-    version: published.windowsDownloadURL ? published.version : published.windowsPreview?.version,
-    preview: !published.windowsDownloadURL && !!published.windowsPreview,
-    notes: published.windowsDownloadURL ? published.releaseURL : published.windowsPreview?.releaseURL, guideURL: `${repo}/blob/main/docs/windows.md` },
+    url: downloads.windows?.downloadURL, version: downloads.windows?.version,
+    preview: downloads.windows?.unsigned,
+    notes: downloads.windows?.releaseURL, guideURL: `${repo}/blob/main/docs/windows.md` },
   { name: 'Linux', icon: 'linux', requirements: 'Debian 12 / Ubuntu 22.04 / 24.04 · x86_64', format: '.deb',
-    url: published.linuxDownloadURL,
-    version: published.linuxDownloadURL ? published.version : undefined,
-    notes: published.linuxDownloadURL ? published.releaseURL : undefined, guideURL: `${repo}/blob/main/docs/linux.md` },
+    url: downloads.linux?.downloadURL, version: downloads.linux?.version,
+    notes: downloads.linux?.releaseURL, guideURL: `${repo}/blob/main/docs/linux.md` },
   { name: 'Android', icon: 'android', requirements: 'Android 8.0+ · arm64', format: '.apk',
-    url: published.androidDownloadURL,
-    version: published.androidDownloadURL ? published.version : undefined,
-    notes: published.androidDownloadURL ? published.releaseURL : undefined, guideURL: `${base}docs/mobile/` },
+    url: downloads.android?.downloadURL, version: downloads.android?.version,
+    notes: downloads.android?.releaseURL, guideURL: `${base}docs/mobile/` },
   { name: 'iOS', icon: 'apple', requirements: 'iOS 17+ · Secure Enclave', localBuild: true,
     guideURL: `${base}docs/mobile/` },
 ];
@@ -48,6 +49,7 @@ const canonical = new URL(pathFor(locale), Astro.site);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <GoogleAnalytics />
   <meta name="description" content={c.description} />
   <meta name="theme-color" content="#faf8f4" />
   <title>{c.title}</title>
@@ -62,7 +64,7 @@ const canonical = new URL(pathFor(locale), Astro.site);
 <body>
   <header class="nav wrap">
     <a class="brand" href={pathFor(locale)} aria-label={c.home}><img src={`${base}cage-icon.png`} width="40" height="40" alt="" /><span>Claude Cage</span></a>
-    <nav><a class="nav-guide" href={`${base}docs/`}>{guideLabel}</a><a href="#how">{c.start}</a><a href={repo}>GitHub ↗</a><a class="nav-download" href="#download" data-download-open aria-haspopup="dialog">{c.downloadLabel} ↓</a></nav>
+    <nav><a href={base+"ask/"} lang="zh-CN">使用答疑</a><a class="nav-guide" href={`${base}docs/`}>{guideLabel}</a><a href="#how">{c.start}</a><a href={repo}>GitHub ↗</a><a class="nav-download" href="#download" data-download-open aria-haspopup="dialog">{c.downloadLabel} ↓</a></nav>
   </header>
   <div class="language-switch wrap">
     <span id="language-label">{c.languageLabel}</span>
@@ -78,21 +80,28 @@ const canonical = new URL(pathFor(locale), Astro.site);
   </div>
   <main id="main">
     <section class="story-hero wrap">
-      <div class="story-copy"><span class="eyebrow"><span class="seed"></span>CLAUDE CAGE · v{published.version}</span><h1>{c.hero}{c.heroAccent && <><br /><em>{c.heroAccent}</em></>}</h1><p class="tagline">{c.tagline}</p><p class="hero-intro">{c.intro}</p><a class="button" href="#download" data-download-open aria-haspopup="dialog">{c.downloadLabel} ↓</a><span class="requirements" dir="ltr">{c.requirements}</span></div>
+      <div class="story-copy"><span class="eyebrow"><span class="seed"></span>CLAUDE CAGE · v{published.version}</span><h1>{c.hero}{c.heroAccent && <><br /><em>{c.heroAccent}</em></>}</h1><p class="tagline">{c.tagline}</p><p class="hero-intro">{c.intro}</p><a class="button" href="#download" data-download-open aria-haspopup="dialog">{c.downloadLabel} ↓</a><a class="text-link ask-link" lang="zh-CN" href={base+"ask/"}>使用答疑 →</a><span class="requirements" dir="ltr">{c.requirements}</span></div>
       <figure class="character"><img src={art.src} width={art.width} height={art.height} alt={c.artAlt} fetchpriority="high" /></figure>
     </section>
     <section class="manifesto wrap"><h2>{c.why}</h2><p>{c.whyText}</p><ul class="key-features">{c.keyFeatures.map(text => <li>{text}</li>)}</ul><p class="small-note">{c.whyNote}</p></section>
     <section class="tools wrap" aria-labelledby="tools-title"><div class="section-intro"><h2 id="tools-title">{c.featureTitle}</h2></div><div class="tool-list">{c.features.map(([title,text],i) => <article><span class="tool-icon" aria-hidden="true">{['>_','↔','◎','↗','@','▣','☁'][i] || '↗'}</span><div><h3>{title}</h3><p>{text}</p></div></article>)}</div><a class="text-link feature-guide" href={`${base}docs/`}>{guideLabel} →</a></section>
     <div class="wrap"><figure class="product"><div class="window-bar" dir="ltr"><span class="window-dots" aria-hidden="true">● ● ●</span><span>Claude Cage</span><span class="window-label">macOS</span></div><img src={`${base}workbench-2026-11.jpg`} width="1440" height="900" alt={c.workbench} loading="lazy" /><figcaption>{c.workbench}</figcaption></figure></div>
-    <section class="evidence wrap"><h2>{c.evidenceTitle}</h2><div class="evidence-grid"><figure><a href={checks.src}><img src={checks.src} width={checks.width} height={checks.height} alt={c.checksLabel} loading="lazy" /></a><figcaption>{c.checksLabel}</figcaption></figure><figure><a href={communityCheck.src}><img src={communityCheck.src} width={communityCheck.width} height={communityCheck.height} alt={c.communityCheckLabel} loading="lazy" /></a><figcaption>{c.communityCheckLabel}</figcaption></figure></div><p class="small-note">{c.evidenceNote}</p></section>
+    <section class="evidence wrap"><h2>{c.evidenceTitle}</h2><div class="evidence-grid"><figure><a href={checks.src}><img src={checks.src} width={checks.width} height={checks.height} alt={c.checksLabel} loading="lazy" /></a><figcaption>{c.checksLabel}</figcaption></figure><figure><a href={communityCheck.src}><img src={communityCheckPreview.src} width={communityCheckPreview.width} height={communityCheckPreview.height} alt={c.communityCheckLabel} loading="lazy" /></a><figcaption>{c.communityCheckLabel}</figcaption></figure></div><p class="small-note"><a class="text-link" href="https://fuck-claude.vercel.app/">FuckClaude ↗</a> · <a class="text-link" href="https://github.com/LinXiaoTao/FuckClaude">LinXiaoTao / GitHub ↗</a></p><p class="small-note">{c.evidenceNote}</p></section>
     <section id="how" class="start-section"><div class="wrap"><div class="quick-start"><h2>{c.quickTitle}</h2><p>{c.quickText}</p><pre><code>{c.prompt}</code></pre><p class="small-note">{c.quickNote}</p></div><div class="section-heading"><h2 class="steps-title">{c.stepsTitle}</h2></div><div class="steps">{c.steps.map(([title,text],i)=><article><span class="step-number" dir="ltr">0{i+1}</span><h3>{title}</h3><p>{text}</p></article>)}</div><details class="first-look"><summary>{c.firstLookLabel}<span aria-hidden="true">＋</span></summary><img src={`${base}first-run-2026-11.jpg`} width="1440" height="900" alt={c.firstLookLabel} loading="lazy" /></details></div></section>
     <section id="boundaries" class="boundaries wrap"><h2>{c.boundaryTitle}</h2><div class="boundary-list">{c.boundaries.map(([title,text])=><article><span aria-hidden="true">↔</span><div>{title && <h3>{title}</h3>}<p>{text}</p></div></article>)}</div></section>
-    <section id="download" class="download-section wrap"><div class="download-box"><img src={`${base}cage-icon.png`} width="84" height="84" alt="" /><span class="eyebrow">CLAUDE CAGE · v{published.version}</span><h2>{c.downloadTitle}</h2><p>{c.downloadText}</p><a class="button" href="#download" data-download-open aria-haspopup="dialog">{c.downloadLabel} ↓</a><div class="download-meta" dir="ltr">{platforms.map(platform => <span>{platform.name}</span>)}</div><p class="access-note">{c.downloadNote}</p><p class="access-note update-note">{c.updateNote}</p><a class="text-link" href={published.releaseURL}>{c.releaseNotesLabel} ↗</a><noscript><p>{platforms.map(platform => <a class="text-link" href={platform.url || platform.guideURL}>{platform.name}{platform.localBuild ? ` · ${c.localBuildLabel}` : platform.preview ? ` · ${c.unsignedLabel}` : ''} ↗ </a>)}</p></noscript></div></section>
-    <section class="community-docs wrap" aria-labelledby="docs-title"><h2 id="docs-title">{c.docsTitle}</h2><div class="docs-body"><div class="docs-content"><a class="text-link guide-entry" href={`${base}docs/`}>{guideLabel} →</a><p class="community-intro">{c.communityText}</p><div class="community-links"><a class="text-link" href={`${repo}/issues`}>{c.issuesLabel} ↗</a><a class="text-link" href={repo}>GitHub ↗</a></div><ul class="doc-links">{c.docs.map(doc => <li><a class="text-link" href={docHref(doc.href)}>{doc.label} ↗</a><p>{doc.title}</p></li>)}</ul></div><figure class="community-qr"><a href={qr.src}><img src={qr.src} width={qr.width} height={qr.height} alt={c.group} loading="lazy" /></a><figcaption dir="ltr">{c.group}</figcaption></figure></div></section>
+    <section id="download" class="download-section wrap"><div class="download-box"><img src={`${base}cage-icon.png`} width="84" height="84" alt="" /><span class="eyebrow">CLAUDE CAGE · v{published.version}</span><h2>{c.downloadTitle}</h2><p>{c.downloadText}</p><a class="button" href="#download" data-download-open aria-haspopup="dialog">{c.downloadLabel} ↓</a><div class="download-meta" dir="ltr">{platforms.map(platform => <span>{platform.name}</span>)}</div><p class="access-note">{c.downloadNote}</p><p class="access-note update-note">{c.updateNote}</p><a class="text-link" href={published.releaseURL}>{c.releaseNotesLabel} ↗</a><noscript><p>{platforms.map(platform => <a class="text-link" href={platform.url || platform.guideURL}>{platform.name}{platform.version ? ` · v${platform.version}` : ''}{platform.localBuild ? ` · ${c.localBuildLabel}` : platform.preview ? ` · ${c.unsignedLabel}` : ''} ↗ </a>)}</p></noscript></div></section>
+    <section class="community-docs wrap" aria-labelledby="docs-title"><h2 id="docs-title">{c.docsTitle}</h2><div class="docs-body"><div class="docs-content"><a class="text-link guide-entry" href={`${base}docs/`}>{guideLabel} →</a><p class="community-intro">{c.communityText}</p><div class="community-links"><a class="text-link" href={`${repo}/issues`}>{c.issuesLabel} ↗</a><a class="text-link" href={repo}>GitHub ↗</a><a class="text-link" href="https://t.me/claude_cage">Telegram ↗</a></div><ul class="doc-links">{c.docs.map(doc => <li><a class="text-link" href={docHref(doc.href)}>{doc.label} ↗</a><p>{doc.title}</p></li>)}</ul></div><div class="community-codes">
+      {[{ image: qqQr, label: c.group }, { image: wechatQr, label: c.wechat }].map(({ image, label }) => (
+        <figure class="community-qr">
+          <a href={image.src}><img src={image.src} width={image.width} height={image.height} alt={label} loading="lazy" /></a>
+          <figcaption dir="auto">{label}</figcaption>
+        </figure>
+      ))}
+    </div></div></section>
 
     <section class="license wrap"><h2>{c.licenseTitle}</h2><p>{c.licenseText}</p></section>
   </main>
-  <footer class="wrap"><a class="brand" href={pathFor(locale)}><img src={`${base}cage-icon.png`} width="28" height="28" alt="" />Claude Cage</a><div><a href={`${base}docs/`}>{guideLabel}</a><a href={repo}>GitHub ↗</a><a href={`${repo}/blob/main/${locale === 'zh' ? 'README.md' : `README.${locale}.md`}`}>README ↗</a></div><small>{c.independent}</small></footer>
+  <footer class="wrap"><a class="brand" href={pathFor(locale)}><img src={`${base}cage-icon.png`} width="28" height="28" alt="" />Claude Cage</a><div><a href={`${base}docs/`}>{guideLabel}</a><a href={repo}>GitHub ↗</a><a href={`${repo}/blob/main/${locale === 'zh' ? 'README.md' : `README.${locale}.md`}`}>README ↗</a><a href={`${base}privacy/`}>{locale === 'zh' || locale === 'zh-TW' ? '统计与隐私' : 'Privacy'}</a></div><small>{c.independent}</small></footer>
   <dialog class="download-dialog" aria-labelledby="platform-title">
     <div class="dialog-heading"><h2 id="platform-title">{c.platformLabel}</h2><form method="dialog"><button class="dialog-close" aria-label={c.closeLabel}>×</button></form></div>
     <div class="platform-options">{platforms.map(platform => <article class="platform-option" data-platform={platform.name}>
@@ -136,3 +145,5 @@ const canonical = new URL(pathFor(locale), Astro.site);
   </script>
 </body>
 </html>
+
+<style>.ask-link{display:inline-block;margin-inline-start:18px}</style>

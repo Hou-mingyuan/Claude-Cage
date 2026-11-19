@@ -40,6 +40,9 @@ print(json.dumps({'installed':installed,'version':package[1] if installed else '
 CAGE_DESKTOP_STATE`
 
 func (s *Server) claudeDesktopStatus(w http.ResponseWriter, r *http.Request) {
+	if s.remoteWindowsDesktopUnavailable(w) {
+		return
+	}
 	if !s.vmRunning() {
 		http.Error(w, "请先启动 Cage 环境", 409)
 		return
@@ -51,7 +54,7 @@ func (s *Server) claudeDesktopStatus(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		if s.windowsGuest != nil {
 			var result claudeDesktopState
-			if err := s.windowsDesktopRequest(ctx, "status", nil, &result); err != nil {
+			if err := s.windowsDesktopQuick(ctx, "status", nil, &result); err != nil {
 				return nil, err
 			}
 			return json.Marshal(result)
@@ -73,12 +76,15 @@ func (s *Server) claudeDesktopStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) claudeDesktopAction(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
-	if action != "install" && action != "start" && action != "stop" {
+	if action != "install" && action != "update" && action != "start" && action != "stop" {
 		http.NotFound(w, r)
 		return
 	}
 	var input struct{}
 	if !readJSON(w, r, &input) {
+		return
+	}
+	if s.remoteWindowsDesktopUnavailable(w) {
 		return
 	}
 	if !s.vmRunning() {
@@ -89,13 +95,16 @@ func (s *Server) claudeDesktopAction(w http.ResponseWriter, r *http.Request) {
 		s.desktopStatus.invalidate()
 		defer s.desktopStatus.invalidate()
 		if s.windowsGuest != nil {
+			if action == "update" {
+				return errors.New("请使用 Claude Desktop 应用内的更新入口")
+			}
 			if action == "install" {
 				return errors.New("Windows 客机的自动安装尚未接通，请保留已有官方应用")
 			}
 			return s.windowsDesktopRequest(s.operationContext(), action, nil, nil)
 		}
 		switch action {
-		case "install":
+		case "install", "update":
 			s.mu.Lock()
 			allowed := s.toolsNetworkAllowedLocked()
 			s.mu.Unlock()
@@ -127,7 +136,11 @@ func (s *Server) claudeDesktopAction(w http.ResponseWriter, r *http.Request) {
 				<-done
 			}()
 			s.setMessage("正在下载并安装 Claude Desktop，可在操作详情查看进度…")
-			return RunMaintenanceScript(s.operationContext(), s.configPath, cage.ClaudeDesktopInstallScript(), s.jobs.execution(), s.jobs.execution())
+			script := cage.ClaudeDesktopInstallScript()
+			if action == "update" {
+				script = "set -e\nsudo systemctl stop cage-claude-desktop.service\n" + script
+			}
+			return RunMaintenanceScript(s.operationContext(), s.configPath, script, s.jobs.execution(), s.jobs.execution())
 		case "start":
 			return s.startClaudeDesktop()
 		default:
@@ -169,6 +182,15 @@ func (s *Server) runDesktopScript(script string, timeout time.Duration) error {
 	// A guest cgroup owns apt and all descendants, including across SSH loss.
 	// The application's persistent service is separate from this operation.
 	command := fmt.Sprintf("sudo systemd-run --quiet --pipe --wait --collect --unit=cage-desktop-operation --property=User=cage --property=RuntimeMaxSec=%d --property=KillMode=control-group --setenv=HOME=/home/cage --working-directory=/home/cage /bin/bash -se", int(timeout.Seconds()))
+	var renderErr error
+	command, renderErr = s.linuxTemplate(command)
+	if renderErr != nil {
+		return renderErr
+	}
+	script, renderErr = s.linuxTemplate(script)
+	if renderErr != nil {
+		return renderErr
+	}
 	cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", command)
 	cmd.Stdin = strings.NewReader(script)
 	cmd.Stdout, cmd.Stderr = s.jobs.execution(), s.jobs.execution()
@@ -193,7 +215,7 @@ func (s *Server) claudeDesktopCredentials(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	b, err := s.guestQuick(ctx, `set -eu
 systemctl is-active --quiet cage-claude-desktop.service
-password=$(cat /home/cage/.config/claude-cage/desktop-password)
+password=$(cat "$HOME/.config/claude-cage/desktop-password")
 printf '%s\n' "$password"
 if test -f /run/cage-desktop/base-display-scale; then cat /run/cage-desktop/base-display-scale
 elif test -f /run/cage-desktop/display-scale; then cat /run/cage-desktop/display-scale
@@ -219,6 +241,9 @@ func validDisplayDensity(scale float64) bool {
 }
 
 func (s *Server) claudeDesktopResize(w http.ResponseWriter, r *http.Request) {
+	if s.remoteWindowsDesktopUnavailable(w) {
+		return
+	}
 	var input struct {
 		Width  int     `json:"width"`
 		Height int     `json:"height"`
@@ -285,7 +310,9 @@ printf '%%s %%s %%s\n' %d %d "$scale" > /run/cage-desktop/desktop-size
 if test -f /run/cage-phone-desktop/layout.json; then exit 0; fi
 if test -n "$manager" && test "$(cat /run/cage-desktop/display-scale 2>/dev/null)" != "$scale"; then
   dpi=$(awk -v scale="$scale" 'BEGIN {printf "%%.0f", scale * 96 * 1024}')
-  printf 'Xft/DPI %%s\nGdk/WindowScalingFactor 1\nGdk/UnscaledDPI %%s\nGtk/DecorationLayout ":"\n' "$dpi" "$dpi" > /run/cage-desktop/xsettings.conf.new
+  # A session started by an earlier version has no list of its other settings.
+  { printf 'Xft/DPI %%s\nGdk/WindowScalingFactor 1\nGdk/UnscaledDPI %%s\n' "$dpi" "$dpi"
+    cat /run/cage-desktop/xsettings.fixed 2>/dev/null || printf 'Gtk/DecorationLayout ":"\n'; } > /run/cage-desktop/xsettings.conf.new
   mv /run/cage-desktop/xsettings.conf.new /run/cage-desktop/xsettings.conf
   kill -HUP "$manager"
   printf '%%s\n' "$scale" > /run/cage-desktop/display-scale

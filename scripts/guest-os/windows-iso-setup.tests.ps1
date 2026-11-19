@@ -4,8 +4,11 @@ $ErrorActionPreference = 'Stop'
 function Assert-Check([bool]$Condition, [string]$Message) { if (!$Condition) { throw $Message } }
 $credential = [pscredential]::new('CageAdmin', (ConvertTo-SecureString 'Test-only<&>"Account!123' -AsPlainText -Force))
 $answer = New-CageISOAnswer $credential
+$named = New-CageISOAnswer $credential 'MY-PC'
 $ns = [Xml.XmlNamespaceManager]::new($answer.NameTable)
 $ns.AddNamespace('u', 'urn:schemas-microsoft-com:unattend')
+Assert-Check ($answer.SelectSingleNode('//u:ComputerName', $ns).InnerText -ceq '*') 'Default ISO computer name is fixed.'
+Assert-Check ($named.SelectSingleNode('//u:ComputerName', $ns).InnerText -ceq 'MY-PC') 'ISO setup ignored the manual name.'
 $roundtrip = [xml]$answer.OuterXml
 Assert-Check ($roundtrip.SelectSingleNode('//u:LocalAccount/u:Name', $ns).InnerText -ceq 'CageAdmin') 'Initial account name changed.'
 Assert-Check ($roundtrip.SelectSingleNode('//u:LocalAccount/u:Password/u:Value', $ns).InnerText -ceq $credential.GetNetworkCredential().Password) 'Password XML escaping changed the credential.'
@@ -13,6 +16,12 @@ Assert-Check ($answer.SelectSingleNode('//u:LocalAccount/u:Group', $ns).InnerTex
 foreach ($setting in @('HideOnlineAccountScreens', 'HideWirelessSetupInOOBE')) {
     Assert-Check ($answer.SelectSingleNode('//u:OOBE/u:'+$setting, $ns).InnerText -ceq 'true') 'Offline OOBE settings are missing.'
 }
+# Windows Setup ignores an Autounattend.xml without windowsPE settings ("does not
+# meet criteria"), which silently drops the specialize and oobeSystem passes. The
+# one windowsPE setting must stay Setup's own default so no manual page changes.
+$winPE = @($answer.SelectNodes('//u:settings[@pass="windowsPE"]//u:component', $ns))
+Assert-Check ($winPE.Count -eq 1 -and $winPE[0].GetAttribute('name') -ceq 'Microsoft-Windows-Setup') 'The manual ISO answer needs one windowsPE component so Windows Setup accepts it.'
+Assert-Check (@($winPE[0].ChildNodes | Where-Object NodeType -eq 'Element').Count -eq 1 -and $winPE[0].SelectSingleNode('u:EnableNetwork', $ns).InnerText -ceq 'true') 'The windowsPE setting must only keep Setup''s default network behaviour.'
 Assert-Check ($answer.SelectNodes('//u:DiskConfiguration | //u:ImageInstall | //u:HideEULAPage | //u:AcceptEula | //u:ProductKey | //u:AutoLogon | //u:UILanguage | //u:SkipMachineOOBE', $ns).Count -eq 0) 'Manual ISO choices or administrator sign-in were overridden.'
 foreach ($name in @('Administrator', 'cagesetup', 'host\user', 'user@example.com', 'abcdefghijklmnopqrstu')) {
     try {
@@ -31,9 +40,11 @@ $createAnswer = [scriptblock]::Create($selection.Extent.Text)
 $script:prompts = 0
 function Get-Credential { param($UserName, $Message); $script:prompts++; return $credential }
 $fromHost = $false
+$ComputerName = 'Office-PC'
 $GuestAdministrator = $null
 . $createAnswer
 Assert-Check ($script:prompts -eq 1 -and $answer.SelectNodes('//u:LocalAccount', $ns).Count -eq 1) 'The manual route did not collect an offline account.'
+Assert-Check ($answer.SelectSingleNode('//u:ComputerName', $ns).InnerText -ceq $ComputerName) 'The manual route dropped the selected computer name.'
 . $createAnswer
 Assert-Check ($script:prompts -eq 1) 'An explicit credential prompted again.'
 $fromHost = $true
@@ -42,6 +53,7 @@ $ImageLanguage = 'zh-CN'
 . $createAnswer
 Assert-Check ($answer.SelectSingleNode('//u:LocalAccount/u:Name', $ns).InnerText -ceq 'cagesetup') 'Clone setup account changed.'
 Assert-Check ($answer.SelectSingleNode('//u:UILanguage', $ns).InnerText -ceq 'zh-CN') 'Clone locale changed.'
+Assert-Check ($answer.SelectSingleNode('//u:ComputerName', $ns).InnerText -ceq $ComputerName) 'The clone route dropped the selected computer name.'
 
 # The owner's progress reader accepts only known stages and reads the final
 # stage after process exit. Arbitrary child output never becomes UI content.

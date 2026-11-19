@@ -3,8 +3,6 @@ on:
   push:
     branches: [main]
     paths: ['www/**', 'assets/**', 'README*.md', 'docs/guide/**', 'scripts/agent-*.mjs', 'scripts/verify-macos-release.sh', '.github/workflows/www.yml']
-  pull_request:
-    paths: ['www/**', 'assets/**', 'README*.md', 'docs/guide/**', 'scripts/agent-*.mjs', 'scripts/verify-macos-release.sh', '.github/workflows/www.yml']
   release:
     types: [published]
   workflow_dispatch:
@@ -49,35 +47,17 @@ jobs:
     if: always() && !cancelled() && (needs.verify-release.result == 'success' || needs.verify-release.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      PUBLIC_GA_MEASUREMENT_ID: ${{ vars.GA_MEASUREMENT_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'release' && 'main' || github.ref }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/build-website
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: www/package-lock.json
-      - run: npm ci --prefix www
-      - run: node --test www/scripts/sync-release.test.mjs
-      - name: Agent package discovery and verification
-        run: node --test scripts/agent-bootstrap.test.mjs
-      - name: Resolve the public download version
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: |
-          if [[ -n "$RELEASE_TAG" ]]; then
-            node www/scripts/sync-release.mjs --tag "$RELEASE_TAG"
-          else
-            node www/scripts/sync-release.mjs
-          fi
-      - run: npm run --prefix www check
-      - run: npm run --prefix www build
-      - run: node www/scripts/check-site.mjs
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: www/dist
+          release_tag: ${{ inputs.release_tag || github.event.release.tag_name }}
+
   deploy:
     needs: build
     if: always() && needs.build.result == 'success' && (github.event_name == 'workflow_dispatch' || github.event_name == 'release') && (github.ref == 'refs/heads/main' || github.event_name == 'release')

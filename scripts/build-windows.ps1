@@ -13,23 +13,53 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repository '_output/w
 if (-not $DependencyCache) { $DependencyCache = Join-Path $repository '_output/windows-deps' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath (Join-Path $OutputDirectory 'Uninstall.exe')) { throw 'Do not build over an installed application. Choose a separate output directory and use the installer to upgrade.' }
+Assert-WindowsWorkbenchTestBase
 $version = Get-CageVersion $repository
 $signed = $Release -or $Sign
 if ($signed) { Assert-WindowsSigningConfiguration }
-$go = Get-BuildCommand @('go')
-$dotnet = Get-BuildCommand @('dotnet')
-$node = Get-BuildCommand @('node')
-$npm = Get-BuildCommand @('npm.cmd', 'npm')
-$sevenZip = Get-BuildCommand @('7z.exe', '7zz', '7z')
+$requiredTools = [ordered]@{
+    'Go' = @('go')
+    '.NET SDK' = @('dotnet')
+    'Node.js' = @('node')
+    '7-Zip' = @('7z.exe', '7zz', '7z')
+}
+if (-not $SkipUI) {
+    $requiredTools['npm'] = @('npm.cmd', 'npm')
+    $requiredTools['uv'] = @('uv')
+}
+$tools = @{}
+$missing = foreach ($name in $requiredTools.Keys) {
+    $command = Get-BuildCommand $requiredTools[$name] -Optional
+    if ($command) { $tools[$name] = $command } else { $name }
+}
+if ($missing) { throw "Missing Windows build tools on PATH: $($missing -join ', '). See docs/windows.md#windows-源码构建 for setup instructions." }
+$go = $tools['Go']
+$dotnet = $tools['.NET SDK']
+$node = $tools['Node.js']
+$sevenZip = $tools['7-Zip']
 $dependencies = Get-Content -LiteralPath (Join-Path $repository 'packaging/windows/dependencies.json') -Raw | ConvertFrom-Json
 $stage = Join-Path $repository ("_output/windows-build-" + [guid]::NewGuid().ToString('N'))
 $savedGoOS, $savedGoArch, $savedCGO = $env:GOOS, $env:GOARCH, $env:CGO_ENABLED
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Push-Location $repository
 try {
+    $sdk = (Get-Content -LiteralPath 'global.json' -Raw | ConvertFrom-Json).sdk.version
+    $actualSdk = (& $dotnet '--version' | Select-Object -Last 1)
+    if ($actualSdk -ne $sdk) { throw "Expected .NET SDK $sdk from global.json; found $actualSdk." }
+    foreach ($module in @('.', 'tools/tailnet')) {
+        Push-Location $module
+        try {
+            # Select the module's toolchain before spending time building QEMU.
+            Write-Host "Checking Go toolchain for $module"
+            Invoke-BuildTool $go @('list', '-m')
+        } finally { Pop-Location }
+    }
+    $qemuBuilt = Join-Path $DependencyCache 'qemu-cage'
+    & (Join-Path $PSScriptRoot 'build-qemu-windows.ps1') -DependencyCache $DependencyCache -OutputDirectory $qemuBuilt
+    Invoke-BuildTool $node @('scripts/bundle-cloud-kit.mjs', '--prefetch')
     if (-not $SkipUI) {
-        Invoke-BuildTool $npm @('--prefix', 'ui', 'ci', '--no-audit', '--no-fund')
-        Invoke-BuildTool $npm @('run', '--prefix', 'ui', 'build')
+        Invoke-BuildTool $tools['npm'] @('--prefix', 'ui', 'ci', '--no-audit', '--no-fund')
+        Invoke-BuildTool $tools['npm'] @('run', '--prefix', 'ui', 'build')
     } else {
         Invoke-BuildTool $node @('ui/scripts/verify-build.mjs')
     }
@@ -83,8 +113,7 @@ try {
     Invoke-BuildTool $dotnet @('publish', 'desktop/windows/Cage.Windows.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
         '-p:EnableWindowsTargeting=true', '-p:PublishSingleFile=true', '-p:RestoreLockedMode=true', "-p:Version=$version", "-p:InformationalVersion=$version", '-o', $app)
     Get-ChildItem -LiteralPath $app -File | Where-Object { $_.Extension -in @('.pdb', '.xml') } | Remove-Item -Force
-    node scripts/bundle-cloud-kit.mjs $resources
-    if ($LASTEXITCODE -ne 0) { throw "Cloud deployment kit verification failed." }
+    Invoke-BuildTool $node @('scripts/bundle-cloud-kit.mjs', $resources)
     $coreArchive = Get-VerifiedDependency $dependencies.mihomo $DependencyCache
     $core = Join-Path $stage 'mihomo'
     Expand-BuildArchive $coreArchive $core $sevenZip
@@ -101,10 +130,8 @@ try {
         Remove-Item -LiteralPath (Join-Path $sshTarget $serverFile) -Force -ErrorAction SilentlyContinue
     }
     $qemuArchive = Get-VerifiedDependency $dependencies.qemu $DependencyCache
-    $qemuTarget = Join-Path $resources 'runtime/qemu'
+    $qemuTarget = [IO.Path]::GetFullPath((Join-Path $resources 'runtime/qemu'))
     Expand-BuildArchive $qemuArchive $qemuTarget $sevenZip
-    $qemuBuilt = Join-Path $DependencyCache 'qemu-cage'
-    & (Join-Path $PSScriptRoot 'build-qemu-windows.ps1') -DependencyCache $DependencyCache -OutputDirectory $qemuBuilt
     $runtimeManifest = Get-Content (Join-Path $qemuBuilt 'cage-build.json') -Raw | ConvertFrom-Json
     $ownedRuntime = @($runtimeManifest.files | ForEach-Object { $_.name }) + @('cage-build.json')
     foreach ($name in $ownedRuntime) {
@@ -113,21 +140,14 @@ try {
     }
     # The two executables above are linked against the built dependency closure.
     # Vendor DLLs/executables outside that closure have no runtime consumer.
-    Get-ChildItem -LiteralPath $qemuTarget -File | Where-Object {
-        $_.Extension -in @('.exe', '.dll') -and $_.Name -notin $ownedRuntime
+    Get-ChildItem -LiteralPath $qemuTarget -File -Recurse | Where-Object {
+        $_.Extension -in @('.exe', '.dll') -and ($_.DirectoryName -ne $qemuTarget -or $_.Name -notin $ownedRuntime)
     } | Remove-Item -Force
-    # Ship the x64 VM only, with its original firmware, DLLs and notices.
-    Get-ChildItem -LiteralPath $qemuTarget -Filter 'qemu-system-*.exe' | Where-Object { $_.Name -ne 'qemu-system-x86_64.exe' } | Remove-Item -Force
+    # Ship the x64 VM only, with its original firmware and notices.
     Get-ChildItem -LiteralPath (Join-Path $qemuTarget 'share') -File |
         Where-Object { $_.Name -match '^edk2-(?:aarch64|arm|loongarch64|riscv)-.*\.fd$' } | Remove-Item -Force
     foreach ($file in @('qemu-system-x86_64.exe', 'qemu-img.exe', 'share/efi-virtio.rom', 'share/kvmvapic.bin')) {
         if (-not (Test-Path -LiteralPath (Join-Path $qemuTarget $file))) { throw "QEMU archive lacks $file" }
-    }
-    $firmwareDirectories = & (Join-Path $qemuTarget 'qemu-system-x86_64.exe') '-L' 'help'
-    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect QEMU firmware directories.' }
-    $bundledFirmware = [IO.Path]::GetFullPath((Join-Path $qemuTarget 'share')).TrimEnd('\', '/')
-    if (-not @($firmwareDirectories | Where-Object { [IO.Path]::GetFullPath($_).TrimEnd('\', '/') -eq $bundledFirmware }).Count) {
-        throw 'QEMU cannot locate its bundled firmware after relocation.'
     }
     Remove-Item -LiteralPath (Join-Path $qemuTarget '$PLUGINSDIR') -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $qemuTarget 'qemu-uninstall.exe') -Force -ErrorAction SilentlyContinue
@@ -153,7 +173,7 @@ try {
     $runtimePacks = @($resolvedAssets.project.frameworks.PSObject.Properties.Value.downloadDependencies |
         Where-Object { $_.name -in @('Microsoft.NETCore.App.Runtime.win-x64', 'Microsoft.WindowsDesktop.App.Runtime.win-x64') })
     if ($runtimePacks.Count -ne 2 -or @($runtimePacks | Where-Object { $_.version -ne "[$runtimeVersion, $runtimeVersion]" }).Count -ne 0) {
-        throw 'Resolved .NET runtime differs from packaging/windows/dependencies.json. Use SDK 10.0.403 or review and update the runtime pin.'
+        throw "Resolved .NET runtime differs from the pinned $runtimeVersion in packaging/windows/dependencies.json. Use SDK $sdk from global.json."
     }
     $webviewVersion = ((Get-Content -LiteralPath 'desktop/windows/packages.lock.json' -Raw | ConvertFrom-Json).dependencies.PSObject.Properties.Value |
         ForEach-Object { $_.PSObject.Properties } | Where-Object { $_.Name -eq 'Microsoft.Web.WebView2' } | Select-Object -First 1).Value.resolved
@@ -173,9 +193,22 @@ try {
     if ($signed) {
         $signTool = Get-SigningTool
         foreach ($file in @('Cage.exe', 'resources/cage.exe', 'resources/mihomo.exe')) { Sign-CageFile (Join-Path $app $file) $signTool }
+        foreach ($file in (Get-WindowsQemuBinaries $qemuTarget)) {
+            Sign-CageFile $file.FullName $signTool
+            Assert-CageReleaseSignature $file.FullName
+        }
+        # Preserve the original unsigned build identity for corresponding
+        # sources. The shipped manifest hashes the final Authenticode files.
+        $runtimeManifest | Add-Member -NotePropertyName unsignedManifestSha256 -NotePropertyValue (
+            (Get-FileHash -LiteralPath (Join-Path $qemuBuilt 'cage-build.json') -Algorithm SHA256).Hash)
+        foreach ($file in $runtimeManifest.files) {
+            $file.sha256 = (Get-FileHash -LiteralPath (Join-Path $qemuTarget $file.name) -Algorithm SHA256).Hash
+        }
+        $runtimeManifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $qemuTarget 'cage-build.json') -Encoding utf8
     } else {
         [IO.File]::WriteAllText((Join-Path $app 'DEVELOPMENT-BUILD.txt'), "Unsigned development build. Automatic update installation is disabled. Windows 10/11 runtime acceptance is still required.`n")
     }
+    Assert-WindowsQemuRuntime $qemuTarget -Firmware
     Assert-WindowsWorkbench $app
     $previousOutput = $null
     if (Test-Path -LiteralPath $OutputDirectory) {

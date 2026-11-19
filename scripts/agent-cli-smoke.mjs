@@ -11,14 +11,36 @@ assert.ok(binary && isAbsolute(binary), 'Pass an absolute Cage CLI binary path.'
 const profile = await mkdtemp(join(tmpdir(), 'cage-agent-cli-'));
 const config = join(profile, 'profile', 'config.json');
 let controllerPID;
-function call(args, input, expectedCode = 0) {
+function invoke(args, input) {
   const result = spawnSync(binary, ['agent', ...args, '--config', config], { input: input === undefined ? undefined : JSON.stringify(input), encoding: 'utf8', timeout: 30000 });
   assert.ifError(result.error);
-  assert.equal(result.status, expectedCode, `Unexpected exit from ${args[0]}: ${result.stdout} ${result.stderr}`);
   const reply = JSON.parse(result.stdout);
   assert.equal(reply.protocol, 1);
   assert.equal(reply.config_path, config);
+  return { result, reply };
+}
+function call(args, input, expectedCode = 0) {
+  const { result, reply } = invoke(args, input);
+  assert.equal(result.status, expectedCode, `Unexpected exit from ${args[0]}: ${result.stdout} ${result.stderr}`);
   return reply;
+}
+async function setBrowserHome(home) {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const { result, reply } = invoke(['call', 'browser.preferences.set', '--input', '-'], { browser_home_url: home });
+    // A completed settings job does not stop the background health monitor
+    // from briefly taking the same operation lock. This specific 409 is
+    // returned before any homepage write; other errors still fail immediately.
+    const busy = result.status === 1 && reply.error?.code === 'state_conflict' &&
+      reply.error.http_status === 409 && reply.error.message.endsWith('环境正在执行其他操作，请稍后保存');
+    if (!busy || Date.now() >= deadline) {
+      assert.equal(result.status, 0, `Browser preferences failed: ${result.stdout} ${result.stderr}`);
+      assert.equal(reply.status, 'completed');
+      return;
+    }
+    call(['call', 'status']);
+    await setTimeout(100);
+  }
 }
 try {
   const capabilities = call(['capabilities']);
@@ -43,7 +65,7 @@ try {
   assert.equal(applied.status, 'completed'); assert.equal(applied.data.running, false);
   assert.equal(call(['job', applied.data.id]).data.id, applied.data.id);
   assert.equal(call(['call', 'settings.get']).data.balanced_display, patch.balanced_display);
-  call(['call','browser.preferences.set','--input','-'],{browser_home_url:'https://example.org/'});
+  await setBrowserHome('https://example.org/');
   assert.equal(call(['call','settings.get']).data.browser_home_url,'https://example.org/');
   const rejected = call(['call', 'settings.patch', '--input', '-'], { patch: { proxy_url: 'socks5://127.0.0.1:1' } }, 1);
   assert.equal(rejected.error.code, 'request_rejected');

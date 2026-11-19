@@ -2,9 +2,12 @@ package guestos
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,7 +17,8 @@ import (
 	"github.com/sylvinus/agent-vm/internal/hostimage"
 )
 
-// Installation persists only the media choice and private instance identity.
+// Installation persists the media choice and private instance identity.
+// macOS recovery state is stored separately so it cannot enable the workbench.
 // macOS secrets live separately in the Cage account's encrypted vault.
 type Installation struct {
 	Version     int            `json:"version"`
@@ -71,11 +75,47 @@ func (i Installation) Validate() error {
 		return errors.New("缺少 Linux 本机系统安装来源")
 	}
 	if i.System == MacOS {
-		if i.SHA256 != "" || (i.Media != "" && !strings.EqualFold(filepath.Ext(i.Media), ".ipsw")) {
+		if i.Media != "" && !strings.EqualFold(filepath.Ext(i.Media), ".ipsw") {
 			return errors.New("请选择 Apple 的 .ipsw 恢复镜像")
+		}
+		if i.SHA256 != "" {
+			if i.Media == "" {
+				return errors.New("SHA-256 只用于校验本机的 .ipsw 恢复镜像，请同时选择镜像文件")
+			}
+			if hash, err := hex.DecodeString(i.SHA256); err != nil || len(hash) != 32 {
+				return errors.New("恢复镜像的 SHA-256 格式无效，请填写完整的 64 位十六进制值")
+			}
 		}
 	} else if hash, err := hex.DecodeString(i.SHA256); i.Media == "" || !i.EditorTerms || err != nil || len(hash) != 32 || !strings.EqualFold(filepath.Ext(i.Media), ".iso") {
 		return errors.New("请选择 Windows 11 x64 ISO，并填写这份镜像的完整 SHA-256")
+	}
+	return nil
+}
+
+// VerifyMediaDigest checks a user-selected local image against the SHA-256
+// supplied with the choice. The file is only read.
+func VerifyMediaDigest(ctx context.Context, path, expected string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return errors.New("原安装镜像不可读，请恢复其原路径后重试")
+	}
+	defer f.Close()
+	hash, buf := sha256.New(), make([]byte, 1<<20)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, err := f.Read(buf)
+		hash.Write(buf[:n])
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("读取安装镜像失败：%w", err)
+		}
+	}
+	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expected) {
+		return errors.New("安装镜像的 SHA-256 与填写的值不一致，请核对镜像文件和校验值")
 	}
 	return nil
 }

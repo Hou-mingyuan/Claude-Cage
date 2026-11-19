@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import { createWorkbench } from "./workbench-fixture.mjs";
 
+const chrome = process.argv.includes("--chrome");
+const app = chrome ? "Google Chrome" : "Claude Desktop";
+const base = chrome ? "/api/macos-browser" : "/api/macos/claude";
 const inputs = [], status = { installed: true, running: true, screen: true, input: true, input_protocol: 1, persistent: true };
 let image, geometry = "input-geometry-1";
 const { page, browser, errors } = await createWorkbench({
   async beforeNavigate(page, state) {
     state.account.guest_system = state.status.guest_system = "macos";
     state.status.vm_running = state.status.ready = true;
+    if (chrome) {
+      status.surface = "browser";
+      state.tabs = [{ id: "native-chrome", kind: "web", title: "Google Chrome", native_window: true }];
+      state.active = "native-chrome";
+    }
     image = await page.evaluate(() => {
       const canvas = document.createElement("canvas");
       canvas.width = 640; canvas.height = 480;
@@ -16,8 +24,8 @@ const { page, browser, errors } = await createWorkbench({
       context.fillText("Synthetic Claude input surface", 30, 45);
       return canvas.toDataURL().split(",")[1];
     });
-    await page.route("**/api/macos/claude/window", route => route.fulfill({ json: status }));
-    await page.routeWebSocket("**/api/macos/claude/connection**", socket => {
+    await page.route("**" + base + "/window", route => route.fulfill({ json: status }));
+    await page.routeWebSocket("**" + base + "/connection**", socket => {
       socket.onMessage(data => {
         const { id, request } = JSON.parse(data);
         let result = { ok: true };
@@ -42,10 +50,10 @@ async function until(predicate) {
   assert(predicate(), "expected native window input did not arrive");
 }
 try {
-  await page.getByRole("button", { name: "Claude Desktop", exact: true }).click();
-  const surface = page.getByAltText("Claude Desktop 客机窗口");
+  await page.getByRole("button", { name: chrome ? "打开浏览器" : app, exact: true }).click();
+  const surface = page.getByAltText(app + " 客机窗口");
   await surface.waitFor();
-  await page.getByLabel("向 Claude Desktop 输入").waitFor({ state: "attached" });
+  await page.getByLabel("向 " + app + " 输入").waitFor({ state: "attached" });
   const bounds = await surface.boundingBox();
   await page.mouse.move(bounds.x + 80, bounds.y + 100);
   await page.mouse.down();
@@ -68,7 +76,7 @@ try {
   assert(inputs.some(input => input.code === "KeyF" && input.command));
   assert(inputs.some(input => input.code === "KeyA" && input.command));
   await until(() => inputs.some(input => input.action === "ime" && input.mode === "status"));
-  await page.getByLabel("向 Claude Desktop 输入").evaluate(element => {
+  await page.getByLabel("向 " + app + " 输入").evaluate(element => {
     element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
     element.value = "nihao";
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertCompositionText", isComposing: true, data: "nihao" }));
@@ -93,6 +101,11 @@ try {
   geometry = "input-geometry-2";
   await until(() => inputs.filter(input => input.action === "input-reset").length > beforeResize);
   await surface.click({ position: { x: 40, y: 50 } });
+  if (chrome) {
+    assert.equal(await page.locator(".address-bar").count(), 0);
+    await page.keyboard.press("Meta+l");
+    await until(() => inputs.some(input => input.code === "KeyL" && input.command && input.down));
+  }
   await page.keyboard.press("ArrowLeft");
   await until(() => inputs.some(input => input.code === "ArrowLeft" && !input.down && input.geometry === geometry));
   assert.deepEqual(errors, []);

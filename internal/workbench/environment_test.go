@@ -55,7 +55,7 @@ func TestEnvironmentUpgradeSeparatesPrivateLegacyWorkspaceFromVMIdentity(t *test
 				if err := s.prepareEnvironment(); err != nil {
 					t.Fatal(err)
 				}
-				if s.environmentDir() != selected || s.workspace() != selected || cage.InstanceName(s.profile, selected) != identity {
+				if s.environmentDir() != cage.DefaultEnvironmentDir(s.profile) || s.workspace() != selected || cage.InstanceName(s.profile, s.environmentDir()) != identity {
 					t.Fatal("startup changed the VM identity or selected project")
 				}
 				if _, err := validateWorkspace(legacy, s.profile); err == nil {
@@ -97,6 +97,26 @@ func TestEnvironmentIdentityDoesNotFollowLastProject(t *testing.T) {
 	}
 }
 
+func TestFreshEnvironmentHasNoProjectGrantAcrossRestarts(t *testing.T) {
+	s := testServer(t)
+	t.Cleanup(func() { _ = os.RemoveAll(cage.DefaultEnvironmentDir(s.profile)) })
+	for range 2 {
+		if err := s.prepareEnvironment(); err != nil {
+			t.Fatal(err)
+		}
+		projects, err := s.projectPaths()
+		if err != nil || len(projects) != 0 || s.workspace() != "" {
+			t.Fatal("fresh environment implicitly granted a project", projects, s.workspace(), err)
+		}
+		if _, err := s.projectWorkspace(s.environmentDir()); err == nil {
+			t.Fatal("internal download directory authorized as a project")
+		}
+		if _, err := os.Stat(s.profile + "-workspace"); !os.IsNotExist(err) {
+			t.Fatal("fresh environment created a default workspace", err)
+		}
+	}
+}
+
 func TestEnvironmentEntryPreservesLiveProject(t *testing.T) {
 	s := testServer(t)
 	s.preferences.Workspace, _ = filepath.EvalSymlinks(t.TempDir())
@@ -111,7 +131,7 @@ func TestEnvironmentEntryPreservesLiveProject(t *testing.T) {
 	if err := s.prepareEnvironment(); err != nil {
 		t.Fatal(err)
 	}
-	if s.workspace() != workspace || s.environmentDir() != workspace {
+	if s.workspace() != workspace || cage.EnvironmentIdentityDir(s.profile) != workspace {
 		t.Fatal("live project was replaced")
 	}
 }

@@ -14,7 +14,7 @@ func (s *Server) browser(w http.ResponseWriter, r *http.Request) {
 		action = "tabs"
 	}
 	switch action {
-	case "tabs", "split", "new", "activate", "close", "navigate", "back", "forward", "reload", "editor", "editor-restart", "download-retry", "upload-finish", "upload-cancel", "resize", "insert-text", "copy-context", "copy", "cut", "cookies", "settings", "extensions", "internal-page", "info":
+	case "tabs", "split", "new", "activate", "close", "navigate", "back", "forward", "reload", "editor", "editor-restart", "download-retry", "upload-finish", "upload-cancel", "resize", "wheel", "insert-text", "copy-context", "copy", "cut", "cookies", "settings", "extensions", "internal-page", "info":
 	default:
 		http.NotFound(w, r)
 		return
@@ -63,7 +63,12 @@ func (s *Server) remoteInput(w http.ResponseWriter, r *http.Request) {
 		var output map[string]any
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 		defer cancel()
-		if err := s.windowsDesktopRequest(ctx, "ime", value, &output); err != nil {
+		request := s.windowsDesktopRequest
+		if input.Mode == "status" {
+			// Caret polls only read the focused control.
+			request = s.windowsDesktopQuick
+		}
+		if err := request(ctx, "ime", value, &output); err != nil {
 			http.Error(w, err.Error(), 502)
 			return
 		}

@@ -20,6 +20,7 @@ import (
 	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/guestos"
+	"github.com/sylvinus/agent-vm/internal/guestprofile"
 	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/hostproxy"
 	"github.com/sylvinus/agent-vm/internal/limaembed"
@@ -52,7 +53,8 @@ cage access        Inspect legacy viewer credentials (diagnostics only)
 cage shell         Open a shell in the shared environment
 cage run COMMAND   Execute a command in the shared environment
 cage claude        Run Claude Code in the shared environment
-cage stop          Stop the shared Cage environment
+cage stop          Stop the shared Cage environment and its proxy core
+                   --keep-proxy keeps the core running for an environment restart
 cage list          List this cage profile's VMs
 cage doctor        Diagnose the VM
 cage diagnostics --json PATH.zip   Export a redacted diagnostic bundle
@@ -89,6 +91,9 @@ func run() int {
 	} {
 		os.Unsetenv(name)
 	}
+	// The shared commands otherwise name agent-vm and suggest its installer.
+	cli.Command = "claude-cage"
+	cli.UpdateHint = "update Cage from the app, or with the installer or package that installed it"
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "host-download" {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -147,8 +152,12 @@ func run() int {
 		if err != nil {
 			return fail(err)
 		}
-		if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-			if _, err := share.GuestAgent("Darwin", "aarch64"); err != nil {
+		if runtime.GOOS == "darwin" {
+			arch := "aarch64"
+			if runtime.GOARCH == "amd64" {
+				arch = "x86_64"
+			}
+			if _, err := share.GuestAgent("Darwin", arch); err != nil {
 				return fail(err)
 			}
 		}
@@ -247,12 +256,12 @@ func run() int {
 		return 0
 	}
 	if args[0] == "container-tap" {
-		if len(args) != 1 {
+		if len(args) > 2 {
 			return 2
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
-		if err := containerenv.RunTAP(ctx, os.Stdin, os.Stdout); err != nil {
+		if err := containerenv.RunTAP(ctx, os.Stdin, os.Stdout, args[1:]...); err != nil {
 			return fail(err)
 		}
 		return 0
@@ -482,6 +491,12 @@ func run() int {
 		fmt.Println("Configuration created:", path)
 		return 0
 	}
+	// The workbench owns the proxy lifetime during internal environment
+	// restarts. A normal CLI stop still shuts down both the guest and core.
+	keepProxy := len(args) > 1 && args[0] == "stop" && args[1] == "--keep-proxy"
+	if keepProxy {
+		args = append([]string{"stop"}, args[2:]...)
+	}
 	cfg, err := cage.Load(path)
 	management := args[0] == "stop" || args[0] == "list" || args[0] == "info"
 	if err != nil && !management {
@@ -542,7 +557,7 @@ func run() int {
 		}
 		return 0
 	}
-	if handled, err := containerOperation(path, args, cfg); handled {
+	if handled, err := containerOperation(path, args, cfg, keepProxy); handled {
 		if err != nil {
 			return fail(err)
 		}
@@ -561,7 +576,7 @@ func run() int {
 	}
 	if management {
 		code := cli.Main(args, cli.Stdio())
-		if code == 0 && args[0] == "stop" {
+		if code == 0 && args[0] == "stop" && !keepProxy {
 			if err := managedproxy.Stop(filepath.Dir(path)); err != nil {
 				return fail(err)
 			}
@@ -594,24 +609,36 @@ func run() int {
 		return 0
 	}
 	if args[0] == "setup" {
+		if cfg.GuestProfile == nil {
+			loc, e := cage.GetStorageLocation(filepath.Dir(path))
+			if e != nil {
+				return fail(e)
+			}
+			if !loc.HasEnvironment {
+				cfg.GuestProfile, e = guestprofile.Create(filepath.Dir(path), guestprofile.Options{})
+				if e != nil {
+					return fail(e)
+				}
+			}
+		}
 		if err = os.MkdirAll(state, 0700); err != nil {
 			return fail(err)
 		}
-		if err = os.WriteFile(filepath.Join(state, "setup.sh"), []byte(cage.GuestSetup), 0600); err != nil {
+		if err = os.WriteFile(filepath.Join(state, "setup.sh"), []byte(cfg.SetupScript()), 0600); err != nil {
 			return fail(err)
 		}
 		memory, cpus, resourceErr := cage.ConfiguredResourceLimits(path)
 		if resourceErr != nil {
 			return fail(resourceErr)
 		}
-		args = append([]string{"setup", "--memory", fmt.Sprint(memory), "--cpus", fmt.Sprint(cpus), "--disk", "24", "--preinstall=node,python,chromium,claude,code-server"}, args[1:]...)
+		args = append([]string{"setup", "--memory", fmt.Sprint(memory), "--cpus", fmt.Sprint(cpus), "--disk", "24", "--preinstall=node,python,chromium,gh,claude,code-server"}, args[1:]...)
 	}
 	if args[0] == "up" || args[0] == "login" {
 		result := cli.Main([]string{"run", "true"}, cli.Stdio())
 		if result != 0 {
 			return result
 		}
-		if err := workbench.StartGuestServices(context.Background(), path, cfg, os.Stdout, os.Stderr); err != nil {
+		if err := workbench.StartGuestServices(context.Background(), path, os.Stdout, os.Stderr); err != nil {
 			return fail(err)
 		}
 		fmt.Println("Cage local services are ready. Open Cage or run cage desktop to complete the required network checks. External networking stays closed until the workbench approves this VM; no local access password is required.")
@@ -645,7 +672,7 @@ func containerInstallScript(kind string) (string, error) {
 		return cage.GuestSetup, nil
 	case "tools":
 		script := "set -e\nexport CLAUDE_CAGE=1\n" + cage.APTBootstrapScript + "\n" + cage.ToolInstallPrelude()
-		enabled := map[string]bool{"NODE": true, "PYTHON": true, "CHROMIUM": true, "CLAUDE": true, "CODE_SERVER": true}
+		enabled := map[string]bool{"NODE": true, "PYTHON": true, "CHROMIUM": true, "GH": true, "CLAUDE": true, "CODE_SERVER": true}
 		for _, name := range []string{"PYTHON", "NODE", "RUBY", "RUST", "GOLANG", "DOCKER", "CHROMIUM", "GH", "CLAUDE", "OPENCODE", "CODEX", "VIBE", "PI", "CODE_SERVER", "CODE_CLAUDE", "CODE_OPENCODE", "CODE_CODEX", "CODE_VIBE", "MCP_CHROME", "MCP_PLAYWRIGHT"} {
 			value := "0"
 			if enabled[name] {

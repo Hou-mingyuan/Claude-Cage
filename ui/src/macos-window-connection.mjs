@@ -1,7 +1,7 @@
 import { runtimeSocketURL } from "./client-context.mjs";
 
-export function createMacWindowConnection() {
-  const socket = new WebSocket(runtimeSocketURL("/macos/claude/connection"));
+export function createMacWindowConnection(base = "/macos/claude") {
+  const socket = new WebSocket(runtimeSocketURL(base + "/connection"));
   const pending = new Map();
   let nextID = 0;
   let closed = false;

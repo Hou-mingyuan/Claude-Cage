@@ -266,7 +266,7 @@ func (s *Server) phoneSurfaceRequest(surface phoneSurface, w http.ResponseWriter
 		http.Error(w, "请通过电脑 Cage 的二维码或配对码连接这台主机，再打开"+surface.label()+"。", 403)
 		return
 	}
-	epoch, _ := r.Context().Value(mobileEpochKey{}).(context.Context)
+	epoch, _ := r.Context().Value(accountEpochKey{}).(context.Context)
 	if epoch == nil || epoch.Err() != nil {
 		http.Error(w, "请先解锁 Cage", 423)
 		return

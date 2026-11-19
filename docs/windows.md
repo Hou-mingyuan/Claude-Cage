@@ -27,7 +27,7 @@ DISM /Online /Enable-Feature /FeatureName:HypervisorPlatform /All
 
 ## 安装并开始工作
 
-1. 在[项目主页](https://lee-xeo.github.io/Claude-Cage/#download)点击“下载应用”并选择 Windows，核对对应发行条目的 `SHA256SUMS`。签名安装包名为 `Cage-<版本>-windows-amd64-setup.exe`；单独标明未签名的开发预览包名为 `Cage-<版本>-windows-amd64-setup-unsigned.exe`。未签名包可能触发未知发布者提示，需手动安装和更新。
+1. 在[项目主页](https://claude-cage.com/#download)点击“下载应用”并选择 Windows，核对对应发行条目的 `SHA256SUMS`。签名安装包名为 `Cage-<版本>-windows-amd64-setup.exe`；单独标明未签名的开发预览包名为 `Cage-<版本>-windows-amd64-setup-unsigned.exe`。未签名包可能触发未知发布者提示，需手动安装和更新。
 2. 运行安装程序，选择安装位置。首次安装时，默认选择本地 D 盘的 `D:\Cage`；没有本地 D 盘时使用当前用户的 `%LOCALAPPDATA%\Programs\Cage`。已有安装沿用原目录，也可以手动选择其他位置。安装器随附 .NET 桌面运行组件、WebView2 安装程序、QEMU、OpenSSH 客户端和代理核心，无需另装 Go、Node.js 或 Clash。
 3. 在“快捷方式”页选择“添加桌面快捷方式”和“添加到开始菜单”。首次安装默认勾选两项，覆盖安装沿用上次选择，旧安装按已有快捷方式恢复选择。卸载会清理 Cage 创建的快捷方式。
 4. 从选中的快捷方式启动 Cage，选择客机系统。如果 C 盘空间有限，在工作台点击“选择环境存储位置”，选择其他磁盘的专用空文件夹，再导入代理并启动环境。镜像、工具和虚拟磁盘按所选系统准备；已有环境也可以从设置迁移。见[选盘与迁移步骤](getting-started.md#选择环境存储位置)和[客机系统指南](guide/guest-systems.md)。
@@ -36,9 +36,11 @@ DISM /Online /Enable-Feature /FeatureName:HypervisorPlatform /All
 
 安装器逐文件解压到安装位置所在磁盘的暂存目录，成功后替换应用，避免在系统临时目录生成整包解压副本。Windows 临时目录仍可能保存少量安装器辅助文件；缺少 WebView2 时，Microsoft 安装程序会管理其共享运行组件的位置。
 
-“打开项目”接受 Windows 文件夹。使用 Debian 客机时，例如 `C:\Users\姓名\Projects\demo` 在 Linux 内对应 `/c/Users/姓名/Projects/demo`；使用 Windows 客机时，终端与工具采用 Windows 路径。项目文件仍保存在原来的主机文件夹中，编辑和删除直接影响原文件；项目内的 `.git` 可读写，可在 Cage 中暂存、提交和切换分支。只共享默认工作区与明确打开的目录。
+“打开项目”接受 Windows 文件夹。使用 Debian 客机时，例如 `C:\Users\姓名\Projects\demo` 在 Linux 内对应 `/c/Users/姓名/Projects/demo`；使用 Windows 客机时，终端与工具采用 Windows 路径。项目文件仍保存在原来的主机文件夹中，编辑和删除直接影响原文件；项目内的 `.git` 可读写，可在 Cage 中暂存、提交和切换分支。项目共享只限明确打开的目录，下载使用独立的暂存目录。
 
 Windows 快捷键以 `Ctrl` 为主：`Ctrl+O` 打开项目、`Ctrl+T` 新建网页、`Ctrl+L` 定位地址栏、`Ctrl+W` 关闭标签，`Ctrl+Shift+Enter` 新建终端。终端使用 `Ctrl+Shift+C/V` 复制粘贴，`Ctrl+C` 中断命令。网页和编辑器采用相应客机系统的按键行为。
+
+网页输入框短暂失焦时，工作台会尝试恢复同一标签和窗格的键盘输入。恢复期间的点击、按键、切换标签、打开设置或切换窗口会取消这次自动恢复，保留用户选择的焦点。如果网页仍不接收按键，可重新点击输入框；尚未确认的输入法组合文字会在失焦时取消。
 
 窗口仅保留系统标题栏，工作台直接占据下方区域。文件、项目和设置操作使用工作台入口与快捷键；检查应用更新和版本信息可从托盘图标的右键菜单打开。窗口首次打开时按当前屏幕的可用区域居中，并适配 Windows 显示缩放。手动调整后的窗口尺寸和最大化状态会保存；换屏或降低分辨率时，窗口保持在当前屏幕内。后台启动与版本检测不显示命令行窗口。
 
@@ -48,13 +50,13 @@ Windows 快捷键以 `Ctrl` 为主：`Ctrl+O` 打开项目、`Ctrl+T` 新建网�
 
 ## 更新与卸载
 
-应用内更新从固定的公开 GitHub Releases 来源选择 Windows x64 安装器，并沿用预发行与正式版通道规则。检查与下载经过已经应用并运行的 Cage 代理，不回退主机直连。下载安装器后校验 SHA-256、版本、产品名称和 Authenticode 签名；当前应用与新安装器必须具有相同的发布者公钥，未签名开发包不能自动安装更新。
+应用内更新从固定的公开 GitHub Releases 来源选择 Windows x64 安装器，并沿用预发行与正式版通道规则。检查与下载优先使用主机网络，遵循系统代理与主机代理环境变量；连接失败或等待响应超时后尝试 Cage 所选代理。下载安装器后校验 SHA-256、版本、产品名称和 Windows 信任的 Authenticode 签名。新安装器与当前应用的发布者公钥相同，或证书主体的国家与组织均相同，才允许自动安装；后一个条件允许发布者续期证书时更换密钥。未签名开发包不能自动安装更新。
 
 没有新版时隐藏更新按钮；有新版时显示金色圆形按钮。用户先保存文件并结束运行中的任务，再点击一次，按钮显示环形下载进度和百分比。校验通过后自动安装，不再二次确认。更新器先备份应用，再通过工作台统一入口停止环境、代理和控制服务，等待当前窗口退出后执行静默安装。新应用完成工作台启动确认后才认定成功；安装或启动失败时尝试恢复旧程序，保留失败原因和必要备份。磁盘空间不足、文件被其他软件占用等情况可能阻止自动恢复，应按错误信息处理。
 
 手动更新前也应保存文件、停止环境并退出 Cage，再运行新版安装器。旧后台仍运行时安装器会拒绝覆盖。客机工具在“设置 → 环境与恢复”中单独更新，替换应用会保留原系统与数据。
 
-卸载前停止环境并退出，在 Windows“设置 → 应用”中卸载 Cage。卸载保留用户数据：默认配置、代理和环境数据根目录为 `%USERPROFILE%\.claude-cage`，另选的环境存储位置继续保留；默认工作区通常位于 `%USERPROFILE%\.claude-cage-workspace`，自行打开的项目仍在原目录。WebView2 可能由其他程序共用，不随 Cage 自动卸载。需要另行删除数据时先备份，删除虚拟磁盘会丢失只保存在客机中的文件与登录状态。
+卸载前停止环境并退出，在 Windows“设置 → 应用”中卸载 Cage。卸载保留用户数据：默认配置、代理和环境数据根目录为 `%USERPROFILE%\.claude-cage`，另选的环境存储位置继续保留；下载暂存通常位于 `%USERPROFILE%\.claude-cage-downloads\Downloads`，原 `%USERPROFILE%\.claude-cage-workspace` 中的文件也保留，自行打开的项目仍在原目录。WebView2 可能由其他程序共用，不随 Cage 自动卸载。需要另行删除数据时先备份，删除虚拟磁盘会丢失只保存在客机中的文件与登录状态。
 
 ## 常见启动问题
 
@@ -66,10 +68,58 @@ Cage 支持含中文的安装目录。启动时优先读取随附 QEMU 的 UEFI 
 
 - 提示虚拟化不可用：检查 BIOS/UEFI 的虚拟化开关及 Windows 虚拟机监控程序平台，重启后再试。远程或嵌套虚拟机还需要外层宿主允许嵌套虚拟化。
 - 提示缺少 WebView2：重新运行完整安装程序。不要从第三方站点下载同名 DLL。
+- 提示 Windows 应用程序控制或签名校验阻止了 QEMU：检查 Windows 安全中心和 CodeIntegrity/Operational 事件。使用带可信签名的完整发布包，保留原来的环境存储位置和虚拟磁盘。
 - 工作台能打开，环境不能联网：检查 Cage 内是否已选择节点及网络检查结果。Windows 浏览器能联网不表示 Cage 节点已配置。
 - 提示权限或路径不可用：使用当前用户有权限访问的本地目录，不把 Cage 安装目录、私有配置或磁盘根目录作为共享项目。更新器拒绝含符号链接或目录联接的安装路径。
 
 反馈问题时提供 Cage 版本、Windows 版本与内部版本号、CPU 架构、失败步骤和错误原文。不要附带代理密码、订阅链接、会话地址或未脱敏的配置文件。
+
+## Windows 源码构建
+
+在 Windows x64 上从仓库根目录运行以下步骤。构建脚本需要 PowerShell 7，可用 `pwsh` 打开终端。安装命令行工具后重新打开终端，或在当前会话中更新 `PATH`。
+
+| 工具 | 版本与用途 |
+| --- | --- |
+| [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/install-powershell-on-windows) | 用 `pwsh --version` 检查。系统自带的 `powershell.exe` 是 5.1。 |
+| [Git](https://git-scm.com/install/windows)、[Node.js](https://nodejs.org/en/download) | Git 用于获取源码，CI 使用 Node.js 24 和随附的 npm 构建工作台。建议使用 24.x 的最新补丁版。旧版 Node 在部分 Windows 路径环境曾以 `0xC0000409` 退出。 |
+| [Go](https://go.dev/dl/) | 核对根目录 [go.mod](../go.mod) 和 [tools/tailnet/go.mod](../tools/tailnet/go.mod)。当前最低版本分别为 1.26.10 和 1.27.3。安装 Go 1.27.3 可同时满足两者。使用 `GOTOOLCHAIN=auto` 时可联网下载所需工具链。 |
+| [.NET SDK](https://dotnet.microsoft.com/download/dotnet/10.0) | 在仓库根目录运行 `dotnet --version`，应输出 [global.json](../global.json) 锁定的 10.0.404。构建还会核对 [dependencies.json](../packaging/windows/dependencies.json) 中的 .NET 运行时 10.0.15。 |
+| [uv](https://docs.astral.sh/uv/getting-started/installation/)、[7-Zip](https://www.7-zip.org/) | 工作台构建需要 `uv` 运行 noVNC 补丁脚本。Windows 构建需要 `7z` 或 `7zz` 解包依赖。可用 `uv --version` 和 `Get-Command 7z, 7zz -ErrorAction SilentlyContinue` 检查。 |
+| [WebView2 Evergreen 运行时](https://developer.microsoft.com/microsoft-edge/webview2/) | 本机需安装此运行时，构建完成后会启动工作台进行自检。 |
+| [MSYS2](https://www.msys2.org/)、NSIS | MSYS2 的 UCRT64 环境用于编译 QEMU。生成安装包还需要 NSIS。 |
+
+把 MSYS2 安装到简短、只含 ASCII 且无空格的本地路径，例如 `C:\msys64`。打开 **MSYS2 UCRT64**，运行 `pacman -Syu` 更新。若更新时终端关闭，重新打开 UCRT64 再运行一次。更新完成后安装下列依赖，包清单与 CI 一致。[Windows CI 工具配置](../.github/actions/windows-toolchain/action.yml)
+
+```bash
+pacman -S --needed make patch diffutils git findutils curl \
+  mingw-w64-ucrt-x86_64-{gcc,glib2,pixman,libslirp,dtc,ninja,python,pkgconf}
+```
+
+回到普通用户的 PowerShell 7，从仓库根目录构建。按实际安装位置设置 `CAGE_MSYS2_ROOT`。
+
+```powershell
+$env:CAGE_MSYS2_ROOT = 'C:\msys64'
+.\scripts\build-windows.ps1
+```
+
+首次构建会下载并校验 QEMU 源码，再编译 `qemu-system-x86_64.exe` 和 `qemu-img.exe`。源码优先使用项目发行页上的归档，下载失败时回退到 Git。两种方式都校验源码 tar 文件的 SHA-256。Cage 仓库路径可以有空格；QEMU 会在另一个短路径目录下编译，默认尝试 MSYS2 的 `tmp`。如果该目录不可写，可在当前会话设置 `$env:CAGE_QEMU_BUILD_ROOT = 'D:\CageBuildTemp'`，使用普通用户可写、无空格且仅含 ASCII 字符的路径。
+
+依赖默认缓存到 `_output/windows-deps`，可给构建和打包命令传入相同的 `-DependencyCache` 复用缓存。云部署包的 Linux Mihomo 归档缓存在 `_output/linux-deps`，下载完成并通过 SHA-256 校验后才写入缓存。也可先运行 `.\scripts\fetch-windows-dependencies.ps1` 预取。若公司网络要求代理，在当前构建会话按需设置 `HTTPS_PROXY`、`HTTP_PROXY` 和获准使用的 `GOPROXY`，再重试 NuGet、Go 或构建依赖下载。保留原有证书与哈希校验。
+
+应用输出到 `_output/windows-amd64/app`。本地默认自检目录是仓库内的 `_output/workbench-smoke`。源码如果检出到 AppData 或重解析到其他私有目录，构建会在开始前提示把 `RUNNER_TEMP` 指向 AppData 外的普通本地目录，例如 `D:\CageBuildTemp`。若自检失败，可查看 `smoke.json` 和 `profile/logs/events.jsonl`。`prepareStatus=prepared` 是自检结束时后台的停止确认。
+
+生成未签名安装包时，用仓库脚本安装校验过的 NSIS，再打包刚构建的应用。
+
+```powershell
+$tools = Join-Path (Get-Location).Path '_output/windows-tools'
+.\scripts\install-nsis.ps1 -Destination $tools
+$env:Path = "$(Join-Path $tools 'nsis-3.13');$env:Path"
+.\scripts\package-windows.ps1 -SkipBuild
+```
+
+安装包及 SHA-256 校验文件位于 `_output/releases/<版本>/windows`。
+
+正式发布还会检查随包 QEMU 两个 EXE 及其 DLL 的发布者签名、时间戳和文件哈希。签名后的运行时路径与对应源码归档必须来自同一次构建。发布验收应在开启智能应用控制的 Windows 11 测试机上，用正式签名的安装包升级并启动已有 Linux 环境。普通的构建自检只检查工作台、QEMU 加载及固件路径。
 
 ## Windows 客机里的 PowerShell
 
@@ -79,4 +129,4 @@ Windows 开发包将创建脚本放在安装目录的 `resources\guest-os\new-wi
 
 ## 静默安装选项
 
-静默安装可传入 `/DESKTOPSHORTCUT=0|1` 和 `/STARTMENUSHORTCUT=0|1`，参数放在最后的 `/D=` 安装目录之前。未提供参数的静默更新沿用已保存的快捷方式选择。
+静默安装可同时传入 `/DESKTOPSHORTCUT=0|1` 和 `/STARTMENUSHORTCUT=0|1`。若指定安装目录，`/D=` 必须是最后一项，只出现一次。目录要用绝对盘符和反斜杠，路径中有空格也无需加引号。未提供快捷方式参数的静默更新沿用上次选择。

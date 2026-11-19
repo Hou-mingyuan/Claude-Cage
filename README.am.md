@@ -6,9 +6,13 @@
 
 <img src="assets/claude-cage-character.png" alt="Claude Cage" width="320" />
 
-[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![CI](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**[የፕሮጀክት ድር ጣቢያ](https://lee-xeo.github.io/Claude-Cage/) · [መተግበሪያውን ያውርዱ](https://lee-xeo.github.io/Claude-Cage/am/#download) · [በመጀመር ላይ](docs/getting-started.md) · [የሚጠየቁ ጥያቄዎች](docs/troubleshooting.md) · [የአጠቃቀም መመሪያ (በቻይንኛ)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
+
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily" alt="Trendshift — Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly" alt="Trendshift — Repository of the Week" width="250" height="55" /></a>
+
+**[የፕሮጀክት ድር ጣቢያ](https://claude-cage.com/) · [መተግበሪያውን ያውርዱ](https://claude-cage.com/am/#download) · [በመጀመር ላይ](docs/getting-started.md) · [የሚጠየቁ ጥያቄዎች](docs/troubleshooting.md) · [የአጠቃቀም መመሪያ (በቻይንኛ)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -31,6 +35,8 @@ Claude Cage ተርሚናልን፣ አሳሽን፣ አርታዒን እና ኦፊ�
 | :---: | :---: |
 | <a href="assets/network-checks.png"><img src="assets/network-checks.png" alt="የአውታረ መረብ እና የማግለል ምርመራዎች" width="400" /></a> | <a href="assets/community-browser-check.png"><img src="assets/community-browser-check-cropped.png" alt="የማህበረሰብ አሳሽ ምርመራ" width="400" /></a> |
 
+[FuckClaude](https://fuck-claude.vercel.app/) · [LinXiaoTao / GitHub](https://github.com/LinXiaoTao/FuckClaude)
+
 **የ Cage ዋና በይነገጽ**
 
 ![Cage](www/public/workbench-2026-11.jpg)
@@ -52,7 +58,7 @@ Claude Cage ተርሚናልን፣ አሳሽን፣ አርታዒን እና ኦፊ�
 ይህንን ጥያቄ ወደ AI ወኪልዎ ይላኩ (ኮዴክስ ፣ ዲኤስኤስ ፣ የስራ ጓደኛ - ምናልባት Claude ኮድ 😁 ላይሆን ይችላል)
 
 ```markdown
-እንድጫን እርዳኝ። https://github.com/Lee-xeo/Claude-Cage እና የCage's network proxy አዋቅር በእኔ የአከባቢ ግጭት የ xxx የመጨረሻ ነጥብ ለመጠቀም።
+የ https://github.com/Lee-xeo/Claude-Cage የቅርብ ጊዜ ምንጭ ኮድ አውርድ፣ ገንባ፣ ጥቅል አድርግና ጫን። የCage ፕሮክሲ በአካባቢዬ ያለውን የClash xx ኖድ ተጠቅሞ በእኔ xx IP እንዲወጣ አዋቅር። ሂደቱን በሙሉ ተከታተል፣ ችግሮችን በቀጥታ አስተካክል፣ አስፈላጊ ከሆነም ተስማሚነትን ለማሻሻል በፕሮጀክቱ issue አስገባ።
 ```
 
 የሚያስፈልግህ አስተማማኝ የአውታረ መረብ ተኪ የመጨረሻ ነጥብ ነው። ይህ ፕሮጀክት ማንኛውንም ተኪ አቅራቢን አያስተዋውቅም። አቅራቢን እራስዎ ማግኘት ይችላሉ፣ ለምሳሌ የጥቁር ስህተት ድህረ ገጽን በመፈለግ።
@@ -61,7 +67,7 @@ Claude Cage ተርሚናልን፣ አሳሽን፣ አርታዒን እና ኦፊ�
 
 Cage macOS፣ Windows እና Linux ይደግፋል፦ Apple Silicon ከ macOS 14+፣ Windows 10 22H2 / 11 x64 እና Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac፣ Windows ARM64 እና Linux ARM64 ገና አይደገፉም። [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. መተግበሪያውን ያውርዱ: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/am/#download).
+1. መተግበሪያውን ያውርዱ: [macOS / Windows / Linux](https://claude-cage.com/am/#download).
 2. macOS: የመጫኛ ጥቅሉን ይክፈቱ እና ይጎትቱ **Cage** ውስጥ **መተግበሪያዎች**; ከዚያ ከመተግበሪያዎች ያስጀምሩት። Windows: [የመጫኛ መመሪያ](docs/windows.md#安装并开始工作) · Linux: [የመጫኛ መመሪያ](docs/linux.md#安装并开始工作).
 3. የራስዎን የአውታረ መረብ ፕሮክሲ ለማዋቀር፣ አካባቢውን ለመጀመር እና ፕሮጀክት ለመክፈት የውስጠ-መተግበሪያ መመሪያዎችን ይከተሉ።
 
@@ -102,17 +108,20 @@ macOS እና የተፈረሙ Windows ስሪቶች በተመረጠው ፕሮክ�
 
 | የእርስዎ ተግባር | እዚ ጀምር |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [የእንግዳ ስርዓት ምርጫ](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [የእንግዳ ስርዓት ምርጫ](https://claude-cage.com/docs/guest-systems/) |
 | የአውታረ መረብ ተኪ ጫን፣ አዋቅር እና የመጀመሪያህን ፕሮጀክት ክፈት | [በመጀመር ላይ](docs/getting-started.md) |
 | ማውረዶችን፣ ጅምርን፣ ግንኙነትን እና መግባትን መላ ፈልግ | [የሚጠየቁ ጥያቄዎች እና መልሶ ማግኛ](docs/troubleshooting.md) |
 | የቁልፍ ሰሌዳ መቆጣጠሪያዎችን፣ መልክን፣ የውሂብን ጽናት እና የመውጣት ባህሪን ተማር | [ዕለታዊ አጠቃቀም](docs/getting-started.md#日常使用) |
 | ሊባዛ የሚችል ጉዳይ ሪፖርት ያድርጉ | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| ማስተካከያ፣ ባህሪ ወይም ሰነድ ለማበርከት፦ Issue ግምገማ → የተባባሪ ግብዣ → PR | [የአስተዋጽኦ መመሪያ (ቻይንኛ)](.github/CONTRIBUTING.md) |
 
 ፕሮጀክቱ በፍጥነት እያደገ ነው. ግብረመልስ ለማጋራት የማህበረሰብ ቡድኑን ይቀላቀሉ; የማህበረሰብ ጠባቂዎች እንኳን ደህና መጡ።
 
-<p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1134250870" width="240" /></a>
-</p>
+| QQ group · 273237690 | WeChat |
+| :---: | :---: |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+
+[Telegram](https://t.me/claude_cage)
 
 ## አመጣጥ እና ፈቃድ
 
@@ -135,6 +144,7 @@ Cage ራሱን የቻለ የማህበረሰብ ፕሮጀክት ነው እና ከ
 - [code-server](https://github.com/coder/code-server): በአሳሽ ላይ የተመሰረተ ኮድ አርታዒ.
 - [AIO Sandbox](https://github.com/agent-infra/sandbox) የሥራ አካባቢ እና መስተጋብር ንድፍ ማጣቀሻዎች.
 - [claude-switcher](https://github.com/YOURSJEYO/claude-switcher) እና [Claude-Guardian](https://github.com/DUNHKpcc/Claude-Guardian) ለአውታረ መረብ ፍተሻዎች እና የደህንነት ምርመራዎች ማጣቀሻዎች።
+- [claude-post-ban-cleanup](https://github.com/l2461090/claude-post-ban-cleanup): ለትክክለኛ ቆጠራ፣ ለውሂብ ጥበቃ እና ሊመለስ ለሚችል የመሸጎጫ ማጽዳት ሂደት ማጣቀሻ፤ በCage በተናጠል ተተግብሯል።
 
 
 <a href="https://www.star-history.com/?repos=Lee-xeo%2FClaude-Cage&amp;type=date">

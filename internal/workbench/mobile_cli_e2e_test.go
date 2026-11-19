@@ -259,6 +259,9 @@ func newMobileCLIWorkbench(t *testing.T) (*Server, *mobilelink.Workbench, string
 	if err = writePrivate(filepath.Join(s.profile, "environment.json"), map[string]string{"directory": project}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.rememberSharedProject(project); err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(home, "bin")
 	if err = os.Mkdir(bin, 0700); err != nil {
 		t.Fatal(err)

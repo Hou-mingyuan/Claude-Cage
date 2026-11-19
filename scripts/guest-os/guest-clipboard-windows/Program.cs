@@ -9,7 +9,7 @@ namespace Cage.GuestClipboard;
 
 internal static class GuestOperations
 {
-    internal static readonly HashSet<string> Names = ["stream", "status", "import", "export", "terminal", "cli", "browser", "desktop", "attachments", "audio", "resources", "diagnostics", "versions", "safety", "project-mount", "network-stream", "network-settings"];
+    internal static readonly HashSet<string> Names = ["stream", "status", "import", "export", "terminal", "cli", "browser", "desktop", "attachments", "audio", "resources", "diagnostics", "versions", "safety", "project-mount", "network-stream", "network-settings", "cache-maintenance", "headless-status", "headless-terminal", "headless-browser", "headless-safety", "headless-cli"];
     static readonly Dictionary<string, Func<Stream, CancellationToken, Func<bool>, Task>> handlers = new(StringComparer.Ordinal);
     internal static void Register(string name, Func<Stream, CancellationToken, Func<bool>, Task> handler)
     {
@@ -30,7 +30,24 @@ internal static class Program
         try
         {
             if (args is ["self-test"]) { SelfTest.Run(); Console.WriteLine("Windows guest protocol tests passed."); return 0; }
+            if (args is ["remote-network-policy", var policyAction, "--profile", var policyProfile])
+            {
+                try { RemoteNetworkPolicy.Run(policyAction, policyProfile); return 0; }
+                catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+            }
+            if (args is ["remote-sandbox-policy", var sandboxAction, "--profile", var sandboxProfile])
+            { RemoteSandboxPolicy.Run(sandboxAction, sandboxProfile); return 0; }
+            var instancePackage = args.Length > 0 && args[^1] == "--instance-package" && args[0] == "serve-headless";
+            if (instancePackage) args = args[..^1];
             if (args.Length > 1 && args[0] == "--relay-profile") { Relay.Run(args).GetAwaiter().GetResult(); return 0; }
+            if (args is ["serve-headless", "--vm-id", var headlessVM, "--sid", var headlessSID, "--token-file", var headlessKey, "--machine-id", var headlessMachine])
+            {
+                GuestContext.VM = Guid.Parse(headlessVM); GuestContext.SID = headlessSID; GuestContext.Remote = true;
+                using var headlessLifetime = new CancellationTokenSource();
+                Console.CancelKeyPress += (_, e) => { e.Cancel = true; headlessLifetime.Cancel(); };
+                RemoteHeadless.Run(Guid.Parse(headlessVM), headlessSID, headlessKey, Guid.Parse(headlessMachine), instancePackage, headlessLifetime.Token).GetAwaiter().GetResult();
+                return 0;
+            }
             if (args is ["pair", "--vm-id", var pairVM, "--sid", var pairSID, "--token-file", var source, "--output", var destination])
             { Pairing.Protect(source, destination, Guid.Parse(pairVM), pairSID); return 0; }
             if (args is ["serve-network", "--vm-id", var networkVM, "--sid", var networkSID, "--token-file", var networkKey])
@@ -39,18 +56,25 @@ internal static class Program
                 Console.CancelKeyPress += (_, e) => { e.Cancel = true; networkLifetime.Cancel(); };
                 NetworkRuntime.Run(Guid.Parse(networkVM), networkSID, networkKey, networkLifetime.Token).GetAwaiter().GetResult(); return 0;
             }
+            Guid? remoteMachine = null;
+            if (args is ["serve-local", "--vm-id", _, "--sid", _, "--token-file", _, "--machine-id", var machine])
+            {
+                remoteMachine = Guid.Parse(machine);
+                args = ["serve", .. args[1..7]];
+            }
             if (args is not ["serve", "--vm-id", var vmText, "--sid", var sid, "--token-file", var tokenFile]) throw new InvalidDataException("command_invalid");
-            var vm = Guid.Parse(vmText); SessionGuard.Target(vm, sid); GuestContext.VM = vm; GuestContext.SID = sid;
+            var vm = Guid.Parse(vmText); SessionGuard.Target(vm, sid, remoteMachine); GuestContext.VM = vm; GuestContext.SID = sid;
+            GuestContext.Remote = remoteMachine.HasValue;
             FreeConsole();
             var secret = Pairing.Load(tokenFile, vm, sid, false);
             Application.SetHighDpiMode(HighDpiMode.SystemAware);
             using var lifetime = new CancellationTokenSource();
             using var agent = new ClipboardAgent(Path.Combine(AppContext.BaseDirectory, "cage-guest-files.exe"));
-            using var listener = HyperVEndPoint.Socket();
-            listener.Bind(new HyperVEndPoint(Protocol.Parent, Protocol.Service)); listener.Listen(64);
+            using var listener = remoteMachine.HasValue ? null : HyperVEndPoint.Socket();
+            if (listener != null) { listener.Bind(new HyperVEndPoint(Protocol.Parent, Protocol.Service)); listener.Listen(64); }
             GuestDiagnostics.Record("lifecycle", "started");
-            Application.ApplicationExit += (_, _) => { lifetime.Cancel(); listener.Dispose(); CryptographicOperations.ZeroMemory(secret); };
-            _ = Accept(listener, agent, vm, sid, secret, lifetime.Token);
+            Application.ApplicationExit += (_, _) => { lifetime.Cancel(); listener?.Dispose(); CryptographicOperations.ZeroMemory(secret); };
+            _ = listener == null ? AcceptLocal(agent, vm, sid, secret, lifetime.Token) : Accept(listener, agent, vm, sid, secret, lifetime.Token);
             Application.Run(); return 0;
         }
         catch (Exception ex)
@@ -74,7 +98,7 @@ internal static class Program
             {
                 await slots.WaitAsync(token);
                 var socket = await Task.Run(listener.Accept, CancellationToken.None).WaitAsync(token);
-                _ = Task.Run(async () => { try { await Connection(socket, agent, vm, sid, secret, token); } finally { socket.Dispose(); slots.Release(); } }, CancellationToken.None);
+                _ = Task.Run(async () => { try { using var stream = new NetworkStream(socket, false); await Connection(stream, agent, vm, sid, secret, token); } finally { socket.Dispose(); slots.Release(); } }, CancellationToken.None);
             }
         }
         catch (OperationCanceledException) { }
@@ -90,9 +114,26 @@ internal static class Program
         var browser=BrowserRpc.Status();status["browser"]=browser;
         status["components"]=WindowsComponentStatus.Snapshot(browser);return status;
     }
-    static async Task Connection(Socket socket, ClipboardAgent agent, Guid vm, string sid, byte[] secret, CancellationToken lifetime)
+    static async Task AcceptLocal(ClipboardAgent agent, Guid vm, string sid, byte[] secret, CancellationToken token)
     {
-        using var network = new NetworkStream(socket, false);
+        using var slots = new SemaphoreSlim(64);
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await slots.WaitAsync(token);
+                var pipe = LocalGuestTransport.Listen(vm, sid);
+                try { await pipe.WaitForConnectionAsync(token); }
+                catch { pipe.Dispose(); slots.Release(); throw; }
+                _ = Task.Run(async () => { try { await Connection(pipe, agent, vm, sid, secret, token); } finally { pipe.Dispose(); slots.Release(); } }, CancellationToken.None);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch { Application.Exit(); }
+    }
+    static async Task Connection(Stream network, ClipboardAgent agent, Guid vm, string sid, byte[] secret, CancellationToken lifetime)
+    {
         using var stream = new ReadAheadStream(network);
         using var handshake = CancellationTokenSource.CreateLinkedTokenSource(lifetime); handshake.CancelAfter(TimeSpan.FromSeconds(10));
         var authenticated = false; var operation = "";
@@ -107,6 +148,14 @@ internal static class Program
                 !Protocol.EqualProof(Protocol.Proof(secret, "client", nonce, vm, sid, agent.Session, operation, request["paths"]), request["proof"]?.GetValue<string>()))
                 throw new InvalidDataException("pairing_invalid");
             authenticated = true;
+            if (GuestContext.Remote && operation is not ("status" or "diagnostics" or "versions"))
+            {
+                // Transport bring-up alone cannot authorize workloads on a
+                // host with an ordinary NIC. Keep the unimplemented boundary
+                // explicit, including direct callers outside the workbench UI.
+                await Protocol.Write(stream, new() { ["error"] = "remote_boundary_unavailable" }, lifetime);
+                return;
+            }
             if (operation == "status") { await Protocol.Write(stream, Status(agent, vm, sid), lifetime); return; }
             await Protocol.Write(stream, agent.Hello(), lifetime);
             if (operation == "diagnostics") { await GuestOperations.Run(operation, stream, lifetime); return; }
@@ -154,6 +203,7 @@ internal static class GuestContext
 {
     internal static Guid VM { get; set; }
     internal static string SID { get; set; } = "";
+    internal static bool Remote { get; set; }
 }
 
 // Read buffering is independent from writes, which is essential for a duplex

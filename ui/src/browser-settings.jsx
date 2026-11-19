@@ -61,7 +61,7 @@ export function BrowserSettingsPage({ tab, tabs, currentHome, layout, onLayoutCh
             <div className="browser-settings-links"><button onClick={() => onInternal('permissions')}><ExternalLink size={15} />网站权限</button><button onClick={() => onInternal('clear')}><ExternalLink size={15} />清除普通会话浏览数据</button></div>
           </>}
           {item.id === 'extensions' && <><p>添加与管理 Cage 浏览器使用的扩展。</p><BrowserExtensions onInternal={onInternal} onOpenPage={onOpenPage} onConfirm={onConfirm} /></>}
-          {item.id === 'about' && <><p>Cage 浏览器由环境内的 Chromium 承载。网页、扩展和网站数据随当前 Cage 环境保存。</p><div className="browser-setting-row"><div><h3>浏览器引擎</h3><p>{info?.product || (info?.error ? '版本信息暂时不可用' : '正在读取版本…')}</p></div></div><p>下载文件通过 Cage 保存到默认工作区的 Downloads，可从下载面板另存为。</p></>}
+          {item.id === 'about' && <><p>Cage 浏览器由环境内的 Chromium 承载。网页、扩展和网站数据随当前 Cage 环境保存。</p><div className="browser-setting-row"><div><h3>浏览器引擎</h3><p>{info?.product || (info?.error ? '版本信息暂时不可用' : '正在读取版本…')}</p></div></div><p>下载文件通过 Cage 保存到下载暂存目录，可从下载面板另存为。</p></>}
 
         </section>)}
       </div>

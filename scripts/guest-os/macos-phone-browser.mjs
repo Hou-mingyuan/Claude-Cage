@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PhoneBrowser } from "./modules/browser-phone.mjs";
 import { phoneError } from "./modules/browser-phone-network.mjs";
-import { lines } from "./windows-browser.mjs";
+import { lines } from "./browser-protocol.mjs";
 
 export async function runMacOSPhoneBrowser(input = process.stdin, output = process.stdout, options = {}) {
   if (process.platform !== "darwin" && options.testing !== true) throw new Error("此浏览器需要 macOS 客机");

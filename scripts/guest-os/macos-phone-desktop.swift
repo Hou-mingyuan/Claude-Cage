@@ -127,7 +127,7 @@ final class MacPhoneDesktop {
             width: max(320, session.width), height: max(240, session.height), scale: min(2, session.ratio))
         try validate(session)
         if window.frame != layout.frame {
-            (window, selection) = try await selectedWindow()
+            (window, selection) = try await selectedWindow(fresh: true)
             guard window.windowID == layout.id, window.owningApplication?.processID == layout.pid else {
                 throw Failure(7, "window_changed")
             }

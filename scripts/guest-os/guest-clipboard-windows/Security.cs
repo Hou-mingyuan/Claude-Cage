@@ -131,10 +131,17 @@ internal static class SessionGuard
         finally { CloseDesktop(desktop); }
     }
     internal static void Assert() { if (!Available()) throw new InvalidOperationException("requires_gui_login"); }
-    internal static void Target(Guid expected, string sid)
+    internal static void Target(Guid expected, string sid, Guid? remoteMachine = null)
     {
         using var identity = WindowsIdentity.GetCurrent();
         if (identity.User?.Value != sid || !sid.StartsWith("S-1-5-21-", StringComparison.Ordinal)) throw new InvalidOperationException("gui_identity_mismatch");
+        if (remoteMachine.HasValue)
+        {
+            if (expected == Guid.Empty) throw new InvalidOperationException("guest_identity_mismatch");
+            LocalGuestTransport.VerifyMachine(remoteMachine.Value);
+            Assert();
+            return;
+        }
         using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Virtual Machine\Guest\Parameters");
         if (!Guid.TryParse(key?.GetValue("VirtualMachineId") as string, out var actual) || actual != expected || actual == Guid.Empty)
             throw new InvalidOperationException("guest_identity_mismatch");

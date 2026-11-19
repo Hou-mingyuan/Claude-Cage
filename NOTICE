@@ -14,6 +14,8 @@ texts are in Contents/Resources/licenses/sshfs.
 Their complete corresponding source, patches, build recipes and static relink
 materials are in the cage-macos-guest-VERSION-source.tar.gz release asset,
 also retained in Contents/Resources/guest-os/sources inside the macOS App.
+PDF metadata processing additionally uses pdfcpu, hhrutter/tiff and
+xdg-go/stringprep. Their license texts are included in THIRD_PARTY_LICENSES.
 The root MIT license does not replace these third-party license terms.
 
 agent-vm

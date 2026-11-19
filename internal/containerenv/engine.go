@@ -47,8 +47,9 @@ type engineContainer struct {
 		Pid     int
 	}
 	Config struct {
-		Labels map[string]string
-		Image  string
+		Hostname string
+		Labels   map[string]string
+		Image    string
 	}
 	HostConfig struct {
 		Privileged   bool
@@ -63,6 +64,7 @@ type engineContainer struct {
 		CapAdd       []string
 		Memory       int64
 		NanoCpus     int64
+		PidsLimit    *int64
 		Devices      []struct {
 			PathOnHost      string
 			PathInContainer string
@@ -179,6 +181,9 @@ func (r *Runtime) State(ctx context.Context) (State, error) {
 			state.Ready = state.ResourcesVerified && state.MountsReady
 			state.BrowserAddress = record.BrowserAddress
 			state.VNCAddress = record.VNCAddress
+		} else if errors.Is(err, errSharedDirectoryChanged) {
+			state.MountsReady = false
+			state.MountError = err.Error()
 		}
 	}
 	return state, nil
@@ -247,6 +252,14 @@ func (r *Runtime) engineSecurity(ctx context.Context) (rootless, limited bool, e
 }
 
 func checkContainerConfiguration(container *engineContainer) error {
+	identity, err := containerIdentity(container)
+	if err != nil {
+		return err
+	}
+	hostname := "cage"
+	if identity != nil {
+		hostname = identity.Hostname
+	}
 	config := container.HostConfig
 	if config.Privileged || config.NetworkMode != "none" || (config.PidMode != "" && config.PidMode != "private") || config.IpcMode != "private" || config.CgroupnsMode != "private" {
 		return errors.New("容器必须使用独立命名空间和禁用默认网络，不能启用特权模式")
@@ -255,8 +268,8 @@ func checkContainerConfiguration(container *engineContainer) error {
 		return errors.New("容器不能直接挂载宿主目录")
 	}
 	for _, entry := range config.ExtraHosts {
-		if entry != "cage:127.0.1.1" {
-			return errors.New("容器只允许 Cage 主机名的固定回环地址")
+		if entry != hostname+":127.0.1.1" {
+			return errors.New("容器只允许当前主机名的固定回环地址")
 		}
 	}
 	for _, mount := range container.Mounts {
@@ -327,6 +340,9 @@ func (r *Runtime) Inspect(ctx context.Context) (Inspection, error) {
 			result.NetworkConfined = true
 			result.FilesystemConfined = mounts.Ready()
 			result.Evidence = "实际 rootless 容器无默认网络或宿主目录挂载；当前外置网络门槛身份已验证，唯一 TAP 通道由宿主接收；默认项目经受限 SFTP 共享并完成双端读写验证"
+		} else if errors.Is(err, errSharedDirectoryChanged) {
+			result.State.MountsReady = false
+			result.State.MountError = err.Error()
 		}
 	}
 	return result, nil

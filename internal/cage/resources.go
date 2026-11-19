@@ -156,14 +156,22 @@ func (p *memoryPolicy) next(now time.Time, s ResourceSample, hostPressure bool) 
 	// Kernel bookkeeping and balloon pages are absent from MemTotal.
 	desired := min(p.maximum, max(min(uint64(2<<30), p.maximum), ((used+reserve+256*mib+255*mib)/(256*mib))*(256*mib)))
 	pressure := s.Available < max(uint64(512*mib), s.Total/8) || s.Stall >= 1
+	// Only an imminent out-of-memory condition justifies the whole budget at once.
+	severe := s.Available < max(uint64(256*mib), s.Total/16) || s.Stall >= 10
 	if pressure || desired > p.target {
 		p.idleSince = time.Time{}
 		if hostPressure {
 			return p.target
 		}
-		// A burst should not wait through several incremental allocations.
-		if pressure {
+		if severe {
 			return p.maximum
+		}
+		if pressure {
+			// Grow geometrically instead of jumping to the maximum: a short burst
+			// then stops at a modest target, a sustained one still reaches the
+			// maximum within a few two-second probes.
+			grown := p.target + max(uint64(2<<30), p.target/2)
+			return min(p.maximum, max(desired, (grown+256*mib-1)/(256*mib)*(256*mib)))
 		}
 		return desired
 	}
@@ -181,7 +189,10 @@ func (p *memoryPolicy) next(now time.Time, s ResourceSample, hostPressure bool) 
 	if s.Balloon < p.maximum-p.target {
 		return p.target
 	}
-	return max(desired, p.target-256*mib)
+	// Reclaim a quarter of the excess per probe (at least 256 MiB), so a VM that
+	// booted at its maximum does not take minutes to return unused memory.
+	step := max(256*mib, (p.target-desired)/4/(256*mib)*(256*mib))
+	return max(desired, p.target-step)
 }
 
 // StartResourceManager belongs to the VM hostagent, so closing a window cannot

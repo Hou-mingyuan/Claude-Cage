@@ -12,6 +12,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)init NS_UNAVAILABLE;
 - (nullable NSData *)snapshotPNG;
 - (nullable NSData *)snapshotJPEG;
+// Capture on the main thread; the returned private bitmap may be encoded by
+// the caller off-thread. The caller must recheck authorization before delivery.
+- (nullable NSBitmapImageRep *)snapshotBitmap;
 - (BOOL)sendKey:(NSEvent *)event;
 // Click in the view's logical coordinates, with the origin at its top left.
 - (BOOL)clickAtX:(CGFloat)x y:(CGFloat)y;

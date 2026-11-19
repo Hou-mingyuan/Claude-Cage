@@ -192,13 +192,18 @@ func startUsernet(ctx context.Context, inst *limatype.Instance) (*usernet.Client
 	os.RemoveAll(endpointSock)
 	os.RemoveAll(vzSock)
 	ctx, cancel := context.WithCancel(ctx)
+	gatewayMAC := ""
+	if inst.Config.GuestIdentity != nil {
+		gatewayMAC = inst.Config.GuestIdentity.GatewayMACAddress
+	}
 	err = usernet.StartGVisorNetstack(ctx, &usernet.GVisorNetstackOpts{
-		MTU:      1500,
-		Endpoint: endpointSock,
-		FdSocket: vzSock,
-		Async:    true,
+		GatewayMACAddress: gatewayMAC,
+		MTU:               1500,
+		Endpoint:          endpointSock,
+		FdSocket:          vzSock,
+		Async:             true,
 		DefaultLeases: map[string]string{
-			networks.SlirpIPAddress: limayaml.MACAddress(inst.Dir),
+			networks.SlirpIPAddress: limayaml.GuestMACAddress(inst.Config, inst.Dir),
 		},
 		Subnet: networks.SlirpNetwork,
 	})
@@ -413,7 +418,7 @@ func newVirtioNetworkDeviceConfiguration(attachment vz.NetworkDeviceAttachment, 
 func attachNetwork(ctx context.Context, inst *limatype.Instance, vmConfig *vz.VirtualMachineConfiguration) error {
 	var configurations []*vz.VirtioNetworkDeviceConfiguration
 
-	// Configure default usernetwork with limayaml.MACAddress(inst.Dir) for eth0 interface
+	// Configure default usernetwork with limayaml.GuestMACAddress(inst.Config, inst.Dir) for eth0 interface
 	firstUsernetIndex := limayaml.FirstUsernetIndex(inst.Config)
 	if firstUsernetIndex == -1 {
 		// slirp network using gvisor netstack
@@ -425,7 +430,7 @@ func attachNetwork(ctx context.Context, inst *limatype.Instance, vmConfig *vz.Vi
 		if err != nil {
 			return err
 		}
-		networkConfig, err := newVirtioFileNetworkDeviceConfiguration(networkConn, limayaml.MACAddress(inst.Dir))
+		networkConfig, err := newVirtioFileNetworkDeviceConfiguration(networkConn, limayaml.GuestMACAddress(inst.Config, inst.Dir))
 		if err != nil {
 			return err
 		}
@@ -439,7 +444,7 @@ func attachNetwork(ctx context.Context, inst *limatype.Instance, vmConfig *vz.Vi
 		if err != nil {
 			return err
 		}
-		networkConfig, err := newVirtioFileNetworkDeviceConfiguration(networkConn, limayaml.MACAddress(inst.Dir))
+		networkConfig, err := newVirtioFileNetworkDeviceConfiguration(networkConn, limayaml.GuestMACAddress(inst.Config, inst.Dir))
 		if err != nil {
 			return err
 		}
@@ -998,4 +1003,11 @@ func ensureIPSW(instDir string) error {
 		return fmt.Errorf("failed to create hard link from %#q to %#q: %w", ipswBase, ipsw, err)
 	}
 	return nil
+}
+
+// restoreImagePath returns the physical pathname of an instance's restore image.
+// Cage may keep LIMA_HOME behind a symlink to custom storage, and
+// Virtualization.framework reports such a restore image as missing.
+func restoreImagePath(instDir string) (string, error) {
+	return filepath.EvalSymlinks(filepath.Join(instDir, filenames.ImageIPSW))
 }

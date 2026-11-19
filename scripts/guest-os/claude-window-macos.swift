@@ -1,3 +1,6 @@
+@_silgen_name("cageGuestIsVirtualMac")
+private func cageGuestIsVirtualMac() -> Bool
+
 // Capture one visible Claude Desktop window to stdout inside a Cage macOS VM.
 // Build with swiftc -parse-as-library -target arm64-apple-macos14.0.
 import AppKit
@@ -18,10 +21,7 @@ struct Failure: Error {
 }
 
 func requireGuest() throws {
-    var model = [CChar](repeating: 0, count: 256)
-    var count = model.count
-    guard sysctlbyname("hw.model", &model, &count, nil, 0) == 0,
-          String(cString: model).range(of: #"^VirtualMac[0-9]+,[0-9]+$"#, options: .regularExpression) != nil else {
+    guard cageGuestIsVirtualMac() else {
         throw Failure(2, "not_cage_guest: Run inside a Cage virtual Mac.")
     }
     let fd = open("/var/db/cage-guest-os", O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
@@ -45,6 +45,11 @@ func claudeSigningRequirement() throws -> SecRequirement {
     return requirement
 }
 
+func claudeApplicationURL() -> URL {
+    let writable = URL(fileURLWithPath: "/Applications/Claude/Claude.app")
+    return FileManager.default.fileExists(atPath: writable.path) ? writable : URL(fileURLWithPath: "/Applications/Claude.app")
+}
+
 func claudePIDs() throws -> Set<pid_t> {
     var console = stat()
     var attributes: SessionAttributeBits = []
@@ -53,11 +58,11 @@ func claudePIDs() throws -> Set<pid_t> {
           attributes.contains(.sessionHasGraphicAccess) else {
         throw Failure(4, "requires_gui_login: Run as the logged-in guest desktop user in their GUI session.")
     }
-    let path = URL(fileURLWithPath: "/Applications/Claude.app").resolvingSymlinksInPath()
+    let path = claudeApplicationURL().resolvingSymlinksInPath()
     let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).filter {
         $0.bundleURL?.resolvingSymlinksInPath() == path && !$0.isTerminated
     }
-    guard !apps.isEmpty else { throw Failure(3, "not_running: Launch /Applications/Claude.app in the guest.") }
+    guard !apps.isEmpty else { throw Failure(3, "not_running: Open Claude Desktop.") }
     let requirement = try claudeSigningRequirement()
     let validPIDs = apps.compactMap { app -> pid_t? in
         let attributes = [kSecGuestAttributePid: app.processIdentifier] as CFDictionary

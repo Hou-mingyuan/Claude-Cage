@@ -312,6 +312,11 @@ func TestGateControlAuthenticationAndConfigInvalidation(t *testing.T) {
 		t.Fatal("unauthenticated control accepted")
 	}
 	fixtureGrant(t, g)
+	longReason := strings.Repeat("故", 32<<10)
+	if state, err := client.Close(context.Background(), longReason); err != nil || state.Mode != GateClosed || state.Reason != strings.Repeat("故", 66) {
+		t.Fatalf("close with a long diagnostic: mode=%q reason=%q error=%v", state.Mode, state.Reason, err)
+	}
+	fixtureGrant(t, g)
 	cfg.Timezone = "Europe/London"
 	data, _ = json.Marshal(cfg)
 	_ = os.WriteFile(path, data, 0600)

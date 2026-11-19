@@ -56,7 +56,7 @@ func (e windowsWindowFailure) Error() string {
 // Session, identity, permission and transport failures are never suppressed.
 func transientWindowFrame(code string) bool {
 	switch code {
-	case "browser_target_changed", "target_changed", "desktop_target_changed", "desktop_capture_busy", "desktop_empty_frame":
+	case "browser_window_unavailable", "browser_target_changed", "target_changed", "desktop_target_changed", "desktop_capture_busy", "desktop_empty_frame":
 		return true
 	}
 	return false
@@ -165,6 +165,9 @@ type nativeWindowConnection struct {
 }
 
 func (s *Server) windowsWindowConnection(ctx context.Context) (*nativeWindowConnection, error) {
+	if s.windowsGuest != nil && s.windowsGuest.Remote() {
+		return nil, errors.New(remoteWindowsDesktopMessage)
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	cmd, err := guestos.WindowsRelayCommand(ctx, s.profile, "desktop")
 	if err != nil {
@@ -172,6 +175,16 @@ func (s *Server) windowsWindowConnection(ctx context.Context) (*nativeWindowConn
 		return nil, err
 	}
 	return startWindowConnection(cmd, cancel)
+}
+
+const remoteWindowsDesktopMessage = "Windows 云端当前支持隔离 PowerShell、浏览器和 Claude CLI，尚未接通图形会话。Claude Desktop 和完整 Windows 桌面暂不可用；无需重新连接或安装应用。"
+
+func (s *Server) remoteWindowsDesktopUnavailable(w http.ResponseWriter) bool {
+	if s.windowsGuest == nil || !s.windowsGuest.Remote() {
+		return false
+	}
+	http.Error(w, remoteWindowsDesktopMessage, http.StatusNotImplemented)
+	return true
 }
 
 func startWindowConnection(cmd *exec.Cmd, cancel context.CancelFunc) (*nativeWindowConnection, error) {
@@ -239,6 +252,9 @@ func (s *Server) windowsDesktopRequest(ctx context.Context, action string, input
 // Windows renders the same RFB view used by Linux. The guest publishes only its
 // application client area; the controller never requests a desktop screenshot.
 func (s *Server) windowsDesktopVNC(w http.ResponseWriter, r *http.Request) {
+	if s.remoteWindowsDesktopUnavailable(w) {
+		return
+	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	first, err := s.windowsWindowConnection(ctx)
@@ -833,6 +849,9 @@ func windowRFBRect(width, height int, encoding int32) []byte {
 }
 
 func (s *Server) windowsDesktopCredentials(w http.ResponseWriter, r *http.Request) {
+	if s.remoteWindowsDesktopUnavailable(w) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	var state claudeDesktopState

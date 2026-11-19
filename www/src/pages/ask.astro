@@ -1,0 +1,69 @@
+---
+import '@fontsource-variable/inter';
+import {Image} from 'astro:assets';
+import {Archive, ArrowUp, ArrowUpRight, BookOpen, ChevronRight, CircleDot, Globe, ImagePlus, MessageSquare, PanelLeft, Pencil, Plus, SquarePen, Trash, X} from '@lucide/astro';
+import GoogleAnalytics from '../components/GoogleAnalytics.astro';
+import {guidePages,guideURL} from '../lib/guide';
+import portrait from '../assets/fufu-avatar.webp';
+import '../styles/agent.css';
+const base=import.meta.env.BASE_URL;
+const guides=guidePages.map(p=>({path:guideURL(p.slug),title:p.title,sections:p.content.getHeadings().filter(h=>h.depth===2).map(h=>[h.text,h.slug])}));
+---
+<!doctype html>
+<html lang="zh-CN"><head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content"/>
+  <link rel="icon" href={base+'cage-icon.png'}/><link rel="canonical" href={new URL(base+'ask/',Astro.site)}/>
+  <title>Cage 助手 · Claude Cage</title><GoogleAnalytics/>
+</head><body>
+<div class="workspace" id="workspace">
+  <aside class="rail" id="rail" aria-label="会话导航">
+    <a class="brand" href={base}><img src={base+'cage-icon.png'} width="34" height="34" alt=""/>Claude Cage</a>
+    <button class="new" id="new-chat"><SquarePen size={17}/>新对话 <Plus size={15}/></button>
+    <div class="rail-label">历史对话</div>
+    <nav id="history" aria-label="浏览器本地对话"></nav>
+    <footer class="rail-foot"><a href={base+'docs/'}><BookOpen size={17}/> 使用手册 <ArrowUpRight size={14}/></a><a href="https://github.com/Lee-xeo/Claude-Cage/issues" target="_blank" rel="noopener noreferrer"><CircleDot size={17}/> 项目 Issues <ArrowUpRight size={14}/></a></footer>
+  </aside>
+  <button id="backdrop" class="backdrop" hidden aria-label="关闭会话导航"></button>
+  <main class="chat" aria-label="Cage 助手">
+    <header class="topbar"><div><button class="icon menu" id="menu" aria-label="会话导航" aria-expanded="false" aria-controls="rail" data-tip="会话导航"><PanelLeft size={20}/></button><strong>Cage 助手</strong><ChevronRight size={15}/><span id="chat-title">新对话</span></div><a class="top-link" href={base}>返回官网 <ArrowUpRight size={15}/></a></header>
+    <div class="surface" id="surface">
+      <div class="welcome" id="welcome">
+        <div class="portrait"><Image src={portrait} width={122} height={122} format="webp" alt="芙芙头像" loading="eager"/></div>
+        <h1>有什么想问 <em>Cage</em> 的？</h1>
+        <p>查使用手册、看报错截图和诊断日志，把问题反馈给开发者。</p>
+      </div>
+      <div class="messages" id="thread" role="log" aria-label="对话消息" aria-live="polite" aria-relevant="additions"></div>
+      <div class="dock" id="dock">
+        <form id="ask" autocomplete="off">
+          <div id="attachment" class="attachment" hidden><img id="photo-preview" alt="待发送图片"/><span id="photo-name"></span><button class="icon" type="button" id="remove-photo" aria-label="移除图片" data-tip="移除图片"><X size={15}/></button></div>
+          <div id="log-attachment" class="log-attachment" hidden>
+            <div><Archive size={16}/><span id="log-name"></span><button class="icon" type="button" id="remove-log" aria-label="移除日志包" data-tip="移除日志包"><X size={15}/></button></div>
+            <details id="log-details"><summary>检查并编辑将发送的日志节选</summary><p id="log-report"></p><label class="sr" for="log-excerpt">发送给助手的日志节选</label><textarea id="log-excerpt" maxlength="12000" rows="5"></textarea></details>
+          </div>
+          <label class="sr" for="question">发送给 Cage 助手的消息</label>
+          <textarea id="question" rows="2" maxlength="1400" placeholder="问问 Cage，或粘贴一张截图…"></textarea>
+          <div class="toolbar"><div><button type="button" id="attach" class="tool"><ImagePlus size={17}/> 图片</button><button type="button" id="attach-log" class="tool"><Archive size={16}/> 日志 ZIP</button><button type="button" id="web" class="tool" aria-pressed="false"><Globe size={16}/> 联网</button></div><button id="send" class="send" aria-label="发送消息" data-tip="发送消息" disabled><ArrowUp size={20}/></button></div>
+          <input type="file" id="log-file" hidden accept=".zip,application/zip"/><input type="file" id="file" hidden accept="image/png,image/jpeg,image/webp"/>
+        </form>
+        <div class="shortcuts" id="shortcuts">
+          <button id="find-doc"><BookOpen size={16}/> 查找项目文档</button>
+          <button id="diagnose"><ImagePlus size={16}/> 帮我看截图</button>
+          <button id="report"><CircleDot size={16}/> 反馈一个问题</button>
+        </div>
+        <p id="status" role="status"></p><p id="storage-warning" role="status"></p>
+      </div>
+    </div>
+    <footer class="privacy">对话保存在此浏览器，可在历史列表中删除 <span>·</span> <a href={base+'privacy/'}>隐私说明</a></footer>
+  </main>
+</div>
+<dialog id="document"><header><span><BookOpen size={17}/> 使用手册</span><button id="close-doc" class="icon" aria-label="关闭文档预览" data-tip="关闭预览"><X size={18}/></button></header><div id="doc-text"></div><a id="doc-link" class="doc-link" target="_blank" rel="noopener noreferrer">打开完整文档 <ArrowUpRight size={15}/></a></dialog>
+<template id="bot-avatar"><Image src={portrait} width={64} height={64} format="webp" alt="" /></template>
+<dialog id="rename-chat" class="history-dialog" aria-labelledby="rename-heading"><form id="rename-form"><h2 id="rename-heading">重命名对话</h2><label for="new-title">对话标题</label><input id="new-title" type="text" maxlength="80" required autocomplete="off"/><div><button type="button" id="cancel-rename">取消</button><button type="submit" class="primary">保存</button></div></form></dialog>
+<template id="rename-icon"><Pencil size={15}/></template>
+<dialog class="history-dialog" id="delete-chat" aria-labelledby="delete-title"><h2 id="delete-title">删除这段对话？</h2><p id="delete-name"></p><div><button id="cancel-delete">取消</button><button id="confirm-delete">删除对话</button></div></dialog>
+<template id="delete-icon"><Trash size={15}/></template>
+<template id="history-icon"><MessageSquare size={15}/></template>
+<script id="doc-map" type="application/json" set:html={JSON.stringify(guides).replaceAll('<','\\u003c')}></script>
+<noscript><p>请启用 JavaScript 与助手对话，或直接阅读<a href={base+'docs/'}>使用手册</a>。</p></noscript>
+<script>import '../lib/agent-chat';</script>
+</body></html>

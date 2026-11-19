@@ -36,13 +36,17 @@
     return YES;
 }
 
-- (NSData *)snapshotType:(NSBitmapImageFileType)type properties:(NSDictionary *)properties {
+- (NSBitmapImageRep *)snapshotBitmap {
     if (![self canUseView]) return nil;
     NSBitmapImageRep *rep = [_view bitmapImageRepForCachingDisplayInRect:_view.bounds];
     if (!rep) return nil;
     [_view cacheDisplayInRect:_view.bounds toBitmapImageRep:rep];
-    NSData *data = [rep representationUsingType:type properties:properties];
-    return [self canUseView] ? data : nil;
+    return [self canUseView] ? rep : nil;
+}
+
+- (NSData *)snapshotType:(NSBitmapImageFileType)type properties:(NSDictionary *)properties {
+    NSBitmapImageRep *rep = [self snapshotBitmap];
+    return rep ? [rep representationUsingType:type properties:properties] : nil;
 }
 
 - (NSData *)snapshotPNG { return [self snapshotType:NSBitmapImageFileTypePNG properties:@{}]; }

@@ -68,7 +68,7 @@ class NativeChannelTests(unittest.TestCase):
                 self.assertEqual(replies,[{'ok':True},{'ok':True}])
                 event=lines.get(timeout=5)
                 self.assertEqual(event['params']['content'],text)
-                self.assertEqual(event['params']['meta']['cage_request'],request)
+                self.assertEqual(event['params']['meta']['request_id'],request)
                 with self.assertRaises(queue.Empty):lines.get(timeout=.1)
                 self.assertIn('error',rpc(action='send',request_id=request,text='changed'))
                 invoke('hook',{'hook_event_name':'UserPromptSubmit','session_id':connection,'cwd':str(home/'project')})

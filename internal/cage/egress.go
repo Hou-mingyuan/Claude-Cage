@@ -29,12 +29,13 @@ type Egress struct {
 	dnsURL   string
 	client   *http.Client
 	public   netguard.Policy
-	connect  proxyConnector
+	connect  proxy.ContextDialer
 }
 
-type proxyConnector interface {
-	Dial(string, string) (net.Conn, error)
-	DialContext(context.Context, string, string) (net.Conn, error)
+// The SOCKS handshake runs on our socket so TCP half-close remains available
+// to the relay after authentication. DialContext returns a net.Conn wrapper.
+type socksHandshaker interface {
+	DialWithConn(context.Context, net.Conn, string, string) (net.Addr, error)
 }
 
 func NewEgress(c Config) (*Egress, error) {
@@ -58,6 +59,14 @@ type bufferedConn struct {
 }
 
 func (c *bufferedConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
+func (c *bufferedConn) CloseWrite() error          { return closeWrite(c.Conn) }
+
+func closeWrite(c net.Conn) error {
+	if w, ok := c.(interface{ CloseWrite() error }); ok {
+		return w.CloseWrite()
+	}
+	return errors.ErrUnsupported
+}
 
 func proxyConnectionError(ctx context.Context, action string, err error) error {
 	// Closing a stalled handshake on cancellation can report net.ErrClosed.
@@ -88,12 +97,20 @@ func (e *Egress) DialContext(ctx context.Context, network, addr string) (net.Con
 			p, _ := e.upstream.User.Password()
 			auth = &proxy.Auth{User: e.upstream.User.Username(), Password: p}
 		}
-		d, err := proxy.SOCKS5("tcp", e.upstream.Host, auth, e.connect)
+		d, err := proxy.SOCKS5("tcp", e.upstream.Host, auth, nil)
 		if err != nil {
 			return nil, errors.New("invalid SOCKS5 configuration")
 		}
-		c, err := d.(proxy.ContextDialer).DialContext(ctx, "tcp", addr)
+		handshake, ok := d.(socksHandshaker)
+		if !ok {
+			return nil, errors.New("SOCKS5 dialer cannot negotiate on an existing connection")
+		}
+		c, err := e.connect.DialContext(ctx, "tcp", e.upstream.Host)
 		if err != nil {
+			return nil, proxyConnectionError(ctx, "连接指定 SOCKS5 代理", err)
+		}
+		if _, err := handshake.DialWithConn(ctx, c, "tcp", addr); err != nil {
+			_ = c.Close()
 			return nil, proxyConnectionError(ctx, "连接指定 SOCKS5 代理", err)
 		}
 		return c, nil

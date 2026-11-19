@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createWorkbench } from "./workbench-fixture.mjs";
 for (const failure of ["http", "native"]) {
   const user = "cage";
-  const permissions = { screen:false, input:false, projects:false, managed_credential:true };
+  const permissions = { screen:false, input:false, projects:false, sharing:false, managed_credential:true };
   const calls = []; let finishFailed = false;
   const {page, browser, errors} = await createWorkbench({
     async beforeNavigate(page, state) {
@@ -28,8 +28,12 @@ for (const failure of ["http", "native"]) {
           assert.equal(q.password,undefined,"browser sent a credential");
           assert.equal(q.session,"setup-fixture");
         }
+        if (q.action === "confirm-sharing") {
+          permissions.sharing = true;
+          return r.fulfill({json:permissions});
+        }
         if (q.action === "finish") {
-          assert.ok(permissions.screen && permissions.input && permissions.projects);
+          assert.ok(permissions.screen && permissions.input && permissions.projects && permissions.sharing);
           if (!finishFailed) {
             finishFailed=true;
             return failure === "http"
@@ -68,6 +72,12 @@ for (const failure of ["http", "native"]) {
     await page.getByRole("dialog",{name:"首次设置虚拟 Mac"}).getByText(/打开 macFUSE 和 macFUSE \(local\) 两个开关，用于/).waitFor();
     assert.ok(!calls.includes("finish"),"finished before filesystem permission");
     permissions.projects=true;
+    await waitCall("sharing");
+    const sharingConfirm = tools.getByRole("button", {name:"已开启，重新检查", exact:true});
+    await sharingConfirm.waitFor();
+    assert.ok(!calls.includes("finish"), "opening the settings pane cannot confirm screen sharing");
+    await sharingConfirm.click();
+    await waitCall("confirm-sharing");
     await page.getByRole("button",{name:"返回设置指引"}).click();
     const retry=page.getByRole("button",{name:"重试完成设置"});
     await retry.waitFor();

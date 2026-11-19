@@ -402,7 +402,7 @@ func (s *Server) monitorClaudeAccount(terminal *terminalSession, id string) {
 			}
 			// Locking pauses observation; unlocking resumes it for the same
 			// terminal. Cancel an in-flight attempt if its access epoch ends.
-			attempt, finish := context.WithCancel(context.WithValue(ctx, mobileEpochKey{}, epoch))
+			attempt, finish := context.WithCancel(context.WithValue(ctx, accountEpochKey{}, epoch))
 			stop := context.AfterFunc(epoch, finish)
 			s.maybeSwitchClaudeAccount(attempt, id, &lastUsageCheck)
 			stop()

@@ -6,7 +6,14 @@ namespace Cage.Windows;
 
 internal static class Authenticode
 {
-    public static string Publisher(string path)
+    private static readonly Lazy<(string Key, string Organization)> Own = new(() => Identity(Environment.ProcessPath!));
+
+    public static string Publisher(string path) => Identity(path).Key;
+
+    // Key identifies one certificate. Organization is the publisher Windows
+    // verified in the subject, which stays the same when a certificate is
+    // renewed with a new key.
+    private static (string Key, string Organization) Identity(string path)
     {
         UpdatePolicy.PlainPath(path);
         var file = new TrustFile { Size = (uint)Marshal.SizeOf<TrustFile>(), Path = path };
@@ -29,15 +36,23 @@ internal static class Authenticode
             using var signed = X509Certificate.CreateFromSignedFile(path);
             using var certificate = new X509Certificate2(signed);
 #pragma warning restore SYSLIB0057
-            return Convert.ToHexString(SHA256.HashData(certificate.PublicKey.ExportSubjectPublicKeyInfo()));
+            return (Convert.ToHexString(SHA256.HashData(certificate.PublicKey.ExportSubjectPublicKeyInfo())), UpdatePolicy.PublisherOrganization(certificate.SubjectName));
         }
         finally { Marshal.DestroyStructure<TrustFile>(memory); Marshal.FreeHGlobal(memory); }
     }
 
+    // A file matches when it carries the expected certificate key, or when the
+    // running App carries that key and Windows trusts the file's signature for
+    // the same verified organization. The second case keeps updates working
+    // after the signing certificate is renewed.
     public static void SamePublisher(string path, string expected)
     {
-        if (!string.Equals(Publisher(path), expected, StringComparison.Ordinal))
-            throw new IOException("更新包的发布者签名与当前 Cage 不一致");
+        var actual = Identity(path);
+        if (string.Equals(actual.Key, expected, StringComparison.Ordinal)) return;
+        var own = Own.Value;
+        if (string.Equals(own.Key, expected, StringComparison.Ordinal) && own.Organization.Length != 0 &&
+            string.Equals(actual.Organization, own.Organization, StringComparison.Ordinal)) return;
+        throw new IOException("更新包的发布者签名与当前 Cage 不一致");
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

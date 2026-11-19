@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sylvinus/agent-vm/internal/transfermeta"
 	"io"
 	"net/http"
 	"net/url"
@@ -74,6 +75,9 @@ func streamSelectedHostFiles(client *http.Client, origin, target, id string, fil
 		}
 		data, readErr := io.ReadAll(io.LimitReader(response.Body, 4097))
 		response.Body.Close()
+		if response.StatusCode == http.StatusUnprocessableEntity {
+			return nil, transfermeta.ErrUnsupported
+		}
 		if response.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("文件传递失败（%d），请重新发起上传", response.StatusCode)
 		}

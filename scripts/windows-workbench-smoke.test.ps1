@@ -7,6 +7,7 @@ function Assert-SmokeContract([bool]$Condition, [string]$Message) { if (-not $Co
 try {
     $env:RUNNER_TEMP = Join-Path $directory 'runner-temp'
     Assert-SmokeContract ((Get-WindowsWorkbenchTestBase) -eq [IO.Path]::GetFullPath($env:RUNNER_TEMP)) 'CI report directory ignores RUNNER_TEMP.'
+    Assert-SmokeContract ((Get-WindowsWorkbenchTestBase -WorkbenchProfile) -eq [IO.Path]::GetFullPath($env:RUNNER_TEMP)) 'CI workbench profile ignores RUNNER_TEMP.'
     $savedTemp = $env:TEMP; $savedTmp = $env:TMP
     $envFile = Join-Path $directory 'child-env.json'
     $envScript = Join-Path $directory 'child-env.ps1'
@@ -25,6 +26,20 @@ try {
     Assert-SmokeContract (-not (Test-Path -LiteralPath $childEnv.temp)) 'Owned test temp was not cleaned.'
     Remove-Item Env:RUNNER_TEMP -ErrorAction SilentlyContinue
     Assert-SmokeContract ((Get-WindowsWorkbenchTestBase) -eq [IO.Path]::GetTempPath()) 'Local report directory lost its OS temp fallback.'
+    $checkout = Split-Path $PSScriptRoot -Parent
+    Push-Location $directory
+    try {
+        Assert-SmokeContract ((Get-WindowsWorkbenchTestBase -WorkbenchProfile) -eq (Join-Path $checkout '_output/workbench-smoke')) 'Local workbench profile must stay in the checkout output directory.'
+    } finally { Pop-Location }
+    if ($IsWindows -and $env:LOCALAPPDATA) {
+        # An AppData checkout recreates the old timeout even with the new
+        # checkout-relative default. No files need to be written there.
+        $privateStage = Join-Path $env:LOCALAPPDATA 'Cage-test-checkout/_output/workbench-smoke'
+        $rejected = $false
+        try { Assert-WindowsWorkbenchTestBase $privateStage }
+        catch { $rejected = $_.Exception.Message -match 'Set RUNNER_TEMP' }
+        Assert-SmokeContract $rejected 'Smoke preflight accepted a checkout under AppData.'
+    }
     $report = Join-Path $directory 'smoke.json'
     $fixture = Join-Path $directory 'fixture.json'
     $childScript = Join-Path $directory 'child.ps1'
@@ -32,6 +47,7 @@ try {
     @{
         success = $false; nativeBridgeReady = $false; phase = 'loading_workbench'
         prepareExit = 1; prepareStatus = 'stop_required'
+        prepareMessage = 'shutdown failed http://localhost:1234/api/handoff?token=private-token#private-fragment'
         nativeStatus = 'failed http://localhost:1234/?token=private-token#private-fragment'
         entryJSON = 'private-entry'; pageURL = 'http://localhost:1234/#private-launch'
         page = @{ text = 'private-page-body'; errors = @(
@@ -53,7 +69,7 @@ try {
         } 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
         Assert-SmokeContract ($observedFailure -like '*loading_workbench*') 'Failure report was not parsed before rejecting its process exit.'
-        foreach ($expected in @('loading_workbench', 'module-load', '/missing.js', 'syntax error', '"prepareExit":1', '"prepareStatus":"stop_required"')) {
+        foreach ($expected in @('loading_workbench', 'module-load', '/missing.js', 'syntax error', '"prepareExit":1', '"prepareStatus":"stop_required"', 'shutdown failed http://localhost:1234/api/handoff')) {
             Assert-SmokeContract ($text.Contains($expected)) "Missing safe smoke evidence: $expected"
         }
         foreach ($private in @('private-token','private-fragment','private-query','private-entry','private-launch','private-page-body')) {
@@ -65,7 +81,43 @@ try {
     $rejected = $false
     try { Assert-WindowsWorkbenchReport -ExitCode 17 -Report $report } catch { $rejected = $true }
     Assert-SmokeContract $rejected 'Nonzero child exit was accepted because its report said success.'
-    Write-Output 'PASS: RUNNER_TEMP/local selection, real failed child with existing diagnostic, safe evidence logging, and success/exit contract.'
+    $app = Join-Path $directory 'app'
+    New-Item -ItemType Directory -Path (Join-Path $app 'resources') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $app 'Cage.exe'), 'native fixture')
+    $image = Join-Path $app 'resources/cage.exe'
+    [IO.File]::WriteAllText($image, 'backend fixture')
+    $ready = Join-Path $directory 'image-locked'
+    $released = Join-Path $directory 'image-released'
+    $lockScript = Join-Path $directory 'lock-image.ps1'
+    [IO.File]::WriteAllText($lockScript, @'
+$handle = [IO.File]::Open($args[0], [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+try {
+    [IO.File]::WriteAllText($args[1], 'ready')
+    Start-Sleep -Milliseconds 800
+} finally {
+    [IO.File]::WriteAllText($args[2], 'released')
+    $handle.Dispose()
+}
+'@)
+    $start = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+    $start.UseShellExecute = $false
+    foreach ($argument in @('-NoProfile','-NonInteractive','-File',$lockScript,$image,$ready,$released)) { $start.ArgumentList.Add($argument) }
+    $child = [Diagnostics.Process]::Start($start)
+    try {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        while (-not (Test-Path -LiteralPath $ready)) {
+            if ($child.HasExited -or [DateTime]::UtcNow -ge $deadline) { throw 'Image lock fixture did not start.' }
+            Start-Sleep -Milliseconds 20
+        }
+        Wait-WindowsWorkbenchFiles -AppDirectory $app
+        Assert-SmokeContract (Test-Path -LiteralPath $released) 'Smoke returned while a child still held its executable image.'
+        $child.WaitForExit()
+        Assert-SmokeContract ($child.ExitCode -eq 0) 'Image lock fixture failed.'
+    } finally {
+        if (-not $child.HasExited) { $child.Kill($true); $child.WaitForExit() }
+        $child.Dispose()
+    }
+    Write-Output 'PASS: isolated temp, safe smoke diagnostics, exit status and executable release.'
 } finally {
     $env:RUNNER_TEMP = $savedRunnerTemp
     Remove-Item -LiteralPath $directory -Recurse

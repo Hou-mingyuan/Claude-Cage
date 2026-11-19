@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const maxChecksums = 64 * 1024;
+// The in-place updater of every published App rejects a larger installer.
 const maxInstaller = 512 * 1024 * 1024;
 
 async function releaseNames() {
@@ -68,7 +69,12 @@ function isQemuArchive(name, names) {
 
 async function verifyAndStage(source, digest, destination, installer) {
   const before = await regularFile(source);
-  if (!before.size || (installer && before.size > maxInstaller)) throw new Error(`Invalid release asset size: ${source}`);
+  if (!before.size) throw new Error(`Invalid release asset size: ${source}`);
+  if (installer && before.size > maxInstaller) {
+    throw new Error(`Release installer is ${before.size} bytes, above the ${maxInstaller}-byte limit: ${source}\n` +
+      'Published versions up to 0.1.8-rc ignore a larger package and report that they are up to date. ' +
+      'Reduce the package, or raise this limit once those versions no longer update in place.');
+  }
   const file = await open(source, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const opened = await file.stat();

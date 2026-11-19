@@ -24,6 +24,9 @@ func WindowsVMAction(ctx context.Context, root, action string) error {
 	if binding == nil {
 		return errors.New("此配置尚未绑定 Windows 客机")
 	}
+	if binding.Remote() {
+		return errors.New("云端 Windows 的电源由云平台管理，Cage 只连接或断开工作环境")
+	}
 	operation := action
 	if operation == "stop" {
 		operation = "shutdown"

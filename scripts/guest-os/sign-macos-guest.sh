@@ -34,4 +34,10 @@ while IFS= read -r -d '' app; do
   "${sign[@]}" "$app"
   /usr/bin/codesign --verify --deep --strict "$app"
 done < <(/usr/bin/find "$kit" -depth -type d -name '*.app' -print0)
+# Local builds may keep the window helper on a stable identity so that guest
+# Screen Recording and Accessibility grants survive component updates.
+if [[ $identity == - && -n ${CAGE_GUEST_SIGN_IDENTITY:-} && -d "$kit/Cage Guest Window.app" ]]; then
+  /usr/bin/codesign --force --sign "$CAGE_GUEST_SIGN_IDENTITY" --identifier dev.cage.GuestClaudeWindow "$kit/Cage Guest Window.app"
+  /usr/bin/codesign --verify --deep --strict "$kit/Cage Guest Window.app"
+fi
 printf 'Signed and verified %s guest Mach-O files.\n' "$count"

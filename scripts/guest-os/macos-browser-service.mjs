@@ -1,7 +1,7 @@
 import net from "node:net";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { lines } from "./windows-browser.mjs";
+import { lines } from "./browser-protocol.mjs";
 
 async function privateDirectory(directory) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });

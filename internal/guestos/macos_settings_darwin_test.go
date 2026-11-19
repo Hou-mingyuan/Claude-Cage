@@ -22,7 +22,7 @@ enum MacSetupPassword {
 }
 @main struct Check {
     @MainActor static func main() {
-        for purpose in ["projects", "screen", "input"] {
+        for purpose in ["projects", "screen", "input", "sharing"] {
             guard let url = MacMaintenance.settingsURL(for: purpose) else { exit(1) }
             print("\(purpose) \(url.absoluteString)")
         }
@@ -36,7 +36,8 @@ enum MacSetupPassword {
 	}
 	program := filepath.Join(dir, "settings-check")
 	source := filepath.Join("..", "..", "scripts", "guest-os", "macos-maintenance.swift")
-	compile := exec.CommandContext(t.Context(), "xcrun", "swiftc", "-parse-as-library", source, input, "-o", program)
+	compositor := filepath.Join("..", "..", "scripts", "guest-os", "macos-maintenance-compositor.swift")
+	compile := exec.CommandContext(t.Context(), "xcrun", "swiftc", "-parse-as-library", source, compositor, input, "-o", program)
 	if output, err := compile.CombinedOutput(); err != nil {
 		t.Fatalf("compile settings router: %v\n%s", err, output)
 	}
@@ -48,6 +49,7 @@ enum MacSetupPassword {
 		"projects x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.fskit.fsmodule",
 		"screen x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
 		"input x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+		"sharing x-apple.systempreferences:com.apple.Sharing-Settings.extension",
 	}
 	if strings.TrimSpace(string(output)) != strings.Join(want, "\n") {
 		t.Fatalf("permission routes lost the specific destination: %s", output)

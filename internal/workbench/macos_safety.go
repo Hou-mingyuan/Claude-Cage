@@ -205,10 +205,31 @@ func (s *Server) macOSVMLayout() (bool, bool) {
 	var spec struct {
 		OS               string `yaml:"os"`
 		Driver           string `yaml:"vmType"`
+		Arch             string `yaml:"arch"`
 		Mounts, Networks []any
 		Extra            []any `yaml:"additionalDisks"`
+		Video            struct {
+			Display string `yaml:"display"`
+		} `yaml:"video"`
+		Options struct {
+			QEMU struct {
+				MacOS *struct {
+					UUID      string `yaml:"uuid"`
+					Installer bool   `yaml:"installer"`
+				} `yaml:"macOS"`
+			} `yaml:"qemu"`
+		} `yaml:"vmOpts"`
 	}
-	if yaml.Unmarshal(data, &spec) != nil || spec.OS != "Darwin" || spec.Driver != "vz" {
+	if yaml.Unmarshal(data, &spec) != nil || spec.OS != "Darwin" {
+		return false, false
+	}
+	if s.macosGuest.Backend == guestos.MacOSQEMU {
+		mac := spec.Options.QEMU.MacOS
+		if spec.Driver != "qemu" || spec.Arch != "x86_64" || spec.Video.Display != "offscreen" || mac == nil ||
+			mac.UUID == "" || mac.UUID != s.macosGuest.UUID || mac.Installer {
+			return false, false
+		}
+	} else if s.macosGuest.Backend != "" || spec.Driver != "vz" {
 		return false, false
 	}
 	return spec.Mounts != nil && len(spec.Mounts) == 0 && len(spec.Extra) == 0, spec.Networks != nil && len(spec.Networks) == 0
@@ -223,11 +244,22 @@ func (s *Server) macOSBrowserObservation(ctx context.Context, cfg cage.Config, n
 	return observation, nil
 }
 
+// A full safety check samples the live Chrome page. Between checks, the
+// monitor verifies that the sampled process, active profile, and its language
+// and timezone settings still match without opening a tab in the user's window.
+func (s *Server) recheckMacOSBrowserSettings(ctx context.Context, cfg cage.Config) bool {
+	data, err := s.nativeBrowserClient().request(ctx, "POST", "/audit-recheck", map[string]string{"timezone": cfg.Timezone, "language": cfg.BrowserLanguage})
+	var result struct {
+		Unchanged bool `json:"unchanged"`
+	}
+	return err == nil && json.Unmarshal(data, &result) == nil && result.Unchanged
+}
+
 func macOSIPv6LinkVerified(v guestObservation, before, after cage.GateStatus) bool {
 	if !after.PolicyVerified || before.Mode != cage.GateChecking || after.Mode != cage.GateChecking || before.RunID == "" || after.RunID != before.RunID || before.CheckID == "" || after.CheckID != before.CheckID || after.IPv6LinkProbeCheck != before.CheckID {
 		return false
 	}
-	if v.IPv6Connected || !v.IPv6UnscopedAbsent || !v.IPv6LinkSent || v.IPv6LinkInterface == "" || v.IPv6Unbound.Result != "no-route" || v.IPv6Unbound.GlobalSources != 0 || v.IPv6DefaultRoutes != len(v.IPv6Scoped) {
+	if v.IPv6Connected || !v.IPv6UnscopedAbsent || !v.IPv6LinkSent || !v.IPv6LinkInterfaceValid || v.IPv6Unbound.Result != "no-route" || v.IPv6Unbound.GlobalSources != 0 || v.IPv6DefaultRoutes != len(v.IPv6Scoped) {
 		return false
 	}
 	seen := map[string]bool{}

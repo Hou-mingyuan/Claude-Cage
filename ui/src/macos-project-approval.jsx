@@ -8,6 +8,16 @@ const permissionMessages = {
   project_screen_permission: "无法显示文件夹授权窗口。请在虚拟 Mac 的“系统设置 → 隐私与安全性 → 屏幕与系统音频录制”中允许 Cage Guest Window，并按系统提示重新打开助手。",
   accessibility_permission: "无法点击文件夹授权窗口。请在虚拟 Mac 的“系统设置 → 隐私与安全性 → 辅助功能”中允许 Cage Guest Window，然后重试。",
   requires_gui_login: "请先登录并解锁虚拟 Mac 的普通账户，然后重新打开项目。",
+  project_button_not_hit: "尚未点中允许按钮。请点击下方「允许使用此文件夹」，或在 macOS 授权窗口中点击右下角 Use Project。",
+  project_panel_still_open: "macOS 尚未完成确认。请稍后重试，或展开授权窗口查看系统提示。",
+  no_project_panel: "当前未找到这次文件夹授权窗口。若已在 macOS 中允许，请点击重新检查；否则请重新请求授权。",
+  window_changed: "授权窗口已变化，正在重新读取。请稍后再点击允许。",
+  project_panel_changed: "这次文件夹授权请求已变化，正在重新读取。请确认文件夹后再点击允许。",
+  project_window_identity_changed: "显示的授权窗口已被替换，正在重新读取。请看到新画面后再点击允许。",
+  project_window_not_frontmost: "文件夹授权窗口未处于客机前台。请关闭遮挡它的窗口，再点击允许。",
+  project_window_focus_unavailable: "无法读取文件夹授权窗口的焦点。请在客机中激活授权窗口后重试。",
+  project_window_geometry_unavailable: "无法读取文件夹授权窗口的位置和尺寸。请重新打开授权窗口后重试。",
+  project_window_geometry_changed: "文件夹授权窗口的位置或尺寸与当前画面不一致。请停止移动或缩放窗口，看到新画面后再点击允许。",
 };
 
 export function InitializationProjectApproval({ workspace, jobRunning, onClose, onApproved = onClose }) {

@@ -27,7 +27,10 @@ internal static class ClaudeGraphicsCapture
         finally { CaptureGate.Release(); }
     }
 
-    internal static async Task<byte[]> Capture(IntPtr window, int pid, int width, int height, Action validate, bool allowSolid = false, bool preserveAlpha = false)
+    // jpeg selects the encoding of the returned image. Claude's window is sent
+    // as JPEG, which encodes several times faster than PNG and is the same
+    // kind of image a Linux guest sends; overlays that need alpha stay PNG.
+    internal static async Task<byte[]> Capture(IntPtr window, int pid, int width, int height, Action validate, bool allowSolid = false, bool preserveAlpha = false, bool jpeg = false)
     {
         await CaptureGate.WaitAsync();
         Idle.Change(Timeout.Infinite, Timeout.Infinite);
@@ -40,7 +43,7 @@ internal static class ClaudeGraphicsCapture
             Exception? hardware = null;
             foreach (uint driver in new uint[] { 1, 5 }) // hardware, then WARP
             {
-                try { return await CaptureDevice(window, pid, width, height, validate, driver, allowSolid, preserveAlpha); }
+                try { return await CaptureDevice(window, pid, width, height, validate, driver, allowSolid, preserveAlpha, jpeg); }
                 catch (COMException error) when ((uint)error.HResult == 0x80070005)
                 { throw new InvalidDataException("desktop_capture_permission_required", error); }
                 catch (Exception error) when (error is COMException || error is TimeoutException || error is InvalidDataException { Message: "desktop_empty_frame" })
@@ -54,12 +57,12 @@ internal static class ClaudeGraphicsCapture
         }
         finally { Idle.Change(1500, Timeout.Infinite); CaptureGate.Release(); }
     }
-    private static async Task<byte[]> CaptureDevice(IntPtr window, int pid, int width, int height, Action validate, uint driver, bool allowSolid, bool preserveAlpha)
+    private static async Task<byte[]> CaptureDevice(IntPtr window, int pid, int width, int height, Action validate, uint driver, bool allowSolid, bool preserveAlpha, bool jpeg)
     {
-        if (current is null || !current.Matches(window, pid, width, height, allowSolid, preserveAlpha))
+        if (current is null || !current.Matches(window, pid, width, height, allowSolid, preserveAlpha, jpeg))
         {
             current?.Dispose(); current = null;
-            current = new CaptureSession(window, pid, width, height, driver, allowSolid, preserveAlpha);
+            current = new CaptureSession(window, pid, width, height, driver, allowSolid, preserveAlpha, jpeg);
         }
         return await current.Read(validate);
     }
@@ -68,7 +71,7 @@ internal static class ClaudeGraphicsCapture
     {
         private readonly IntPtr window;
         private readonly int pid, width, height;
-        private readonly bool allowSolid, preserveAlpha;
+        private readonly bool allowSolid, preserveAlpha, jpeg;
         private readonly GraphicsCaptureItem item;
         private readonly IDirect3DDevice device;
         private Direct3D11CaptureFramePool? pool;
@@ -83,9 +86,9 @@ internal static class ClaudeGraphicsCapture
         private TimeSpan? timestamp;
         private bool closed;
 
-        internal CaptureSession(IntPtr window, int pid, int width, int height, uint driver, bool allowSolid, bool preserveAlpha)
+        internal CaptureSession(IntPtr window, int pid, int width, int height, uint driver, bool allowSolid, bool preserveAlpha, bool jpeg)
         {
-            this.window = window; this.pid = pid; this.width = width; this.height = height; this.allowSolid = allowSolid; this.preserveAlpha = preserveAlpha;
+            this.window = window; this.pid = pid; this.width = width; this.height = height; this.allowSolid = allowSolid; this.preserveAlpha = preserveAlpha; this.jpeg = jpeg && !preserveAlpha;
             item = Item(window);
             if (item.Size.Width < width || item.Size.Height < height || (long)item.Size.Width * item.Size.Height > 40_000_000)
                 throw new InvalidDataException("desktop_target_changed");
@@ -102,9 +105,9 @@ internal static class ClaudeGraphicsCapture
             catch { Dispose(); throw; }
         }
 
-        internal bool Matches(IntPtr handle, int process, int w, int h, bool solid, bool alpha)
+        internal bool Matches(IntPtr handle, int process, int w, int h, bool solid, bool alpha, bool image)
         {
-            lock (frames) return !closed && window == handle && pid == process && width == w && height == h && allowSolid == solid && preserveAlpha == alpha;
+            lock (frames) return !closed && window == handle && pid == process && width == w && height == h && allowSolid == solid && preserveAlpha == alpha && jpeg == (image && !alpha);
         }
 
         private void OnFrame(Direct3D11CaptureFramePool sender, object args)
@@ -186,11 +189,11 @@ internal static class ClaudeGraphicsCapture
                     timestamp = frame.SystemRelativeTime;
                     return encoded!;
                 }
-                var png = await EncodeClient(pixels, source.X, source.Y, width, height);
+                // The encoder writes exactly these pixels, so the emptiness
+                // check reads them here instead of decoding the PNG again.
+                if (!allowSolid && !HasContent(pixelsRead, pixels.PixelWidth, source.X, source.Y, width, height)) throw new InvalidDataException("desktop_empty_frame");
+                var png = await EncodeClient(pixels, source.X, source.Y, width, height, jpeg);
                 validate();
-                using var input = new MemoryStream(png, false);
-                using var client = new Bitmap(input);
-                if (client.Width != width || client.Height != height || (!allowSolid && !HasContent(client))) throw new InvalidDataException("desktop_empty_frame");
                 // Publish the comparison pixels only after encoding and target
                 // validation succeed, so a failed frame cannot reuse old PNGs.
                 previousPixels ??= new byte[checked(rowBytes * height)];
@@ -218,6 +221,8 @@ internal static class ClaudeGraphicsCapture
             capture?.Dispose(); pool?.Dispose(); device.Dispose();
         }
     }
+    // The quality a Linux guest's display uses at the workbench's setting.
+    private const float JpegQuality = 0.92f;
     internal static bool HasContent(Bitmap bitmap)
     {
         // A white/black client plus custom title buttons is still an empty frame.
@@ -232,12 +237,32 @@ internal static class ClaudeGraphicsCapture
             }
         return varied >= 8;
     }
-    private static async Task<byte[]> EncodeClient(SoftwareBitmap source, int x, int y, int width, int height)
+    // The same sampling over BGRA rows of a captured surface.
+    internal static bool HasContent(ReadOnlySpan<byte> bgra, int surfaceWidth, int originX, int originY, int width, int height)
+    {
+        if (width < 1 || height < 1 || originX < 0 || originY < 0 || originX + width > surfaceWidth ||
+            (long)(originY + height) * surfaceWidth * 4 > bgra.Length) return false;
+        int left = width / 12, right = width - left;
+        int top = height * 15 / 100, bottom = height * 95 / 100;
+        int At(int x, int y) => ((originY + y) * surfaceWidth + originX + x) * 4;
+        var first = At(left, top); int varied = 0;
+        byte blue = bgra[first], green = bgra[first + 1], red = bgra[first + 2];
+        for (int y = top; y < bottom; y += Math.Max(1, (bottom-top)/64))
+            for (int x = left; x < right; x += Math.Max(1, (right-left)/64))
+            {
+                var pixel = At(x, y);
+                if (Math.Abs(bgra[pixel + 2]-red)>8 || Math.Abs(bgra[pixel + 1]-green)>8 || Math.Abs(bgra[pixel]-blue)>8) varied++;
+            }
+        return varied >= 8;
+    }
+    private static async Task<byte[]> EncodeClient(SoftwareBitmap source, int x, int y, int width, int height, bool jpeg)
     {
         if (x < 0 || y < 0 || x + width > source.PixelWidth || y + height > source.PixelHeight)
             throw new InvalidDataException("desktop_target_changed");
         using var output = new InMemoryRandomAccessStream();
-        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, output);
+        var encoder = jpeg
+            ? await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, output, new BitmapPropertySet { ["ImageQuality"] = new BitmapTypedValue(JpegQuality, PropertyType.Single) })
+            : await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, output);
         encoder.SetSoftwareBitmap(source);
         encoder.BitmapTransform.Bounds = new BitmapBounds { X = (uint)x, Y = (uint)y, Width = (uint)width, Height = (uint)height };
         await encoder.FlushAsync();

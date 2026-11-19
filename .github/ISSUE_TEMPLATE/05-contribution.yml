@@ -1,0 +1,105 @@
+name: 方案贡献（Contribution）
+description: 通过 Issue 分享修复方案、实现代码或补丁，供维护者评估整合。
+title: "[Contribution] "
+labels: [contribution]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        贡献流程：先提交本 Issue，维护者审核通过后邀请你成为协作者，接受邀请后再创建 PR，审查通过后合入。
+        维护者添加 accepted 标签后，自动化会发送协作者邀请并在此说明后续步骤。协作者拥有整个仓库的写权限。
+        可直接贴代码或 diff，也可提供补丁附件、Fork 分支或具体提交链接，审核前无需创建 PR。
+        详细步骤见[贡献指南](https://github.com/Lee-xeo/Claude-Cage/blob/main/.github/CONTRIBUTING.md)。
+        仅提出功能需求时请选择“功能建议”；报告异常时请选择“问题反馈”。
+        上传代码、配置或日志前，请移除密码、令牌、订阅链接等敏感信息。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题与关联 Issue
+      description: 说明当前行为、期望结果和方案要达到的目标；已有相关 Issue 时请附编号或链接。
+      placeholder: |
+        关联 Issue：#123（没有可省略）
+        当前问题：……
+        希望达到的结果：……
+    validations:
+      required: true
+  - type: input
+    id: base-version
+    attributes:
+      label: 基于的 Cage 版本或提交号
+      description: 代码或补丁请注明基于的 Commit SHA，可在源码目录运行 git rev-parse HEAD；操作方案请注明适用版本，暂未确认时请明确说明。
+      placeholder: 版本号 / Commit SHA / 尚未确认适用版本
+    validations:
+      required: true
+  - type: dropdown
+    id: host-systems
+    attributes:
+      label: 涉及的主机系统
+      description: 主机是运行 Cage 的电脑，可多选；适用于所有平台时全部选中。Issue 会按所选系统添加标签，交给对应平台的维护者。
+      multiple: true
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - 不涉及或不确定
+    validations:
+      required: true
+  - type: dropdown
+    id: guest-systems
+    attributes:
+      label: 涉及的客机系统
+      description: 客机是 Cage 内运行的系统，可多选；适用于所有客机时全部选中。
+      multiple: true
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - 不涉及或不确定
+    validations:
+      required: true
+  - type: textarea
+    id: platforms
+    attributes:
+      label: 系统版本与架构
+      description: 说明方案涉及的系统版本及架构；没有版本或架构限制时填写“无限制”。
+      placeholder: |
+        主机：……
+        客机：……
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: 方案内容与提交材料
+      description: 解释如何解决问题、为什么有效，以及涉及的文件或操作步骤。可在此贴代码、diff 或补丁附件，也可提供可访问的 Fork 分支或具体提交链接。
+      placeholder: |
+        解决思路：……
+        修改范围或操作步骤：……
+        代码、补丁或提交链接：……（如有）
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 验证方式与结果
+      description: 说明验证所用的系统、执行步骤或命令，以及修改前后的结果。未测试的方案或平台请明确注明，便于维护者接续验证。
+      placeholder: |
+        验证环境：……
+        步骤或命令：……
+        修改前：……
+        修改后：……
+        尚未验证的范围：……
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响范围与已知限制
+      description: 说明是否影响其他功能、平台、已有配置或个人数据，是否需要迁移及已知副作用；尚未评估时请明确注明。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充说明与参考资料
+      description: 可附截图、日志、设计依据或参考实现；引用他人代码时请注明来源及许可。

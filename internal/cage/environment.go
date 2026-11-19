@@ -32,15 +32,15 @@ func LoadEnvironmentRecord(profile string) (EnvironmentRecord, error) {
 	return saved, nil
 }
 
-// DefaultEnvironmentDir keeps generated workspaces outside the default profile,
+// DefaultEnvironmentDir keeps download transfers outside the default profile,
 // including independent profiles stored below that profile's directory.
 func DefaultEnvironmentDir(profile string) string {
-	path := filepath.Clean(profile) + "-workspace"
+	path := filepath.Clean(profile) + "-downloads"
 	if home, err := os.UserHomeDir(); err == nil {
 		defaultProfile := filepath.Join(home, ".claude-cage")
 		if !paths.Equal(profile, defaultProfile) && StorageContains(defaultProfile, profile) {
 			if relative, err := filepath.Rel(defaultProfile, profile); err == nil {
-				path = filepath.Join(defaultProfile+"-workspaces", relative)
+				path = filepath.Join(defaultProfile+"-downloads", relative)
 			}
 		}
 	}
@@ -50,8 +50,8 @@ func DefaultEnvironmentDir(profile string) string {
 	return path
 }
 
-// EnvironmentDir is the default shared workspace, independent of the currently
-// selected project. IdentityDirectory retains a legacy VM's naming input.
+// EnvironmentDir is the internal transfer directory, independent of the selected
+// project. Existing records and VM names retain their legacy paths.
 func EnvironmentDir(profile string) string {
 	if saved, err := LoadEnvironmentRecord(profile); err == nil && saved.Directory != "" {
 		return saved.Directory

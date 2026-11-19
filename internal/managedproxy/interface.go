@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -53,11 +54,20 @@ func PhysicalInterface(ctx context.Context) (string, error) {
 	return selectPhysicalInterface(string(route), string(hardware), string(nwi), usable)
 }
 
+// macOS also exposes packet tunnels, bridges, VM links, AWDL and other
+// service interfaces through network tools. They can carry an IPv4 address,
+// but they are not a physical uplink and must not become the proxy's binding.
+var macVirtualInterface = regexp.MustCompile(`(?i)^(?:utun|bridge|vmen|vmenet|vmnet|tap|lima|awdl|llw|p2p|gif|stf|anpi|ap)[0-9]+$`)
+
+func isVirtualMACInterface(name string) bool {
+	return macVirtualInterface.MatchString(name)
+}
+
 func selectPhysicalInterface(route, hardware, nwi string, usable map[string]bool) (string, error) {
 	physical := map[string]bool{}
 	for _, line := range strings.Split(hardware, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[0] == "Device:" && usable[fields[1]] {
+		if len(fields) == 2 && fields[0] == "Device:" && usable[fields[1]] && !isVirtualMACInterface(fields[1]) {
 			physical[fields[1]] = true
 		}
 	}

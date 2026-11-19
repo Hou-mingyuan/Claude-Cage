@@ -13,6 +13,24 @@ clipboard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(clipboard)
 
 
+class ContentChoiceTests(unittest.TestCase):
+    def test_a_rich_text_copy_with_a_rendered_picture_is_text(self):
+        self.assertTrue(clipboard.copies_rich_text(['TARGETS', 'text/rtf', 'UTF8_STRING', 'image/png']))
+        self.assertTrue(clipboard.copies_rich_text(['application/rtf', 'text/plain;charset=utf-8', 'image/bmp']))
+
+    def test_pictures_and_web_images_remain_pictures(self):
+        self.assertFalse(clipboard.copies_rich_text(['TARGETS', 'image/png', 'text/html', 'UTF8_STRING']))
+        self.assertFalse(clipboard.copies_rich_text(['image/png', 'text/rtf']))
+        self.assertFalse(clipboard.copies_rich_text([]))
+
+    def test_pixel_signature_ignores_row_padding_and_detects_changes(self):
+        packed = clipboard.pixel_signature(2, 2, 6, 3, bytes(range(12)))
+        padded = clipboard.pixel_signature(2, 2, 8, 3, bytes(range(6)) + b'\xff\xff' + bytes(range(6, 12)))
+        self.assertEqual(packed, padded)
+        self.assertNotEqual(packed, clipboard.pixel_signature(2, 2, 6, 3, bytes(12)))
+        self.assertNotEqual(packed, clipboard.pixel_signature(1, 4, 3, 3, bytes(range(12))))
+
+
 class CacheOwnershipTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

@@ -22,16 +22,19 @@ import (
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/clipboardfiles"
 	"github.com/sylvinus/agent-vm/internal/guestos"
+	"github.com/sylvinus/agent-vm/internal/transfermeta"
 )
 
 const clipboardWireLimit = 30 << 20
 
 // 保留当前后端配套的客机脚本，使已有 Linux 客机也能建立剪贴板连接。
 // 将脚本压缩为单个参数，避免完整脚本经过两层转义后超出 Windows 进程命令行上限。
-var linuxClipboardCommand = sync.OnceValues(func() (string, error) {
+var linuxClipboardCommand = sync.OnceValues(func() (string, error) { return compressedClipboardCommand(cage.SharedClipboardHelper) })
+
+func compressedClipboardCommand(script string) (string, error) {
 	var compressed bytes.Buffer
 	writer := zlib.NewWriter(&compressed)
-	if _, err := io.WriteString(writer, cage.SharedClipboardHelper); err != nil {
+	if _, err := io.WriteString(writer, script); err != nil {
 		return "", err
 	}
 	if err := writer.Close(); err != nil {
@@ -41,7 +44,7 @@ var linuxClipboardCommand = sync.OnceValues(func() (string, error) {
 	const bootstrap = `import base64,sys,zlib; exec(compile(zlib.decompress(base64.b64decode(sys.argv.pop(1))), '<cage-shared-clipboard>', 'exec'))`
 	return "exec sudo -n /usr/bin/python3 -c " + shellescape.Quote(bootstrap) + " " +
 		base64.StdEncoding.EncodeToString(compressed.Bytes()), nil
-})
+}
 
 type clipboardPayload struct {
 	Hello   *clipboardHello `json:"hello,omitempty"`
@@ -101,7 +104,11 @@ func (s *Server) clipboardCommand(ctx context.Context, operation string, selecti
 		}
 		return cmd, "guest", nil
 	}
-	command, err := linuxClipboardCommand()
+	helper, err := s.linuxTemplate(cage.SharedClipboardHelper)
+	if err != nil {
+		return nil, "", err
+	}
+	command, err := compressedClipboardCommand(helper)
 	if err != nil {
 		return nil, "", err
 	}
@@ -428,12 +435,21 @@ func (s *Server) clipboardArchive(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Cage-Clipboard-Status", status)
 		return
 	}
+	prepared, err := transfermeta.PrepareArchive(http.MaxBytesReader(w, r.Body, 201<<30), s.transferOptions())
+	if err != nil {
+		transferMetadataError(w, err)
+		return
+	}
+	defer prepared.Close()
+	if prepared.Unclean {
+		w.Header().Set("X-Cage-Metadata-Warning", "metadata-may-remain")
+	}
 	cmd, source, err := s.clipboardCommand(ctx, "import", clipboardFileSelection{})
 	if err != nil {
 		http.Error(w, "传递剪贴板文件失败", 502)
 		return
 	}
-	cmd.Stdin = http.MaxBytesReader(w, r.Body, 201<<30)
+	cmd.Stdin = prepared.Body
 	out, err := cmd.StdoutPipe()
 	if err != nil || cmd.Start() != nil {
 		http.Error(w, "传递剪贴板文件失败", 502)
@@ -504,8 +520,18 @@ func (s *Server) clipboardCopy(w http.ResponseWriter, r *http.Request) {
 	jsonReply(w, result)
 }
 
-func writeClipboardArchive(output io.Writer, paths []string) error {
-	return clipboardfiles.Write(output, paths)
+func writeClipboardArchive(output io.Writer, paths []string, options ...transfermeta.Options) error {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	done := make(chan error, 1)
+	go func() {
+		err := clipboardfiles.Write(writer, paths)
+		_ = writer.CloseWithError(err)
+		done <- err
+	}()
+	err := transfermeta.SanitizeArchive(output, reader, options...)
+	_ = reader.CloseWithError(err)
+	return errors.Join(err, <-done)
 }
 
 func readClipboardArchive(input io.Reader) ([]string, error) {
@@ -569,10 +595,19 @@ func ClipboardFilesForConnection(configPath, connectionID, operation string, arg
 			client.client.Timeout = 5 * time.Second
 		}
 	} else if operation == "send" {
+		var settings struct {
+			Allow bool `json:"transfer_allow_unclean"`
+		}
+		code, err := client.call("GET", "/api/settings", nil, &settings)
+		if err != nil || code != http.StatusOK {
+			return nil, errors.New("无法确认文件元数据传递设置")
+		}
 		reader, writer := io.Pipe()
 		defer reader.Close()
 		body = reader
-		go func() { writer.CloseWithError(writeClipboardArchive(writer, args)) }()
+		go func() {
+			writer.CloseWithError(writeClipboardArchive(writer, args, transfermeta.Options{AllowUnclean: settings.Allow}))
+		}()
 	} else {
 		return nil, errors.New("剪贴板文件操作无效")
 	}

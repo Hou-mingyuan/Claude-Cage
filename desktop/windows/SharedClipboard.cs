@@ -90,6 +90,16 @@ internal static class SharedClipboard
         return new { ok = true };
     }
 
+    // Word processors and spreadsheets publish a rendered picture next to the
+    // text they copied. Such a copy is text: sharing the picture would replace
+    // the text with an image on both sides.
+    public static string? RichText()
+    {
+        if (!Clipboard.ContainsText() || !Clipboard.ContainsData(DataFormats.Rtf)) return null;
+        var text = Clipboard.GetText();
+        return text.Length > 0 ? text : null;
+    }
+
     public static async Task<object> Read(JsonElement request, CancellationToken token)
     {
         var revision = Revision;
@@ -113,6 +123,7 @@ internal static class SharedClipboard
             }
             finally { readers.Remove(selected); await Collect(); }
         }
+        if (RichText() is { } copied) return new { revision, text = copied };
         if (Clipboard.ContainsImage())
         {
             using var image = Clipboard.GetImage() ?? throw new IOException("无法读取剪贴板图片");

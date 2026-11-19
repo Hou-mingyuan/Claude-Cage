@@ -70,7 +70,7 @@ func TestProjectRemovalPersistsRevocationAcrossGuests(t *testing.T) {
 			if s.terminals.sessions["other"].closed || len(s.projectErrors) != 1 || s.projectErrors[0].Path != other {
 				t.Fatal("unrelated project was changed")
 			}
-			before.Workspace = s.environmentDir()
+			before.Workspace = other
 			if s.preferences != before {
 				t.Fatal("preferences changed beyond current project")
 			}
@@ -194,7 +194,7 @@ func TestProjectRemovalHandlesMissingDirectoriesAndLegacySelection(t *testing.T)
 		})
 	}
 	s := testServer(t)
-	removeProjectRequest(t, s, s.environmentDir(), 400)
+	removeProjectRequest(t, s, s.environmentDir(), 200)
 	removeProjectRequest(t, s, "", 400)
 }
 

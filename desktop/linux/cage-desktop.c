@@ -305,6 +305,75 @@ static void pending_free(PendingReply *pending) {
     g_free(pending->connection);
     g_free(pending);
 }
+// Linux packages are installed by the system. The App only learns whether a
+// newer package was published, so the workbench can point to it.
+static char *update_latest;
+static gboolean update_checking;
+typedef struct { GSubprocess *process; GCancellable *cancel; guint deadline; PendingReply *pending; } UpdateCheck;
+static void reply_update_state(WebKitScriptMessageReply *reply, JSCContext *context) {
+    const char *text = CAGE_CLIENT_ONLY
+        ? "轻量客户端使用独立安装包更新。退出客户端后更换程序；连接配置会保留，云端任务继续运行。"
+        : "Linux 版本使用系统安装包更新。请保存工作、停止环境并退出 Cage，再安装新版 .deb；用户数据会保留。";
+    char *version = quote(CAGE_VERSION), *message = quote(text), *latest = update_latest ? quote(update_latest) : NULL;
+    char *state = latest
+        ? g_strdup_printf("{\"phase\":\"manual\",\"currentVersion\":%s,\"latestVersion\":%s,\"message\":%s}", version, latest, message)
+        : g_strdup_printf("{\"phase\":\"manual\",\"currentVersion\":%s,\"message\":%s}", version, message);
+    reply_json(reply, context, state);
+    g_free(state); g_free(version); g_free(message); g_free(latest);
+}
+static gboolean update_check_timeout(gpointer data) {
+    UpdateCheck *check = data;
+    check->deadline = 0;
+    g_cancellable_cancel(check->cancel);
+    g_subprocess_force_exit(check->process);
+    return G_SOURCE_REMOVE;
+}
+static void update_check_finished(GObject *source, GAsyncResult *result, gpointer data) {
+    UpdateCheck *check = data;
+    char *output = NULL;
+    if (check->deadline) g_source_remove(check->deadline);
+    // The backend writes one state per line; the last line is the result. A
+    // failed or unreadable check keeps what an earlier check found.
+    if (g_subprocess_communicate_utf8_finish(G_SUBPROCESS(source), result, &output, NULL, NULL) && output && strlen(output) <= 65536) {
+        g_strchomp(output);
+        const char *line = strrchr(output, '\n');
+        line = line ? line + 1 : output;
+        JsonParser *parser = json_parser_new();
+        if (json_parser_load_from_data(parser, line, -1, NULL) && JSON_NODE_HOLDS_OBJECT(json_parser_get_root(parser))) {
+            JsonObject *state = json_node_get_object(json_parser_get_root(parser));
+            const char *phase = text_member(state, "phase"), *latest = text_member(state, "latestVersion");
+            gsize length = strlen(latest);
+            if (!strcmp(phase, "available") && length > 0 && length <= 64 &&
+                strspn(latest, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-") == length) {
+                g_free(update_latest);
+                update_latest = g_strdup(latest);
+            } else if (!strcmp(phase, "current")) g_clear_pointer(&update_latest, g_free);
+        }
+        g_object_unref(parser);
+    }
+    update_checking = FALSE;
+    reply_update_state(check->pending->reply, check->pending->context);
+    pending_free(check->pending);
+    g_free(output);
+    g_object_unref(check->process);
+    g_object_unref(check->cancel);
+    g_free(check);
+}
+static void update_check(WebKitScriptMessageReply *reply, JSCContext *context) {
+    const char *args[] = {app.backend, "app-update", "check", NULL};
+    GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+    g_subprocess_launcher_setenv(launcher, "CLAUDE_CAGE_CONFIG", app.profile, TRUE);
+    GSubprocess *process = update_checking ? NULL : g_subprocess_launcher_spawnv(launcher, args, NULL);
+    g_object_unref(launcher);
+    if (!process) { reply_update_state(reply, context); return; }
+    UpdateCheck *check = g_new0(UpdateCheck, 1);
+    check->process = process;
+    check->cancel = g_cancellable_new();
+    check->pending = pending_reply(reply, context);
+    check->deadline = g_timeout_add_seconds(150, update_check_timeout, check);
+    update_checking = TRUE;
+    g_subprocess_communicate_utf8_async(process, NULL, check->cancel, update_check_finished, check);
+}
 static void browser_file_finished(JsonObject *object, const GError *error, gpointer data) {
     PendingReply *pending = data;
     if (error) reply_error(pending->reply, error->message);
@@ -363,6 +432,23 @@ static void clipboard_content_image(GtkClipboard *clipboard, GdkPixbuf *image, g
     }
     g_free(buffer);
     pending_free(pending);
+}
+static void clipboard_rich_text(GtkClipboard *clipboard, const gchar *text, gpointer data) {
+    if (text && *text) clipboard_content_text(clipboard, text, data);
+    else gtk_clipboard_request_image(clipboard, clipboard_content_image, data);
+}
+/* Word processors and spreadsheets publish a rendered picture next to the
+   text they copied. Such a copy is text: sharing the picture would replace
+   the text with an image on both sides. */
+static void clipboard_content_targets(GtkClipboard *clipboard, GdkAtom *targets, gint count, gpointer data) {
+    gboolean rich = FALSE;
+    for (gint index = 0; targets && index < count && !rich; index++) {
+        char *name = gdk_atom_name(targets[index]);
+        rich = name && (!strcmp(name, "text/rtf") || !strcmp(name, "application/rtf") || !strcmp(name, "text/richtext"));
+        g_free(name);
+    }
+    if (rich && gtk_targets_include_text(targets, count)) gtk_clipboard_request_text(clipboard, clipboard_rich_text, data);
+    else gtk_clipboard_request_image(clipboard, clipboard_content_image, data);
 }
 static void file_selection_free(gpointer data) {
     FileSelection *selection = data;
@@ -436,7 +522,7 @@ static void reply_selected_uris(char **uris, PendingReply *pending) {
 }
 static void clipboard_gnome_files(GtkClipboard *clipboard, GtkSelectionData *selection, gpointer data) {
     gint length = gtk_selection_data_get_length(selection);
-    if (length <= 0) { gtk_clipboard_request_image(clipboard, clipboard_content_image, data); return; }
+    if (length <= 0) { gtk_clipboard_request_targets(clipboard, clipboard_content_targets, data); return; }
     if (length > MAX_MESSAGE) {
         PendingReply *pending = data; reply_error(pending->reply, "剪贴板文件列表过大。"); pending_free(pending); return;
     }
@@ -754,20 +840,22 @@ static gboolean bridge_received(WebKitUserContentManager *manager, JSCValue *val
     } else if (!strcmp(name, "accountDevice")) {
         if (!strcmp(text_member(request, "operation"), "status")) reply_json(reply, context, "{\"supported\":false}");
         else reply_error(reply, "Linux 版本使用 Cage 账户密码解锁。");
+    } else if (!strcmp(name, "appReference")) {
+        const char *kind = text_member(request, "kind");
+        const char *uri = !strcmp(kind, "source") ? "https://github.com/Lee-xeo/Claude-Cage/commits/main"
+            : !strcmp(kind, "releases") ? "https://github.com/Lee-xeo/Claude-Cage/releases" : NULL;
+        if (!uri) reply_error(reply, "未知的项目页面");
+        else {
+            GError *error = NULL;
+            if (g_app_info_launch_default_for_uri(uri, NULL, &error)) reply_json(reply, context, "true");
+            else { reply_error(reply, "无法打开项目页面，请检查默认浏览器"); g_clear_error(&error); }
+        }
     } else if (!strcmp(name, "appUpdate")) {
         const char *operation = text_member(request, "operation");
         if (strcmp(operation, "status") && strcmp(operation, "check") && strcmp(operation, "install") && strcmp(operation, "cancel"))
             reply_error(reply, "更新操作无效。");
-        else {
-            char *version = quote(CAGE_VERSION);
-            const char *update_message = CAGE_CLIENT_ONLY
-                ? "轻量客户端使用独立安装包更新。退出客户端后更换程序；连接配置会保留，云端任务继续运行。"
-                : "Linux 版本使用系统安装包更新。请保存工作、停止环境并退出 Cage，再安装新版 .deb；用户数据会保留。";
-            char *message = quote(update_message);
-            char *state = g_strdup_printf("{\"phase\":\"manual\",\"currentVersion\":%s,\"message\":%s}", version, message);
-            reply_json(reply, context, state);
-            g_free(state); g_free(version); g_free(message);
-        }
+        else if (!strcmp(operation, "check") && !CAGE_CLIENT_ONLY) update_check(reply, context);
+        else reply_update_state(reply, context);
     } else if (!strcmp(name, "desktopFileAction")) {
         const char *id = text_member(request, "id"), *connection = text_member(request, "connection_id");
         if (!g_uuid_string_is_valid(id)) reply_error(reply, "文件打开标识无效。");
@@ -940,6 +1028,18 @@ static gboolean bridge_received(WebKitUserContentManager *manager, JSCValue *val
                 g_clear_object(&stream); g_clear_object(&info); g_object_unref(file); g_free(contents);
             }
             g_free(path);
+        }
+    } else if (!strcmp(name, "saveRecoveryKey")) {
+        const char *key = text_member(request, "key");
+        if (strlen(key) != 71 || !g_regex_match_simple("^[A-F0-9]{8}(-[A-F0-9]{8}){7}$", key, 0, 0)) reply_error(reply, "恢复密钥格式无效。");
+        else if (app.picker_open) reply_error(reply, "请先完成当前文件选择。");
+        else {
+            char *path = choose_file(GTK_FILE_CHOOSER_ACTION_SAVE, "保存账户恢复密钥", "账户恢复密钥.txt");
+            char *contents = g_strconcat(key, "\n", NULL);
+            if (!path) reply_json(reply, context, "false");
+            else if (g_file_set_contents_full(path, contents, -1, G_FILE_SET_CONTENTS_CONSISTENT | G_FILE_SET_CONTENTS_DURABLE, 0600, NULL)) reply_json(reply, context, "true");
+            else reply_error(reply, "恢复密钥未能保存，请检查保存位置的权限。");
+            g_free(contents); g_free(path);
         }
     } else if (!strcmp(name, "exportTheme")) {
         const char *contents = text_member(request, "text");

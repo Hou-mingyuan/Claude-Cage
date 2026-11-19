@@ -45,7 +45,7 @@ func RequiredNativeComponents(kit, system string) (NativeComponentManifest, erro
 	}
 	essential := []string{"payload/Cage.GuestClipboard.exe", "payload/cage-guest-files.exe", "payload/cage-guest-boot.exe", "payload/Cage.HyperVManager.exe", "payload/windows-browser.mjs"}
 	if system == MacOS {
-		essential = []string{"Cage Guest Window.app/Contents/MacOS/CageGuestWindow", "Cage Guest Clipboard.app/Contents/MacOS/CageGuestClipboard", "project/cage-sshfs", "project/cage-macos-terminal", "native-browser/macos-native-browser.mjs", "native-browser/macos-browser-service.mjs", "register-macos-browser.sh", "macos-cli.py", "cli_channel.py"}
+		essential = []string{"Cage Guest Window.app/Contents/MacOS/CageGuestWindow", "Cage Guest Clipboard.app/Contents/MacOS/CageGuestClipboard", "project/cage-sshfs", "project/cage-macos-terminal", "native-browser/macos-native-browser.mjs", "native-browser/macos-browser-service.mjs", "native-browser/macos-browser-window.mjs", "register-macos-browser.sh", "macos-cli.py", "cli_channel.py"}
 	}
 	for _, relative := range essential {
 		info, err := os.Lstat(filepath.Join(kit, filepath.FromSlash(relative)))
@@ -128,7 +128,7 @@ func RequiredNativeComponents(kit, system string) (NativeComponentManifest, erro
 	manifest.Revision = hex.EncodeToString(digest.Sum(nil))
 	manifest.Tools = map[string]string{"chromium": "系统维护的 Chrome / Edge", "code_server": "261c84cb1eddf11235f9e2c921425e9663fbe556"}
 	if system == MacOS {
-		manifest.Tools = map[string]string{"chromium": "Google Chrome 稳定版", "code_server": "4.145.0", "claude": "2.1.311", "node": "24.22.2", "python": "3.13.18", "git": "2.56.0"}
+		manifest.Tools = map[string]string{"chromium": "Google Chrome 稳定版", "code_server": "4.145.0", "claude": "官方最新版（下载时解析）", "node": "24.22.2", "python": "3.13.18", "git": "2.56.0", "gh": "2.103.3"}
 	} else {
 		var dependencies map[string]struct {
 			Version string `json:"version"`
@@ -138,9 +138,10 @@ func RequiredNativeComponents(kit, system string) (NativeComponentManifest, erro
 		} else if err = json.Unmarshal(data, &dependencies); err != nil {
 			return manifest, err
 		}
-		for _, name := range []string{"claude", "python", "git"} {
+		for _, name := range []string{"python", "git", "gh"} {
 			manifest.Tools[name] = dependencies[name].Version
 		}
+		manifest.Tools["claude"] = "官方最新版（下载时解析）"
 		manifest.Tools["node"] = "24.22.2"
 	}
 	return manifest, manifest.Validate()
@@ -166,16 +167,19 @@ func nativeComponentTarget(source, system string) string {
 		return MacOSBrowserTools + "/controller/" + strings.TrimPrefix(source, "native-browser/")
 	}
 	targets := map[string]string{
+		"cage-guest-check":                "/usr/local/libexec/cage-guest-check",
 		"project/cage-sshfs":              "/usr/local/libexec/cage-sshfs",
 		"project/cage-macos-terminal":     "/usr/local/libexec/cage-macos-terminal",
 		"cage-finish-initial-setup":       "/usr/local/libexec/cage-finish-initial-setup",
 		"cage-macos-ipv6-check":           "/usr/local/libexec/cage-macos-ipv6-check",
 		"macos-browser.mjs":               "/usr/local/libexec/cage-macos-browser.mjs",
 		"cage-macos-editor":               "/usr/local/libexec/cage-macos-editor",
+		"enable-macos-screensharing.sh":   "/usr/local/libexec/cage-enable-screensharing",
 		"register-macos-claude-window.sh": "/usr/local/libexec/cage-register-claude-window",
 		"register-macos-clipboard.sh":     "/usr/local/libexec/cage-register-clipboard",
 		"register-macos-browser.sh":       "/usr/local/libexec/cage-register-browser",
 		"macos-cli.py":                    "/usr/local/libexec/cage-cli/macos-cli.py",
+		"client_runtime.py":               "/usr/local/libexec/cage-cli/client_runtime.py",
 		"cli_channel.py":                  "/usr/local/libexec/cage-cli/cli_channel.py",
 		"cli_channel.resume.md":           "/usr/local/libexec/cage-cli/cli_channel.resume.md",
 		"claude_account_resume.md":        "/usr/local/libexec/cage-cli/cli_channel.account-resume.md",

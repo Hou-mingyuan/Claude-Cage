@@ -7,6 +7,8 @@ import (
 	"net"
 	"runtime"
 
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
+
 	"github.com/lima-vm/go-qcow2reader/image"
 	"github.com/opencontainers/go-digest"
 	"github.com/sirupsen/logrus"
@@ -60,6 +62,9 @@ type LimaYAML struct {
 	User                 User    `yaml:"user,omitempty" json:"user,omitempty"`
 	TPM                  *bool   `yaml:"tpm,omitempty" json:"tpm,omitempty" jsonschema:"nullable"`
 	OsOpts               OsOpts  `yaml:"osOpts,omitempty" json:"osOpts,omitempty"`
+
+	// GuestIdentity is optional; absent identities retain upstream defaults.
+	GuestIdentity *guestidentity.Identity `yaml:"guestIdentity,omitempty" json:"guestIdentity,omitempty"`
 }
 
 type BaseTemplates []LocatorWithDigest
@@ -121,8 +126,17 @@ type User struct {
 type VMOpts map[VMType]any
 
 type QEMUOpts struct {
-	MinimumVersion *string `yaml:"minimumVersion,omitempty" json:"minimumVersion,omitempty" jsonschema:"nullable"`
-	CPUType        CPUType `yaml:"cpuType,omitempty" json:"cpuType,omitempty" jsonschema:"nullable"`
+	MinimumVersion *string        `yaml:"minimumVersion,omitempty" json:"minimumVersion,omitempty" jsonschema:"nullable"`
+	CPUType        CPUType        `yaml:"cpuType,omitempty" json:"cpuType,omitempty" jsonschema:"nullable"`
+	MacOS          *QEMUMacOSOpts `yaml:"macOS,omitempty" json:"macOS,omitempty"`
+}
+
+// QEMUMacOSOpts selects the confined, native Intel Mac device model. Boot
+// resources have fixed names inside the instance; arbitrary QEMU arguments,
+// host disks and network devices are deliberately not part of this interface.
+type QEMUMacOSOpts struct {
+	UUID      string `yaml:"uuid" json:"uuid"`
+	Installer bool   `yaml:"installer,omitempty" json:"installer,omitempty"`
 }
 
 type VZOpts struct {
@@ -431,12 +445,14 @@ func IsNativeArch(arch Arch) bool {
 }
 
 func DefaultDriver() VMType {
-	switch runtime.GOOS {
-	case "darwin":
+	return defaultDriverFor(runtime.GOOS, runtime.GOARCH)
+}
+
+func defaultDriverFor(platform, arch string) VMType {
+	if platform == "darwin" && arch == "arm64" {
 		return VZ
-	default:
-		return QEMU
 	}
+	return QEMU
 }
 
 func DefaultNonNativeArchDriver() VMType {

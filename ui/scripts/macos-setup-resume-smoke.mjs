@@ -4,7 +4,7 @@ import { createWorkbench } from "./workbench-fixture.mjs";
 const evidence = process.env.CAGE_INITIALIZATION_EVIDENCE;
 if (evidence) await fs.mkdir(evidence, { recursive: true });
 for (const scenario of ["permission-read", "start-failure", "open-failure"]) {
-  const permissions = { screen: true, input: false, projects: false, managed_credential: false };
+  const permissions = { screen: true, input: false, projects: false, sharing: false, managed_credential: false };
   let failRead = true, failAction = true, starts = 0, finishes = 0, permissionReads = 0;
   const f = await createWorkbench({ waitForReady: false, beforeNavigate: async (page, state) => {
     Object.assign(state.account, { initial_mac_setup: true, guest_system: "macos", macos_credentials_ready: true });
@@ -22,6 +22,7 @@ for (const scenario of ["permission-read", "start-failure", "open-failure"]) {
         if (scenario === "permission-read" && failRead && permissionReads > 1) return route.fulfill({ status: 409, contentType: "text/plain", body: "客机连接暂时中断" });
         return route.fulfill({ json: permissions });
       }
+      if (action === "confirm-sharing") permissions.sharing = true;
       if (action === "finish") { finishes++; state.account.initial_mac_setup = false; }
       if (action === "input" && scenario === "open-failure" && failAction) return route.fulfill({ status: 409, contentType: "text/plain", body: "授权页面暂时无法打开，请重试" });
       return route.fulfill({ json: {} });
@@ -46,6 +47,10 @@ for (const scenario of ["permission-read", "start-failure", "open-failure"]) {
       if (evidence) await page.screenshot({ path: `${evidence}/permission-read-failure.png`, fullPage: true });
       failRead = false;
       await page.getByRole("button", { name: "重新检查状态", exact: true }).click();
+      const confirmSharing = page.getByRole("button", { name: "已开启，重新检查", exact: true });
+      await confirmSharing.waitFor();
+      assert.equal(finishes, 0, "permission recovery bypassed screen-sharing confirmation");
+      await confirmSharing.click();
       await page.getByRole("heading", { name: "完成虚拟 Mac 的系统授权" }).waitFor({ state: "hidden" });
       assert.equal(finishes, 1);
     } else {

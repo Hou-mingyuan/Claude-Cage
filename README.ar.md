@@ -6,9 +6,13 @@
 
 <img src="assets/claude-cage-character.png" alt="Claude Cage" width="320" />
 
-[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![CI](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**[موقع المشروع](https://lee-xeo.github.io/Claude-Cage/) · [تنزيل التطبيق](https://lee-xeo.github.io/Claude-Cage/ar/#download) · [البدء](docs/getting-started.md) · [الأسئلة الشائعة](docs/troubleshooting.md) · [دليل الاستخدام (بالصينية)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
+
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily" alt="Trendshift — Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly" alt="Trendshift — Repository of the Week" width="250" height="55" /></a>
+
+**[موقع المشروع](https://claude-cage.com/) · [تنزيل التطبيق](https://claude-cage.com/ar/#download) · [البدء](docs/getting-started.md) · [الأسئلة الشائعة](docs/troubleshooting.md) · [دليل الاستخدام (بالصينية)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -31,6 +35,8 @@
 | :---: | :---: |
 | <a href="assets/network-checks.png"><img src="assets/network-checks.png" alt="فحص الشبكة والعزل" width="400" /></a> | <a href="assets/community-browser-check.png"><img src="assets/community-browser-check-cropped.png" alt="فحص المتصفح من المجتمع" width="400" /></a> |
 
+[FuckClaude](https://fuck-claude.vercel.app/) · [LinXiaoTao / GitHub](https://github.com/LinXiaoTao/FuckClaude)
+
 **الواجهة الرئيسية للقفص:**
 
 ![Cage](www/public/workbench-2026-11.jpg)
@@ -52,7 +58,7 @@
 أرسل هذا الطلب إلى وكيل الذكاء الاصطناعي لديك (codex، dsh، Workbuddy - ربما ليس Claude Code 😁):
 
 ```markdown
-ساعدني في التثبيت https://github.com/Lee-xeo/Claude-Cage وقم بتكوين وكيل شبكة Cage لاستخدام نقطة النهاية xxx في تثبيت Clash المحلي الخاص بي.
+اسحب أحدث الشفرة المصدرية من https://github.com/Lee-xeo/Claude-Cage وابنِ الحزمة وثبّتها. اضبط وكيل Cage ليستخدم العقدة xx في Clash المحلي ويخرج عبر عنوان IP الخاص بي xx. راقب العملية بالكامل وأصلح المشكلات مباشرةً، وقدّم issue للمشروع عند الحاجة للمساعدة في تحسين التوافق.
 ```
 
 كل ما تحتاجه هو نقطة نهاية وكيل شبكة موثوقة. لا يروج هذا المشروع لأي مزود وكيل؛ يمكنك العثور على مقدم الخدمة بنفسك، على سبيل المثال من خلال البحث عن موقع Black Error على الويب.
@@ -61,7 +67,7 @@
 
 يدعم Cage أنظمة macOS وWindows وLinux: أجهزة Apple Silicon مع macOS 14+، وWindows 10 22H2 / 11 x64، وDebian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac أو Windows ARM64 أو Linux ARM64. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. تنزيل التطبيق: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/ar/#download).
+1. تنزيل التطبيق: [macOS / Windows / Linux](https://claude-cage.com/ar/#download).
 2. macOS: افتح حزمة التثبيت واسحب **Cage** في **التطبيقات**; ثم قم بتشغيله من التطبيقات. Windows: [دليل التثبيت](docs/windows.md#安装并开始工作) · Linux: [دليل التثبيت](docs/linux.md#安装并开始工作).
 3. اتبع الإرشادات الموجودة في التطبيق لتكوين وكيل الشبكة الخاص بك، وبدء تشغيل البيئة، وفتح المشروع.
 
@@ -102,17 +108,20 @@
 
 | مهمتك | ابدأ هنا |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [اختيار النظام الضيف](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [اختيار النظام الضيف](https://claude-cage.com/docs/guest-systems/) |
 | قم بتثبيت وكيل الشبكة وتكوينه وافتح مشروعك الأول | [البدء](docs/getting-started.md) |
 | استكشاف أخطاء التنزيلات وبدء التشغيل والاتصال وتسجيل الدخول وإصلاحها | [الأسئلة الشائعة والاسترداد](docs/troubleshooting.md) |
 | تعرف على عناصر التحكم في لوحة المفاتيح والمظهر واستمرارية البيانات وسلوك الخروج | [الاستخدام اليومي](docs/getting-started.md#日常使用) |
 | الإبلاغ عن مشكلة قابلة للتكرار | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| المساهمة بإصلاح أو ميزة أو توثيق: مراجعة Issue ← دعوة متعاون ← PR | [دليل المساهمة (بالصينية)](.github/CONTRIBUTING.md) |
 
 المشروع يتطور بسرعة. انضم إلى مجموعة المجتمع لمشاركة التعليقات؛ مشرفو المجتمع مرحب بهم.
 
-<p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1134250870" width="240" /></a>
-</p>
+| QQ group · 273237690 | WeChat |
+| :---: | :---: |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+
+[Telegram](https://t.me/claude_cage)
 
 ## الأصول والترخيص
 
@@ -135,6 +144,7 @@ Cage هو مشروع مجتمعي مستقل ولا ينتمي إلى Anthropic.
 - [code-server](https://github.com/coder/code-server): محرر التعليمات البرمجية القائم على المتصفح.
 - [AIO Sandbox](https://github.com/agent-infra/sandbox): مراجع لبيئة العمل وتصميم التفاعل.
 - [claude-switcher](https://github.com/YOURSJEYO/claude-switcher) و [Claude-Guardian](https://github.com/DUNHKpcc/Claude-Guardian): مراجع لفحوصات الشبكة والتشخيص الأمني.
+- [claude-post-ban-cleanup](https://github.com/l2461090/claude-post-ban-cleanup): مرجع لجرد البيانات وحمايتها وتنظيف الذاكرة المؤقتة مع إمكانية الاستعادة؛ تنفيذ مستقل في Cage.
 
 
 <a href="https://www.star-history.com/?repos=Lee-xeo%2FClaude-Cage&amp;type=date">

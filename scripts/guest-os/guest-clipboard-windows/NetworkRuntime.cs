@@ -87,12 +87,14 @@ internal static class NetworkRuntime
         await tun.Configure(handshake.Token);
         await Protocol.Write(stream,new JsonObject { ["version"] = 1,["os"] = "windows",["vm_id"] = vm.ToString("D"),["gui_user_sid"] = sid,["session"] = session,["available"] = true,["network"] = "packet" },handshake.Token);
         using var writes = new SemaphoreSlim(1,1);
-        async Task Send(byte[] frame)
+        // wire is one frame behind its four-byte length, sent in a single write.
+        async Task SendWire(byte[] wire)
         {
             await writes.WaitAsync(connection.Token);
-            try { var length = new byte[4]; BinaryPrimitives.WriteUInt32BigEndian(length,(uint)frame.Length); await stream.WriteAsync(length,connection.Token); await stream.WriteAsync(frame,connection.Token); await stream.FlushAsync(connection.Token); }
+            try { BinaryPrimitives.WriteUInt32BigEndian(wire,(uint)(wire.Length-4)); await stream.WriteAsync(wire,connection.Token); await stream.FlushAsync(connection.Token); }
             finally { writes.Release(); }
         }
+        Task Send(byte[] frame) { var wire = new byte[4+frame.Length]; frame.CopyTo(wire,4); return SendWire(wire); }
         var readyPath = Path.Combine(AppContext.BaseDirectory,"network-ready.json");
         var receipt = Task.Run(async () =>
         {
@@ -109,10 +111,13 @@ internal static class NetworkRuntime
             while(!connection.IsCancellationRequested)
             {
                 var packet = tun.Receive();
-                if (packet is null) { await Task.Delay(5,connection.Token); continue; }
-                var frame = new byte[14+packet.Length]; GatewayMac.CopyTo(frame,0); GuestMac.CopyTo(frame,6);
-                frame[12] = packet[0]>>4 == 6 ? (byte)0x86 : (byte)0x08; frame[13] = packet[0]>>4 == 6 ? (byte)0xdd : (byte)0;
-                packet.CopyTo(frame,14); await Send(frame);
+                // A timer here would hold the first packet after every quiet
+                // moment for one system clock tick, about 15 ms on Windows.
+                // The bounded wait still observes the end of the connection.
+                if (packet is null) { if (!tun.WaitForPacket(100)) await Task.Delay(5,connection.Token); continue; }
+                var wire = new byte[18+packet.Length]; GatewayMac.CopyTo(wire,4); GuestMac.CopyTo(wire,10);
+                wire[16] = packet[0]>>4 == 6 ? (byte)0x86 : (byte)0x08; wire[17] = packet[0]>>4 == 6 ? (byte)0xdd : (byte)0;
+                packet.CopyTo(wire,18); await SendWire(wire);
             }
         },connection.Token);
         var incoming = Task.Run(async () =>
@@ -180,7 +185,11 @@ internal static class NetworkRuntime
         [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleasePacket(IntPtr session,IntPtr packet);
         [UnmanagedFunctionPointer(CallingConvention.Winapi,SetLastError=true)] private delegate IntPtr AllocatePacket(IntPtr session,uint size);
         [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void Luid(IntPtr adapter,out ulong luid);
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate IntPtr ReadWaitEvent(IntPtr session);
         [DllImport("iphlpapi.dll")] private static extern uint ConvertInterfaceLuidToIndex(ref ulong luid,out uint index);
+        [DllImport("kernel32.dll")] private static extern uint WaitForSingleObject(IntPtr handle,uint milliseconds);
+        // The session owns this event and closes it when the session ends.
+        private readonly IntPtr readable;
         private readonly IntPtr library,adapter,session;
         private readonly Close close,end; private readonly ReceivePacket receive; private readonly ReleasePacket release,send; private readonly AllocatePacket allocate;
         internal string Name { get; }
@@ -199,6 +208,8 @@ internal static class NetworkRuntime
                 if (ConvertInterfaceLuidToIndex(ref luid,out var index)!=0 || index==0) throw new InvalidDataException("network_adapter_invalid"); Index=index;
                 session = Load<Start>("WintunStartSession")(adapter,4<<20);
                 if (session==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastPInvokeError());
+                if (NativeLibrary.TryGetExport(library,"WintunGetReadWaitEvent",out var wait))
+                    readable = Marshal.GetDelegateForFunctionPointer<ReadWaitEvent>(wait)(session);
             }
             catch(Exception error) { Dispose(); throw new NetworkFailure("driver",error); }
         }
@@ -234,6 +245,14 @@ internal static class NetworkRuntime
                 catch(Exception error) when(error is System.Text.Json.JsonException or InvalidDataException or InvalidOperationException){ }
                 throw new NetworkFailure("configure",new Win32Exception(process.ExitCode));
             }
+        }
+        // Blocks until the adapter has a packet or the time passes. false means
+        // this driver has no wait event and the caller must pace itself.
+        internal bool WaitForPacket(uint milliseconds)
+        {
+            if (readable==IntPtr.Zero) return false;
+            WaitForSingleObject(readable,milliseconds);
+            return true;
         }
         internal byte[]? Receive()
         {

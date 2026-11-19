@@ -7,7 +7,7 @@ const modifiers = keys => ({
 });
 
 export function createMacWindowInput({ element, frame, active, request, onError, eventWindow = window }) {
-  let keyboard, disposed = false, queued, pending = 0, move, drag, lastClick;
+  let keyboard, disposed = false, queued, pending = 0, move, wheel, drag, lastClick;
   const keys = new Set(), listeners = [];
   const run = action => {
     if (disposed) return Promise.reject(new Error("窗口输入连接已关闭"));
@@ -98,7 +98,7 @@ export function createMacWindowInput({ element, frame, active, request, onError,
   });
   const reset = () => {
     if (disposed) return;
-    move = undefined; keys.clear();
+    move = undefined; wheel = undefined; keys.clear();
     const hadInput = Boolean(drag || keyboard);
     const pointer = drag?.pointer;
     drag = undefined;
@@ -108,11 +108,30 @@ export function createMacWindowInput({ element, frame, active, request, onError,
   on(element, "pointercancel", reset);
   on(element, "lostpointercapture", () => { if (drag) reset(); });
   on(element, "contextmenu", event => event.preventDefault());
+  // A trackpad emits dozens of wheel events per second, while each request
+  // waits for the guest. Merge the ones still queued into a single scroll so
+  // the page follows the gesture instead of replaying a backlog afterwards.
+  const clamp = value => Math.max(-1200, Math.min(1200, value));
+  const scroll = (target, at, deltaY, deltaX) => {
+    if (wheel && identity(wheel.target) === identity(target)) {
+      Object.assign(wheel, { at, deltaY: wheel.deltaY + deltaY, deltaX: wheel.deltaX + deltaX });
+      return;
+    }
+    const entry = { target, at, deltaY, deltaX };
+    wheel = entry;
+    report(run(() => {
+      if (wheel === entry) wheel = undefined;
+      if (!valid(entry.target)) throw new Error("输入窗口已变化，请重新操作");
+      const delta = clamp(entry.deltaY), deltaX = clamp(entry.deltaX);
+      // A merged gesture beyond one request's limit continues in the next one.
+      if (entry.deltaY !== delta || entry.deltaX !== deltaX) scroll(entry.target, entry.at, entry.deltaY - delta, entry.deltaX - deltaX);
+      return request("scroll", { ...entry.target, ...entry.at, delta, deltaX });
+    }));
+  };
   on(element, "wheel", event => {
-    if (!active()) return;
+    if (!active() || !frame()) return;
     event.preventDefault();
-    report(send("scroll", { ...point(event), delta: Math.max(-1200, Math.min(1200, event.deltaY)),
-      deltaX: Math.max(-1200, Math.min(1200, event.deltaX)) }));
+    scroll({ ...frame() }, point(event), event.deltaY, event.deltaX);
   }, { passive: false });
   on(eventWindow, "blur", reset);
 
@@ -132,7 +151,7 @@ export function createMacWindowInput({ element, frame, active, request, onError,
     },
     dispose() {
       if (disposed) return;
-      disposed = true; move = undefined; keys.clear(); drag = undefined;
+      disposed = true; move = undefined; wheel = undefined; keys.clear(); drag = undefined;
       void request("input-reset").catch(() => {});
       listeners.forEach(remove => remove());
       keyboard = undefined;

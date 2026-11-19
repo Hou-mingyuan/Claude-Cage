@@ -23,6 +23,25 @@ func testPNG(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(data.Bytes())
 }
 
+func testPNGWithMetadata(t *testing.T) []byte {
+	t.Helper()
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	raw := encoded.Bytes()
+	payload := []byte("Language\x00zh-CN\x00GPSLatitude=31.23")
+	chunk := make([]byte, 8+len(payload)+4)
+	binary.BigEndian.PutUint32(chunk[:4], uint32(len(payload)))
+	copy(chunk[4:8], "tEXt")
+	copy(chunk[8:8+len(payload)], payload)
+	binary.BigEndian.PutUint32(chunk[8+len(payload):], crc32.ChecksumIEEE(chunk[4:8+len(payload)]))
+	out := append([]byte{}, raw[:len(raw)-12]...)
+	out = append(out, chunk...)
+	out = append(out, raw[len(raw)-12:]...)
+	return out
+}
+
 func TestInputImageValidation(t *testing.T) {
 	valid := testPNG(t)
 	if _, err := decodeInputImage(valid); err != nil {
@@ -38,6 +57,20 @@ func TestInputImageValidation(t *testing.T) {
 	binary.BigEndian.PutUint32(oversized[29:33], crc32.ChecksumIEEE(oversized[12:29]))
 	if _, err := decodeInputImage(base64.StdEncoding.EncodeToString(oversized)); err == nil {
 		t.Fatal("oversized dimensions accepted")
+	}
+}
+
+func TestInputImageRemovesMetadata(t *testing.T) {
+	original := testPNGWithMetadata(t)
+	cleaned, err := decodeInputImage(base64.StdEncoding.EncodeToString(original))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(cleaned, []byte("GPSLatitude")) || bytes.Contains(cleaned, []byte("zh-CN")) {
+		t.Fatal("image metadata survived")
+	}
+	if _, err := png.Decode(bytes.NewReader(cleaned)); err != nil {
+		t.Fatal("cleaned PNG is invalid", err)
 	}
 }
 

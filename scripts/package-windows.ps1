@@ -6,6 +6,7 @@ param(
     [switch]$SkipBuild,
     [string]$AppDirectory,
     [string]$OutputDirectory,
+    [string]$DependencyCache,
     [string]$QemuSourceArchive
 )
 . (Join-Path $PSScriptRoot 'windows-common.ps1')
@@ -14,24 +15,18 @@ $version = Get-CageVersion $repository
 $signed = $Release -or $Sign
 if (-not $AppDirectory) { $AppDirectory = Join-Path $repository '_output/windows-amd64/app' }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repository "_output/releases/$version/windows" }
+if (-not $DependencyCache) { $DependencyCache = Join-Path $repository '_output/windows-deps' }
 $AppDirectory = [IO.Path]::GetFullPath($AppDirectory)
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath (Join-Path $AppDirectory 'CageData')) { throw 'App directory contains CageData user data. Package a clean build directory; do not package an installed application.' }
-if (-not $SkipBuild) { & (Join-Path $PSScriptRoot 'build-windows.ps1') -Release:$Release -Sign:$Sign -OutputDirectory $AppDirectory }
+$makeNSIS = Get-BuildCommand @('makensis.exe', 'makensis') -Optional
+if (-not $makeNSIS) { throw 'NSIS (makensis) is missing from PATH. See scripts/install-nsis.ps1 and docs/windows.md#windows-源码构建.' }
+$sevenZip = Get-BuildCommand @('7z.exe', '7zz', '7z')
+if (-not $SkipBuild) { & (Join-Path $PSScriptRoot 'build-windows.ps1') -Release:$Release -Sign:$Sign -OutputDirectory $AppDirectory -DependencyCache $DependencyCache }
 if ((Get-Content -LiteralPath (Join-Path $AppDirectory 'Cage.install-id') -Raw) -ne 'io.github.lee-xeo.claude-cage') { throw 'Invalid Cage app directory.' }
 if ((Get-Content -LiteralPath (Join-Path $AppDirectory 'version.txt') -Raw).Trim() -ne $version) { throw 'App version differs from VERSION; rebuild before packaging.' }
-$makeNSIS = Get-BuildCommand @('makensis.exe', 'makensis')
-$sevenZip = Get-BuildCommand @('7z.exe', '7zz', '7z')
-if ($IsWindows) {
-    if ([Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $AppDirectory 'Cage.exe')).ProductVersion -ne $version) { throw 'Cage.exe version differs from VERSION; rebuild before packaging.' }
-    Invoke-BuildTool (Join-Path $AppDirectory 'resources/cage.exe') @('verify-vm-assets')
-    Invoke-BuildTool (Join-Path $AppDirectory 'resources/cage.exe') @('verify-web-assets')
-    if ($SkipBuild) { Assert-WindowsWorkbench $AppDirectory }
-} else {
-    $metadata = & $sevenZip 'l' '-tPE' (Join-Path $AppDirectory 'Cage.exe')
-    if ($LASTEXITCODE -ne 0 -or -not ($metadata -match ('^ProductVersion: ' + [regex]::Escape($version) + '$'))) { throw 'Cage.exe version differs from VERSION; rebuild before packaging.' }
-}
 $signTool = $null
+$qemuRuntime = Join-Path $AppDirectory 'resources/runtime/qemu'
 if ($signed) {
     Assert-WindowsSigningConfiguration
     if ($env:CAGE_WINDOWS_CERT_SHA1 -notmatch '^[0-9A-Fa-f]{40}$') { throw 'Build and verify the signed app before packaging.' }
@@ -42,16 +37,38 @@ if ($signed) {
     if ($Release) { Invoke-BuildTool $sevenZip @('t', '-bso0', '-bsp0', $QemuSourceArchive) }
     $signTool = Get-SigningTool
     foreach ($file in @('Cage.exe', 'resources/cage.exe', 'resources/mihomo.exe')) {
-        $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $AppDirectory $file)
-        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:CAGE_WINDOWS_CERT_SHA1) { throw "Invalid release signature: $file" }
+        Assert-CageReleaseSignature (Join-Path $AppDirectory $file)
+    }
+    $identity = Get-Content -LiteralPath (Join-Path $qemuRuntime 'cage-build.json') -Raw | ConvertFrom-Json
+    if ($Release -and (Get-WindowsQemuSourceManifestHash $QemuSourceArchive) -ne $identity.unsignedManifestSha256) {
+        throw 'The corresponding source archive does not match the unsigned build identity of the signed QEMU runtime.'
+    }
+    foreach ($file in (Get-WindowsQemuBinaries $qemuRuntime)) {
+        Assert-CageReleaseSignature $file.FullName
+        $entry = @($identity.files | Where-Object name -eq $file.Name)
+        if ($entry.Count -ne 1 -or $entry[0].sha256 -ne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash) {
+            throw "Signed QEMU file differs from its packaged build manifest: $($file.Name)"
+        }
     }
     $webview = Get-AuthenticodeSignature -LiteralPath (Join-Path $AppDirectory 'resources/runtime/MicrosoftEdgeWebView2RuntimeInstallerX64.exe')
     if ($webview.Status -ne 'Valid' -or $webview.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw 'WebView2 installer must have a valid Microsoft signature.' }
 }
+if ($IsWindows) {
+    if ([Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $AppDirectory 'Cage.exe')).ProductVersion -ne $version) { throw 'Cage.exe version differs from VERSION; rebuild before packaging.' }
+    Invoke-BuildTool (Join-Path $AppDirectory 'resources/cage.exe') @('verify-vm-assets')
+    Invoke-BuildTool (Join-Path $AppDirectory 'resources/cage.exe') @('verify-web-assets')
+    if ($SkipBuild) {
+        Assert-WindowsQemuRuntime $qemuRuntime -Firmware
+        Assert-WindowsWorkbench $AppDirectory
+    }
+} else {
+    $metadata = & $sevenZip 'l' '-tPE' (Join-Path $AppDirectory 'Cage.exe')
+    if ($LASTEXITCODE -ne 0 -or -not ($metadata -match ('^ProductVersion: ' + [regex]::Escape($version) + '$'))) { throw 'Cage.exe version differs from VERSION; rebuild before packaging.' }
+}
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 # Verify source material before the expensive installer compression.
 $dependencies = Get-Content -LiteralPath (Join-Path $repository 'packaging/windows/dependencies.json') -Raw | ConvertFrom-Json
-$qemuTar = Get-VerifiedGitArchive $dependencies.qemuSource (Join-Path $repository '_output/windows-deps')
+$qemuTar = Get-VerifiedGitArchive $dependencies.qemuSource $DependencyCache
 $suffix = if ($Release) { '' } elseif ($Sign) { '-test-signed' } else { '-unsigned' }
 $artifact = Join-Path $OutputDirectory "Cage-$version-windows-amd64-setup$suffix.exe"
 $manifest = Join-Path $AppDirectory 'Cage.install-files.json'
@@ -80,7 +97,7 @@ if ((Get-Item -LiteralPath $artifact).Length -gt 512MB) { throw 'Installer excee
 
 # Source materials travel beside the binary, not inside the application directory.
 $coreSource = Join-Path $OutputDirectory "mihomo-$($dependencies.mihomo.version)-source.tar.gz"
-$verifiedCoreSource = Get-VerifiedDependency $dependencies.mihomoSource (Join-Path $repository '_output/windows-deps')
+$verifiedCoreSource = Get-VerifiedDependency $dependencies.mihomoSource $DependencyCache
 Copy-Item -LiteralPath $verifiedCoreSource -Destination $coreSource -Force
 Invoke-BuildTool $sevenZip @('t', '-bso0', '-bsp0', $coreSource)
 $releaseFiles = @($artifact, $coreSource)
@@ -89,13 +106,13 @@ if (Test-Path -LiteralPath $qemuSource) { Remove-Item -LiteralPath $qemuSource }
 Invoke-BuildTool $sevenZip @('a', '-tgzip', '-mx=9', '-bso0', '-bsp0', $qemuSource, $qemuTar)
 Invoke-BuildTool $sevenZip @('t', '-bso0', '-bsp0', $qemuSource)
 $releaseFiles += $qemuSource
-$qemuRuntime = Join-Path $AppDirectory 'resources/runtime/qemu'
 if (Test-Path (Join-Path $qemuRuntime 'cage-build.json')) {
-    $keymapArchive = Get-VerifiedDependency $dependencies.qemuKeycodemap (Join-Path $repository '_output/windows-deps')
+    $keymapArchive = Get-VerifiedDependency $dependencies.qemuKeycodemap $DependencyCache
     $keymapSource = Join-Path $OutputDirectory ('qemu-keycodemapdb-' + $dependencies.qemuKeycodemap.version + '-source.tar.gz')
     Copy-Item $keymapArchive $keymapSource -Force
     $changesSource = Join-Path $OutputDirectory ('qemu-' + $dependencies.qemu.version + '-cage-changes-source.tar.gz')
-    Invoke-BuildTool 'tar' @('-czf', $changesSource, '-C', $repository, 'patches/qemu', 'scripts/build-qemu-windows.ps1',
+    $tar = if ($IsWindows) { Join-Path $env:SystemRoot 'System32/tar.exe' } else { 'tar' }
+    Invoke-BuildTool $tar @('-czf', $changesSource, '-C', $repository, 'patches/qemu', 'scripts/build-qemu-windows.ps1',
         'scripts/build-qemu-windows.sh', '-C', $qemuRuntime, 'cage-build.json', 'build-packages.txt')
     $releaseFiles += @($keymapSource, $changesSource)
 }

@@ -47,7 +47,7 @@ func TestLocationFallbackUsesMeasuredIP(t *testing.T) {
 			var hosts []string
 			client := &http.Client{Timeout: 50 * time.Millisecond, Transport: browserTransport(func(r *http.Request) (*http.Response, error) {
 				hosts = append(hosts, r.URL.Host)
-				if r.URL.Scheme != "https" || r.Method != "GET" || r.Header.Get("User-Agent") != "Cage-network-check/1" {
+				if r.URL.Scheme != "https" || r.Method != "GET" || r.Header.Get("User-Agent") != "" {
 					t.Fatal("lookup changed its fixed HTTPS request contract")
 				}
 				switch r.URL.Host {
@@ -85,7 +85,8 @@ func TestLocationFallbackUsesMeasuredIP(t *testing.T) {
 }
 
 func TestLocationFallbackStaysOnConfiguredProxy(t *testing.T) {
-	targets := make(chan string, 2)
+	wantTargets := []string{"ipwho.is:443", "api.ip.sb:443", "ipwhois.app:443", "get.geojs.io:443", "ipapi.co:443"}
+	targets := make(chan string, len(wantTargets))
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodConnect {
 			t.Error("location query did not establish a proxy tunnel")
@@ -99,7 +100,7 @@ func TestLocationFallbackStaysOnConfiguredProxy(t *testing.T) {
 	if _, err := probeLocationForIP(context.Background(), cfg, "8.8.8.8"); err == nil {
 		t.Fatal("rejected proxy requests produced a location")
 	}
-	for _, want := range []string{"ipwho.is:443", "api.ip.sb:443"} {
+	for _, want := range wantTargets {
 		select {
 		case target := <-targets:
 			if target != want {
@@ -108,6 +109,51 @@ func TestLocationFallbackStaysOnConfiguredProxy(t *testing.T) {
 		default:
 			t.Fatal("location provider bypassed configured proxy", want)
 		}
+	}
+}
+
+func TestLocationExtendedFallbacks(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+		path string
+		body string
+	}{
+		{
+			name: "ipwhois.app",
+			host: "ipwhois.app",
+			path: "/json/8.8.8.8",
+			body: `{"ip":"8.8.8.8","success":true,"country":"United States","country_code":"US","region":"Washington","city":"Seattle","timezone":"America/Los_Angeles"}`,
+		},
+		{
+			name: "get.geojs.io",
+			host: "get.geojs.io",
+			path: "/v1/ip/geo/8.8.8.8.json",
+			body: `{"ip":"8.8.8.8","country":"United States","country_code":"US","region":"California","city":"San Jose","timezone":"America/Los_Angeles"}`,
+		},
+		{
+			name: "ipapi.co",
+			host: "ipapi.co",
+			path: "/8.8.8.8/json/",
+			body: `{"ip":"8.8.8.8","country":"US","country_name":"United States","country_code":"US","region":"Connecticut","region_code":"CT","city":"New Haven","timezone":"America/New_York"}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: browserTransport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Host == tc.host {
+					if r.URL.Path != tc.path {
+						t.Fatalf("unexpected path %s for %s", r.URL.Path, tc.host)
+					}
+					return locationResponse(200, tc.body), nil
+				}
+				return nil, errors.New("blocked")
+			})}
+			loc, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8"))
+			if err != nil || loc.IP != "8.8.8.8" || loc.Country != "United States" || loc.CountryCode != "US" || loc.Timezone == "" {
+				t.Fatalf("%s lookup failed: %+v, err=%v", tc.name, loc, err)
+			}
+		})
 	}
 }
 
@@ -129,6 +175,7 @@ func TestLocationRejectsInvalidBackupAndKeepsErrorsPrivate(t *testing.T) {
 		strings.Replace(backupLocationJSON, "America/Los_Angeles", "Local", 1),
 		strings.Replace(backupLocationJSON, "America/Los_Angeles", "", 1),
 		strings.Replace(backupLocationJSON, `"US"`, `""`, 1),
+		strings.Replace(backupLocationJSON, `"ip":"8.8.8.8"`, `"ip":"8.8.8.8","error":true`, 1),
 	} {
 		client := &http.Client{Transport: browserTransport(func(r *http.Request) (*http.Response, error) {
 			if r.URL.Host == "ipwho.is" {
@@ -242,7 +289,7 @@ func TestLocationProvidersLiveIntegration(t *testing.T) {
 			t.Fatal("manual mode was not applied")
 		}
 	})
-	for _, host := range []string{"ipwho.is", "api.ip.sb"} {
+	for _, host := range []string{"ipwho.is", "api.ip.sb", "ipwhois.app", "get.geojs.io", "ipapi.co"} {
 		t.Run(host, func(t *testing.T) {
 			only := *client
 			only.Transport = browserTransport(func(r *http.Request) (*http.Response, error) {

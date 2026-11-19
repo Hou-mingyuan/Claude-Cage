@@ -1,7 +1,7 @@
 import { runtimeSocketURL } from "./client-context.mjs";
 
-export function createMacFrameConnection(onFrame, onError) {
-  const socket = new WebSocket(runtimeSocketURL("/macos/claude/frames"));
+export function createMacFrameConnection(onFrame, onError, base = "/macos/claude") {
+  const socket = new WebSocket(runtimeSocketURL(base + "/frames"));
   socket.binaryType = "arraybuffer";
   const urls = new Set();
   let configuration, size = "", revision = 0, latestURL = "", closed = false;

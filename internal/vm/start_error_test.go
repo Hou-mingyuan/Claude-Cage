@@ -67,3 +67,25 @@ panic: send on closed channel
 		t.Fatal("an earlier attempt's log replaced this failure")
 	}
 }
+
+func TestVMStartErrorPreservesWindowsLoaderFailure(t *testing.T) {
+	previous := diagnostics.Default()
+	diagnostics.SetDefault(diagnostics.New(t.TempDir()))
+	t.Cleanup(func() { diagnostics.SetDefault(previous) })
+	dir := t.TempDir()
+	// The executable was blocked before it could write any QEMU stderr.
+	log := `{"msg":"qemu[loader]: Windows 应用程序控制或签名校验阻止加载 QEMU。请使用有可信签名的 Cage 安装包"}`
+	if err := os.WriteFile(filepath.Join(dir, "ha.stderr.log"), []byte(log), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New("host agent process has exited")
+	if err := vmStartError(cause, dir, time.Time{}); !errors.Is(err, cause) ||
+		!strings.Contains(err.Error(), "QEMU 启动失败：Windows 应用程序控制或签名校验") {
+		t.Fatalf("loader failure was lost: %v", err)
+	}
+	cause = errors.New("qemu[loader]: Windows 应用程序控制或签名校验阻止加载 QEMU")
+	if err := vmStartError(cause, t.TempDir(), time.Time{}); !errors.Is(err, cause) ||
+		!strings.HasPrefix(err.Error(), "QEMU 启动失败：") {
+		t.Fatalf("direct loader failure was lost: %v", err)
+	}
+}

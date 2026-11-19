@@ -22,6 +22,9 @@ func windowsVMResources(ctx context.Context, root string, memoryGiB, cpus int) (
 	if binding == nil {
 		return WindowsVMResourceState{}, errors.New("此配置尚未绑定Windows客机")
 	}
+	if binding.Remote() {
+		return WindowsVMResourceState{}, errors.New("云端 Windows 的 CPU 和内存由云平台管理")
+	}
 	var result WindowsVMResourceState
 	if err := windowsHostManagerCall(ctx, binding.VMID, "resources", memoryGiB, cpus, &result); err != nil {
 		return result, err

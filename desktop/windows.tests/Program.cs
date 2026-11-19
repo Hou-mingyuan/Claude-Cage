@@ -74,6 +74,13 @@ Check(!UpdatePolicy.IsNewer("0.1.0-alpha.1", "0.1.0-alpha.1"), "same version acc
 Check(!UpdatePolicy.IsNewer("0.1.0-alpha.1", "0.1.0"), "downgrade accepted");
 Check(!UpdatePolicy.IsNewer("v0.2.0", "0.1.0"), "noncanonical version accepted");
 Check(!UpdatePolicy.IsNewer("0.2.0+metadata", "0.1.0"), "unmatched backend version accepted");
+string Organization(string subject) => UpdatePolicy.PublisherOrganization(new System.Security.Cryptography.X509Certificates.X500DistinguishedName(subject));
+Check(Organization("C=CN, L=Shanghai, O=Example Publisher, CN=Example Publisher") == Organization("CN=Renewed name, O=Example Publisher, L=Beijing, C=CN"),
+    "renewed certificate of the same organization rejected");
+Check(Organization("C=CN, O=Example Publisher") != Organization("C=US, O=Example Publisher"), "organization of another country accepted");
+Check(Organization("C=CN, O=Example Publisher") != Organization("C=CN, O=Example Publisher Ltd"), "different organization accepted");
+foreach (var subject in new[] { "CN=Example Publisher", "C=CN, CN=Example Publisher", "O=Example Publisher", "C=CN, O=First, O=Second" })
+    Check(Organization(subject).Length == 0, "incomplete or ambiguous publisher accepted: " + subject);
 var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "cage-update-policy-tests"));
 var good = Path.Combine(root, "download-abc", "Cage-setup.exe");
 Check(UpdatePolicy.DownloadPath(good, root) == good, "private download rejected");
@@ -120,6 +127,27 @@ try
     catch (System.Reflection.TargetInvocationException error) when (error.InnerException is InvalidDataException) { rejectedNestedSnapshot = true; }
     Check(rejectedNestedSnapshot, "snapshot recursively copied its own output");
     Check(!Directory.Exists(nestedSnapshot), "overlapping snapshot destination was created before validation");
+    var intactApp = Path.Combine(integration, "intact application");
+    var intactBackup = Path.Combine(integration, "intact backup");
+    foreach (var directory in new[] { intactApp, intactBackup })
+    {
+        Directory.CreateDirectory(Path.Combine(directory, "resources"));
+        File.WriteAllText(Path.Combine(directory, "Cage.exe"), "original launcher");
+        File.WriteAllText(Path.Combine(directory, "Cage.install-id"), "io.github.lee-xeo.claude-cage");
+        File.WriteAllText(Path.Combine(directory, "resources", "cage.exe"), "original backend");
+    }
+    Directory.CreateDirectory(Path.Combine(intactApp, "my-project"));
+    File.WriteAllText(Path.Combine(intactApp, "my-project", "work.txt"), "latest personal data");
+    Check(UpdateRecovery.OriginalIntact(intactApp, intactBackup), "unchanged original was sent through replacement rollback");
+    File.WriteAllText(Path.Combine(intactApp, "resources", "cage.exe"), "modified backend");
+    Check(!UpdateRecovery.OriginalIntact(intactApp, intactBackup), "same launcher hid a changed backend");
+    File.Copy(Path.Combine(intactBackup, "resources", "cage.exe"), Path.Combine(intactApp, "resources", "cage.exe"), true);
+    File.WriteAllText(intactApp + ".cage-installation.json", "unresolved transaction");
+    Check(!UpdateRecovery.OriginalIntact(intactApp, intactBackup), "unfinished personal-file transfer was treated as intact");
+    File.Delete(intactApp + ".cage-installation.json");
+    File.Delete(Path.Combine(intactApp, "Cage.exe"));
+    Check(!UpdateRecovery.OriginalIntact(intactApp, intactBackup), "missing launcher was treated as intact");
+    Check(File.ReadAllText(Path.Combine(intactApp, "my-project", "work.txt")) == "latest personal data", "recovery classification changed personal data");
     var ensureComplete = typeof(UpdateInstaller).GetMethod("EnsureInstallationComplete", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
     ensureComplete.Invoke(null, [snapshotSource]);
     var recoveryReceipt = snapshotSource + ".cage-installation.json";

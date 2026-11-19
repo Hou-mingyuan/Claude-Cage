@@ -5,8 +5,10 @@ import { createWorkbench } from "./workbench-fixture.mjs";
 const output = process.env.CAGE_UPDATE_QA_OUTPUT || "/tmp/cage-update-diagnosis/ui";
 await fs.mkdir(output, { recursive: true });
 const calls = [];
+const references = [];
 let update = { phase: "idle", currentVersion: "0.1.3-alpha.1" };
 const fixture = await createWorkbench({ nativeRequest: async body => {
+  if (body.action === "appReference") { references.push(body.kind); return true; }
   if (body.action !== "appUpdate") return body.action === "workbenchReady" ? true : null;
   calls.push(body.operation);
   if (body.operation === "check") update = { ...update, phase: "current", message: "已是最新版本" };
@@ -75,8 +77,17 @@ try {
   await publish({ phase: "manual", currentVersion: "0.1.3-alpha.2" });
   await page.locator(".app-update-button").waitFor({ state: "hidden" });
   assert.equal(await page.locator(".app-update-button").count(), 0, "system package updates must not offer an automatic installation");
+  await publish({ phase: "manual", currentVersion: "0.1.3-alpha.2", latestVersion: "0.1.3-alpha.3", message: "Linux 版本使用系统安装包更新。" });
+  const view = page.getByRole("button", { name: "查看新版本", exact: true });
+  await view.waitFor();
+  assert.match(await view.getAttribute("title"), /0.1.3-alpha.3.*系统安装包.*发布页面/);
+  const installs = count("install");
+  await view.click();
+  for (let attempt = 0; attempt < 50 && !references.length; attempt++) await new Promise(resolve => setTimeout(resolve, 100));
+  assert.deepEqual(references, ["releases"], "a system package update opens the release page");
+  assert.equal(count("install"), installs, "a system package update must not start an automatic installation");
   assert.deepEqual(errors, []);
-  const result = { checks: ["automatic startup and periodic checks", "failed background check retry", "latest version hidden", "single click without update dialog", "ring and percentage", "indeterminate progress", "verification and installation", "visible failure and retry", "collapsed sidebar", "Linux manual update remains separate"], calls };
+  const result = { checks: ["automatic startup and periodic checks", "failed background check retry", "latest version hidden", "single click without update dialog", "ring and percentage", "indeterminate progress", "verification and installation", "visible failure and retry", "collapsed sidebar", "Linux manual update remains separate", "Linux newer package opens the release page"], calls };
   await fs.writeFile(`${output}/checks.json`, JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } finally { await browser.close(); }

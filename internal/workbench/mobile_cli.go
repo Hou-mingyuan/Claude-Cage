@@ -21,14 +21,12 @@ var mobileSupervisor string
 
 var mobileCCSProfile = regexp.MustCompile("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
-type mobileEpochKey struct{}
-
 var errMobileLocked = errors.New("Cage 已锁定，请重新解锁后操作")
 
 // Caller holds the account mutex. An operation begun under an old unlock
 // must not gain authority from a later unlock of the same account.
 func (s *Server) mobileAuthorized(ctx context.Context) bool {
-	epoch, _ := ctx.Value(mobileEpochKey{}).(context.Context)
+	epoch, _ := ctx.Value(accountEpochKey{}).(context.Context)
 	return len(s.account.key) == 32 && epoch != nil && epoch == s.account.epoch && epoch.Err() == nil && ctx.Err() == nil
 }
 
@@ -60,6 +58,14 @@ func sharedCLILauncher(launcher string) bool {
 
 func (s *Server) mobileRunner(prefix []string) cliconversation.Runner {
 	return cliconversation.Runner{SupervisedStdin: true, Command: func(ctx context.Context, workspace string, args []string) (*exec.Cmd, error) {
+		directories, err := s.projectAdditionalDirectories(workspace)
+		if err != nil {
+			return nil, err
+		}
+		args = slices.Clone(args)
+		for _, directory := range directories {
+			args = append(args, "--add-dir", directory)
+		}
 		// The login shell supplies the guest's PATH and Claude provider configuration.
 		// Shell startup output goes to stderr so stdout contains only CLI JSON.
 		login := `exec 3>&1 1>&2; exec /bin/bash -lc ` + shellescape.Quote(`exec 1>&3 3>&-; cd -- "$1" && shift && exec "$@"`) + ` "$0" "$@"`

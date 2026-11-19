@@ -49,10 +49,15 @@ func TestMacOSResourceRequirementsUseRestoreMinimumAndHostShare(t *testing.T) {
 			t.Fatalf("accepted incompatible allocation %+v", allocation)
 		}
 	}
-	if memory, cpus, err := requirements.Limits(cage.ResourceAllocation{Automatic: true}); err != nil || memory != 12 || cpus != 5 {
+	if memory, cpus, err := requirements.Limits(cage.ResourceAllocation{Automatic: true}); err != nil || memory != 8 || cpus != 5 {
 		t.Fatalf("automatic=%d/%d %v", memory, cpus, err)
 	}
 	if memory, cpus, err := requirements.Limits(cage.ResourceAllocation{MemoryGiB: 4, CPUs: 2}); err != nil || memory != 4 || cpus != 2 {
 		t.Fatalf("manual=%d/%d %v", memory, cpus, err)
+	}
+	// A guest whose own minimum exceeds the automatic cap still gets what it needs, within the host share.
+	large := MacOSResourceRequirements{Version: 1, MemoryGiB: 10, CPUs: 2, Source: "restore-image"}
+	if memory, _, err := large.Limits(cage.ResourceAllocation{Automatic: true}); err != nil || memory != 10 {
+		t.Fatalf("automatic below the guest minimum: %d %v", memory, err)
 	}
 }

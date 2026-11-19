@@ -16,6 +16,9 @@ import (
 )
 
 func (s *Server) windowsGuestObservation(ctx context.Context, input map[string]any) (guestObservation, error) {
+	if s.windowsGuest.Remote() {
+		return s.remoteWindowsObservation(ctx, input)
+	}
 	var observation guestObservation
 	cfg, err := loadConfig(s.configPath)
 	if err != nil {
@@ -80,6 +83,10 @@ func decodeWindowsObservation(data []byte) (guestObservation, error) {
 }
 
 func (s *Server) windowsVMLayout() (bool, bool) {
+	if s.windowsGuest.Remote() {
+		// A cloud NIC and system disk are not a zero-NIC Hyper-V guest.
+		return false, false
+	}
 	ctx, cancel := s.controlContext()
 	defer cancel()
 	report, err := guestos.InspectHyperV(ctx, s.windowsGuest.VMID)
@@ -95,6 +102,7 @@ func (s *Server) windowsVMLayout() (bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	allowed := make(map[string]bool, len(projects))
+	allowed[s.environmentDir()] = true // Internal download and boundary transport.
 	for _, path := range projects {
 		allowed[path] = true
 	}

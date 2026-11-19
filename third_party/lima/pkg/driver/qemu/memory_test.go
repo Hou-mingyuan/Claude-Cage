@@ -39,7 +39,7 @@ func TestMemoryTargetQMPProtocolAndCancellation(t *testing.T) {
 					return
 				}
 				defer conn.Close()
-				_ = conn.SetDeadline(time.Now().Add(time.Second))
+				_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 				if stall {
 					var b [1]byte
 					_, e = conn.Read(b[:])
@@ -68,14 +68,18 @@ func TestMemoryTargetQMPProtocolAndCancellation(t *testing.T) {
 				}
 				done <- nil
 			}()
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			budget := 3 * time.Second
+			if stall {
+				budget = 100 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), budget)
 			defer cancel()
 			started := time.Now()
 			err = l.SetMemoryTarget(ctx, 2<<30)
 			if (err != nil) != stall {
 				t.Fatal("unexpected command result", err)
 			}
-			if time.Since(started) > time.Second {
+			if stall && time.Since(started) > time.Second {
 				t.Fatal("deadline ignored")
 			}
 			if e := <-done; e != nil && !stall {

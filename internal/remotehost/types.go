@@ -26,6 +26,7 @@ type HostProfile struct {
 	Host       string     `json:"host"`
 	Port       int        `json:"port"`
 	User       string     `json:"user"`
+	Platform   string     `json:"platform,omitempty"`
 	Auth       AuthConfig `json:"auth"`
 	HostKey    *HostKey   `json:"host_key,omitempty"`
 	Executable string     `json:"executable,omitempty"`
@@ -52,6 +53,7 @@ type ServerManifest struct {
 	Capabilities map[string]bool `json:"capabilities"`
 	Origin       string          `json:"origin"`
 	Ticket       string          `json:"ticket"`
+	RemoteView   string          `json:"remote_view,omitempty"`
 }
 
 func (m ServerManifest) Public() PublicManifest {

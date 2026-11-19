@@ -1,0 +1,23 @@
+[Unit]
+Description=Website support assistant
+After=network-online.target
+
+[Service]
+User=cage-support
+Group=cage-support
+Environment=HOME=/var/lib/cage-support
+Environment=SUPPORT_LEARNING_DIR=/var/lib/cage-support/knowledge
+Environment=SUPPORT_FEISHU_CLI=/opt/cage-support/lark-cli
+EnvironmentFile=-/etc/cage-support/feishu.env
+WorkingDirectory=/opt/cage-support
+EnvironmentFile=/etc/cage-support/model.env
+ExecStart=/opt/cage-support/server
+Restart=on-failure
+RestartSec=4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

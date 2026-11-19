@@ -25,7 +25,6 @@ import (
 
 	"github.com/lima-vm/lima/v2/pkg/debugutil"
 	"github.com/lima-vm/lima/v2/pkg/driver"
-	"github.com/lima-vm/lima/v2/pkg/instance/hostname"
 	"github.com/lima-vm/lima/v2/pkg/iso9660util"
 	"github.com/lima-vm/lima/v2/pkg/limatype"
 	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
@@ -140,7 +139,7 @@ func templateArgs(ctx context.Context, bootScripts bool, instDir, name string, i
 		Arch:               *instConfig.Arch,
 		BootScripts:        bootScripts,
 		Name:               name,
-		Hostname:           hostname.FromInstName(name), // TODO: support customization
+		Hostname:           limayaml.GuestHostname(instConfig, name),
 		User:               *instConfig.User.Name,
 		Comment:            strutil.RemoveControlChars(*instConfig.User.Comment),
 		Home:               *instConfig.User.Home,
@@ -289,7 +288,7 @@ func templateArgs(ctx context.Context, bootScripts bool, instDir, name string, i
 		})
 	}
 
-	args.Networks = append(args.Networks, Network{MACAddress: limayaml.MACAddress(instDir), Interface: networks.SlirpNICName, Metric: 200})
+	args.Networks = append(args.Networks, Network{MACAddress: limayaml.GuestMACAddress(instConfig, instDir), Interface: networks.SlirpNICName, Metric: 200})
 	for i, nw := range instConfig.Networks {
 		if i == firstUsernetIndex {
 			continue

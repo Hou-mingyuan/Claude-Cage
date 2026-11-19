@@ -879,6 +879,7 @@ figure { margin: 0; }
 .community-docs .doc-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 30px; margin-top: 36px; }
 .community-docs .doc-links li { padding: 18px 0 0; }
 .community-docs .doc-links p { line-height: 1.7; }
+.community-codes { display: grid; gap: 16px; }
 .community-qr { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: white; }
 .community-qr figcaption { padding: 12px; font-size: 11px; }
 @media (max-width: 1000px) {
@@ -889,7 +890,7 @@ figure { margin: 0; }
   .community-docs { padding-top: 60px; padding-bottom: 55px; }
   .docs-body { grid-template-columns: 1fr; }
   .community-docs .doc-links { column-gap: 22px; }
-  .community-qr { width: 200px; justify-self: center; }
+  .community-codes { grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); width: min(100%, 416px); justify-self: center; align-items: start; }
 }
 @media (max-width: 360px) {
   .community-docs .doc-links { grid-template-columns: 1fr; }

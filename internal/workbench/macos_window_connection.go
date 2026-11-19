@@ -56,7 +56,7 @@ func validMacOSWindowRequest(input macOSWindowRequest) bool {
 		(input.Action == "frame" && input.Width >= 320 && input.Height >= 240 && input.Scale >= 1)
 }
 
-func macOSWindowClientRequest(input macOSWindowRequest, keepAlive bool) macOSWindowRequest {
+func macOSWindowClientRequest(input macOSWindowRequest, keepAlive, browser bool) macOSWindowRequest {
 	input.Project, input.Nonce = "", ""
 	input.Phone, input.PhoneToken = nil, ""
 	input.Transfer, input.Path, input.Error = "", "", ""
@@ -64,6 +64,13 @@ func macOSWindowClientRequest(input macOSWindowRequest, keepAlive bool) macOSWin
 	input.Wait, input.Binary, input.KeepAlive = false, false, keepAlive
 	if input.Action != "ime" {
 		input.Sequence = 0
+	}
+	input.Surface = ""
+	if browser {
+		input.Surface = "browser"
+		// Older guest helpers ignore unknown fields. A distinct action prevents
+		// them from delivering browser input to Claude Desktop during an update.
+		input.Action = "browser-" + input.Action
 	}
 	return input
 }
@@ -102,6 +109,7 @@ func (s *Server) macOSWindowConnection(w http.ResponseWriter, r *http.Request) {
 	defer func() { cancel(); input.Close(); output.Close(); _ = cmd.Wait() }()
 	scanner := bufio.NewScanner(output)
 	scanner.Buffer(make([]byte, 64<<10), 12<<20)
+	metrics := newInputMetrics(s.recordInputMetrics)
 	for {
 		var message struct {
 			ID      uint64             `json:"id"`
@@ -113,22 +121,29 @@ func (s *Server) macOSWindowConnection(w http.ResponseWriter, r *http.Request) {
 		if !validMacOSWindowRequest(message.Request) {
 			return
 		}
-		message.Request = macOSWindowClientRequest(message.Request, true)
+		browser := macOSBrowserWindowRoute(r)
+		if browser {
+			// The visible browser view sends status and input on this channel.
+			s.noteNativeBrowserUse()
+		}
+		message.Request = macOSWindowClientRequest(message.Request, true, browser)
 		body, err := json.Marshal(message.Request)
 		if err != nil || len(body) > 64<<10 {
 			return
 		}
 		limit := 12 * time.Second
-		if message.Request.Action == "launch" {
+		if message.Request.Action == "launch" || message.Request.Action == "browser-launch" {
 			limit = 55 * time.Second
 		}
 		timer := time.AfterFunc(limit, func() { cancel(); output.Close(); ws.Close() })
+		requested := time.Now()
 		_, err = input.Write(append(body, '\n'))
 		if err != nil || !scanner.Scan() {
 			timer.Stop()
 			return
 		}
 		timer.Stop()
+		metrics.observe(message.Request.Action, time.Since(requested))
 		data := append(json.RawMessage(nil), scanner.Bytes()...)
 		if !json.Valid(data) {
 			return

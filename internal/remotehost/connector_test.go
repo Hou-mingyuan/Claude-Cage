@@ -586,3 +586,31 @@ func TestStorePreservesIndependentUpdatesAndRejectsUnsafeFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsEntryTreatsConfigPathAsLiteral(t *testing.T) {
+	shell := "pwsh"
+	if runtime.GOOS == "windows" {
+		shell = "powershell.exe"
+	}
+	if _, err := exec.LookPath(shell); err != nil {
+		t.Skip("PowerShell is unavailable")
+	}
+	profile := HostProfile{Name: "test", Host: "localhost", User: "user", Platform: "windows", Auth: AuthConfig{Kind: "agent"}, ConfigPath: `C:\config\a'‘’‚‛$(Get-Location).json`}
+	command, err := ServerEntryCommand(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, encoded, ok := strings.Cut(command, " -EncodedCommand ")
+	if !ok {
+		t.Fatal("entry command is missing its encoded script")
+	}
+	// Simulate the installed server entry and execute the actual script using PowerShell's parser.
+	cmd := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `
+function cage { [Console]::WriteLine($env:CLAUDE_CAGE_CONFIG); [Console]::WriteLine($args -join ' ') }
+& ([ScriptBlock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($env:ENTRY_SCRIPT))))`)
+	cmd.Env = append(os.Environ(), "ENTRY_SCRIPT="+encoded)
+	output, err := cmd.CombinedOutput()
+	if err != nil || strings.ReplaceAll(string(output), "\r\n", "\n") != profile.ConfigPath+"\nserver-entry --json\n" {
+		t.Fatalf("PowerShell entry output = %q, error = %v", output, err)
+	}
+}

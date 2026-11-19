@@ -83,12 +83,16 @@ func (g *remoteGateway) context() ClientContext {
 		for _, host := range hosts {
 			if host.ID == result.HostID {
 				result.Name = host.Name
+				result.ServerPlatform = host.Platform
 				if host.HostKey != nil {
 					result.HostFingerprint = host.HostKey.Fingerprint
 				}
 				break
 			}
 		}
+	}
+	if result.State.Manifest != nil {
+		result.ServerPlatform = result.State.Manifest.Platform
 	}
 	return result
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sylvinus/agent-vm/internal/transfermeta"
 	"github.com/sylvinus/agent-vm/internal/usererror"
 )
 
@@ -70,15 +71,24 @@ func (s *Server) browserUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	query := url.Values{"id": {id}, "name": {name}}
 	r.Body = http.MaxBytesReader(w, r.Body, browserFileLimit)
-	s.proxyBrowserFile(w, r, token, "POST", "/upload-file?"+query.Encode(), r.Body)
-}
-
-func (s *Server) proxyBrowserFile(w http.ResponseWriter, r *http.Request, token, method, path string, body io.Reader) {
-	if s.macosGuest != nil || s.windowsGuest != nil {
-		s.nativeBrowserFile(w, r, method, path, body)
+	prepared, err := transfermeta.Prepare(name, r.Body, r.ContentLength, s.transferOptions())
+	if err != nil {
+		transferMetadataError(w, err)
 		return
 	}
-	response, err := s.browserClient().file(r.Context(), token, method, path, body, r.ContentLength)
+	defer prepared.Close()
+	if prepared.Unclean {
+		w.Header().Set("X-Cage-Metadata-Warning", "metadata-may-remain")
+	}
+	s.proxyBrowserFile(w, r, token, "POST", "/upload-file?"+query.Encode(), prepared.Body, prepared.Size)
+}
+
+func (s *Server) proxyBrowserFile(w http.ResponseWriter, r *http.Request, token, method, path string, body io.Reader, length int64) {
+	if s.macosGuest != nil || s.windowsGuest != nil {
+		s.nativeBrowserFile(w, r, method, path, body, length)
+		return
+	}
+	response, err := s.browserClient().file(r.Context(), token, method, path, body, length)
 	if err != nil {
 		http.Error(w, usererror.Wrap("传递浏览器文件", err, "请恢复环境连接后核对文件是否已收到，再重新选择文件。").Error(), 502)
 		return
@@ -349,7 +359,7 @@ func (s *Server) nativeDownloadForHost(item browserDownloadInfo) browserDownload
 		}
 	}
 	item.State, item.Retryable = "failed", true
-	item.Error = usererror.Display("保存下载到本机", err, "请恢复环境连接或检查默认工作区空间，再点击重试。").Error()
+	item.Error = usererror.Display("保存下载到本机", err, "请恢复环境连接或检查下载目录空间，再点击重试。").Error()
 	return item
 }
 
@@ -387,7 +397,7 @@ func (s *Server) saveNativeDownload(ctx context.Context, item browserDownloadInf
 	}
 	directory, err := root.Lstat("Downloads")
 	if err != nil || !directory.IsDir() {
-		return errors.New("默认下载目录无效，请选择默认工作区中的普通文件夹")
+		return errors.New("默认下载目录无效，请选择有效的下载暂存文件夹")
 	}
 	downloads, err := root.OpenRoot("Downloads")
 	if err != nil {
@@ -489,7 +499,7 @@ func (s *Server) browserDownload(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	token := s.credentials.Token
 	s.mu.Unlock()
-	s.proxyBrowserFile(w, r, token, "GET", "/download-file?id="+url.QueryEscape(item.ID), nil)
+	s.proxyBrowserFile(w, r, token, "GET", "/download-file?id="+url.QueryEscape(item.ID), nil, -1)
 }
 
 type cancelableDownload struct {

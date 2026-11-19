@@ -1,6 +1,4 @@
 # shellcheck shell=bash
-# Ubuntu's Chromium package is a Snap transition. Use the upstream portable
-# build with extension loading and inherited CDP pipes, without snapd.
 cage_is_ubuntu() (
   . /etc/os-release
   [ "$ID" = ubuntu ]
@@ -8,37 +6,52 @@ cage_is_ubuntu() (
 
 cage_install_ubuntu_browser() (
   set -euo pipefail
-  local version="$CAGE_UBUNTU_BROWSER_VERSION" checksum="$CAGE_UBUNTU_BROWSER_SHA256" platform=linux64
-  case "$(dpkg --print-architecture)" in
-    amd64) ;;
-    arm64) platform=linux-arm64; checksum="$CAGE_UBUNTU_BROWSER_ARM64_SHA256" ;;
-    *) echo 'Ubuntu guest browsers require amd64 or arm64.' >&2; exit 1 ;;
-  esac
-  local directory=chrome-$platform
-  local cache="$HOME/.cache/cage/downloads/$checksum" target="/opt/cage-browser/$version" stage
-  mkdir -p "$cache"
-  exec 8>"$cache/lock"
-  flock -w 60 8
-  # Package names differ after Ubuntu's time_t transition.
-  local asound=libasound2 atk=libatk1.0-0 bridge=libatk-bridge2.0-0 cups=libcups2
-  if . /etc/os-release; [ "$VERSION_ID" = 24.04 ]; then
-    asound=libasound2t64 atk=libatk1.0-0t64 bridge=libatk-bridge2.0-0t64 cups=libcups2t64
-  fi
   sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get install -y --no-install-recommends \
-    "$asound" "$atk" "$bridge" "$cups" libnss3 libnspr4 libdrm2 libgbm1 libgtk-3-0 \
-    libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxkbcommon0 \
-    fonts-liberation fonts-dejavu-core xvfb xauth unzip </dev/null
-  if [ ! -x "$target/chrome" ]; then
-    cage_download_tool "https://storage.googleapis.com/chrome-for-testing-public/$version/$platform/chrome-$platform.zip" "$checksum" "$cache/chrome.zip"
-    sudo install -d -m 0755 /opt/cage-browser
-    stage=$(sudo mktemp -d /opt/cage-browser/.install-XXXXXX)
-    trap 'sudo rm -rf "$stage"' EXIT
-    sudo unzip -q "$cache/chrome.zip" -d "$stage"
-    sudo chown -R root:root "$stage/$directory"
-    sudo chmod 4755 "$stage/$directory/chrome_sandbox"
-    sudo mv "$stage/$directory" "$target"
+    snapd dbus-user-session fonts-liberation fonts-dejavu-core xvfb xauth </dev/null
+
+  # snapd downloads and verifies the store assertions in its own process.
+  # Keep the short-lived maintenance proxy out of persistent snap settings.
+  local unit_dir=/run/systemd/system/snapd.service.d
+  local dropin proxy_file
+  if [[ -n ${CAGE_INSTALL_PROXY:-} ]]; then
+    sudo install -d -m 0755 "$unit_dir"
+    proxy_file=$(sudo mktemp /run/browser-install.XXXXXX)
+    dropin="$unit_dir/90-${proxy_file##*/}.conf"
+    trap 'sudo rm -f "$dropin" "$proxy_file"; sudo systemctl daemon-reload; sudo systemctl restart snapd' EXIT
+    printf 'HTTPS_PROXY=%s\nhttps_proxy=%s\n' "$CAGE_INSTALL_PROXY" "$CAGE_INSTALL_PROXY" | sudo tee "$proxy_file" >/dev/null
+    printf '[Service]\nEnvironmentFile=%s\n' "$proxy_file" | sudo tee "$dropin" >/dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl restart snapd
   fi
-  sudo ln -sfn "$target/chrome" /usr/bin/chromium
+  sudo snap wait system seed.loaded
+  if snap list chromium >/dev/null 2>&1; then
+    local channel
+    channel=$(LC_ALL=C snap list chromium | awk '$1 == "chromium" {print $4}')
+    if [[ $channel != latest/stable && $channel != stable ]]; then
+      echo "Installed Chromium follows $channel. Keep that installation and select latest/stable before setting up the workbench." >&2
+      return 1
+    fi
+    sudo snap refresh chromium
+  else
+    sudo snap install chromium --channel=latest/stable
+  fi
+
+  # Chrome for Testing wrote this directory in place. Do not give a browser
+  # older than that profile an opportunity to downgrade its database schemas.
+  local profile_version=/home/cage-browser/profile/'Last Version'
+  if sudo test -s "$profile_version"; then
+    local last current
+    last=$(sudo -u cage-browser cat "$profile_version")
+    current=$(LC_ALL=C snap list chromium | awk '$1 == "chromium" {print $2}')
+    if ! dpkg --compare-versions "$current" ge "$last"; then
+      echo "Chromium stable $current is older than the existing profile ($last); retry after the stable channel updates." >&2
+      return 1
+    fi
+  fi
+  # Keep distro launchers and other browser installations intact. Snap dispatches
+  # by executable name, so the workbench entry must also be named chromium.
+  sudo install -d -m 0755 /usr/local/lib/workbench-browser
+  sudo ln -sfnT /snap/bin/chromium /usr/local/lib/workbench-browser/chromium
 )
 
 cage_install_chromium() {

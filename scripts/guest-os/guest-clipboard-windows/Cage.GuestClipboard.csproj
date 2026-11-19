@@ -14,8 +14,13 @@
     <AssemblyName>Cage.GuestClipboard</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="remote-shell.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="remote-python/sitecustomize.py" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="remote-safety.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="../../../internal/workbench/cache_maintenance.py" LogicalName="Cage.CacheMaintenance" />
     <EmbeddedResource Include="../../../internal/workbench/cli_channel.py" LogicalName="Cage.CliChannel" />
     <EmbeddedResource Include="../../../internal/cage/claude-account.py" LogicalName="Cage.CliAccount" />
+    <EmbeddedResource Include="../../../internal/cage/client_runtime.py" LogicalName="Cage.ClientRuntime" />
     <EmbeddedResource Include="../../../internal/workbench/windows_cli_platform.py" LogicalName="Cage.CliPlatform" />
     <EmbeddedResource Include="../../../internal/workbench/windows_ccs_launch.cjs" LogicalName="Cage.CliCCS" />
     <EmbeddedResource Include="../../../internal/workbench/mobile_cli_identity.py" LogicalName="Cage.CliIdentity" />

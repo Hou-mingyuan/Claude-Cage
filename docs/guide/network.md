@@ -3,7 +3,7 @@ title: 网络与代理
 description: 导入节点与订阅、配置多次中转，理解联网检查、时区和出口变化规则。
 group: 开始使用
 order: 2
-keywords: Clash Mihomo YAML SOCKS5 住宅 IP DNS DoH 暂停 断网 代理链 订阅
+keywords: Clash Mihomo YAML VLESS REALITY ML-KEM SOCKS5 SSH 私钥 住宅 IP DNS DoH 暂停 断网 代理链 订阅
 ---
 <figure class="guide-shot">
   <a href="../../www/public/docs/screenshots/proxy-subscription.jpg" target="_blank" rel="noopener" aria-label="查看原图：添加订阅链接与首次主机下载选项"><img src="../../www/public/docs/screenshots/proxy-subscription.jpg" alt="添加订阅链接与首次主机下载选项" width="2560" height="1764" loading="lazy" decoding="async" /></a>
@@ -18,11 +18,16 @@ keywords: Clash Mihomo YAML SOCKS5 住宅 IP DNS DoH 暂停 断网 代理链 订
 | --- | --- |
 | 订阅链接 | 输入名称和 HTTPS 节点订阅地址。首次没有可用节点时，可明确勾选“通过主机网络下载这份订阅”。 |
 | 本地 YAML | 拖入或点击选择导出的 YAML、YML、JSON 文件（单个不超过 8 MiB），也可直接粘贴 Clash/Mihomo YAML 内容。读取后可编辑，点击“导入并验证”完成导入。 |
-| 手动节点 | 填写 HTTP 或 SOCKS5 服务器、端口和对应认证字段。 |
+| 手动节点 | 选择 HTTP、SOCKS5 或 SSH，填写服务器、端口和认证信息。SSH 默认端口为 22，用户名必填；可选择密码或私钥认证。私钥认证须粘贴完整私钥内容，加密私钥还需填写私钥口令。 |
 
 点击“导入并验证”，进入“节点”，选最终出口，再点“应用代理”。“保存设置”用于其他设置，不能替代应用代理。未应用的选择只是草稿。
 
-订阅必须包含 `proxies` 或 `payload` 节点。Base64 列表、单个节点分享链接、只引用远程 provider 的配置暂不支持。导入只采用支持的节点与代理链，不采用订阅中的主机系统代理、TUN、监听端口或直连规则。
+“导入并验证”检查节点格式和核心配置，成功后仍需验证实际连接与出口：
+
+1. 应用节点后，在“设置 → 网络与代理”点击“验证出口”。该检查通过所选代理发起真实 HTTPS 请求，确认能取得出口 IP 和位置，并与预期出口核对；主机上其他代理客户端能够访问外网，不能代替这一步。
+2. 启动工作环境，查看底部网络状态及检查结果。宿主、客机终端和浏览器的出口采样及其他关键检查通过后，才会显示“已联网”。失败项的处理见[为什么应用了节点仍然离线](#为什么应用了节点仍然离线)。
+
+订阅或本地配置必须包含 `proxies` 或 `payload` 节点。Base64 列表、单个 `vless://` 等分享链接、Xray/v2rayN 原生 JSON、只引用远程 provider 的配置暂不支持。只有分享链接时，先从原客户端导出 Clash/Mihomo YAML；更改文件后缀不能完成转换。导入只采用支持的节点与代理链，不采用订阅中的主机系统代理、TUN、监听端口或直连规则。
 
 普通节点参数保留并交给 Cage 随附的 Mihomo 核心校验。例如，从 FlClash 复制的 VLESS 节点可以保留 `xudp: true`，无需手动改成其他字段。内核可能忽略未知字段；配置校验通过后，仍需应用节点并检查实际出口。客机公网 UDP 的阻断规则不受这些协议选项影响。
 
@@ -30,12 +35,51 @@ VMess、VLESS 和 Trojan 的 WebSocket 节点可以导入旧字段 `ws-path`、`
 
 Hysteria2 节点可使用 `mport` 指定端口跳跃范围、`pinSHA256` 指定证书指纹，导入时会转换为核心支持的字段并保留功能。若节点使用不支持的协议、引用本机文件或网卡、管理字段重复、别名参数冲突或代理链不可用，会跳过该节点，并在来源下显示导入数量、跳过数量和原因。点击「查看原因」可展开具体节点；依赖失败节点的代理链也会跳过。若所有节点均被跳过，导入失败；更新影响当前出口或中转节点时保留原配置，请先应用其他节点再更新。其余节点还须整体通过核心配置校验，校验失败时原配置保持不变，可在设置的「日志与诊断」中导出诊断包查看校验记录。
 
+手动添加 SSH 节点时，可在“服务器公钥”中填写可信公钥，每行一条；留空时不校验服务器身份。
+
+SSH 节点（`type: ssh`）可以把自己的 VPS 直接作为固定出口，服务器上只需开启 SSH，无需另外部署代理服务。可用 `password` 或 `private-key` 认证；`private-key` 须直接填写 PEM 私钥内容（含 `-----BEGIN ... PRIVATE KEY-----`），引用本机私钥文件路径的节点会被跳过，加密私钥可配合 `private-key-passphrase`。建议用 `host-key` 固定服务器公钥（`ssh-keyscan` 输出中的 `ssh-ed25519 AAAA...` 部分），未填写时核心不校验服务器身份。SSH 节点仅转发 TCP。示例：
+
+```yaml
+proxies:
+  - name: my-vps
+    type: ssh
+    server: 203.0.113.10
+    port: 22
+    username: root
+    private-key: |
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      ...
+      -----END OPENSSH PRIVATE KEY-----
+    host-key:
+      - "ssh-ed25519 AAAA..."
+```
+
 同一个订阅地址可能按请求的客户端身份返回不同格式。Cage 下载时使用 Clash 客户端身份，服务商返回 YAML 时可以导入；若返回 Base64 或分享链接列表，仍需向服务商获取 Clash/Mihomo YAML。
 
 <figure class="guide-shot">
   <a href="../../www/public/docs/screenshots/proxy-manual.jpg" target="_blank" rel="noopener" aria-label="查看原图：手动填写 HTTP / SOCKS5 节点"><img src="../../www/public/docs/screenshots/proxy-manual.jpg" alt="手动填写 HTTP / SOCKS5 节点" width="2560" height="1764" loading="lazy" decoding="async" /></a>
   <figcaption>手动填写 HTTP / SOCKS5 节点。截图版本：0.1.6-alpha-preview（开发构建） · macOS 原生应用 · 2026-11-07。<a href="../../www/public/docs/screenshots/proxy-manual.jpg" target="_blank" rel="noopener">查看原图（2560 × 1764） ↗</a></figcaption>
 </figure>
+
+## 通过本机代理客户端转发
+
+节点依赖 Xray 等客户端支持的传输或握手参数、转换为 Mihomo YAML 后仍无法连接时，可将该客户端的本机 SOCKS5 监听作为 Cage 的上游。此时连接顺序为 `Cage → 本机 SOCKS5 监听 → 原客户端所选节点 → 目标网站`；原客户端须保持运行，并让这些请求经过预期节点，避免其直连规则或自动回退改变出口。
+
+1. 在原客户端启用只监听本机的 SOCKS5 端口，记录实际地址、端口及认证信息。此处的本机指运行 Cage 控制服务的主机；连接远程 Cage 时，`127.0.0.1` 指远程主机，无法使用你电脑上的监听。
+2. 在 Cage 手动添加 SOCKS5 节点，或导入以下完整 YAML。示例端口 `10808` 须替换为客户端实际的 SOCKS5 端口；启用认证时，补上该监听要求的 `username` 和 `password`。
+
+```yaml
+proxies:
+  - name: local-client
+    type: socks5
+    server: 127.0.0.1
+    port: 10808
+    udp: false
+```
+
+3. 选择并应用该节点，在“设置 → 网络与代理”点击“验证出口”，与原客户端的预期出口核对；随后完成环境联网检查。客户端选中其他节点、规则变化或停止运行都会影响此路径，须重新验证。
+
+Cage 仍通过受管核心转发客机出站，原客户端负责连接上游 VLESS 等服务；这条路径不会开放客机到主机的任意直连，也不放宽出口规则或公网 UDP 限制。各主机上的监听能否被核心实际访问，以“验证出口”和环境检查结果为准。
 
 ## 通过中转连接住宅出口
 
@@ -51,6 +95,8 @@ Hysteria2 节点可使用 `mport` 指定端口跳跃范围、`pinSHA256` 指定�
 ## 为什么应用了节点仍然离线
 
 代理核心就绪和工作环境获准联网是两个步骤。环境启动后先保持业务外网关闭，执行出口、DNS、系统与浏览器配置、共享目录、宿主管理接口和网络阻断等关键检查。Linux 客机的 DNS 项同时要求解析器只指向环境内地址，且到公共 DNS 的 UDP/53、TCP/53 与 DoT/853 直连未绕过网关；宿主管理接口项还探测链路本地元数据地址和已配置的用户代理端口。IPv6 项要求客机全局 IPv6 地址为零，并核对路由或拒绝记录。缺少探针结果时显示未知；任一关键项失败或证据缺失都会继续关闭外网。
+
+macOS 主机只从 `networksetup` 报告的硬件端口中选择具有可用 IPv4 地址的物理出口；`utun`、`bridge`、`vmen`、`vmenet`、`vmnet`、`tap`、`lima`、`awdl`、`llw`、`p2p`、`gif`、`stf`、`anpi`、`ap` 等隧道、桥接和虚拟机接口即使带有地址或默认路由，也不会被绑定为代理出口。macOS 客机的 IPv6 链路入口检查只向宿主回报已验证的布尔结果，安全报告显示“客机以太网卡”。如果 IPv6 默认路由经过这张网卡，IPv6 检查显示“未知”，业务外网保持关闭。宿主诊断日志保留该路由的验证结果，省略网卡名。
 
 出口检测通过所选代理读取公网 IPv4 地址，依次使用 `https://ipv4.icanhazip.com/` 和备用服务 `https://api.ipify.org/`。双栈节点使用其 IPv4 出口完成检查；宿主、客机终端和浏览器使用相同的检测方式。启动检查无法取得有效地址时，业务外网保持关闭，可稍后重试或检查节点。
 
@@ -85,7 +131,9 @@ Hysteria2 节点可使用 `mport` 指定端口跳跃范围、`pinSHA256` 指定�
 
 在“设置 → 时区与语言”选择跟随出口或手动设置。自动模式通过代理查询出口位置，不使用主机位置替代。位置服务失败时可重试或切换节点；手动设置时区和语言仍须确认出口国家或地区。
 
-网络页的“IP 变化规则”支持静态 IP，以及动态 IP 的同一城市、同一国家／地区或不限地区。城市模式还检查国家与州省。已保存的出口基准只有明确修改后才改变，重新检查不会自动接受新地址。
+网络页的“IP 变化规则”按最终出口节点保存，支持静态 IP，以及动态 IP 的同一城市、同一州／省、同一国家／地区或不限地区。城市模式还检查国家与州省。切换最终出口时自动恢复该节点的规则；首次使用的节点沿用当前的静态或动态模式及允许范围，通过代理检测并确认非中国大陆出口后绑定自己的 IP 或地区。仅更换中转、刷新订阅、重新检查或重启会保留该节点的基准。
+
+例如，住宅节点001与节点003分别绑定各自的固定 IP，来回切换会自动使用对应地址；同一住宅节点意外更换 IP 时仍会暂停外网，需要确认后明确修改。旧配置未记录出口基准所属的节点时，原规则持续生效，直到明确应用节点后为其检测并建立绑定。
 
 中国大陆出口禁止放行。检测地址命中内置大陆网段库，或定位结果为中国大陆时，业务外网保持关闭；静态 IP 和“不限地区”均不能豁免。无法确认出口国家或地区时也保持关闭，离线终端和文件仍可使用。地区定位和网段库可能存在误差；后台按周期采样，无法保证第三方代理每条连接都使用同一出口。
 
@@ -104,6 +152,21 @@ Hysteria2 节点可使用 `mport` 指定端口跳跃范围、`pinSHA256` 指定�
 业务 DNS 通过所选代理转发。节点域名的启动解析属于准备通信，与客机业务 DNS 的设置分开。Cage 不修改主机系统代理或 TUN，也不改变本机其他代理软件的节点。
 
 代理页“诊断”可检查核心状态、重启 Cage 核心或选择独立监听端口。端口占用时选择未占用端口即可，修改后按提示重启环境。具体症状见[故障排查](troubleshooting.md#节点已应用但无法联网)。
+
+### VLESS REALITY 握手失败
+
+从 V2rayN 等客户端迁入 VLESS + TCP + REALITY 节点后，可能出现配置校验通过、真实 HTTPS 请求失败，核心日志报 `REALITY authentication failed` 的情况。先逐项对照原客户端与服务端参数，包括服务器、端口、UUID、传输方式、SNI、客户端指纹、flow、公钥和 short-id；配置语法正确仍可能存在握手兼容问题。
+
+参数核对一致后，可按 [Mihomo 官方 TLS 文档](https://wiki.metacubex.one/config/proxies/tls/#reality-optssupport-x25519mlkem768)检查 `reality-opts.support-x25519mlkem768`，该选项用于支持 X25519-MLKEM768 密钥交换。对于需要此兼容选项的节点，在该节点现有的 `reality-opts` 中保留原公钥和 short-id，并添加：
+
+```yaml
+reality-opts:
+  public-key: <原节点公钥>
+  short-id: <原节点 short-id>
+  support-x25519mlkem768: true
+```
+
+这是节点内的配置片段，需放回完整的 Clash/Mihomo YAML 后重新导入、应用。保留原配置，每次只调整这一项，再重复相同的 HTTPS 与出口检查。部分节点在启用此项后可以恢复连接；请按原节点与服务端要求使用，不要对所有 REALITY 节点无条件添加或重写参数。若仍失败，保留日志继续排查，不能仅凭该错误判断服务端版本或设置，也不要通过关闭证书校验、放宽出口规则或启用直连回退处理。
 
 ## 通过 Tailscale 私网使用 SSH
 

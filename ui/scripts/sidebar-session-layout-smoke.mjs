@@ -18,7 +18,7 @@ try {
   await page.route("**/api/cli/sessions", route => route.fulfill({ json: { sessions } }));
   state.status.ready = state.status.vm_running = true;
   state.terminals = [{ id: "layout-live", workspace, title: "已打开的会话" }];
-  const project = page.getByRole("region", { name: "项目 默认工作区", exact: true });
+  const project = page.getByRole("region", { name: "项目 .claude-cage-workspace", exact: true });
   const history = project.locator(".sidebar-session");
   await history.last().waitFor();
   await project.getByRole("tab", { name: "已打开的会话", exact: true }).waitFor();

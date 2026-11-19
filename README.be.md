@@ -6,9 +6,13 @@
 
 <img src="assets/claude-cage-character.png" alt="Claude Cage" width="320" />
 
-[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![CI](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**[Сайт праекта](https://lee-xeo.github.io/Claude-Cage/) · [Спампаваць праграму](https://lee-xeo.github.io/Claude-Cage/be/#download) · [Пачатак працы](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [Дапаможнік (па-кітайску)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
+
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily" alt="Trendshift — Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly" alt="Trendshift — Repository of the Week" width="250" height="55" /></a>
+
+**[Сайт праекта](https://claude-cage.com/) · [Спампаваць праграму](https://claude-cage.com/be/#download) · [Пачатак працы](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [Дапаможнік (па-кітайску)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -31,6 +35,8 @@ Claude Cage аб’ядноўвае тэрмінал, браўзер, рэдак
 | :---: | :---: |
 | <a href="assets/network-checks.png"><img src="assets/network-checks.png" alt="Праверка сеткі і ізаляцыі" width="400" /></a> | <a href="assets/community-browser-check.png"><img src="assets/community-browser-check-cropped.png" alt="Праверка браўзера ад супольнасці" width="400" /></a> |
 
+[FuckClaude](https://fuck-claude.vercel.app/) · [LinXiaoTao / GitHub](https://github.com/LinXiaoTao/FuckClaude)
+
 **Асноўны інтэрфейс Cage:**
 
 ![Cage](www/public/workbench-2026-11.jpg)
@@ -52,7 +58,7 @@ Claude Cage аб’ядноўвае тэрмінал, браўзер, рэдак
 Адпраўце гэты запыт свайму агенту штучнага інтэлекту (codex, dsh, workbuddy — верагодна, не Claude Code 😁):
 
 ```markdown
-Дапамажыце ўсталяваць https://github.com/Lee-xeo/Claude-Cage і наладзіць сеткавы проксі Cage для выкарыстання канцавой кропкі xxx у маёй лакальнай устаноўцы Clash.
+Атрымай апошні зыходны код https://github.com/Lee-xeo/Claude-Cage, збяры пакет і ўсталюй яго. Наладзь проксі Cage на выкарыстанне вузла xx майго лакальнага Clash і выхад праз мой IP xx. Сачы за ўсім працэсам, адразу выпраўляй праблемы і пры неабходнасці ствары issue ў праекце, каб палепшыць сумяшчальнасць.
 ```
 
 Усё, што вам трэба, гэта надзейная канчатковая кропка сеткавага проксі. Гэты праект не прасоўвае ніякіх проксі-правайдэраў; вы можаце знайсці пастаўшчыка самастойна, напрыклад, здзейсніўшы пошук на сайце Black Error.
@@ -61,7 +67,7 @@ Claude Cage аб’ядноўвае тэрмінал, браўзер, рэдак
 
 Cage падтрымлівае macOS, Windows і Linux: Apple Silicon з macOS 14+, Windows 10 22H2 / 11 x64 і Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac, Windows ARM64 і Linux ARM64 пакуль не падтрымліваюцца. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. Спампаваць праграму: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/be/#download).
+1. Спампаваць праграму: [macOS / Windows / Linux](https://claude-cage.com/be/#download).
 2. macOS: Адкрыйце ўсталявальны пакет і перацягнуць **Cage** у **Прыкладанні**; затым запусціце яго з праграм. Windows: [Інструкцыя па ўсталяванні](docs/windows.md#安装并开始工作) · Linux: [Інструкцыя па ўсталяванні](docs/linux.md#安装并开始工作).
 3. Выконвайце інструкцыі ў дадатку, каб наладзіць свой уласны сеткавы проксі, запусціць асяроддзе і адкрыць праект.
 
@@ -102,17 +108,20 @@ macOS і падпісаныя версіі Windows абнаўляюцца пра
 
 | Ваша задача | Пачаць тут |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [Выбар гасцявой сістэмы](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [Выбар гасцявой сістэмы](https://claude-cage.com/docs/guest-systems/) |
 | Усталюйце, наладзьце сеткавы проксі і адкрыйце свой першы праект | [Пачатак працы](docs/getting-started.md) |
 | Выпраўленне непаладак спампоўкі, запуску, падключэння і ўваходу ў сістэму | [FAQ і аднаўленне](docs/troubleshooting.md) |
 | Вывучыце элементы кіравання з клавіятуры, знешні выгляд, захаванне даных і паводзіны пры выхадзе | [Штодзённае выкарыстанне](docs/getting-started.md#日常使用) |
 | Паведаміць аб узнаўляльнай праблеме | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| Унесці выпраўленне, функцыю або дакументацыю: праверка Issue → запрашэнне суаўтара → PR | [Кіраўніцтва для ўдзельнікаў (кітайская)](.github/CONTRIBUTING.md) |
 
 Праект імкліва развіваецца. Далучайцеся да групы супольнасці, каб падзяліцца водгукамі; вітаюцца супрацоўнікі супольнасці.
 
-<p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1134250870" width="240" /></a>
-</p>
+| QQ group · 273237690 | WeChat |
+| :---: | :---: |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+
+[Telegram](https://t.me/claude_cage)
 
 ## Паходжанне і ліцэнзаванне
 
@@ -135,6 +144,7 @@ Cage з'яўляецца незалежным грамадскім праект�
 - [code-server](https://github.com/coder/code-server): рэдактар ​​кода на аснове браўзера.
 - [AIO Sandbox](https://github.com/agent-infra/sandbox): спасылкі на дызайн працоўнага асяроддзя і ўзаемадзеяння.
 - [claude-switcher](https://github.com/YOURSJEYO/claude-switcher) і [Claude-Guardian](https://github.com/DUNHKpcc/Claude-Guardian): спасылкі для праверкі сеткі і дыягностыкі бяспекі.
+- [claude-post-ban-cleanup](https://github.com/l2461090/claude-post-ban-cleanup): прыклад дакладнай інвентарызацыі, абароны даных і ачысткі кэша з аднаўленнем; незалежная рэалізацыя ў Cage.
 
 
 <a href="https://www.star-history.com/?repos=Lee-xeo%2FClaude-Cage&amp;type=date">

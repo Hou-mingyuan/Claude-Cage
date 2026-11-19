@@ -95,7 +95,7 @@ func MaintainMacOSComponents(ctx context.Context, profile, kit, manifestPath str
 	}()
 	archiveArgs := []string{"--no-mac-metadata", "-cf", "-", "-C", kit, ".", "-C", local, "native-components.json"}
 	if tools {
-		archiveArgs = append(archiveArgs, "-C", cache, "node.tgz", "editor.tgz", "playwright.tgz", "chrome.dmg", "cli")
+		archiveArgs = append(archiveArgs, "-C", cache, "node.tgz", "editor.tgz", "chrome.dmg", "cli")
 	}
 	archive := exec.CommandContext(ctx, "/usr/bin/tar", archiveArgs...)
 	archive.Env = append(os.Environ(), "COPYFILE_DISABLE=1")

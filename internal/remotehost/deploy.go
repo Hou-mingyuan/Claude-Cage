@@ -93,6 +93,11 @@ func cloudEntry(ctx context.Context, client *ssh.Client, p HostProfile, deploy b
 	if out, err := runSSH(client, command, nil); err == nil {
 		return out, nil
 	}
+	if p.Platform == "windows" {
+		// A Windows host must never fall through to the Linux/rootless-Docker
+		// installer. Provisioning the interactive user is a separate operation.
+		return nil, failure("windows_server_not_ready", "Windows Cage 服务尚未就绪，请检查已部署的服务和配置路径；不能在此主机运行 Linux 部署包")
+	}
 	phase("cloud_detect")
 	out, err := runSSH(client, lifecycleCommand(p, "probe"), nil)
 	if err != nil {

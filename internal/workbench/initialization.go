@@ -35,7 +35,12 @@ func (s *Server) initializationState() (initializationView, error) {
 		if json.Unmarshal(data, &record) != nil || record.Version != 1 {
 			return initializationView{}, errors.New("初始化记录无法读取，请保留现有数据并导出诊断包")
 		}
-		return initializationView{Required: !record.Completed || s.macSetupPending(), Started: record.Started, Tracked: true, Prepared: s.environmentPrepared()}, nil
+		pending, err := guestos.LoadInstallation(s.profile)
+		if err != nil {
+			return initializationView{}, err
+		}
+		unboundMac := pending != nil && pending.System == guestos.MacOS && s.macosGuest == nil
+		return initializationView{Required: !record.Completed || s.macSetupPending() || unboundMac, Started: record.Started || unboundMac, Tracked: true, Prepared: s.environmentPrepared()}, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return initializationView{}, err

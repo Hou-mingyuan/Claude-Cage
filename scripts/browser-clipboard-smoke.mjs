@@ -10,6 +10,11 @@ const { chromium } = createRequire(import.meta.url)(
   process.env.CAGE_PLAYWRIGHT_MODULE || "playwright",
 );
 const site = http.createServer((request, response) => {
+  if (request.url === "/source") {
+    response.writeHead(401, { "Content-Type": "application/json" });
+    response.end('{"error":"unauthorized"}');
+    return;
+  }
   response.setHeader("Content-Type", "text/html; charset=utf-8");
   response.end(`<!doctype html><button id="copy">Copy</button><script>
     const originalWrite = navigator.clipboard.writeText.bind(navigator.clipboard);
@@ -22,9 +27,10 @@ const site = http.createServer((request, response) => {
 });
 await new Promise((resolve) => site.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${site.address().port}`;
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true,
+  ...(process.env.CAGE_BROWSER_TEST_CHROMIUM ? { executablePath: process.env.CAGE_BROWSER_TEST_CHROMIUM } : {}) });
 const context = await browser.newContext({
-  permissions: ["clipboard-read", "clipboard-write"],
+  permissions: ["clipboard-write"],
 });
 const copies = [];
 const sessions = new Map();
@@ -32,6 +38,15 @@ const pageIds = new WeakMap();
 const observer = new BrowserClipboard(
   (method, params, id) => sessions.get(id).send(method, params),
   (copy) => copies.push(copy),
+  { source: async () => {
+    const helper = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+    const page = await helper.newPage();
+    await page.goto(origin + "/source");
+    const connection = await helper.newCDPSession(page);
+    sessions.set("source", connection);
+    connection.on("Runtime.bindingCalled", params => observer.event({ sessionId: "source", method: "Runtime.bindingCalled", params }));
+    return "source";
+  } },
 );
 async function attach(page, id) {
   pageIds.set(page, id);
@@ -75,7 +90,15 @@ try {
   await page.waitForTimeout(50);
   assert.deepEqual(copies, []);
   await click(page, ["中文🙂\nexact text"]);
+  await click(page, ["中文🙂\nexact text"]);
+  const fingerprint = () => ({
+    globals: Object.getOwnPropertyNames(globalThis).filter(name => /cage/i.test(name)),
+    native: [Clipboard.prototype.writeText, Clipboard.prototype.write, DataTransfer.prototype.setData, DataTransfer.prototype.clearData, Document.prototype.execCommand]
+      .every(fn => /\{ \[native code\] \}/.test(Function.prototype.toString.call(fn))),
+  });
+  assert.deepEqual(await page.evaluate(fingerprint), { globals: [], native: true });
   await page.reload();
+  assert.deepEqual(await page.evaluate(fingerprint), { globals: [], native: true });
   await click(page, ["中文🙂\nexact text"]);
 
   await page.evaluate(() => {
@@ -100,9 +123,7 @@ try {
 
   for (const mode of ["textarea", "input", "shadow", "password", "collapsed"]) {
     await page.reload();
-    const previousClipboard = await page.evaluate(() =>
-      navigator.clipboard.readText(),
-    );
+    const previousClipboard = await sessions.get("source").send("Runtime.evaluate", { expression: "navigator.clipboard.readText()", awaitPromise: true, returnByValue: true }).then(value => value.result.value);
     await page.evaluate((mode) => {
       window.action = () => {
         const field = document.createElement(
@@ -130,7 +151,7 @@ try {
     const exported = mode !== "password" && mode !== "collapsed";
     await click(page, exported ? [expected] : []);
     assert.equal(
-      await page.evaluate(() => navigator.clipboard.readText()),
+      await sessions.get("source").send("Runtime.evaluate", { expression: "navigator.clipboard.readText()", awaitPromise: true, returnByValue: true }).then(value => value.result.value),
       exported ? expected : previousClipboard,
       mode,
     );
@@ -154,9 +175,9 @@ try {
       field.remove();
     };
   });
-  await click(page, []);
+  await click(page, ["aimage alternativeb"]);
   assert.equal(
-    await page.evaluate(() => navigator.clipboard.readText()),
+    await sessions.get("source").send("Runtime.evaluate", { expression: "navigator.clipboard.readText()", awaitPromise: true, returnByValue: true }).then(value => value.result.value),
     "aimage alternativeb",
   );
 
@@ -260,7 +281,7 @@ try {
     Clipboard.prototype.writeText = () => Promise.resolve();
   });
   const result = await attach(modified, "modified");
-  assert.match(result.skipped[0]?.reason, /writeText/);
+  assert.deepEqual(result.skipped, []);
   await click(modified, []);
   await modified.reload();
   await click(modified, ["中文🙂\nexact text"]);
@@ -283,7 +304,7 @@ try {
     };
   });
   const poisonedResult = await attach(poisoned, "poisoned");
-  assert.match(poisonedResult.skipped[0]?.reason, /defineProperty/);
+  assert.deepEqual(poisonedResult.skipped, []);
   assert.equal(
     await poisoned.evaluate(() => window.leakedReferenceTable),
     false,
@@ -300,6 +321,7 @@ try {
   const frameContext = randomUUID();
   await modified.frameLocator("iframe").locator("#copy").waitFor();
   await observer.setContext("modified", frameContext);
+  await modified.bringToFront();
   await modified.frameLocator("iframe").locator("#copy").click();
   await modified.waitForTimeout(100);
   assert.deepEqual(copies.slice(frameCount), [

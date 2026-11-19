@@ -89,3 +89,26 @@ func TestWindowsBindingKeepsPacketPairingOutOfArguments(t *testing.T) {
 		t.Fatal("packet transport bypassed the protected profile")
 	}
 }
+
+func TestRemoteWindowsBindingIsLimitedToHeadlessRelay(t *testing.T) {
+	root := t.TempDir()
+	binding := windowsBindingFixture(root)
+	binding.Mode, binding.MachineID, binding.SandboxPackage = "remote", uuid.NewString(), binding.VMID.String()
+	if err := BindWindowsProfile(root, binding); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"headless-status", "headless-browser", "headless-cli", "headless-terminal", "headless-safety"} {
+		if _, err := WindowsRelayCommand(context.Background(), root, operation); err != nil {
+			t.Fatalf("remote %s unavailable: %v", operation, err)
+		}
+	}
+	for _, operation := range []string{"terminal", "cli", "stream", "project-mount", "network-stream"} {
+		if _, err := WindowsRelayCommand(context.Background(), root, operation); err == nil {
+			t.Fatalf("remote binding admitted %s outside the headless service", operation)
+		}
+	}
+	binding.SandboxPackage = uuid.NewString()
+	if err := binding.validate(); err == nil {
+		t.Fatal("binding accepted another instance's sandbox")
+	}
+}

@@ -64,6 +64,13 @@ internal static class SelfTest
         Assert(!ClaudeGraphicsCapture.HasContent(blank));
         using(var paint=Graphics.FromImage(blank)){paint.FillRectangle(Brushes.Black,70,110,100,30);}
         Assert(ClaudeGraphicsCapture.HasContent(blank));
+        // The capture path samples surface rows directly, at an offset.
+        var surface = new byte[260 * 250 * 4];
+        Array.Fill(surface, (byte)255);
+        Assert(!ClaudeGraphicsCapture.HasContent(surface, 260, 20, 10, 240, 240));
+        for (var y = 110; y < 140; y++) for (var x = 70; x < 170; x++) surface.AsSpan(((10 + y) * 260 + 20 + x) * 4, 3).Clear();
+        Assert(ClaudeGraphicsCapture.HasContent(surface, 260, 20, 10, 240, 240));
+        Assert(!ClaudeGraphicsCapture.HasContent(surface, 260, 21, 10, 240, 240));
         var browserFrame = new JsonObject { ["jpeg"] = "page-pixels", ["target"] = "native-window", ["sequence"] = "cdp-first", ["width"] = 800, ["height"] = 600 };
         var published = BrowserWindowCapture.FrameReply((JsonObject)browserFrame.DeepClone(), null);
         var sequence = published["sequence"]!.GetValue<string>();

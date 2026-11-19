@@ -47,6 +47,9 @@ func (runtime *windowsStorageRuntime) Snapshot(ctx context.Context, source strin
 	if binding == nil {
 		return snapshot, errors.New("Windows 客机尚未绑定")
 	}
+	if binding.Remote() {
+		return snapshot, errors.New("云端 Windows 不使用 Hyper-V 虚拟磁盘迁移")
+	}
 	state, err := runtime.call(ctx, binding.VMID, windowsHostStorageRequest{Action: "status"})
 	if err != nil {
 		return snapshot, fmt.Errorf("请先在设置的环境页选择“同步环境组件”，完成 Windows 系统授权后再迁移：%w", err)

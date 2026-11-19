@@ -1,7 +1,7 @@
 """Run with Cage's Python inside a prepared, network-authorized test VirtualMac.
 
-Use the ordinary guest account. The test gives Chrome and the official CLI a
-fresh temporary home, opens the official sign-in page, then cancels. It never
+Use the ordinary account in a disposable guest. The CLI receives a temporary
+home and the registered native service opens an isolated login window. It never
 submits an account, authorization code or model prompt.
 """
 import json
@@ -14,7 +14,6 @@ import signal
 import subprocess
 import tempfile
 import time
-from urllib.parse import urlsplit
 
 
 def browser_request(browser, route):
@@ -32,13 +31,9 @@ def authorized_tab(snapshot):
     for tab in snapshot.get("tabs", []):
         if not tab.get("login") or tab["id"] != snapshot.get("active"):
             continue
-        if tab["url"] in ("about:blank", "null"):
-            continue
-        url = urlsplit(tab["url"])
-        if url.query or url.fragment or url.path not in ("", "/"):
-            raise RuntimeError("The workbench snapshot exposed a login URL path or parameters")
-        return url.scheme == "https" and url.hostname in (
-            "claude.ai", "claude.com", "platform.claude.com", "platform.anthropic.com", "console.anthropic.com")
+        if tab["url"]:
+            raise RuntimeError("The workbench snapshot exposed a native login URL")
+        return tab.get("native_window") is True
     return False
 
 
@@ -82,8 +77,13 @@ def main():
     with tempfile.TemporaryDirectory(dir="/tmp", prefix="cgc.") as home:
         env = dict(os.environ, HOME=home, TERM="xterm-256color",
                    PATH="/usr/local/libexec/cage-cli/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        # The LaunchAgent belongs to the real GUI user. Link only its private
+        # CLI socket into the disposable home, while the test account data stays there.
+        temp_login = Path(home) / "Library/Application Support/Cage/Login"
+        temp_login.parent.mkdir(parents=True, mode=0o700)
+        temp_login.symlink_to(Path.home() / "Library/Application Support/Cage/Login", target_is_directory=True)
         with subprocess.Popen([base / "editor/lib/node", base / "controller/macos-native-browser.mjs"],
-                              env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL) as browser:
             try:
                 deadline = time.monotonic() + 45

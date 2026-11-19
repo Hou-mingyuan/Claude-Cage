@@ -18,9 +18,28 @@ import threading
 import time
 import uuid
 
+_controller_context = {**os.environ, **globals().get("_controller_context", {})}
+PRIVATE_MODE = 0o777 if os.name == "nt" and _controller_context.get("CAGE_REMOTE_APP_CONTAINER") == "1" else 0o700
+_runtime = None
+
+
+def client_runtime():
+    global _runtime
+    if _runtime is None:
+        helper = Path(shutil.which("cage-claude-account") or "/usr/local/bin/cage-claude-account").resolve()
+        paths = (Path(__file__).with_name("client_runtime.py"),
+                 helper.with_name("client_runtime.py"), helper.parent.parent / "client_runtime.py",
+                 Path("/usr/local/bin/client_runtime.py"),
+                 Path(__file__).parent.parent / "cage/client_runtime.py")
+        source = next((path for path in paths if path.is_file()), None)
+        if source is None:
+            raise ValueError("Client runtime component unavailable")
+        _runtime = runpy.run_path(source, init_globals={"_controller_context": _controller_context})
+    return _runtime
+
 
 if os.name == "nt":
-    _platform = runpy.run_path(Path(__file__).with_name("windows_cli_platform.py"))
+    _platform = runpy.run_path(Path(__file__).with_name("windows_cli_platform.py"), init_globals={"_controller_context": _controller_context})
     fcntl = _platform["FileLock"]
 else:
     import fcntl
@@ -35,7 +54,7 @@ def terminate_cli(pid, force=False):
         return _platform["terminate_cli"](pid, force)
     return os.kill(int(pid), signal.SIGKILL if force else signal.SIGTERM)
 
-ROOT = Path(os.environ["CAGE_CLI_STATE_ROOT"]) if os.name == "nt" else Path.home() / ".local/share/cage/cli-channels"
+ROOT = Path(_controller_context["CAGE_CLI_STATE_ROOT"]) if os.name == "nt" else Path.home() / ".local/share/cage/cli-channels"
 PROMPT_LIMIT = 32 << 10
 REPLY_LIMIT = 128 << 10
 HISTORY_LIMIT = 448 << 10
@@ -87,7 +106,7 @@ def config_directory(account):
         return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").resolve()
     if not re.fullmatch(r"[0-9a-f]{24}", account):
         raise ValueError("invalid account")
-    root = Path(os.environ["CAGE_CLI_ACCOUNT_ROOT"]) if os.name == "nt" else Path.home() / ".local/share/cage/claude-accounts"
+    root = Path(_controller_context["CAGE_CLI_ACCOUNT_ROOT"]) if os.name == "nt" else Path.home() / ".local/share/cage/claude-accounts"
     return root / account / "config"
 
 
@@ -109,7 +128,8 @@ def clip_text(text, limit):
 
 
 def channel_message(text):
-    match = re.match(r'^<channel\s+[^>]*cage_request="([0-9a-f-]{36})"[^>]*>\n?', text)
+    # Read historical receipts without adding their old field to new messages.
+    match = re.match(r'^<channel\s+[^>]*\b(?:request_id|cage_request)="([0-9a-f-]{36})"[^>]*>\n?', text)
     if not match or not text.endswith("</channel>"):
         return None
     # Only remove the framing newline. The user's text can itself contain XML
@@ -309,12 +329,17 @@ def discover(request):
             configs.add(state["config"])
     for config_name in configs:
         config = Path(config_name)
-        running_ids = None
+        running = None
         def observed_running():
-            nonlocal running_ids
-            if running_ids is None:
-                running_ids = {row.get("sessionId") for row in running_sessions(config_name)}
-            return running_ids
+            nonlocal running
+            if running is None:
+                running = running_sessions(config_name)
+            return running
+        def process_state(session_id):
+            rows = [row for row in observed_running() if row.get("sessionId") == session_id]
+            return {"running": bool(rows), "claude_desktop": any(
+                session_entrypoint(row, config) in ("claude-desktop", "claude-desktop-3p", "local-agent", "local_agent", "remote_desktop")
+                for row in rows)}
         paths = sorted((config / "projects").glob("*/*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
         found = set()
         for path in paths:
@@ -328,9 +353,11 @@ def discover(request):
             if not any(workspace_within(workspace, root) for root in allowed):
                 continue
             connection, state = connection_for(session_id, config)
+            process = process_state(session_id)
             item = {"cli_id": session_id, "config": config_name, "connection": connection,
                     "workspace": workspace, "title": title or "Claude Code", "updated_at": path.stat().st_mtime,
-                    "running": session_id in observed_running() or bool(live(state.get("pid")) and not state.get("closed")),
+                    "running": process["running"] or bool(live(state.get("pid")) and not state.get("closed")),
+                    "claude_desktop": process["claude_desktop"],
                     "active": bool(live(state.get("pid")) and not state.get("closed") and (state.get("busy") or state.get("approvals")))}
             found.add(session_id)
             sessions.append(item)
@@ -341,7 +368,9 @@ def discover(request):
             if state.get("config") != config_name or not session_id or session_id in found or not any(workspace_within(workspace, root) for root in allowed):
                 continue
             item = view(config, session_id)
-            item["running"] = item["running"] or session_id in observed_running()
+            process = process_state(session_id)
+            item["running"] = item["running"] or process["running"]
+            item["claude_desktop"] = process["claude_desktop"]
             item.pop("turns")
             sessions.append(item)
     return sessions
@@ -443,6 +472,25 @@ def running_sessions(config=""):
     if listing.returncode != 0:
         raise ValueError("无法检查原会话是否仍在运行")
     return [row for row in json.loads(listing.stdout) if live(row.get("pid"))]
+
+
+def session_entrypoint(row, config):
+    # agents --json omits entrypoint in some CLI versions. Read only the
+    # matching live registration, never transcript origins or process arguments.
+    if row.get("entrypoint"):
+        return row["entrypoint"]
+    pid = row.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return ""
+    try:
+        with (config / "sessions" / (str(pid) + ".json")).open() as stream:
+            state = json.loads(stream.read(64 << 10))
+        if (state.get("pid") == pid and state.get("sessionId") == row.get("sessionId")
+                and row.get("startedAt") is not None and state.get("startedAt") == row["startedAt"]):
+            return state.get("entrypoint", "")
+    except (OSError, ValueError, AttributeError):
+        pass
+    return ""
 
 
 def handoff_session(request):
@@ -571,7 +619,7 @@ def prepare_account_switch(request):
                 pending.discard(block.get("tool_use_id"))
     if pending:
         raise ValueError("历史仍有结果未确认的工具，不能自动接续")
-    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    folder.mkdir(mode=PRIVATE_MODE, parents=True, exist_ok=True)
     target = folder / "history.jsonl"
     with tempfile.NamedTemporaryFile(dir=folder, delete=False) as stream:
         stream.write(path.read_bytes())
@@ -647,22 +695,24 @@ def purge_session(request):
 
 
 def launch(request):
+    _runtime = client_runtime()
     if os.name == "nt" and request.get("ccs_profile"):
         return _platform["launch_ccs_parent"](request, globals())
     policy_available = migrate_cage_policy()
     connection = identifier(request["id"])
     folder = ROOT / connection
-    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    folder.mkdir(parents=True, exist_ok=True, mode=PRIVATE_MODE)
     prefix = request["prefix"]
     if os.name == "nt":
         account_id = request.get("account") or "default"
         os.environ["CLAUDE_CONFIG_DIR"] = str(config_directory(account_id))
         if request.get("subject"):
-            os.environ["CAGE_CLAUDE_SUBJECT"] = request["subject"]
-        prefix = [os.environ["CAGE_CLI_BINARY"]]
+            _controller_context["CAGE_CLAUDE_SUBJECT"] = request["subject"]
+        prefix = [_controller_context["CAGE_CLI_BINARY"]]
         request["prefix"] = prefix
     elif len(prefix) == 5 and Path(prefix[2]).name == "cage-claude-account" and prefix[3] == "run":
         os.environ["CLAUDE_CONFIG_DIR"] = str(config_directory(prefix[4]))
+        _controller_context["CAGE_CLAUDE_SUBJECT"] = prefix[1].split("=", 1)[1]
     elif request.get("config"):
         os.environ["CLAUDE_CONFIG_DIR"] = request["config"]
     session_id = identifier(request.get("resume") or request.get("session_id") or connection)
@@ -670,25 +720,26 @@ def launch(request):
     if request.get("resume"):
         if active_session(request["resume"]):
             raise ValueError("原会话仍在电脑终端运行，请先结束该终端中的 Claude Code 再接续")
-    command = shlex.join([sys.executable, *(["-X", "utf8"] if os.name == "nt" else []), "-I", str(Path(__file__).resolve()), "hook", connection])
+    command = _runtime["command_text"](__file__, ["hook", connection])
     events = ("SessionStart", "UserPromptSubmit", "MessageDisplay", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure", "SessionEnd")
     handler = {"type": "command", "command": command, "timeout": 5}
     if os.name == "nt":
-        handler = {"type": "command", "command": sys.executable,
-                   "args": ["-X", "utf8", "-I", str(Path(__file__).resolve()), "hook", connection], "timeout": 5}
+        argv = _runtime["command"](__file__, ["hook", connection])
+        handler = {"type": "command", "command": argv[0], "args": argv[1:], "timeout": 5}
     settings = {"hooks": {event: [{"hooks": [handler.copy()]}] for event in events}}
     prefix = request["prefix"]
     if os.name == "nt":
-        account = runpy.run_path(os.environ["CAGE_CLI_ACCOUNT_HELPER"])
+        account = runpy.run_path(_controller_context["CAGE_CLI_ACCOUNT_HELPER"])
         if not account["has_status_line"](account["profile"](account_id)):
-            status_command = shlex.join([sys.executable, "-X", "utf8", "-I", os.environ["CAGE_CLI_ACCOUNT_HELPER"], "statusline", account_id])
+            status_command = _runtime["command_text"](_controller_context["CAGE_CLI_ACCOUNT_HELPER"], ["statusline", account_id])
             settings["statusLine"] = {"type": "command", "command": status_command}
     elif len(prefix) == 5 and Path(prefix[2]).name == "cage-claude-account" and prefix[3] == "run":
         account = runpy.run_path(prefix[2])
         if not account["has_status_line"](account["profile"](prefix[4])):
-            settings["statusLine"] = {"type": "command", "command": prefix[2] + " statusline " + prefix[4]}
+            settings["statusLine"] = {"type": "command", "command": _runtime["command_text"](prefix[2], ["statusline", prefix[4]])}
     save(folder / "settings.json", settings)
-    config = {"mcpServers": {"cage": {"command": sys.executable, "args": [*(["-X", "utf8"] if os.name == "nt" else []), "-I", str(Path(__file__).resolve()), "serve", connection]}}}
+    argv = _runtime["command"](__file__, ["serve", connection])
+    config = {"mcpServers": {connection: {"command": argv[0], "args": argv[1:]}}}
     save(folder / "mcp.json", config)
     with state_file(connection) as state:
         if live(state.get("pid")) and not state.get("closed"):
@@ -718,20 +769,27 @@ def launch(request):
         except (OSError, ValueError):
             state["blocked"] = False
         state["policy_unavailable"] = policy_available is False
-    args = [*request["prefix"], "--settings", str(folder / "settings.json"), "--mcp-config", str(folder / "mcp.json"),
-            "--dangerously-load-development-channels", "server:cage"]
+    args = [*request["prefix"], "--settings", _runtime["path"](folder / "settings.json"), "--mcp-config", _runtime["path"](folder / "mcp.json"),
+            "--dangerously-load-development-channels", "server:" + connection]
+    for directory in request.get("additional_directories", []):
+        if not isinstance(directory, str) or not Path(directory).is_absolute() or not Path(directory).is_dir():
+            raise ValueError("项目文件夹未连接，请重新打开项目")
+        args += ["--add-dir", directory]
     if request.get("resume_transcript"):
         expected = ROOT.parent / "cli-account-switches" / identifier(request["switch_id"]) / "history.jsonl"
         if Path(request["resume_transcript"]) != expected or not expected.is_file():
             raise ValueError("账号交接历史无效")
-        args += ["--resume", str(expected), "--fork-session", "--session-id", session_id]
+        args += ["--resume", _runtime["path"](expected), "--fork-session", "--session-id", session_id]
     else:
         args += ["--resume", session_id] if request.get("resume") else ["--session-id", session_id]
     if state.get("handoff_permission_mode") == "manual":
         args += ["--permission-mode", "manual"]
     if os.name == "nt":
         return _platform["launch_cli"](args, request, connection, state_file)
-    os.execvpe(args[0], args, os.environ)
+    # Managed account wrappers need their private launch state until they reach
+    # the official executable; the ordinary direct launch crosses that boundary here.
+    managed = len(request["prefix"]) == 5 and request["prefix"][3] == "run"
+    os.execvpe(args[0], args, os.environ if managed else _runtime["environment"](os.environ))
 
 
 def rpc(request):
@@ -786,7 +844,7 @@ def serve(connection):
                             # Persist admission before writing to the CLI. A lost
                             # acknowledgement must never replay a channel event.
                             save(ROOT / connection / "state.json", state)
-                            emit({"method": "notifications/claude/channel", "params": {"content": text, "meta": {"cage_request": request_id}}})
+                            emit({"method": "notifications/claude/channel", "params": {"content": text, "meta": {"request_id": request_id}}})
                     elif action == "approve":
                         pending = state.get("approvals", [])
                         if not pending or pending[0]["id"] != request["approval_id"] or type(request["allow"]) is not bool:
@@ -807,7 +865,7 @@ def serve(connection):
                             save(ROOT / connection / "state.json", state)
                             emit({"method": "notifications/claude/channel", "params": {
                                 "content": Path(__file__).with_suffix(".account-resume.md" if state.get("account_resume") else ".resume.md").read_text(encoding="utf-8"),
-                                "meta": {"cage_resume": "true"}}})
+                                "meta": {"resume": "true"}}})
                     else:
                         raise ValueError("unsupported operation")
                     state["updated_at"] = time.time()
@@ -837,9 +895,8 @@ def serve(connection):
                 message = json.loads(line)
                 method = message.get("method")
                 if method == "initialize":
-                    emit({"id": message["id"], "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "cage", "version": "1"},
-                          "capabilities": {"experimental": {"claude/channel": {}, "claude/channel/permission": {}}},
-                          "instructions": "The user is viewing this same Claude Code conversation from Cage on a phone. Respond normally in the conversation. Cage synchronizes the transcript."}})
+                    emit({"id": message["id"], "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "session", "version": "1"},
+                          "capabilities": {"experimental": {"claude/channel": {}, "claude/channel/permission": {}}}}})
                 elif method == "notifications/initialized":
                     with state_file(connection) as state:
                         state["channel_pid"] = os.getpid()

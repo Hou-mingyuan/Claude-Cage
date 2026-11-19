@@ -114,7 +114,7 @@ func Cmdline(inst *limatype.Instance) (*exec.Cmd, error) {
 func buildNetworkArgs(inst *limatype.Instance) ([]string, error) {
 	var args []string
 
-	// Configure default usernetwork with limayaml.MACAddress(inst.Dir) for eth0 interface
+	// Configure default usernetwork with limayaml.GuestMACAddress(inst.Config, inst.Dir) for eth0 interface
 	firstUsernetIndex := limayaml.FirstUsernetIndex(inst.Config)
 	if firstUsernetIndex == -1 {
 		// slirp network using gvisor netstack
@@ -127,7 +127,7 @@ func buildNetworkArgs(inst *limatype.Instance) ([]string, error) {
 			return nil, err
 		}
 
-		args = append(args, "--device", fmt.Sprintf("virtio-net,type=unixgram,fd=%d,mac=%s", client.Fd(), limayaml.MACAddress(inst.Dir)))
+		args = append(args, "--device", fmt.Sprintf("virtio-net,type=unixgram,fd=%d,mac=%s", client.Fd(), limayaml.GuestMACAddress(inst.Config, inst.Dir)))
 	}
 
 	for _, nw := range inst.Networks {
@@ -144,7 +144,7 @@ func buildNetworkArgs(inst *limatype.Instance) ([]string, error) {
 				if err != nil {
 					return nil, err
 				}
-				mac = limayaml.MACAddress(inst.Dir)
+				mac = limayaml.GuestMACAddress(inst.Config, inst.Dir)
 			case networks.ModeShared, networks.ModeBridged:
 				socketVMNetInstalled, err := nwCfg.IsDaemonInstalled(networks.SocketVMNet)
 				if err != nil {
@@ -201,7 +201,7 @@ func startUsernet(ctx context.Context, inst *limatype.Instance) (*usernet.Client
 		FdSocket: krunkitSock,
 		Async:    true,
 		DefaultLeases: map[string]string{
-			networks.SlirpIPAddress: limayaml.MACAddress(inst.Dir),
+			networks.SlirpIPAddress: limayaml.GuestMACAddress(inst.Config, inst.Dir),
 		},
 		Subnet: networks.SlirpNetwork,
 	})

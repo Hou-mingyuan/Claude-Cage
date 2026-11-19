@@ -9,6 +9,7 @@ full rate within a few frames; an unattended animation runs at a lower one.
 import os
 import select
 import signal
+import socket
 import struct
 import sys
 import time
@@ -66,6 +67,21 @@ def raw_key(data):
     return struct.unpack_from('=I', data, 6)[0] if isinstance(data, (bytes, bytearray)) and len(data) >= 10 else None
 
 
+def negotiate_input(connection):
+    """Require raw events even while another application owns an input grab.
+
+    python-xlib's xinput_query_version helper requests XI 2.0, whose raw
+    events disappear during another client's grab (menus/scrollbar drags).
+    XI 2.1 keeps delivery active. Older servers must keep the full frame rate
+    rather than throttle a viewer whose activity we cannot reliably observe.
+    """
+    from Xlib.ext import xinput
+    version = xinput.XIQueryVersion(display=connection.display,
+                                   opcode=connection.display.get_extension_major(xinput.extname),
+                                   major_version=2, minor_version=1)
+    return (version.major_version, version.minor_version) >= (2, 1)
+
+
 def choose_mode(rate, current, base, available):
     """Mode to show `rate` at the current size, and the remembered base mode.
 
@@ -80,16 +96,76 @@ def choose_mode(rate, current, base, available):
     return mode_name(rate, width, height), base
 
 
+class Activity:
+    """Viewer input that does not pass through the display.
+
+    A page scrolled by its viewer's distance receives no display input. The
+    client that scrolls it writes to this socket instead, and each write
+    counts as input. Without a path nothing listens.
+    """
+
+    def __init__(self, path=None):
+        self.listener, self.clients = None, []
+        if not path:
+            return
+        try:
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            if os.path.lexists(path):
+                os.unlink(path)
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            mask = os.umask(0o177)
+            try:
+                listener.bind(path)
+            finally:
+                os.umask(mask)
+            listener.listen(4)
+            listener.setblocking(False)
+            self.listener = listener
+        except OSError as error:
+            # The display is still paced by its own input.
+            print(f'display governor: activity socket unavailable: {error}', file=sys.stderr)
+
+    def files(self):
+        return ([self.listener] if self.listener else []) + self.clients
+
+    def acted(self):
+        acted = False
+        while self.listener:
+            try:
+                client = self.listener.accept()[0]
+            except OSError:
+                break
+            client.setblocking(False)
+            if len(self.clients) >= 4:
+                self.clients.pop(0).close()
+            self.clients.append(client)
+        for client in list(self.clients):
+            try:
+                data = client.recv(4096)
+            except (BlockingIOError, InterruptedError):
+                continue
+            except OSError:
+                data = b''
+            if data:
+                acted = True
+            else:
+                client.close()
+                self.clients.remove(client)
+        return acted
+
+
 class Governor:
-    def __init__(self, connection, output='VNC-0'):
+    def __init__(self, connection, output='VNC-0', activity=None):
         from Xlib.ext import randr, xinput
         self.conn = connection
+        self.activity = activity or Activity()
         self.root = connection.screen().root
         self.output_name = output
         self.xinput = xinput
         self.expected = None
         self.base = None
         self.probe_codes = None
+        self.stopping = False
         # Requests without a reply report their errors here. A mode another
         # client still uses is simply left in place.
         connection.set_error_handler(lambda *_: None)
@@ -200,10 +276,11 @@ class Governor:
                 acted = True
         return acted, changed
 
-    def run(self, clock=time.monotonic):
+    def run(self, clock=time.monotonic, wakeup_fd=None):
         last_input, shown = clock(), None
-        while True:
+        while not self.stopping:
             acted, changed = self.events()
+            acted = self.activity.acted() or acted
             if acted:
                 last_input = clock()
             rate = target_rate(clock() - last_input)
@@ -221,7 +298,10 @@ class Governor:
             if self.conn.pending_events():
                 continue
             wait = next_change(clock() - last_input) if shown is not None else 5
-            select.select([self.conn.fileno()], [], [], None if wait is None else wait + .01)
+            readers = [self.conn.fileno(), *self.activity.files()]
+            if wakeup_fd is not None:
+                readers.append(wakeup_fd)
+            select.select(readers, [], [], None if wait is None else wait + .01)
 
 
 def main():
@@ -244,11 +324,22 @@ def main():
         # Without both extensions the display simply keeps its full rate.
         print('display governor: RandR or XInput2 unavailable', file=sys.stderr)
         return 0
-    connection.xinput_query_version()
-    governor = Governor(connection, os.environ.get('CAGE_DISPLAY_OUTPUT', 'VNC-0'))
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    if not negotiate_input(connection):
+        print('display governor: XI 2.1 unavailable; keeping the full rate', file=sys.stderr)
+        connection.close()
+        return 0
+    governor = Governor(connection, os.environ.get('CAGE_DISPLAY_OUTPUT', 'VNC-0'),
+                        Activity(os.environ.get('CAGE_DISPLAY_ACTIVITY')))
+    # Never raise out of a python-xlib request: it can leave a reply lock held
+    # and deadlock the full-rate restore below. Mark shutdown and wake select
+    # instead, including when the idle display has no next timer deadline.
+    wake_read, wake_write = os.pipe()
+    os.set_blocking(wake_read, False)
+    os.set_blocking(wake_write, False)
+    previous_wakeup = signal.set_wakeup_fd(wake_write)
+    previous_handler = signal.signal(signal.SIGTERM, lambda *_: setattr(governor, 'stopping', True))
     try:
-        governor.run()
+        governor.run(wakeup_fd=wake_read)
     finally:
         # A stopped governor leaves the display at its full rate.
         try:
@@ -256,6 +347,11 @@ def main():
                 governor.apply(ACTIVE_RATE)
         except Exception:
             pass
+        signal.signal(signal.SIGTERM, previous_handler)
+        signal.set_wakeup_fd(previous_wakeup)
+        os.close(wake_read)
+        os.close(wake_write)
+        connection.close()
     return 0
 
 

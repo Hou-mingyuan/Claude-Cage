@@ -55,6 +55,20 @@ func TestMacOSWindowInputContract(t *testing.T) {
 }
 
 func TestMacOSWindowInputRoutesPreserveCompositionSequence(t *testing.T) {
+	for _, surface := range []string{"claude", "browser"} {
+		t.Run(surface, func(t *testing.T) { testMacWindowInputRoutes(t, surface) })
+	}
+}
+
+func testMacWindowInputRoutes(t *testing.T, surface string) {
+	base := "/api/macos/claude"
+	expectedAction, expectedSurface := "ime", ""
+	spoofSurface := "browser"
+	if surface == "browser" {
+		base = "/api/macos-browser"
+		expectedAction, expectedSurface = "browser-ime", "browser"
+		spoofSurface = ""
+	}
 	guest := newMacWorkspaceGuest(t, func(channel ssh.Channel, command string) (uint32, bool) {
 		if !strings.Contains(command, "window.sock") {
 			return 0, false
@@ -74,13 +88,13 @@ func TestMacOSWindowInputRoutesPreserveCompositionSequence(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(s.macOSWindowConnection))
 	defer server.Close()
 	s.origin = server.URL
-	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), http.Header{"Origin": {server.URL}})
+	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+base+"/connection", http.Header{"Origin": {server.URL}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
 	for sequence, mode := range []string{"begin", "update", "commit"} {
-		input := macOSWindowRequest{Action: "ime", PID: 42, Window: 7, Geometry: "geometry", Mode: mode,
+		input := macOSWindowRequest{Action: "ime", Surface: spoofSurface, PID: 42, Window: 7, Geometry: "geometry", Mode: mode,
 			Context: strings.Repeat("a", 32), Session: strings.Repeat("b", 32), Sequence: sequence,
 			Project: "ungranted", PhoneToken: "ungranted", Path: "ungranted", Transfer: "ungranted", IDs: []string{"ungranted"}, KeepAlive: true, Wait: true, Binary: true}
 		if mode == "commit" {
@@ -99,7 +113,7 @@ func TestMacOSWindowInputRoutesPreserveCompositionSequence(t *testing.T) {
 		}
 		check := func(actual macOSWindowRequest, keepAlive bool) {
 			t.Helper()
-			if actual.Sequence != sequence || actual.Session != input.Session || actual.Text != input.Text || actual.Geometry != input.Geometry {
+			if actual.Action != expectedAction || actual.Surface != expectedSurface || actual.Sequence != sequence || actual.Session != input.Session || actual.Text != input.Text || actual.Geometry != input.Geometry {
 				t.Fatalf("composition changed in transit for %s, sequence %d", mode, actual.Sequence)
 			}
 			if actual.Project != "" || actual.Path != "" || actual.PhoneToken != "" || actual.Transfer != "" || actual.IDs != nil || actual.Wait || actual.Binary || actual.KeepAlive != keepAlive {
@@ -112,7 +126,7 @@ func TestMacOSWindowInputRoutesPreserveCompositionSequence(t *testing.T) {
 			t.Fatal(err)
 		}
 		recorder := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/api/macos/claude/window", bytes.NewReader(data))
+		request := httptest.NewRequest(http.MethodPost, base+"/window", bytes.NewReader(data))
 		request.Header.Set("Content-Type", "application/json")
 		s.macOSClaudeWindow(recorder, request)
 		if recorder.Code != http.StatusOK {

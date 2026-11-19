@@ -128,7 +128,7 @@ function probe(path) {
           !flags.includes("I") ||
           !gateway.startsWith("fe80:")
         )
-          return { name };
+          return { routeVerified: false };
         const detail = read("/sbin/route", [
           "-n",
           "get",
@@ -151,7 +151,7 @@ function probe(path) {
             boundIndex: data.boundIndex,
           };
         } catch {
-          return { name };
+          return { routeVerified: false };
         }
       }),
     );
@@ -163,11 +163,15 @@ function probe(path) {
       "get",
       "-inet",
       "198.18.0.254",
-    ]).match(/interface:\s*(en[0-9]+)\s*$/m)?.[1];
+    ]).match(
+      /interface:\s*((?:en|vmen|vmenet|vmnet|bridge|tap|lima)[0-9]+)\s*$/m,
+    )?.[1];
     if (iface && input.run_id && input.check_id) {
-      result.ipv6_link_interface = iface;
       result.ipv6_link_sent =
         read(helper, ["link", iface, input.run_id, input.check_id]) === "sent";
+      // The helper resolves the interface index and binds the datagram to it.
+      // Return only the outcome; the interface name stays in this process.
+      result.ipv6_link_interface_valid = result.ipv6_link_sent;
     }
     try {
       await dns.lookup(input.nonce + ".example.com");

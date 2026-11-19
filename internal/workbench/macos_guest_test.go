@@ -8,11 +8,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/guestos"
 )
 
@@ -178,6 +181,66 @@ func TestInitialMacSetupQuarantinesRegularWorkbench(t *testing.T) {
 	}
 }
 
+func TestPendingMacOSInstallQuarantinesWorkbench(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the recovery record's profile directory sync is denied on Windows")
+	}
+	s := testServer(t)
+	id := uuid.New()
+	if err := guestos.SaveInstallation(s.profile, guestos.Installation{Version: 1, System: guestos.MacOS, ID: id}); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{"/api/terminals", "/api/browser/tabs", "/api/projects/open", "/api/safety/check", "/api/macos/maintenance", "/api/macos/first-setup"}
+	for _, path := range paths {
+		if response := request(s, http.MethodGet, path, s.origin, "", true); response.Code != http.StatusConflict {
+			t.Errorf("pending Mac exposed %s: %d", path, response.Code)
+		}
+	}
+	prepare := httptest.NewRequest(http.MethodPost, s.origin+"/api/macos/install-recovery", strings.NewReader(`{"action":"prepare"}`))
+	prepare.Header.Set("Origin", s.origin)
+	prepare.Header.Set("Content-Type", "application/json")
+	prepare.AddCookie(&http.Cookie{Name: s.cookieName(), Value: s.session})
+	prepare.AddCookie(&http.Cookie{Name: s.cookieName() + "-desktop", Value: trustedViewProof(s.token)})
+	prepared := httptest.NewRecorder()
+	s.handler().ServeHTTP(prepared, prepare)
+	if prepared.Code != http.StatusConflict {
+		t.Fatalf("missing guest identity was guessed: %d %s", prepared.Code, prepared.Body.String())
+	}
+	machine := filepath.Join(s.profile, "state", "lima", "mac")
+	if err := os.MkdirAll(machine, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(machine, "vz-identifier"), []byte("failed-install-machine"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(machine, "disk"), []byte("published"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := guestos.LoadInstallation(s.profile)
+	if err != nil || pending == nil || pending.ID != id {
+		t.Fatalf("pending installation missing after failure: %+v %v", pending, err)
+	}
+	if err := guestos.CreateMacOSInstallRecovery(s.profile, "cageuser", id); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		if response := request(s, http.MethodGet, path, s.origin, "", true); response.Code != http.StatusConflict {
+			t.Errorf("recovery identity exposed %s: %d", path, response.Code)
+		}
+	}
+	get := httptest.NewRequest(http.MethodGet, s.origin+"/api/macos/install-recovery", nil)
+	get.AddCookie(&http.Cookie{Name: s.cookieName(), Value: s.session})
+	get.AddCookie(&http.Cookie{Name: s.cookieName() + "-desktop", Value: trustedViewProof(s.token)})
+	response := httptest.NewRecorder()
+	s.handler().ServeHTTP(response, get)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"available":true`) {
+		t.Fatalf("pending failure did not expose recovery entry: %d %s", response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(machine); err != nil {
+		t.Fatalf("pending guest disk was lost: %v", err)
+	}
+}
+
 func TestMacOSSetupAdministratorIdentity(t *testing.T) {
 	for _, user := range []string{"cage", "cageprovision"} {
 		t.Run(user, func(t *testing.T) {
@@ -197,5 +260,25 @@ func TestMacOSSetupAdministratorIdentity(t *testing.T) {
 				t.Fatalf("incorrect setup identity: %v", cmd.Args)
 			}
 		})
+	}
+}
+
+func TestMacOSComponentDriftFromReceipt(t *testing.T) {
+	required := cage.GuestManifest{Protocol: 1, Revision: "7edc041c", AppVersion: "0.1.7"}
+	for name, test := range map[string]struct {
+		receipt string
+		drifted bool
+	}{
+		"current":            {`{"protocol":1,"revision":"7edc041c","app_version":"0.1.7","system":"macos"}`, false},
+		"older app version":  {`{"protocol":1,"revision":"7edc041c","app_version":"0.1.7-rc.1","system":"macos"}`, false},
+		"older revision":     {`{"protocol":1,"revision":"dd93682c","app_version":"0.1.7-rc.1","system":"macos"}`, true},
+		"other protocol":     {`{"protocol":2,"revision":"7edc041c","system":"macos"}`, true},
+		"other system":       {`{"protocol":1,"revision":"7edc041c","system":"windows11"}`, true},
+		"missing receipt":    {`null`, true},
+		"unreadable receipt": {`not json`, true},
+	} {
+		if got := macOSComponentsDrifted([]byte(test.receipt), required); got != test.drifted {
+			t.Errorf("%s: drifted=%v, want %v", name, got, test.drifted)
+		}
 	}
 }

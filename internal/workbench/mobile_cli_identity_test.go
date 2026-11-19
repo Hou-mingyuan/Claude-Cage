@@ -140,10 +140,10 @@ func TestMobileCLIHistoryStaysAtBoundProvider(t *testing.T) {
 					"))(deny network-outbound)(allow network-outbound (remote ip \"localhost:*\"))"
 				launch = "/usr/bin/sandbox-exec -p " + shellescape.Quote(policy) + " " + shellescape.Quote(realBinary)
 			}
-			shim := "#!/bin/sh\n" + `if [ -n "$CAGE_TEST_ROUTE_SOURCE" ]; then
+			shim := "#!/bin/sh\n" + `if [ -n "$TEST_ROUTE_SOURCE" ]; then
 case " $* " in *" auth status "*) ` + launch + ` "$@"
 r=$?
-/bin/cp "$CAGE_TEST_ROUTE_SOURCE" "$CAGE_TEST_ROUTE_TARGET" || exit 91
+/bin/cp "$TEST_ROUTE_SOURCE" "$TEST_ROUTE_TARGET" || exit 91
 exit "$r";; esac
 fi
 ` + "exec " + launch + " \"$@\"\n"
@@ -245,7 +245,7 @@ fi
 					"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 					"HTTP_PROXY=" + proxyURL, "HTTPS_PROXY=" + proxyURL, "NO_PROXY=127.0.0.1,localhost"}
 				if swapAfterAuth {
-					cmd.Env = append(cmd.Env, "CAGE_TEST_ROUTE_SOURCE="+swapSource, "CAGE_TEST_ROUTE_TARGET="+settings)
+					cmd.Env = append(cmd.Env, "TEST_ROUTE_SOURCE="+swapSource, "TEST_ROUTE_TARGET="+settings)
 				}
 				if official {
 					// The sandbox permits only loopback. The fake TLS server stands in for the official hostname.

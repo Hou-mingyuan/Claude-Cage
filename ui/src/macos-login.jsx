@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, Maximize, ZoomIn } from "lucide-react";
 import { api } from "./api";
+import { pollLoginFrames } from "./macos-login-frames.mjs";
 import "./macos-login.css";
 
 // DOM physical codes and the matching ANSI key codes expected by the Apple VM keyboard.
@@ -79,10 +80,11 @@ function closeSession(session, endpoint, maintenance) {
   if (session) api(endpoint, { action: "close", session, ...(maintenance ? { maintenance } : {}) }).catch(() => {});
 }
 
-export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", label, setupActions, setupHint, setupStatus, setupError, autoOpen = false, managedCredential = false, onSessionClosed, onSettings }) {
-  const endpoint = initialSetup ? "/macos/first-setup" : maintenance ? "/macos/maintenance" : "/macos/login";
+export function MacOSLogin({ disabled, initialSetup = false, installRecovery = false, maintenance = "", label, setupActions, setupHint, setupStatus, setupError, autoOpen = false, managedCredential = false, onSessionClosed, onSettings }) {
+  const endpoint = installRecovery ? "/macos/install-recovery" : initialSetup ? "/macos/first-setup" : maintenance ? "/macos/maintenance" : "/macos/login";
   const scope = maintenance ? { maintenance } : {};
   const [opened, setOpened] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [session, setSession] = useState("");
   const [frame, setFrame] = useState("");
   const [message, setMessage] = useState("");
@@ -96,6 +98,7 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
   const [aspect, setAspect] = useState(guestWidth / guestHeight);
   const lease = useRef(null);
   const chain = useRef(Promise.resolve());
+  const refreshFrame = useRef(null);
   const stage = useRef(null);
   const keyboard = useRef(null);
   const imageRef = useRef(null);
@@ -138,7 +141,7 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
     setFrameError("");
     setRecovery("");
     setZoomed(!initialSetup && !maintenance);
-    setOpened(true);
+    setOpening(true);
     try {
       const r = await api(endpoint, { action: "open", ...scope });
       if (lease.current !== next) {
@@ -149,8 +152,11 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
       setAdministrator(r.administrator || "");
       next.session = r.session;
       setSession(r.session);
+      setOpened(true);
     } catch (e) {
       if (lease.current === next) end(e.message);
+    } finally {
+      setOpening(false);
     }
   }
 
@@ -211,12 +217,11 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
 
   useEffect(() => {
     if (!session) return;
-    let timer;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const r = await api(endpoint, { action: "frame", session, ...scope });
-        if (!alive || lease.current?.session !== session) return;
+    const polling = pollLoginFrames({
+      capture: () => api(endpoint, { action: "frame", session, ...scope }),
+      inputPending: () => Boolean(lease.current?.pendingInputs),
+      onFrame(r) {
+        if (lease.current?.session !== session) return;
         if (r.closed) { setRecovery(r.recovery || ""); end(r.error || ""); onSessionClosed?.(); return; }
         if (r.image) {
           if (maintenance && (!r.geometry || !Array.isArray(r.region) || r.region.length !== 4 || !r.region.every(Number.isInteger)))
@@ -226,13 +231,11 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
           setFrameError("");
         }
         if (r.error) setFrameError(r.error);
-        timer = setTimeout(poll, 550);
-      } catch (e) {
-        if (alive && lease.current?.session === session) end(e.message);
-      }
-    };
-    poll();
-    return () => { alive = false; clearTimeout(timer); };
+      },
+      onError(e) { if (lease.current?.session === session) end(e.message); },
+    });
+    refreshFrame.current = polling.refresh;
+    return () => { refreshFrame.current = null; polling.stop(); };
   }, [session]);
 
   function enqueue(action, data) {
@@ -240,13 +243,17 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
     if (!owner?.session) return;
     const geometry = shown.current.geometry;
     if (maintenance && !geometry) { setMessage("请等待授权窗口画面后再操作"); return; }
+    owner.pendingInputs = (owner.pendingInputs || 0) + 1;
     chain.current = chain.current.then(async () => {
       if (lease.current !== owner) return;
       const r = await api(endpoint, { action, session: owner.session, ...scope, ...(maintenance ? { geometry } : {}), ...data });
       if (lease.current !== owner) return;
       if (r.closed) { end(r.error || ""); onSessionClosed?.(); }
       else setMessage(r.error || "");
-    }).catch((e) => { if (lease.current === owner) end(e.message); });
+    }).catch((e) => { if (lease.current === owner) end(e.message); }).finally(() => {
+      owner.pendingInputs--;
+      if (!owner.pendingInputs && lease.current === owner) refreshFrame.current?.();
+    });
   }
 
   function sendClick(e) {
@@ -300,12 +307,13 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
   }
 
   return <>
-    <button type="button" ref={opener} disabled={disabled || opened} onClick={open}>{label || (initialSetup ? "打开客机系统设置" : maintenance ? "打开客机授权设置" : "登录客机账户")}</button>
+    <button type="button" ref={opener} disabled={disabled || opened || opening} onClick={open}
+      title={!initialSetup && !maintenance ? "仅用于客机登录或解锁，已登录后请直接使用工作台应用。" : undefined}>{opening ? "正在连接客机画面…" : label || (initialSetup ? installRecovery ? "打开恢复画面" : "打开客机系统设置" : maintenance ? "打开客机授权设置" : "查看客机登录界面")}</button>
     {!opened && message && <span role="status">{message}</span>}
     {!opened && ["environment-update", "environment-restart"].includes(recovery) && onSettings &&
-      <button type="button" onClick={onSettings}>{recovery === "environment-update" ? "查看环境组件" : "打开环境设置"}</button>}
+      <button type="button" onClick={onSettings}>{installRecovery ? "查看日志与诊断" : recovery === "environment-update" ? "查看环境组件" : "打开环境设置"}</button>}
     {opened && createPortal(
-      <div className="mac-login-fullscreen" data-mode={initialSetup ? "setup" : maintenance ? "maintenance" : "login"} role="dialog" aria-modal="true" aria-label={initialSetup ? "首次设置虚拟 Mac" : maintenance ? "恢复客机系统权限" : "登录虚拟 Mac"}
+      <div className="mac-login-fullscreen" data-mode={initialSetup ? "setup" : maintenance ? "maintenance" : "login"} role="dialog" aria-modal="true" aria-label={initialSetup ? installRecovery ? "恢复安装虚拟 Mac" : "首次设置虚拟 Mac" : maintenance ? "恢复客机系统权限" : "登录虚拟 Mac"}
         onKeyDownCapture={(e) => {
           if (e.key === "F6") {
             e.preventDefault();
@@ -320,11 +328,11 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
         }}>
         <div className="mac-login-panel">
         <header className="mac-login-heading">
-          <h2>{initialSetup ? "虚拟 Mac 的系统设置" : maintenance ? "恢复客机系统权限" : "登录 macOS 客机"}</h2>
-          <p>{initialSetup ? "按下方提示完成当前授权，Cage 会自动检查。可以随时返回设置指引继续处理。" : maintenance ? "在当前系统设置窗口中完成授权。切换到其他客机应用或锁定后，画面会结束。" : "输入客机账户密码，按回车登录。"}</p>
+          <h2>{initialSetup ? installRecovery ? "恢复安装画面" : "虚拟 Mac 的系统设置" : maintenance ? "恢复客机系统权限" : "登录 macOS 客机"}</h2>
+          <p>{initialSetup ? installRecovery ? "先登录安装时创建的客机普通账户，再按下方提示完成安装器授权，Cage 会自动检查。可以随时返回恢复指引。" : "按下方提示完成当前授权，Cage 会自动检查。可以随时返回设置指引继续处理。" : maintenance ? "在当前系统设置窗口中完成授权。切换到其他客机应用或锁定后，画面会结束。" : "输入客机账户密码，按回车登录。"}</p>
         </header>
         <div className="mac-login-tools" role="toolbar" aria-label="画面工具">
-          <button ref={back} onClick={() => end()}><ArrowLeft size={16} aria-hidden="true" />{initialSetup ? "返回设置指引" : "返回工作台"}</button>
+          <button ref={back} onClick={() => end()}><ArrowLeft size={16} aria-hidden="true" />{initialSetup ? installRecovery ? "返回恢复指引" : "返回设置指引" : "返回工作台"}</button>
           <button aria-pressed={!zoomed} onClick={() => changeZoom(false)}><Maximize size={16} aria-hidden="true" />{initialSetup || maintenance ? "适配" : "完整画面"}</button>
           <button aria-pressed={zoomed} onClick={() => changeZoom(true)}><ZoomIn size={16} aria-hidden="true" />{initialSetup || maintenance ? "放大" : "登录区域"}</button>
           {initialSetup && setupActions}
@@ -342,12 +350,13 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
         </div>
         {maintenance && <div className="mac-setup-hint">
           {maintenance === "projects" && <p>Cage 会直接打开「文件系统扩展」面板。打开 macFUSE 和 macFUSE (local) 两个开关，Cage 会自动检查并重新连接项目。</p>}
+          {maintenance === "sharing" && <p>Cage 会打开「系统设置 → 通用 → 共享」。请打开「屏幕共享」，并允许当前普通客机用户访问。仅在客机外网关闭时可以打开此设置。macOS 26 仅命令行启用后，仍需在此再手动打开一次，否则连接可能提示「屏幕共享在 localhost 上不被允许」。</p>}
           {administrator && <p>系统要求管理员时，用户名填写 {administrator}。选中系统授权窗口的密码框后，点击「填写管理员密码」，再由你确认授权。</p>}
           {administrator && <button type="button" onClick={() => enqueue("fill-password", {})}>填写管理员密码</button>}
         </div>}
         {initialSetup && setupHint && <div className="mac-setup-hint">
           <p>{setupHint}</p>
-          <p role={setupError ? "alert" : "status"}>{setupStatus} 查看完整步骤或进入工作台时，点击「返回设置指引」。</p>
+          <p role={setupError ? "alert" : "status"}>{setupStatus} {installRecovery ? "点击「返回恢复指引」可回到继续安装的指引。" : "查看完整步骤或进入工作台时，点击「返回设置指引」。"}</p>
         </div>}
         <input ref={keyboard} className="mac-login-keyboard" type="text" autoComplete="off" autoCapitalize="none"
           autoCorrect="off" spellCheck={false}
@@ -391,7 +400,7 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
           {frame && <div className="mac-login-canvas" style={{
             width: Math.max(size.width, imageWidth), height: Math.max(size.height, imageHeight),
           }}>
-            <img ref={imageRef} key={maintenance ? frameTarget?.geometry : undefined} alt={initialSetup ? "Apple 客机首次系统设置" : maintenance ? "客机系统设置或授权窗口" : "Apple 客机登录屏幕"} draggable={false} src={frame}
+            <img ref={imageRef} key={maintenance ? frameTarget?.geometry : undefined} alt={initialSetup ? installRecovery ? "Apple 客机恢复安装画面" : "Apple 客机首次系统设置" : maintenance ? "客机系统设置或授权窗口" : "Apple 客机登录屏幕"} draggable={false} src={frame}
               style={{ width: imageWidth, height: imageHeight }}
               onLoad={(e) => {
                 if (e.currentTarget.naturalHeight) setAspect(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight);
@@ -400,7 +409,7 @@ export function MacOSLogin({ disabled, initialSetup = false, maintenance = "", l
           </div>}
         </div>
         {(visibleMessage || !frame) && <p className="mac-login-status" role={visibleMessage ? "alert" : "status"}>
-          {visibleMessage || (initialSetup ? "正在读取客机首次设置画面…" : maintenance ? "正在确认系统授权窗口…" : "正在确认客机登录画面…")}
+          {visibleMessage || (initialSetup ? installRecovery ? "正在读取恢复安装画面…" : "正在读取客机首次设置画面…" : maintenance ? "正在确认系统授权窗口…" : "正在确认客机登录画面…")}
         </p>}
         {!initialSetup && !maintenance && <p className="mac-login-help">拖动画面可查看其他账户或提示</p>}
         </div>

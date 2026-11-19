@@ -6,9 +6,13 @@
 
 <img src="assets/claude-cage-character.png" alt="Claude Cage" width="320" />
 
-[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![CI](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lee-xeo/Claude-Cage/actions/workflows/ci.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Lee-xeo/Claude-Cage?include_prereleases)](https://github.com/Lee-xeo/Claude-Cage/releases) [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**[د پروژې ویب پاڼه](https://lee-xeo.github.io/Claude-Cage/) · [اپلیکیشن ډاونلوډ کړئ](https://lee-xeo.github.io/Claude-Cage/ps/#download) · [پیل کول](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [د کارولو لارښود (په چینایي)](https://lee-xeo.github.io/Claude-Cage/docs/)**
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily?language=Go" alt="Trendshift — Go Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly?language=Go" alt="Trendshift — Go Repository of the Week" width="250" height="55" /></a>
+
+<a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/daily" alt="Trendshift — Repository of the Day" width="250" height="55" /></a> <a href="https://trendshift.io/repositories/339051#achievements"><img src="https://trendshift.io/api/badge/trendshift/repositories/339051/weekly" alt="Trendshift — Repository of the Week" width="250" height="55" /></a>
+
+**[د پروژې ویب پاڼه](https://claude-cage.com/) · [اپلیکیشن ډاونلوډ کړئ](https://claude-cage.com/ps/#download) · [پیل کول](docs/getting-started.md) · [FAQ](docs/troubleshooting.md) · [د کارولو لارښود (په چینایي)](https://claude-cage.com/docs/)**
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [Русский](README.ru.md) · [العربية](README.ar.md) · [فارسی](README.fa.md) · [한국어](README.ko.md) · [Español](README.es.md) · [မြန်မာဘာသာ](README.my.md) · [Беларуская](README.be.md) · [پښتو](README.ps.md) · [دری](README.prs.md) · [አማርኛ](README.am.md) · [Soomaali](README.so.md) · [ትግርኛ](README.ti.md) · [Français](README.fr.md)
 
@@ -31,6 +35,8 @@ Claude Cage ټرمینل، براوزر، سمونګر او رسمي Claude Desk
 | :---: | :---: |
 | <a href="assets/network-checks.png"><img src="assets/network-checks.png" alt="د شبکې او جلاوالي کتنې" width="400" /></a> | <a href="assets/community-browser-check.png"><img src="assets/community-browser-check-cropped.png" alt="د ټولنې د براوزر کتنه" width="400" /></a> |
 
+[FuckClaude](https://fuck-claude.vercel.app/) · [LinXiaoTao / GitHub](https://github.com/LinXiaoTao/FuckClaude)
+
 **د Cage اصلي انٹرفیس:**
 
 ![Cage](www/public/workbench-2026-11.jpg)
@@ -52,7 +58,7 @@ Claude Cage ټرمینل، براوزر، سمونګر او رسمي Claude Desk
 دا غوښتنه خپل AI اجنټ ته واستوئ (کوډیکس، dsh، کاري ملګري — شاید د کلاډ کوډ نه وي 😁):
 
 ```markdown
-په نصبولو کې راسره مرسته وکړئ https://github.com/Lee-xeo/Claude-Cage او د Cage شبکې پراکسي ترتیب کړئ ترڅو زما په محلي کلاش نصب کې د xxx پای ټکی وکاروئ.
+د https://github.com/Lee-xeo/Claude-Cage وروستی سرچینه کوډ راواخله، جوړ، بسته بندي او نصب یې کړه. د Cage پراکسي داسې تنظیم کړه چې زما د محلي Clash له xx نوډ څخه زما د xx IP له لارې ووځي. ټوله پروسه وڅاره، ستونزې سمې کړه او که اړتیا وي د مطابقت د ښه کولو لپاره په پروژه کې issue ثبت کړه.
 ```
 
 ټول هغه څه چې تاسو ورته اړتیا لرئ د باور وړ شبکې پراکسي پای ټکی دی. دا پروژه هیڅ پراکسي چمتو کونکي ته وده نه ورکوي؛ تاسو کولی شئ پخپله چمتو کوونکی ومومئ، د بیلګې په توګه د تور غلطی ویب پاڼې لټون کولو سره.
@@ -61,7 +67,7 @@ Claude Cage ټرمینل، براوزر، سمونګر او رسمي Claude Desk
 
 Cage د macOS، Windows او Linux ملاتړ کوي: Apple Silicon له macOS 14+ سره، Windows 10 22H2 / 11 x64 او Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac، Windows ARM64 او Linux ARM64 لا نه ملاتړ کېږي. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
-1. اپلیکیشن ډاونلوډ کړئ: [macOS / Windows / Linux](https://lee-xeo.github.io/Claude-Cage/ps/#download).
+1. اپلیکیشن ډاونلوډ کړئ: [macOS / Windows / Linux](https://claude-cage.com/ps/#download).
 2. macOS: د نصب کولو کڅوړه خلاص کړئ او ډریګ کړئ **Cage** دننه **غوښتنلیکونه**; بیا یې د غوښتنلیکونو څخه پیل کړئ. Windows: [د نصب لارښود](docs/windows.md#安装并开始工作) · Linux: [د نصب لارښود](docs/linux.md#安装并开始工作).
 3. د خپل شبکې پراکسي تنظیم کولو لپاره د ایپ دننه لارښوونې تعقیب کړئ ، چاپیریال پیل کړئ ، او پروژه خلاص کړئ.
 
@@ -102,17 +108,20 @@ macOS او لاسلیک شوې Windows نسخې د ټاکلي پراکسي له 
 
 | ستاسو دنده | دلته پیل کړئ |
 |---|---|
-| macOS / Windows / Debian / Ubuntu 22.04 | [د مېلمه سیسټم ټاکنه](https://lee-xeo.github.io/Claude-Cage/docs/guest-systems/) |
+| macOS / Windows / Debian / Ubuntu 22.04 | [د مېلمه سیسټم ټاکنه](https://claude-cage.com/docs/guest-systems/) |
 | د شبکې پراکسي نصب کړئ، تنظیم کړئ، او خپله لومړۍ پروژه پرانیزئ | [پیل کول](docs/getting-started.md) |
 | د ډاونلوډونو، پیل کولو، ارتباطاتو، او لاسلیک کولو ستونزې حل کړئ | [FAQ او بیا رغونه](docs/troubleshooting.md) |
 | د کیبورډ کنټرولونه، بڼه، د معلوماتو دوام، او د وتلو چلند زده کړئ | [ورځنی استعمال](docs/getting-started.md#日常使用) |
 | د بیا تولید وړ مسلې راپور ورکړئ | [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues) |
+| د سمون، ځانګړنې یا اسنادو ونډه: د Issue ارزونه ← د همکار بلنه ← PR | [د ونډې لارښود (چینایي)](.github/CONTRIBUTING.md) |
 
 پروژه په چټکۍ سره وده کوي. د نظر شریکولو لپاره د ټولنې ګروپ کې ګډون وکړئ؛ د ټولنې ساتونکي ښه راغلاست.
 
-<p align="center">
-  <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ · 1134250870" width="240" /></a>
-</p>
+| QQ group · 273237690 | WeChat |
+| :---: | :---: |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+
+[Telegram](https://t.me/claude_cage)
 
 ## اصل او جواز ورکول
 
@@ -135,6 +144,7 @@ Cage یوه خپلواکه ټولنه پروژه ده او د انتروپیک �
 - [code-server](https://github.com/coder/code-server): د براوزر پر بنسټ کوډ مدیر.
 - [AIO Sandbox](https://github.com/agent-infra/sandbox): د کاري چاپیریال او تعامل ډیزاین لپاره حوالې.
 - [claude-switcher](https://github.com/YOURSJEYO/claude-switcher) او [Claude-Guardian](https://github.com/DUNHKpcc/Claude-Guardian): د شبکې چکونو او امنیت تشخیص لپاره حوالې.
+- [claude-post-ban-cleanup](https://github.com/l2461090/claude-post-ban-cleanup): د دقیقې پلټنې، د معلوماتو د ساتنې او بېرته راګرځېدونکي کش پاکولو د بهیر مرجع؛ په Cage کې خپلواک تطبیق.
 
 
 <a href="https://www.star-history.com/?repos=Lee-xeo%2FClaude-Cage&amp;type=date">

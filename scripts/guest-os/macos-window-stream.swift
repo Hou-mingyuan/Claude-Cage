@@ -125,7 +125,13 @@ final class MacWindowStream: NSObject, SCStreamOutput, SCStreamDelegate {
         let sequence = self.sequence
         if sequence == after { return (nil, sequence) }
         let image = CIImage(cvPixelBuffer: buffer)
-        guard let output = images.createCGImage(image, from: image.extent) else { throw Failure(8, "capture_conversion_failed") }
+        // Reading the surface back copies the whole frame. It runs off the main
+        // actor so that input and other requests are not held behind it.
+        let context = images
+        let converted = await Task.detached(priority: .userInitiated) {
+            context.createCGImage(image, from: image.extent)
+        }.value
+        guard let output = converted else { throw Failure(8, "capture_conversion_failed") }
         return (output, sequence)
     }
 }

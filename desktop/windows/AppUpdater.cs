@@ -71,9 +71,12 @@ internal sealed class AppUpdater : IDisposable
 
     private async Task Run(bool checkOnly)
     {
-        cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(25));
+        // The backend reports progress at least once per retry. Bound its silence
+        // rather than the transfer, so a slow connection can still finish.
+        var silence = TimeSpan.FromMinutes(10);
+        cancellation = new CancellationTokenSource(silence);
         var token = cancellation.Token;
-        Change("checking", "正在通过所选代理检查更新");
+        Change("checking", "正在检查更新，优先使用主机网络");
         string? archive = null;
         string retryAt = "";
         using var process = new Process { StartInfo = Backend.StartInfo(Backend.Executable, "app-update", checkOnly ? "check" : "download") };
@@ -88,6 +91,7 @@ internal sealed class AppUpdater : IDisposable
             while (await process.StandardOutput.ReadLineAsync(token) is { } line)
             {
                 if (line.Length > 65536) throw new IOException("更新响应超过允许大小");
+                cancellation.CancelAfter(silence);
                 last = JsonDocument.Parse(line).RootElement.Clone();
                 retryAt = last.Text("retryAt");
                 foreach (var property in last.EnumerateObject())
@@ -105,6 +109,7 @@ internal sealed class AppUpdater : IDisposable
             archive = UpdatePolicy.DownloadPath(last.Text("archivePath"), Root);
             var version = last.Text("latestVersion"); var digest = last.Text("sha256");
             if (!UpdatePolicy.IsNewer(version, Version)) throw new IOException("安装包版本无效或不高于当前版本");
+            cancellation.CancelAfter(TimeSpan.FromMinutes(25));
             Change("verifying", "正在验证 Windows 签名和安装包内容");
             var publisher = await Task.Run(() => Authenticode.Publisher(Environment.ProcessPath!), token);
             await Task.Run(() => UpdateInstaller.VerifyArchive(archive, digest, version, publisher), token);
@@ -141,7 +146,11 @@ internal sealed class AppUpdater : IDisposable
             Directory.CreateDirectory(Root); UpdatePolicy.PlainPath(Root);
             File.Copy(Environment.ProcessPath!, helperPath);
             await Task.Run(() => Authenticode.SamePublisher(helperPath, prepared.Publisher), token);
-            var start = Backend.StartInfo(helperPath, "--install-update"); start.RedirectStandardInput = true;
+            var start = Backend.StartInfo(helperPath, "--install-update");
+            // A live process's working directory cannot be renamed on Windows.
+            // The helper outlives this App and must not retain its install path.
+            start.WorkingDirectory = Root;
+            start.RedirectStandardInput = true;
             helper = new Process { StartInfo = start };
             if (!helper.Start()) throw new IOException("无法启动安全安装程序");
             await helper.StandardInput.WriteLineAsync(JsonSerializer.Serialize(prepared));

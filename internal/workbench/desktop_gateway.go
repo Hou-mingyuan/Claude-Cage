@@ -152,10 +152,14 @@ func (d *desktopGateway) context() ClientContext {
 		c.ServerPlatform = "linux"
 		if p, err := d.store.Get(c.HostID); err == nil {
 			c.Name = p.Name
+			c.ServerPlatform = p.Platform
 			if p.HostKey != nil {
 				c.HostFingerprint = p.HostKey.Fingerprint
 			}
 		}
+	}
+	if c.State.Manifest != nil {
+		c.ServerPlatform = c.State.Manifest.Platform
 	}
 	return c
 }

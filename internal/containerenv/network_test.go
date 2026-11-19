@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
 	"github.com/miekg/dns"
 	"github.com/sylvinus/agent-vm/internal/cage"
 )
@@ -36,7 +37,16 @@ func TestFramesRejectInvalidLengthsAndTruncation(t *testing.T) {
 }
 
 func TestContainerNetworkARPAndClosedDNS(t *testing.T) {
-	network, err := NewNetwork(cage.DefaultConfig())
+	t.Run("legacy", func(t *testing.T) { testContainerNetworkARPAndClosedDNS(t, nil) })
+	identity, err := guestidentity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("randomized", func(t *testing.T) { testContainerNetworkARPAndClosedDNS(t, identity) })
+}
+
+func testContainerNetworkARPAndClosedDNS(t *testing.T, identity *guestidentity.Identity) {
+	network, err := newNetwork(cage.DefaultConfig(), identity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,8 +66,12 @@ func TestContainerNetworkARPAndClosedDNS(t *testing.T) {
 		}
 	}()
 	_ = guest.SetDeadline(time.Now().Add(3 * time.Second))
-	guestMAC, _ := net.ParseMAC(GuestMAC)
-	gatewayMAC, _ := net.ParseMAC(GatewayMAC)
+	guestMACText, gatewayMACText := GuestMAC, GatewayMAC
+	if identity != nil {
+		guestMACText, gatewayMACText = identity.MACAddress, identity.GatewayMACAddress
+	}
+	guestMAC, _ := net.ParseMAC(guestMACText)
+	gatewayMAC, _ := net.ParseMAC(gatewayMACText)
 	arp := &layers.ARP{AddrType: layers.LinkTypeEthernet, Protocol: layers.EthernetTypeIPv4, HwAddressSize: 6, ProtAddressSize: 4, Operation: layers.ARPRequest, SourceHwAddress: guestMAC, SourceProtAddress: net.ParseIP(GuestIP).To4(), DstHwAddress: make([]byte, 6), DstProtAddress: net.ParseIP(GatewayIP).To4()}
 	ethernet := &layers.Ethernet{SrcMAC: guestMAC, DstMAC: net.HardwareAddr{255, 255, 255, 255, 255, 255}, EthernetType: layers.EthernetTypeARP}
 	buffer := gopacket.NewSerializeBuffer()

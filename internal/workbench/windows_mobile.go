@@ -15,6 +15,14 @@ func (s *Server) windowsConversationInput(record *mobileRecord, input map[string
 	if s.windowsGuest == nil {
 		return nil
 	}
+	if s.windowsGuest.Remote() {
+		home, err := s.remoteWindowsCLIWorkspace(record.Workspace)
+		if err != nil {
+			return err
+		}
+		input["workspace"] = home
+		return nil
+	}
 	if _, err := s.projectWorkspace(record.Workspace); err != nil {
 		return err
 	}
