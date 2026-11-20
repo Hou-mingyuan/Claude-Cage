@@ -22,9 +22,16 @@ import (
 )
 
 type Preferences struct {
-	TransferAllowUnclean  bool   `json:"transfer_allow_unclean"`
-	BalancedDisplay       bool   `json:"balanced_display"`
-	ProjectFileCache      bool   `json:"project_file_cache"`
+	ReuseClaudeLogin     bool `json:"reuse_claude_login"`
+	TransferAllowUnclean bool `json:"transfer_allow_unclean"`
+	BalancedDisplay      bool `json:"balanced_display"`
+	ProjectFileCache     bool `json:"project_file_cache"`
+	// HostTools lets Claude in the environment run commands on this computer.
+	HostTools bool `json:"host_tools,omitempty"`
+	// HostPluginsOff names the plugins the user turned off, separated by
+	// commas; "commands" is the built-in one. One string keeps preferences
+	// comparable.
+	HostPluginsOff        string `json:"host_plugins_off,omitempty"`
 	MobileRelay           string `json:"mobile_relay,omitempty"`
 	Workspace             string `json:"workspace"`
 	BrowserHomeURL        string `json:"browser_home_url"`
@@ -33,6 +40,11 @@ type Preferences struct {
 	Clock12Hour           bool   `json:"clock_12_hour"`
 	AutoTimezone          bool   `json:"auto_timezone"`
 	AutoLanguage          bool   `json:"auto_language"`
+	// DebianMirror is the APT source policy for Debian guests, chosen in the
+	// install dialog after measuring the sources through the proxy. Empty
+	// keeps the guest default ("auto": official first); "nju" or "ustc" puts
+	// that mirror first.
+	DebianMirror string `json:"debian_mirror,omitempty"`
 }
 
 const defaultBrowserHomeURL = "https://www.bing.com/"
@@ -185,6 +197,9 @@ func proposedSettings(input Settings, old cage.Config, profile string) (cage.Con
 	}
 	if input.Keyboard != "mac" && input.Keyboard != "native" {
 		return c, input.Preferences, errors.New("请选择 Mac 或原生 Linux 按键习惯")
+	}
+	if input.DebianMirror != "" && !cage.ValidDebianMirror(input.DebianMirror) {
+		return c, input.Preferences, errors.New("Debian 软件源只能选择官方源优先、指定国内镜像优先或固定官方源")
 	}
 	p := input.Preferences
 	p.MobileRelay = strings.TrimSuffix(strings.TrimSpace(p.MobileRelay), "/")

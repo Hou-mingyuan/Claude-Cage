@@ -8,24 +8,31 @@ internal sealed class MainWindow : Form
 {
     private WebView2 web = new() { Dock = DockStyle.Fill, Visible = false };
     private readonly NativeInput nativeInput;
-    private readonly Label message = new() { AutoSize = true, MaximumSize = new Size(720, 0), Text = "正在启动 Cage 工作台…", Margin = new Padding(12) };
+    private readonly Label message = new() { AutoSize = true, MaximumSize = new Size(720, 0), Text = InterfaceLanguage.Text("正在启动 Cage 工作台…"), Margin = new Padding(12) };
     private readonly FlowLayoutPanel status = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(48), WrapContents = false };
-    private readonly Button retry = new() { Text = "重试连接", AutoSize = true, Visible = false };
-    private readonly Button existing = new() { Text = "打开现有环境保存文件", AutoSize = true, Visible = false };
-    private readonly Button complete = new() { Text = "保存后停止环境并完成更新", AutoSize = true, Visible = false };
+    private readonly Button retry = new() { Text = InterfaceLanguage.Text("重试连接"), AutoSize = true, Visible = false };
+    private readonly Button existing = new() { Text = InterfaceLanguage.Text("打开现有环境保存文件"), AutoSize = true, Visible = false };
+    private readonly Button complete = new() { Text = InterfaceLanguage.Text("保存后停止环境并完成更新"), AutoSize = true, Visible = false };
     private readonly NotifyIcon tray;
     private readonly AppUpdater updater;
     private int expectedPort;
     private bool controllerNeedsUpdate, allowQuit, bootstrapping, webFailed;
     private bool completingSmoke;
+    // Bridge requests still running on the UI thread, such as refreshSession's "desktop".
+    private int nativeRequests;
     private string smokePhase = "starting";
     private readonly CancellationTokenSource lifetime = new();
     private readonly Dictionary<string, (string[] Paths, DateTime Expires)> fileSelections = new();
+    private (string TerminalID, string ConnectionID)? pendingNotification;
+    // The tray balloon reports clicks without saying which balloon was clicked.
+    // Once two targets are outstanding, a click only brings Cage forward.
+    private bool pendingNotificationAmbiguous;
 
     public MainWindow()
     {
         nativeInput = new NativeInput(value => Script("window.dispatchEvent(new CustomEvent('cage-native-input',{detail:" + JsonSerializer.Serialize(value) + "}));"));
-        Deactivate += (_, _) => Script("window.dispatchEvent(new Event('cage-window-deactivated'));");
+        Activated += (_, _) => PublishFocus(true);
+        Deactivate += (_, _) => { PublishFocus(false); Script("window.dispatchEvent(new Event('cage-window-deactivated'));"); };
         AutoScaleMode = AutoScaleMode.Dpi; AutoScaleDimensions = new SizeF(96, 96);
         Text = "Cage";
         StartPosition = FormStartPosition.CenterScreen; BackColor = Color.FromArgb(247, 247, 247);
@@ -41,14 +48,29 @@ internal sealed class MainWindow : Form
             if (ConfirmStop()) await Bootstrap("--complete-update");
         };
         var trayMenu = new TrayMenu();
-        trayMenu.Items.Add("打开 Cage", null, (_, _) => RestoreWindow());
-        trayMenu.Items.Add("检查应用更新…", null, (_, _) => updater!.Handle("check"));
-        trayMenu.Items.Add("关于 Cage", null, (_, _) => MessageBox.Show(this, $"Cage {AppUpdater.Version}\n本机隔离编码工作区", "关于 Cage"));
+        AddTrayItem("打开 Cage", (_, _) => RestoreWindow());
+        AddTrayItem("检查应用更新…", (_, _) => updater!.Handle("check"));
+        AddTrayItem("关于 Cage", (_, _) => MessageBox.Show(this,
+            $"Cage {AppUpdater.Version}\n" + InterfaceLanguage.Text("本机隔离编码工作区"),
+            InterfaceLanguage.Text("关于 Cage")));
         trayMenu.Items.Add(new ToolStripSeparator());
-        trayMenu.Items.Add("退出 Cage…", null, (_, _) => RequestQuit());
-        trayMenu.Opening += (_, _) => (chrome ?? new WindowChrome(BackColor, ForeColor, false)).ApplyMenu(trayMenu);
+        AddTrayItem("退出 Cage…", (_, _) => RequestQuit());
+        trayMenu.Opening += (_, _) => {
+            foreach (ToolStripItem item in trayMenu.Items)
+                if (item.Tag is string source) item.Text = InterfaceLanguage.Text(source);
+            (chrome ?? new WindowChrome(BackColor, ForeColor, false)).ApplyMenu(trayMenu);
+        };
         tray = new NotifyIcon { Icon = Icon, Text = "Cage", Visible = true, ContextMenuStrip = trayMenu };
         tray.DoubleClick += (_, _) => RestoreWindow();
+        tray.BalloonTipClicked += (_, _) => {
+            RestoreWindow();
+            var target = pendingNotification;
+            var ambiguous = pendingNotificationAmbiguous;
+            pendingNotification = null;
+            pendingNotificationAmbiguous = false;
+            if (!ambiguous && target != null && target.Value.TerminalID.Length > 0)
+                Script("window.dispatchEvent(new CustomEvent('cage-notification-click',{detail:" + JsonSerializer.Serialize(new { terminal_id = target.Value.TerminalID, connection_id = target.Value.ConnectionID }) + "}));");
+        };
         updater = new AppUpdater(PublishUpdate, () => { allowQuit = true; Close(); }, () => _ = Bootstrap());
         Shown += async (_, _) => {
             if (Program.SmokeOutput != null) _ = SmokeDeadline();
@@ -60,6 +82,8 @@ internal sealed class MainWindow : Form
             if (!allowQuit && e.CloseReason is not (CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing)) { e.Cancel = true; Hide(); }
         };
         FormClosed += (_, _) => { lifetime.Cancel(); updater.Dispose(); tray.Dispose(); trayMenu.Dispose(); web.Dispose(); };
+        void AddTrayItem(string source, EventHandler action) =>
+            trayMenu.Items.Add(InterfaceLanguage.Text(source), null, action).Tag = source;
     }
 
     protected override void OnLoad(EventArgs e)
@@ -126,8 +150,8 @@ internal sealed class MainWindow : Form
     }
 
     private bool ConfirmStop() => MessageBox.Show(this,
-        "请先保存编辑器中的文件并结束正在运行的工作。继续后 Cage 会停止环境、安装已验证的更新并重新启动。",
-        "保存并停止环境后安装重启", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK;
+        InterfaceLanguage.Text("请先保存编辑器中的文件并结束正在运行的工作。继续后 Cage 会停止环境、安装已验证的更新并重新启动。"),
+        InterfaceLanguage.Text("保存并停止环境后安装重启"), MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK;
 
     public void RestoreWindow() { Show(); if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); PublishVisibility(); }
     private void RequestQuit()
@@ -137,7 +161,13 @@ internal sealed class MainWindow : Form
         else { allowQuit = true; Close(); }
     }
     private void Action(string name) => Script("window.cageNativeAction?.(" + JsonSerializer.Serialize(name) + ")");
-    private void PublishVisibility() => Script($"window.cageWindowVisible = {(Visible && WindowState != FormWindowState.Minimized ? "true" : "false")}; window.dispatchEvent(new Event('cage-window-visibility'));");
+    private void PublishFocus(bool focused) => Script($"window.cageWindowFocused = {(focused ? "true" : "false")}; window.dispatchEvent(new Event('cage-window-focus'));");
+    private void PublishVisibility()
+    {
+        var visible = Visible && WindowState != FormWindowState.Minimized;
+        Script($"window.cageWindowVisible = {(visible ? "true" : "false")}; window.dispatchEvent(new Event('cage-window-visibility'));");
+        PublishFocus(visible && Form.ActiveForm == this);
+    }
     private void PublishUpdate(Dictionary<string, object?> state) {
         if (state.TryGetValue("phase", out var phase) && phase as string == "failed") _ = Backend.Report("App update failed: " + state.GetValueOrDefault("message"));
         Script("window.dispatchEvent(new CustomEvent('cage-app-update',{detail:" + JsonSerializer.Serialize(state) + "}));");
@@ -180,16 +210,15 @@ internal sealed class MainWindow : Form
             core.DownloadStarting += (_, e) => e.Cancel = true;
             core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
             core.WebMessageReceived += Receive;
-            core.ProcessFailed += (_, _) => { webFailed = true; Error("工作台显示进程已退出。后台任务保留，可重试连接。"); };
+            core.ProcessFailed += (_, _) => { webFailed = true; Error(InterfaceLanguage.Text("工作台显示进程已退出。后台任务保留，可重试连接。")); };
             core.NavigationCompleted += (_, e) => {
                 if (!e.IsSuccess) {
-                    var reason = e.WebErrorStatus.ToString() switch {
-                        "Timeout" => "等待本机后台响应超时",
-                        "CannotConnect" => "本机后台没有接受连接，可能尚未启动或已经退出",
-                        "ConnectionAborted" or "ConnectionReset" => "本机工作台连接在加载完成前中断",
-                        _ => "内置网页组件未能加载本机工作台（错误类型 " + e.WebErrorStatus + "）",
-                    };
-                    Error("打开工作台失败：" + reason + "。请点击“重试连接”；仍失败时请保留此错误提示并反馈给维护者。后台任务不会因此自动结束。"); return;
+                    Error(e.WebErrorStatus.ToString() switch {
+                        "Timeout" => InterfaceLanguage.Text("打开工作台失败：等待本机后台响应超时。请点击“重试连接”；仍失败时请保留此错误提示并反馈给维护者。后台任务不会因此自动结束。"),
+                        "CannotConnect" => InterfaceLanguage.Text("打开工作台失败：本机后台没有接受连接，可能尚未启动或已经退出。请点击“重试连接”；仍失败时请保留此错误提示并反馈给维护者。后台任务不会因此自动结束。"),
+                        "ConnectionAborted" or "ConnectionReset" => InterfaceLanguage.Text("打开工作台失败：本机工作台连接在加载完成前中断。请点击“重试连接”；仍失败时请保留此错误提示并反馈给维护者。后台任务不会因此自动结束。"),
+                        _ => InterfaceLanguage.Format("打开工作台失败：内置网页组件未能加载本机工作台（错误代码 {0}）。请点击“重试连接”；仍失败时请保留此错误提示并反馈给维护者。后台任务不会因此自动结束。", e.WebErrorStatus.ToString()),
+                    }); return;
                 }
                 status.Hide(); web.Show(); web.Focus(); PublishVisibility();
             };
@@ -200,10 +229,10 @@ internal sealed class MainWindow : Form
         }
         catch (WebView2RuntimeNotFoundException)
         {
-            Error("缺少 Microsoft Edge WebView2 Runtime。请运行 Cage 安装程序安装随附运行时后重试。");
+            Error(InterfaceLanguage.Text("缺少 Microsoft Edge WebView2 Runtime。请运行 Cage 安装程序安装随附运行时后重试。"));
             webFailed = true;
         }
-        catch (Exception error) { webFailed = true; Error("无法初始化工作台：" + error.Message); }
+        catch (Exception error) { webFailed = true; Error(InterfaceLanguage.Format("无法初始化工作台：{0}", error.Message)); }
         finally { retry.Enabled = true; }
     }
 
@@ -217,6 +246,10 @@ internal sealed class MainWindow : Form
     {
         if (Program.SmokeOutput == null || completingSmoke) return;
         completingSmoke = true;
+        // Navigation hides the status panel but keeps its last text. Report it
+        // only while visible, so a recovered error never enters a success report.
+        // A hidden window hides every child, so keep the old text there.
+        var nativeStatus = status.Visible || !Visible ? message.Text : "";
         JsonElement? page = null;
         var pageURL = web.Source?.GetLeftPart(UriPartial.Path);
         var environment = web.CoreWebView2?.Environment;
@@ -241,6 +274,12 @@ internal sealed class MainWindow : Form
                 }
                 catch (Exception error) { errors.Add("无法保存工作台画面：" + error.Message); }
             }
+            // The page can still refresh its session through the bridge, which runs
+            // "desktop" and may start a new connection service while prepare-update
+            // retires the old one. New requests are refused once completingSmoke is
+            // set; let the ones already running finish first.
+            if (nativeBridgeReady) smokePhase = "waiting_native_requests";
+            while (nativeRequests > 0) await Task.Delay(50, shutdown.Token);
             var controllers = Backend.CaptureSmokeControllers();
             try
             {
@@ -279,7 +318,7 @@ internal sealed class MainWindow : Form
             if (nativeBridgeReady && errors.Count == 0) smokePhase = "completed";
             File.WriteAllText(Program.SmokeOutput, JsonSerializer.Serialize(new {
                 success = nativeBridgeReady && errors.Count == 0, nativeBridgeReady, version = AppUpdater.Version,
-                phase = smokePhase, nativeStatus = message.Text, prepareExit, prepareStatus, prepareMessage, errors, page,
+                phase = smokePhase, nativeStatus, prepareExit, prepareStatus, prepareMessage, errors, page,
                 pageURL, webviewVersion,
                 windowBounds = Bounds, workingArea = Screen.FromHandle(Handle).WorkingArea, deviceDpi = DeviceDpi,
                 nativeMenuBar = MainMenuStrip != null,
@@ -293,14 +332,14 @@ internal sealed class MainWindow : Form
     {
         if (bootstrapping || web.CoreWebView2 == null) return;
         bootstrapping = true;
-        message.Text = "正在连接 Cage 工作台…"; status.Show(); status.BringToFront();
+        message.Text = InterfaceLanguage.Text("正在连接 Cage 工作台…"); status.Show(); status.BringToFront();
         retry.Hide(); existing.Hide(); complete.Hide();
         try
         {
             smokePhase = "starting_backend";
             var (exit, data) = await Backend.Json(["desktop", "--json", ..options], lifetime.Token);
             smokePhase = "backend_returned";
-            if (exit != 0) throw new IOException(data.Text("message") is { Length: > 0 } detail ? detail : "工作台未能启动");
+            if (exit != 0) throw new IOException(data.Text("message") is { Length: > 0 } detail ? detail : InterfaceLanguage.Text("工作台未能启动"));
             controllerNeedsUpdate = data.Text("status") != "ready";
             if (data.Text("status") == "upgrade_pending")
             {
@@ -308,27 +347,27 @@ internal sealed class MainWindow : Form
             }
             var entry = UpdatePolicy.Entry(data.Text("url")); expectedPort = entry.Port;
             smokePhase = "loading_workbench";
-            Text = controllerNeedsUpdate ? "Cage（更新待完成）" : "Cage";
+            Text = controllerNeedsUpdate ? InterfaceLanguage.Text("Cage（更新待完成）") : "Cage";
             web.CoreWebView2.Navigate(entry.AbsoluteUri);
         }
-        catch (OperationCanceledException) { if (!lifetime.IsCancellationRequested) Error("启动工作台失败：等待本机后台响应超时。请点击“重试连接”；仍失败时请保留此提示并反馈给维护者。"); }
+        catch (OperationCanceledException) { if (!lifetime.IsCancellationRequested) Error(InterfaceLanguage.Text("启动工作台失败：等待本机后台响应超时。请点击“重试连接”；仍失败时请保留此提示并反馈给维护者。")); }
         catch (Exception error) {
             _ = Backend.Report("Workbench startup failed: " + error);
-            Error(error.Message.Any(c => c is >= '\u4E00' and <= '\u9FFF') ? error.Message : "启动工作台失败：本机后台未返回可识别的原因（错误类型 " + error.GetType().Name + "）。请点击“重试连接”；仍失败时请保留此提示并反馈给维护者。");
+            Error(error.Message.Any(c => c is >= '\u4E00' and <= '\u9FFF') ? error.Message : InterfaceLanguage.Format("启动工作台失败：本机后台未返回可识别的原因（错误代码 {0}）。请点击“重试连接”；仍失败时请保留此提示并反馈给维护者。", error.GetType().Name));
         }
         finally { bootstrapping = false; }
     }
 
     private object RememberFiles(string[] paths)
     {
-        if (paths.Length is 0 or > 100) throw new InvalidDataException("请选择 1 至 100 个文件");
+        if (paths.Length is 0 or > 100) throw new InvalidDataException(InterfaceLanguage.Text("请选择 1 至 100 个文件"));
         foreach (var path in paths)
         {
-            if (!Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal)) throw new InvalidDataException("请选择本机文件");
+            if (!Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal)) throw new InvalidDataException(InterfaceLanguage.Text("请选择本机文件"));
             var file = new FileInfo(path);
             if (!file.Exists || (file.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
-                throw new InvalidDataException("请选择普通文件，暂不支持文件夹或链接");
-            if (file.Length > 2L * 1024 * 1024 * 1024) throw new InvalidDataException("每个文件不能超过 2 GB");
+                throw new InvalidDataException(InterfaceLanguage.Text("请选择普通文件，暂不支持文件夹或链接"));
+            if (file.Length > 2L * 1024 * 1024 * 1024) throw new InvalidDataException(InterfaceLanguage.Text("每个文件不能超过 2 GB"));
         }
         var now = DateTime.UtcNow;
         foreach (var key in fileSelections.Where(item => item.Value.Expires <= now).Select(item => item.Key).ToArray()) fileSelections.Remove(key);
@@ -344,6 +383,7 @@ internal sealed class MainWindow : Form
         // have a separate CoreWebView2Frame event, which this host never handles.
         if (!UpdatePolicy.IsWorkbench(e.Source, expectedPort)) return;
         string id = "";
+        var counted = false;
         try
         {
             var message = e.WebMessageAsJson;
@@ -351,6 +391,12 @@ internal sealed class MainWindow : Form
             var body = envelope.RootElement;
             id = body.Text("id");
             if (!Guid.TryParse(id, out _)) return;
+            if (completingSmoke)
+            {
+                if (!web.IsDisposed) web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { id, error = "自检正在结束，未执行新的原生操作" }));
+                return;
+            }
+            nativeRequests++; counted = true;
             // Match the Linux bridge envelope limit. A 20 MiB PNG needs about
             // 27 MiB after Base64 encoding; retain the ID to reply on rejection.
             if (message.Length > 30 * 1024 * 1024) throw new InvalidDataException("请求内容过大，请减少图片或文本内容后重试");
@@ -518,6 +564,13 @@ internal sealed class MainWindow : Form
                 case "clipboardWrite":
                     if (request.Text("text") is { Length: > 0 } text) Clipboard.SetText(text); else Clipboard.Clear();
                     result = true; break;
+                case "refreshLanguage":
+                    await InterfaceLanguage.Refresh();
+                    retry.Text = InterfaceLanguage.Text("重试连接");
+                    existing.Text = InterfaceLanguage.Text("打开现有环境保存文件");
+                    complete.Text = InterfaceLanguage.Text("保存后停止环境并完成更新");
+                    Text = controllerNeedsUpdate ? InterfaceLanguage.Text("Cage（更新待完成）") : "Cage";
+                    result = true; break;
                 case "appearance":
                     var mode = request.Text("mode"); var background = request.Text("background");
                     if (mode is not ("system" or "light" or "dark") || !System.Text.RegularExpressions.Regex.IsMatch(background, "^#[0-9a-fA-F]{6}$"))
@@ -533,6 +586,31 @@ internal sealed class MainWindow : Form
                 case "accountDevice":
                     if (request.Text("operation") != "status") throw new InvalidDataException("此平台暂不支持快捷登录");
                     result = new { supported = false }; break;
+                case "notificationStatus":
+                case "requestNotificationPermission":
+                    // Balloon sounds follow Windows' own notification settings.
+                    result = new { supported = true, permission = "authorized", canOpenSettings = true, sound = false }; break;
+                case "showNotification":
+                {
+                    var notifTitle = request.Text("title");
+                    var notifBody = request.Text("body");
+                    var terminalID = request.Text("terminal_id");
+                    var connectionID = request.Text("connection_id");
+                    if (notifTitle.Length is 0 or > 200) throw new InvalidDataException("通知标题无效");
+                    if (notifBody.Length > 500) throw new InvalidDataException("通知内容过长");
+                    if (terminalID.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(terminalID, "^[a-f0-9]{16}$"))
+                        throw new InvalidDataException("通知目标终端无效");
+                    if (connectionID.Length > 128) throw new InvalidDataException("通知连接标识无效");
+                    if (pendingNotification != null && pendingNotification.Value != (terminalID, connectionID))
+                        pendingNotificationAmbiguous = true;
+                    pendingNotification = (terminalID, connectionID);
+                    tray.ShowBalloonTip(5000, notifTitle, notifBody.Length > 0 ? notifBody : notifTitle, ToolTipIcon.None);
+                    result = new { delivered = true, permission = "authorized" };
+                    break;
+                }
+                case "openNotificationSettings":
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:notifications") { UseShellExecute = true });
+                    result = true; break;
                 case "refreshSession":
                     var (exit, data) = await Backend.Json(controllerNeedsUpdate ? ["desktop", "--json", "--existing"] : ["desktop", "--json"], lifetime.Token);
                     if (exit != 0) throw new IOException("工作台会话恢复失败");
@@ -548,6 +626,7 @@ internal sealed class MainWindow : Form
             _ = Backend.Report(error.ToString());
             if (id.Length != 0 && !IsDisposed && !web.IsDisposed) web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { id, error = error.Message }));
         }
+        finally { if (counted) nativeRequests--; }
     }
 
     private const string SmokeDiagnosticsScript = """

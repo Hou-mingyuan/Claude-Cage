@@ -6,8 +6,14 @@ import { ClientRoot } from "./remote-hosts";
 import { native } from "./api";
 import "./style.css";
 import { IconHints } from "./icon-hints.jsx";
+import { useTranslation } from "./interface-language.mjs";
 
 const Workbench = lazy(() => import("./main.jsx"));
+
+function WorkbenchLoading() {
+  const tr = useTranslation();
+  return <div className="client-loading" role="status">{tr("正在打开工作台…")}</div>;
+}
 
 installDiagnostics();
 // Keep the native menu usable while the workbench is loading or disconnected.
@@ -20,11 +26,7 @@ createRoot(document.getElementById("root")).render(
     <IconHints />
     <ClientRoot>
       <Suspense
-        fallback={
-          <div className="client-loading" role="status">
-            正在打开工作台…
-          </div>
-        }
+        fallback={<WorkbenchLoading />}
       >
         <Workbench />
       </Suspense>

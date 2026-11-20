@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sylvinus/agent-vm/internal/exitpolicy"
@@ -62,11 +64,43 @@ func Token() string {
 }
 func Dir(profile string) string { return filepath.Join(profile, "proxy") }
 func Socket(profile string) string {
-	h := sha256.Sum256([]byte(filepath.Clean(profile)))
 	if runtime.GOOS == "windows" {
-		return filepath.Join(os.TempDir(), fmt.Sprintf("cage-proxy-%x", h[:8]), "control.sock")
+		if path, err := windowsSocket(profile, false); err == nil {
+			return path
+		}
+		// No usable directory: starting the core reports WindowsSocket's cause.
+		return filepath.Join(Dir(profile), "control.sock")
 	}
+	h := sha256.Sum256([]byte(filepath.Clean(profile)))
 	return filepath.Join("/tmp", fmt.Sprintf("cage-proxy-%d-%x", os.Getuid(), h[:8]), "control.sock")
+}
+
+var windowsSockets sync.Map
+
+// WindowsSocket is the core's control socket in a private ASCII directory
+// outside AppData and Temp, where Windows AF_UNIX sockets could not be
+// connected or removed (#484). The choice is stable for a profile. Starting
+// the core creates the directory; other callers only look it up.
+func WindowsSocket(profile string) (string, error) { return windowsSocket(profile, true) }
+
+func windowsSocket(profile string, create bool) (string, error) {
+	key := filepath.Clean(profile)
+	if path, ok := windowsSockets.Load(key); ok && !create {
+		return path.(string), nil
+	}
+	dir, err := host.PrivateSocketDir(key, len(`\proxy.sock`), create)
+	if err != nil {
+		return "", err
+	}
+	path := dir + `\proxy.sock`
+	windowsSockets.Store(key, path)
+	return path, nil
+}
+
+// legacyWindowsSocket is where versions before #484 placed the socket.
+func legacyWindowsSocket(profile string) string {
+	h := sha256.Sum256([]byte(filepath.Clean(profile)))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("cage-proxy-%x", h[:8]), "control.sock")
 }
 func Load(profile string) (Store, error) {
 	var s Store
@@ -279,6 +313,7 @@ func (s Store) Runtime(profile string) ([]byte, error) {
 		}
 	}
 	proxies := []map[string]any{}
+	originals := map[string]map[string]any{}
 	for _, src := range s.Sources {
 		for _, n := range src.Nodes {
 			config := make(map[string]any, len(n.Config))
@@ -289,7 +324,9 @@ func (s Store) Runtime(profile string) ([]byte, error) {
 			if err := normalizeWebSocket(config); err != nil {
 				return nil, fmt.Errorf("节点 %q：%w", n.Name, err)
 			}
+			originals[n.ID] = config
 			if via, overridden := dialers[n.ID]; overridden {
+				config = maps.Clone(config)
 				delete(config, "dialer-proxy")
 				if via != "" {
 					config["dialer-proxy"] = via
@@ -301,7 +338,47 @@ func (s Store) Runtime(profile string) ([]byte, error) {
 	// Infrastructure DNS bootstraps only the core's server domains. Guest DNS
 	// remains behind Cage Egress, and there is no host-system resolver fallback.
 	dns := map[string]any{"enable": true, "ipv6": false, "use-hosts": false, "use-system-hosts": false, "default-nameserver": BootstrapDNSURLs(), "proxy-server-nameserver": BootstrapDNSURLs(), "nameserver": []string{"https://1.1.1.1/dns-query#" + Group}}
-	config := map[string]any{"mixed-port": s.Port, "bind-address": "127.0.0.1", "allow-lan": false, "authentication": []string{"cage:" + s.Auth}, "skip-auth-prefixes": []string{}, "mode": "rule", "ipv6": false, "log-level": "warning", "find-process-mode": "off", "external-controller-unix": Socket(profile), "tun": map[string]any{"enable": false}, "dns": dns, "geo-auto-update": false, "profile": map[string]any{"store-selected": false}, "proxies": proxies, "proxy-groups": []any{map[string]any{"name": Group, "type": "select", "proxies": []string{s.Selected}}}, "rules": []string{"MATCH," + Group}}
+	config := map[string]any{"mixed-port": s.Port, "bind-address": "127.0.0.1", "allow-lan": false, "skip-auth-prefixes": []string{}, "mode": "rule", "ipv6": false, "log-level": "warning", "find-process-mode": "off", "external-controller-unix": Socket(profile), "tun": map[string]any{"enable": false}, "dns": dns, "geo-auto-update": false, "profile": map[string]any{"store-selected": false}, "proxy-groups": []any{map[string]any{"name": Group, "type": "select", "proxies": []string{s.Selected}}}}
+	// An explicit environment chain can override imported dialers. Named
+	// account routes retain the node's imported chain, including dependent hops.
+	targets := map[string]string{}
+	var accountTarget func(string) string
+	accountTarget = func(id string) string {
+		if target, ok := targets[id]; ok {
+			return target
+		}
+		targets[id] = id
+		original := originals[id]
+		parent, _ := original["dialer-proxy"].(string)
+		via := parent
+		if parent != "" {
+			via = accountTarget(parent)
+		}
+		applied, overridden := dialers[id]
+		if via != parent || overridden && applied != parent {
+			clone := maps.Clone(original)
+			name := "route-" + id
+			clone["name"] = name
+			if via != "" {
+				clone["dialer-proxy"] = via
+			}
+			proxies = append(proxies, clone)
+			targets[id] = name
+		}
+		return targets[id]
+	}
+	auth := []string{"cage:" + s.Auth}
+	rules := []string{"IN-USER,cage," + Group}
+	for _, src := range s.Sources {
+		for _, n := range src.Nodes {
+			user := nodeUser(n.ID)
+			auth = append(auth, user+":"+s.nodePassword(n.ID))
+			rules = append(rules, "IN-USER,"+user+","+accountTarget(n.ID))
+		}
+	}
+	config["proxies"] = proxies
+	config["authentication"] = auth
+	config["rules"] = append(rules, "MATCH,REJECT")
 	// Measure a request on the established connection rather than folding
 	// protocol and TLS setup into the node's displayed HTTP latency.
 	config["unified-delay"] = true

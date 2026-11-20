@@ -1,0 +1,191 @@
+﻿# Header, don't edit
+NLF v6
+# Start editing here
+# Language ID
+1164
+# Font and size - dash (-) means default
+-
+-
+# Codepage - dash (-) means ASCII code page
+-
+# RTL - anything else than RTL means LTR
+RTL
+# Dari installer strings
+# ^Branding
+Nullsoft Install System %s
+# ^SetupCaption
+نصب $(^Name)
+# ^UninstallCaption
+حذف نصب $(^Name)
+# ^LicenseSubCaption
+: موافقت‌نامهٔ جواز
+# ^ComponentsSubCaption
+: گزینه‌های نصب
+# ^DirSubCaption
+: پوشهٔ نصب
+# ^InstallingSubCaption
+: در حال نصب
+# ^CompletedSubCaption
+: تکمیل شد
+# ^UnComponentsSubCaption
+: گزینه‌های حذف نصب
+# ^UnDirSubCaption
+: پوشهٔ حذف نصب
+# ^ConfirmSubCaption
+: تأیید
+# ^UninstallingSubCaption
+: در حال حذف نصب
+# ^UnCompletedSubCaption
+: تکمیل شد
+# ^BackBtn
+< &قبلی
+# ^NextBtn
+&بعدی >
+# ^AgreeBtn
+&موافقم
+# ^AcceptBtn
+شرایط موافقت‌نامهٔ جواز را &می‌پذیرم
+# ^DontAcceptBtn
+شرایط موافقت‌نامهٔ جواز را &نمی‌پذیرم
+# ^InstallBtn
+&نصب
+# ^UninstallBtn
+&حذف نصب
+# ^CancelBtn
+لغو
+# ^CloseBtn
+&بستن
+# ^BrowseBtn
+م&رور...
+# ^ShowDetailsBtn
+نمایش &جزئیات
+# ^ClickNext
+برای ادامه روی «بعدی» کلیک کنید.
+# ^ClickInstall
+برای آغاز نصب روی «نصب» کلیک کنید.
+# ^ClickUninstall
+برای آغاز حذف نصب روی «حذف نصب» کلیک کنید.
+# ^Name
+نام
+# ^Completed
+تکمیل شد
+# ^LicenseText
+لطفاً پیش از نصب $(^NameDA) موافقت‌نامهٔ جواز را مرور کنید. اگر همهٔ شرایط موافقت‌نامه را می‌پذیرید، روی «موافقم» کلیک کنید.
+# ^LicenseTextCB
+لطفاً پیش از نصب $(^NameDA) موافقت‌نامهٔ جواز را مرور کنید. اگر همهٔ شرایط موافقت‌نامه را می‌پذیرید، کادر زیر را تیک بزنید. $_CLICK
+# ^LicenseTextRB
+لطفاً پیش از نصب $(^NameDA) موافقت‌نامهٔ جواز را مرور کنید. اگر همهٔ شرایط موافقت‌نامه را می‌پذیرید، گزینهٔ اول زیر را انتخاب کنید. $_CLICK
+# ^UnLicenseText
+لطفاً پیش از حذف نصب $(^NameDA) موافقت‌نامهٔ جواز را مرور کنید. اگر همهٔ شرایط موافقت‌نامه را می‌پذیرید، روی «موافقم» کلیک کنید.
+# ^UnLicenseTextCB
+لطفاً پیش از حذف نصب $(^NameDA) موافقت‌نامهٔ جواز را مرور کنید. اگر همهٔ شرایط موافقت‌نامه را می‌پذیرید، کادر زیر را تیک بزنید. $_CLICK
+# ^UnLicenseTextRB
+لطفاً پیش از حذف نصب $(^NameDA) موافقت‌نامهٔ جواز را مرور کنید. اگر همهٔ شرایط موافقت‌نامه را می‌پذیرید، گزینهٔ اول زیر را انتخاب کنید. $_CLICK
+# ^Custom
+سفارشی
+# ^ComponentsText
+اجزایی را که می‌خواهید نصب شوند تیک بزنید و تیک اجزایی را که نمی‌خواهید بردارید. $_CLICK
+# ^ComponentsSubText1
+نوع نصب را انتخاب کنید:
+# ^ComponentsSubText2_NoInstTypes
+اجزای مورد نظر برای نصب را انتخاب کنید:
+# ^ComponentsSubText2
+یا اجزای اختیاری مورد نظر برای نصب را انتخاب کنید:
+# ^UnComponentsText
+اجزایی را که می‌خواهید حذف شوند تیک بزنید و تیک اجزایی را که نمی‌خواهید حذف شوند بردارید. $_CLICK
+# ^UnComponentsSubText1
+نوع حذف نصب را انتخاب کنید:
+# ^UnComponentsSubText2_NoInstTypes
+اجزای مورد نظر برای حذف را انتخاب کنید:
+# ^UnComponentsSubText2
+یا اجزای اختیاری مورد نظر برای حذف را انتخاب کنید:
+# ^DirText
+برنامهٔ نصب، $(^NameDA) را در پوشهٔ زیر نصب می‌کند. برای نصب در پوشهٔ دیگر، روی «مرور» کلیک کنید و پوشهٔ دیگری انتخاب کنید. $_CLICK
+# ^DirSubText
+پوشهٔ مقصد
+# ^DirBrowseText
+پوشه‌ای را برای نصب $(^NameDA) انتخاب کنید:
+# ^UnDirText
+برنامهٔ نصب، $(^NameDA) را از پوشهٔ زیر حذف می‌کند. برای حذف از پوشهٔ دیگر، روی «مرور» کلیک کنید و پوشهٔ دیگری انتخاب کنید. $_CLICK
+# ^UnDirSubText
+""
+# ^UnDirBrowseText
+پوشه‌ای را که $(^NameDA) باید از آن حذف شود انتخاب کنید:
+# ^SpaceAvailable
+"فضای موجود: "
+# ^SpaceRequired
+"فضای مورد نیاز: "
+# ^UninstallingText
+$(^NameDA) از پوشهٔ زیر حذف می‌شود. $_CLICK
+# ^UninstallingSubText
+حذف از:
+# ^FileError
+خطا در باز کردن فایل برای نوشتن: \r\n\r\n$0\r\n\r\nبرای توقف نصب روی «لغو»،\r\nبرای تلاش دوباره روی «تلاش دوباره»، یا\r\nبرای رد کردن این فایل روی «نادیده گرفتن» کلیک کنید.
+# ^FileError_NoIgnore
+خطا در باز کردن فایل برای نوشتن: \r\n\r\n$0\r\n\r\nبرای تلاش دوباره روی «تلاش دوباره»، یا\r\nبرای توقف نصب روی «لغو» کلیک کنید.
+# ^CantWrite
+"نوشتن ممکن نیست: "
+# ^CopyFailed
+کاپی ناکام شد
+# ^CopyTo
+"کاپی به "
+# ^Registering
+"در حال ثبت: "
+# ^Unregistering
+"در حال لغو ثبت: "
+# ^SymbolNotFound
+"سمبول پیدا نشد: "
+# ^CouldNotLoad
+"بارگذاری ممکن نشد: "
+# ^CreateFolder
+"ایجاد پوشه: "
+# ^CreateShortcut
+"ایجاد میانبر: "
+# ^CreatedUninstaller
+"برنامهٔ حذف نصب ایجاد شد: "
+# ^Delete
+"حذف فایل: "
+# ^DeleteOnReboot
+"حذف هنگام راه‌اندازی دوباره: "
+# ^ErrorCreatingShortcut
+"خطا در ایجاد میانبر: "
+# ^ErrorCreating
+"خطا در ایجاد: "
+# ^ErrorDecompressing
+خطا در باز کردن معلومات فشرده! ممکن است برنامهٔ نصب خراب باشد.
+# ^ErrorRegistering
+خطا در ثبت DLL
+# ^ExecShell
+"ExecShell: "
+# ^Exec
+"اجرا: "
+# ^Extract
+"استخراج: "
+# ^ErrorWriting
+"استخراج: خطا در نوشتن فایل "
+# ^InvalidOpcode
+برنامهٔ نصب خراب است: opcode نامعتبر
+# ^NoOLE
+"OLE موجود نیست برای: "
+# ^OutputFolder
+"پوشهٔ خروجی: "
+# ^RemoveFolder
+"حذف پوشه: "
+# ^RenameOnReboot
+"تغییر نام هنگام راه‌اندازی دوباره: "
+# ^Rename
+"تغییر نام: "
+# ^Skipped
+"رد شد: "
+# ^CopyDetails
+کاپی جزئیات در کلیپ‌بورد
+# ^LogInstall
+ثبت لاگ روند نصب
+# ^Byte
+B
+# ^Kilo
+K
+# ^Mega
+M
+# ^Giga
+G

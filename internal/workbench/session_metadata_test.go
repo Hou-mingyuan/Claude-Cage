@@ -215,7 +215,7 @@ func TestSessionArchiveClosesBothListsAndRestores(t *testing.T) {
 	for _, fromPhone := range []bool{false, true} {
 		t.Run(map[bool]string{true: "phone", false: "desktop"}[fromPhone], func(t *testing.T) {
 			s, id, project := metadataFixture(t)
-			method, path, body := "DELETE", "/api/terminals/fixture-terminal", ""
+			method, path, body := "POST", "/api/cli/sessions/"+id+"/archive", `{}`
 			if fromPhone {
 				method, path, body = "POST", "/api/mobile/cli/sessions/"+id+"/delete", `{}`
 			}

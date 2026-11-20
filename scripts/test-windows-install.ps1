@@ -55,27 +55,18 @@ Run-Installer
 Assert-PersonalData
 Assert-Shortcuts $true $true
 if (-not (Test-Path -LiteralPath (Join-Path $target 'Cage.exe'))) { throw 'Installer did not create Cage.exe.' }
-foreach ($file in @('new-windows-guest.ps1', 'windows-guest-media.ps1', 'install-guest-powershell.cmd', 'publish-windows-component-manifest.ps1')) {
-    if (!(Test-Path -LiteralPath (Join-Path $target "resources/guest-os/$file") -PathType Leaf)) {
-        throw "Installed app is missing a Windows guest setup file: $file"
-    }
-}
-$phoneImports = @'
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-for (const file of ['windows-phone-browser.mjs', 'modules/browser-phone.mjs'])
-  await import(pathToFileURL(join(process.argv[1], file)));
-'@
-Invoke-BuildTool 'node' @('--input-type=module', '--eval', $phoneImports, (Join-Path $target 'resources/guest-os/payload'))
 Invoke-BuildTool (Join-Path $target 'resources/cage.exe') @('--help')
 Invoke-BuildTool (Join-Path $target 'resources/cage.exe') @('verify-vm-assets')
 Invoke-BuildTool (Join-Path $target 'resources/cage.exe') @('verify-web-assets')
 Invoke-BuildTool (Join-Path $target 'resources/mihomo.exe') @('-v')
 $qemu = Join-Path $target 'resources/runtime/qemu'
-if ($RequireSignedQemu) {
-    foreach ($file in (Get-WindowsQemuBinaries $qemu)) { Assert-CageReleaseSignature $file.FullName }
+function Assert-InstalledQemu {
+    if ($RequireSignedQemu) {
+        foreach ($file in (Get-WindowsQemuBinaries $qemu)) { Assert-CageReleaseSignature $file.FullName }
+    }
+    Assert-WindowsQemuRuntime $qemu -Firmware
 }
-Assert-WindowsQemuRuntime $qemu -Firmware
+Assert-InstalledQemu
 Invoke-BuildTool (Join-Path $target 'resources/runtime/openssh/ssh.exe') @('-V')
 # Use the same isolated profile, process lifetime and retained diagnostics as
 # build acceptance. The pre-existing default profile holds preservation markers.
@@ -89,6 +80,7 @@ Assert-PersonalData
 if ((Get-FileHash -LiteralPath (Join-Path $target 'Cage.exe') -Algorithm SHA256).Hash -ne $before) { throw 'Failed update replaced the existing application.' }
 # Reinstall through the real atomic replacement path. User data must survive.
 Run-Installer -Update
+Assert-InstalledQemu
 Assert-PersonalData
 Assert-Shortcuts $true $true
 Run-Installer -Update -ShortcutOptions @('/DESKTOPSHORTCUT=0', '/STARTMENUSHORTCUT=0')

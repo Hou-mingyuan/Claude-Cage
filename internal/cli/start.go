@@ -17,6 +17,7 @@ import (
 	"github.com/sylvinus/agent-vm/internal/env"
 	"github.com/sylvinus/agent-vm/internal/guard"
 	"github.com/sylvinus/agent-vm/internal/host"
+	"github.com/sylvinus/agent-vm/internal/hostimage"
 	"github.com/sylvinus/agent-vm/internal/mounts"
 	"github.com/sylvinus/agent-vm/internal/netguard"
 	"github.com/sylvinus/agent-vm/internal/paths"
@@ -321,6 +322,12 @@ func (s *start) ensureRunning() error {
 
 func (s *start) ensureRunningLocked() error {
 	o := &s.opts
+	// An environment created from a system that is no longer run stays as it
+	// is: starting it would apply this version's setup to the wrong system.
+	if system := hostimage.AbandonedEnvironment(string(s.state)); system != "" {
+		s.warnf("Error: %v", &hostimage.AbandonedSystemError{System: system})
+		return errStop
+	}
 	if o.Scratch && (o.Reset || o.ReadOnly) {
 		s.warnf("Error: --scratch makes a new VM that shares nothing: --reset and --readonly do not go with it.")
 		return errStop
@@ -514,7 +521,7 @@ func (s *start) ensureRunningLocked() error {
 		}
 	}
 	if s.staleState(s.name) == "1" {
-		s.warnf("Warning: Base VM has been updated since this VM was cloned. Use --reset to re-clone from the new base.")
+		s.warnf("%s", staleBaseHint(false))
 	}
 
 	// The shares Lima has, against those asked: a stopped VM is changed

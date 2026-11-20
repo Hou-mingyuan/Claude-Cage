@@ -3,6 +3,7 @@ import { Folder, ListFilter, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "./api";
 import { InlineSelect } from "./inline-select";
 import "./cli-sessions.css";
+import { translate, useTranslation } from "./interface-language.mjs";
 
 export const desktopSessionRequest = (path, options = {}) => api("/cli" + path, options.body);
 export const sessionsChanged = () => window.dispatchEvent(new Event("cage-cli-sessions-changed"));
@@ -56,6 +57,7 @@ export function useCLISessions(enabled, visible) {
 }
 
 export function ArchivedSessions({ request = desktopSessionRequest, ready, onRestored }) {
+  const tr = useTranslation();
   const [sessions, setSessions] = useState(null);
   const [error, setError] = useState("");
   const [readError, setReadError] = useState("");
@@ -102,11 +104,11 @@ export function ArchivedSessions({ request = desktopSessionRequest, ready, onRes
       setSelected(previous => new Set([...previous].filter(id => !completed.has(id))));
       if (completed.size) {
         setConfirming("");
-        setResultMessage(`已${operation === "restore" ? "取消归档" : "永久删除"} ${completed.size} 个会话。`);
+        setResultMessage(operation === "restore" ? translate("已取消归档 {0} 个会话。", completed.size) : translate("已永久删除 {0} 个会话。", completed.size));
         sessionsChanged();
       }
       setBulkConfirm(null);
-      if (failures.length) setError(`${failures.length} 个会话处理失败：${failures.map(({session,message}) => `“${session.title || "新会话"}”：${message}`).join("；")}`);
+      if (failures.length) setError(translate("{0} 个会话处理失败：{1}", failures.length, failures.map(({session,message}) => translate("“{0}”：{1}", session.title || translate("新会话"), message)).join("; ")));
       if (operation === "restore") for (const id of completed) onRestored?.(id);
     } finally { setBusy(false); setProgress(null); }
   };
@@ -136,73 +138,73 @@ export function ArchivedSessions({ request = desktopSessionRequest, ready, onRes
   const visible = [...groups.values()].flat();
   const selectedItems = visible.filter(session => selected.has(session.id));
   const hasDeleting = selectedItems.some(session => session.deleting);
-  return <section className="archived-sessions" aria-label="已归档会话">
-    <h2 className="archive-page-title">已归档会话</h2>
+  return <section className="archived-sessions" aria-label={tr("已归档会话")}>
+    <h2 className="archive-page-title">{tr("已归档会话")}</h2>
     <div className="archive-toolbar">
       <div className="archive-search"><Search size={18} aria-hidden="true" />
-        <input type="search" aria-label="搜索已归档的会话" placeholder="搜索已归档的会话" value={query} disabled={busy} onChange={event => resetSelection(setQuery, event.target.value)} />
+        <input type="search" aria-label={tr("搜索已归档的会话")} placeholder={tr("搜索已归档的会话")} value={query} disabled={busy} onChange={event => resetSelection(setQuery, event.target.value)} />
       </div>
-      <InlineSelect aria-label="会话筛选" value={filter} disabled={busy} onValueChange={value => resetSelection(setFilter, value)}
+      <InlineSelect aria-label={tr("会话筛选")} value={filter} disabled={busy} onValueChange={value => resetSelection(setFilter, value)}
         displayLabel={<span className="archive-filter-label"><ListFilter size={17}/><span>{archiveFilters[filter]}</span></span>}>
         {Object.entries(archiveFilters).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
       </InlineSelect>
-      <InlineSelect aria-label="项目筛选" value={selectedProject} disabled={busy} onValueChange={value => resetSelection(setProject, value)}
-        displayLabel={<span className="archive-filter-label"><Folder size={17}/><span>{selectedProject ? projectLabel(selectedProject) : "所有项目"}</span></span>}>
-        <option value="">所有项目</option>
+      <InlineSelect aria-label={tr("项目筛选")} value={selectedProject} disabled={busy} onValueChange={value => resetSelection(setProject, value)}
+        displayLabel={<span className="archive-filter-label"><Folder size={17}/><span>{selectedProject ? projectLabel(selectedProject) : tr("所有项目")}</span></span>}>
+        <option value="">{tr("所有项目")}</option>
         {projects.map(path => <option key={path} value={path}>{projects.some(other => other !== path && projectLabel(other) === projectLabel(path)) ? path : projectLabel(path)}</option>)}
       </InlineSelect>
     </div>
-    {visible.length > 0 && <div className="archive-bulk-toolbar" role="group" aria-label="批量处理会话">
-      <ArchiveSelection items={visible} selected={selected} onToggle={toggleSelection} disabled={busy} label="全选当前筛选结果">全选</ArchiveSelection>
-      <span className="archive-note">已选择 {selectedItems.length} 个会话</span>
+    {visible.length > 0 && <div className="archive-bulk-toolbar" role="group" aria-label={tr("批量处理会话")}>
+      <ArchiveSelection items={visible} selected={selected} onToggle={toggleSelection} disabled={busy} label={tr("全选当前筛选结果")}>{tr("全选")}</ArchiveSelection>
+      <span className="archive-note">{tr("已选择") + " "}{selectedItems.length}{" " + tr("个会话")}</span>
       <div className="archived-session-actions">
-        <button className="archive-button" disabled={busy || !selectedItems.length} onClick={() => resetSelection(setSelected, new Set())}>清空选择</button>
-        <button className="archive-restore" disabled={busy || !selectedItems.length || hasDeleting} onClick={() => change(selectedItems, "restore")}>批量取消归档</button>
-        <button className="archive-button archive-delete" disabled={busy || !ready || !selectedItems.length} onClick={() => { setConfirming(""); setBulkConfirm(selectedItems); }}>批量删除</button>
+        <button className="archive-button" disabled={busy || !selectedItems.length} onClick={() => resetSelection(setSelected, new Set())}>{tr("清空选择")}</button>
+        <button className="archive-restore" disabled={busy || !selectedItems.length || hasDeleting} onClick={() => change(selectedItems, "restore")}>{tr("批量取消归档")}</button>
+        <button className="archive-button archive-delete" disabled={busy || !ready || !selectedItems.length} onClick={() => { setConfirming(""); setBulkConfirm(selectedItems); }}>{tr("批量删除")}</button>
       </div>
-      {hasDeleting && <p className="archive-note archive-bulk-note">所选会话包含删除未完成项，请取消选择这些会话后再取消归档。</p>}
+      {hasDeleting && <p className="archive-note archive-bulk-note">{tr("所选会话包含删除未完成项，请取消选择这些会话后再取消归档。")}</p>}
     </div>}
-    {progress && <p role="status" className="archive-note">正在处理 {progress.done} / {progress.total} 个会话…</p>}
+    {progress && <p role="status" className="archive-note">{tr("正在处理") + " "}{progress.done} / {progress.total}{" " + tr("个会话…")}</p>}
     {resultMessage && <p role="status" className="archive-note">{resultMessage}</p>}
-    {bulkConfirm && <div className="archive-confirm" role="group" aria-label="确认批量永久删除会话">
-      <p>永久删除所选的 {bulkConfirm.length} 个会话及其 Claude Code 原始对话和子代理记录？此操作无法撤销。</p>
-      <div className="archived-session-actions"><button className="archive-button" disabled={busy} onClick={() => setBulkConfirm(null)}>取消</button>
-        <button className="archive-button archive-delete" disabled={busy || !ready} onClick={() => change(bulkConfirm, "purge")}>永久删除所选会话</button></div>
+    {bulkConfirm && <div className="archive-confirm" role="group" aria-label={tr("确认批量永久删除会话")}>
+      <p>{tr("永久删除所选的") + " "}{bulkConfirm.length}{" " + tr("个会话及其 Claude Code 原始对话和子代理记录？此操作无法撤销。")}</p>
+      <div className="archived-session-actions"><button className="archive-button" disabled={busy} onClick={() => setBulkConfirm(null)}>{tr("取消")}</button>
+        <button className="archive-button archive-delete" disabled={busy || !ready} onClick={() => change(bulkConfirm, "purge")}>{tr("永久删除所选会话")}</button></div>
     </div>}
     {(error || readError) && <div role="alert" className="archive-error">{error || readError}
-      {readError && <button className="archive-button" onClick={() => setRevision(value => value + 1)} disabled={busy}>重新读取</button>}
+      {readError && <button className="archive-button" onClick={() => setRevision(value => value + 1)} disabled={busy}>{tr("重新读取")}</button>}
     </div>}
-    {!sessions && !readError && <p role="status">正在读取…</p>}
-    {sessions?.length === 0 && <p className="archive-note">暂无已归档会话。</p>}
-    {Boolean(sessions?.length) && !groups.size && <p className="archive-note">没有符合筛选条件的已归档会话。</p>}
-    {[...groups].map(([path,items]) => <section className="archive-project" key={path} aria-label={projectLabel(path) + "的已归档会话"}>
+    {!sessions && !readError && <p role="status">{tr("正在读取…")}</p>}
+    {sessions?.length === 0 && <p className="archive-note">{tr("暂无已归档会话。")}</p>}
+    {Boolean(sessions?.length) && !groups.size && <p className="archive-note">{tr("没有符合筛选条件的已归档会话。")}</p>}
+    {[...groups].map(([path,items]) => <section className="archive-project" key={path} aria-label={projectLabel(path) + tr("的已归档会话")}>
       <header className="archive-project-heading">
-        <ArchiveSelection items={items} selected={selected} onToggle={toggleSelection} disabled={busy} label={`全选项目 ${path} 的当前筛选结果`} />
-        <Folder size={18}/><h3 title={path}>{projectLabel(path)}</h3><span>{items.length} 个会话</span></header>
+        <ArchiveSelection items={items} selected={selected} onToggle={toggleSelection} disabled={busy} label={tr("全选项目 {0} 的当前筛选结果", (path))} />
+        <Folder size={18}/><h3 title={path}>{projectLabel(path)}</h3><span>{items.length}{" " + tr("个会话")}</span></header>
       <div className="archive-project-list">{items.map(session => {
         const date = new Date(session.updated_at);
         return <article className="archived-session" key={session.id}>
           <div className="archived-session-row">
-            <ArchiveSelection items={[session]} selected={selected} onToggle={toggleSelection} disabled={busy} label={`选择会话 ${session.title || "新会话"}`} />
-            <div className="archived-session-title"><h4>{session.title || "新会话"}</h4>
+            <ArchiveSelection items={[session]} selected={selected} onToggle={toggleSelection} disabled={busy} label={tr("选择会话 {0}", (session.title || "新会话"))} />
+            <div className="archived-session-title"><h4>{session.title || tr("新会话")}</h4>
               {!Number.isNaN(date.valueOf()) && <time dateTime={session.updated_at}>{archiveDate.format(date)}</time>}
             </div>
             <div className="archived-session-actions">
-              <button className="archive-icon-button" aria-label={session.deleting ? "重试删除" : "删除会话"} title={session.deleting ? "重试删除" : "删除会话"}
+              <button className="archive-icon-button" aria-label={session.deleting ? tr("重试删除") : tr("删除会话")} title={session.deleting ? tr("重试删除") : tr("删除会话")}
                 disabled={busy || !ready} onClick={() => { setBulkConfirm(null); session.deleting ? change([session], "purge") : setConfirming(session.id); }}>
                 {session.deleting ? <RefreshCw size={16}/> : <Trash2 size={16}/>}</button>
-              <button className="archive-restore" disabled={busy || session.deleting} onClick={() => change([session], "restore")}>取消归档</button>
+              <button className="archive-restore" disabled={busy || session.deleting} onClick={() => change([session], "restore")}>{tr("取消归档")}</button>
             </div>
           </div>
-          {session.deleting && <p className="archive-note">永久删除尚未完成，连接恢复后可重试。</p>}
-          {confirming === session.id && <div className="archive-confirm" role="group" aria-label="确认永久删除会话">
-            <p>永久删除“{session.title || "新会话"}”及其 Claude Code 原始对话和子代理记录？此操作无法撤销。</p>
-            <div className="archived-session-actions"><button className="archive-button" disabled={busy} onClick={() => setConfirming("")}>取消</button>
-              <button className="archive-button archive-delete" disabled={busy || !ready} onClick={() => change([session], "purge")}>永久删除</button></div>
+          {session.deleting && <p className="archive-note">{tr("永久删除尚未完成，连接恢复后可重试。")}</p>}
+          {confirming === session.id && <div className="archive-confirm" role="group" aria-label={tr("确认永久删除会话")}>
+            <p>{tr("永久删除“")}{session.title || tr("新会话")}{tr("”及其 Claude Code 原始对话和子代理记录？此操作无法撤销。")}</p>
+            <div className="archived-session-actions"><button className="archive-button" disabled={busy} onClick={() => setConfirming("")}>{tr("取消")}</button>
+              <button className="archive-button archive-delete" disabled={busy || !ready} onClick={() => change([session], "purge")}>{tr("永久删除")}</button></div>
           </div>}
         </article>;
       })}</div>
     </section>)}
-    {!ready && <p className="archive-note">启动主机环境后可以永久删除 Claude Code 原始记录。</p>}
+    {!ready && <p className="archive-note">{tr("启动主机环境后可以永久删除 Claude Code 原始记录。")}</p>}
   </section>;
 }

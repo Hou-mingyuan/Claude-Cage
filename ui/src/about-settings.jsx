@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { ExternalLink, LoaderCircle, RefreshCw } from "lucide-react";
 import { api, native, nativeAvailable } from "./api";
 import "./about-settings.css";
+import { useTranslation } from "./interface-language.mjs";
 
 const repository = "https://github.com/Lee-xeo/Claude-Cage";
 const sourceMessages = {
@@ -30,22 +31,24 @@ function RepositoryLink({ kind, onError, children }) {
 }
 
 function CheckResult({ label, item, source, onError }) {
-  return <section className="about-result" aria-label={label}>
-    <h4>{label}</h4>
-    {!item ? <p className="footnote">尚未检查</p> : <>
+  const tr = useTranslation();
+  return <section className="about-result" aria-label={tr(label)}>
+    <h4>{tr(label)}</h4>
+    {!item ? <p className="footnote">{tr("尚未检查")}</p> : <>
       <p className={item.error ? "error-message" : "about-result-status"}>
         {item.error || (source ? sourceMessages : releaseMessages)[item.status]}
       </p>
-      {item.retryAt && <p className="footnote">可于 {new Date(item.retryAt).toLocaleString()} 后重试</p>}
-      {source && item.commit && <p className="about-result-detail">主分支提交 <code title={item.commit}>{item.commit.slice(0, 12)}</code></p>}
-      {source && item.status === "available" && item.aheadBy > 0 && <p className="footnote">主分支新增 {item.aheadBy} 个提交</p>}
-      {!source && item.version && <p className="about-result-detail">{item.version} · {item.prerelease ? "预发行版" : "正式版"}</p>}
-      <RepositoryLink kind={source ? "source" : "releases"} onError={onError}>{source ? "查看源码提交" : "查看发行说明与下载"}</RepositoryLink>
+      {item.retryAt && <p className="footnote">{tr("可于") + " "}{new Date(item.retryAt).toLocaleString()}{" " + tr("后重试")}</p>}
+      {source && item.commit && <p className="about-result-detail">{tr("主分支提交") + " "}<code title={item.commit}>{item.commit.slice(0, 12)}</code></p>}
+      {source && item.status === "available" && item.aheadBy > 0 && <p className="footnote">{tr("主分支新增") + " "}{item.aheadBy}{" " + tr("个提交")}</p>}
+      {!source && item.version && <p className="about-result-detail">{item.version} · {item.prerelease ? tr("预发行版") : tr("正式版")}</p>}
+      <RepositoryLink kind={source ? "source" : "releases"} onError={onError}>{source ? tr("查看源码提交") : tr("查看发行说明与下载")}</RepositoryLink>
     </>}
   </section>;
 }
 
 export function AboutSettings() {
+  const tr = useTranslation();
   const [build, setBuild] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -81,26 +84,26 @@ export function AboutSettings() {
       if (!controller.signal.aborted) setBusy(false);
     }
   };
-  return <section className="about-settings" aria-label="关于 Cage">
-    <div className="section-title"><h3>关于</h3><p>Cage 的版本与更新信息</p></div>
+  return <section className="about-settings" aria-label={tr("关于 Cage")}>
+    <div className="section-title"><h3>{tr("关于")}</h3><p>{tr("Cage 的版本与更新信息")}</p></div>
     <dl className="about-build">
-      <div><dt>软件版本</dt><dd>{loading ? "正在读取…" : build?.version || "未知"}</dd></div>
-      <div><dt>构建提交</dt><dd>{build?.commit ? <code title={build.commit}>{build.commit.slice(0, 12)}</code> : loading ? "正在读取…" : "未记录"}</dd></div>
+      <div><dt>{tr("软件版本")}</dt><dd>{loading ? tr("正在读取…") : build?.version || tr("未知")}</dd></div>
+      <div><dt>{tr("构建提交")}</dt><dd>{build?.commit ? <code title={build.commit}>{build.commit.slice(0, 12)}</code> : loading ? tr("正在读取…") : tr("未记录")}</dd></div>
     </dl>
-    {build?.modified && <p className="footnote">此构建包含未提交的修改，提交核对仅反映已记录的提交。</p>}
+    {build?.modified && <p className="footnote">{tr("此构建包含未提交的修改，提交核对仅反映已记录的提交。")}</p>}
     <div className="about-check-actions">
       <button className="secondary-button" onClick={check} disabled={busy || coolingDown}>
         {busy ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={15} />}
-        {busy ? "正在检查…" : coolingDown ? "等待重试" : "检测更新"}
+        {busy ? tr("正在检查…") : coolingDown ? tr("等待重试") : tr("检测更新")}
       </button>
-      {result?.checkedAt && <span className="footnote">检查时间：{new Date(result.checkedAt).toLocaleString()}</span>}
+      {result?.checkedAt && <span className="footnote">{tr("检查时间：")}{new Date(result.checkedAt).toLocaleString()}</span>}
     </div>
-    <p className="footnote">优先通过主机网络与系统代理检查主分支提交和最新发行版，包含预发行版；主机连接失败时尝试 Cage 所选代理。检查后可前往发布页下载。</p>
-    {busy && <p role="status">正在核对源码提交与发行版…</p>}
-    {error && <p className="error-message" role="alert">{error}</p>}
+    <p className="footnote">{tr("优先通过主机网络与系统代理检查主分支提交和最新发行版，包含预发行版；主机连接失败时尝试 Cage 所选代理。检查后可前往发布页下载。")}</p>
+    {busy && <p role="status">{tr("正在核对源码提交与发行版…")}</p>}
+    {error && <p className="error-message" role="alert">{tr(error)}</p>}
     <div className="about-results" aria-live="polite" aria-busy={busy}>
-      <CheckResult label="源码更新" item={result?.source} source onError={setError} />
-      <CheckResult label="发行版更新（含预发行）" item={result?.release} onError={setError} />
+      <CheckResult label={tr("源码更新")} item={result?.source} source onError={setError} />
+      <CheckResult label={tr("发行版更新（含预发行）")} item={result?.release} onError={setError} />
     </div>
   </section>;
 }

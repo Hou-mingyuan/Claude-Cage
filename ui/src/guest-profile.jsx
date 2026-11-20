@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "./api";
 import { InlineSelect } from "./inline-select";
 import { SafetyMessage } from "./safety-message";
+import { useTranslation } from "./interface-language.mjs";
 
 const textFields = [
   ["hostname", "主机名", "留空使用随机 PC 名称", 15],
@@ -27,6 +28,7 @@ export function guestOptionsForSystem(input, system) {
 }
 
 export function GuestProfileOptions({ value, onChange, disabled, system }) {
+  const tr = useTranslation();
   const [saved, setSaved] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [editable, setEditable] = useState(false);
@@ -61,21 +63,21 @@ export function GuestProfileOptions({ value, onChange, disabled, system }) {
     catch (error) { setError(error.message); }
     finally { setGenerating(false); }
   }
-  return <details className="guest-profile-options"><summary>客机名称与初始设备配置</summary>
-    <p>建议选择自然、易记、与你以往环境身份不同的名称。用户名、主目录、主机名和尺寸可自行填写；留空时生成一组初始值，后续重启保持一致。</p>
+  return <details className="guest-profile-options"><summary>{tr("客机名称与初始设备配置")}</summary>
+    <p>{tr("建议选择自然、易记、与你以往环境身份不同的名称。用户名、主目录、主机名和尺寸可自行填写；留空时生成一组初始值，后续重启保持一致。")}</p>
     {error && <p role="alert"><SafetyMessage message={error} /></p>}
-    {loaded && !editable && <p>{saved ? "此环境的创建配置已保存，继续安装将复用以下设置。" : "已有环境沿用原配置；这些选项用于创建独立的新环境。"}</p>}
+    {loaded && !editable && <p>{saved ? tr("此环境的创建配置已保存，继续安装将复用以下设置。") : tr("已有环境沿用原配置；这些选项用于创建独立的新环境。")}</p>}
     {loaded && (editable || saved) && <fieldset disabled={locked}>
-      {textFields.filter(([key]) => !native || key === "hostname").map(([key, label, placeholder, maxLength]) => <label key={key}>{label}<input value={options[key] || ""} maxLength={maxLength} placeholder={placeholder} onChange={event => set(key, event.target.value)} autoComplete="off" /></label>)}
-      {dimensions.filter(([key]) => !native || key === "browser").map(([key, label]) => <label key={key}>{label}<span className="guest-profile-size">{["width", "height"].map((axis, i) => <React.Fragment key={axis}>{i > 0 && " × "}<input type="number" min={i ? 600 : 800} max={i ? 2160 : 3840} placeholder={i ? "高（随机）" : "宽（随机）"} value={options[`${key}_${axis}`] || ""} onChange={event => set(`${key}_${axis}`, event.target.value === "" ? 0 : Number(event.target.value))} /></React.Fragment>)}</span></label>)}
-      {!native && <label>音频设备（自动选择真实型号）<output>{options.audio_description || `创建时从 ${capabilities?.audio_models?.length || 12} 个型号中随机选择`}</output><small>型号名称与设备标识保持对应；随机后缀仅用于本环境标识。</small></label>}
-      <label>浏览器身份<output>跟随实际安装的浏览器，保持 UA 与 Client Hints 一致</output></label>
-      <label>图形渲染后端<InlineSelect inline aria-label="图形渲染后端" value={options.graphics_backend || "auto"} onValueChange={value => set("graphics_backend", value)} disabled={locked || options.webgl === "disabled"}><option value="auto">自动使用客机可用设备</option>{system === "macos" && <option value="metal">ANGLE / Metal</option>}{system === "windows-11" && <option value="d3d11">ANGLE / D3D11</option>}{!native && <option value="vulkan" disabled={options.gpu_backend === "virgl"}>ANGLE / Vulkan（需要驱动支持，VirGL 不适用）</option>}<option value="opengl">ANGLE / OpenGL</option><option value="software">SwiftShader 软件兼容模式</option></InlineSelect></label>
-      {!native && capabilities?.host_os === "linux" && !capabilities.container && <label>虚拟 GPU<InlineSelect inline aria-label="虚拟 GPU" value={options.gpu_backend || "default"} onValueChange={value => set("gpu_backend", value)}><option value="default">使用现有虚拟设备</option><option value="virgl">QEMU VirGL + DRI3（实验性，需要宿主 GPU）</option></InlineSelect></label>}
-      <label>WebGL<InlineSelect inline aria-label="WebGL" value={options.webgl || "native"} onValueChange={value => set("webgl", value)}><option value="native">使用客机原生图形能力</option><option value="disabled">关闭网页 3D 图形能力</option></InlineSelect></label>
-      <label>Canvas 图像读取<InlineSelect inline aria-label="Canvas 图像读取" value={options.canvas || "native"} onValueChange={value => set("canvas", value)}><option value="native">允许网页读取 Canvas 图像</option><option value="blocked">阻止网页读取 Canvas 图像</option></InlineSelect></label>
-      <p>后端名称表示实际渲染路径，是否获得硬件加速需在环境检测中核实。关闭 WebGL 或阻止 Canvas 读取会影响部分网站；这些选项不替换真实驱动报告的显卡型号。</p>
-      <button type="button" onClick={randomize}>{generating ? "正在生成…" : "重新随机生成名称和尺寸"}</button>
+      {textFields.filter(([key]) => !native || key === "hostname").map(([key, label, placeholder, maxLength]) => <label key={key}>{tr(label)}<input value={options[key] || ""} maxLength={maxLength} placeholder={tr(placeholder)} onChange={event => set(key, event.target.value)} autoComplete="off" /></label>)}
+      {dimensions.filter(([key]) => !native || key === "browser").map(([key, label]) => <label key={key}>{tr(label)}<span className="guest-profile-size">{["width", "height"].map((axis, i) => <React.Fragment key={axis}>{i > 0 && " × "}<input type="number" min={i ? 600 : 800} max={i ? 2160 : 3840} placeholder={i ? tr("高（随机）") : tr("宽（随机）")} value={options[`${key}_${axis}`] || ""} onChange={event => set(`${key}_${axis}`, event.target.value === "" ? 0 : Number(event.target.value))} /></React.Fragment>)}</span></label>)}
+      {!native && <label>{tr("音频设备（自动选择真实型号）")}<output>{options.audio_description || tr("创建时从 {0} 个型号中随机选择", (capabilities?.audio_models?.length || 12))}</output><small>{tr("型号名称与设备标识保持对应；随机后缀仅用于本环境标识。")}</small></label>}
+      <label>{tr("浏览器身份")}<output>{tr("跟随实际安装的浏览器，保持 UA 与 Client Hints 一致")}</output></label>
+      <label>{tr("图形渲染后端")}<InlineSelect inline aria-label={tr("图形渲染后端")} value={options.graphics_backend || "auto"} onValueChange={value => set("graphics_backend", value)} disabled={locked || options.webgl === "disabled"}><option value="auto">{tr("自动使用客机可用设备")}</option>{system === "macos" && <option value="metal">ANGLE / Metal</option>}{system === "windows-11" && <option value="d3d11">ANGLE / D3D11</option>}{!native && <option value="vulkan" disabled={options.gpu_backend === "virgl"}>{tr("ANGLE / Vulkan（需要驱动支持，VirGL 不适用）")}</option>}<option value="opengl">ANGLE / OpenGL</option><option value="software">{tr("SwiftShader 软件兼容模式")}</option></InlineSelect></label>
+      {!native && capabilities?.host_os === "linux" && !capabilities.container && <label>{tr("虚拟 GPU")}<InlineSelect inline aria-label={tr("虚拟 GPU")} value={options.gpu_backend || "default"} onValueChange={value => set("gpu_backend", value)}><option value="default">{tr("使用现有虚拟设备")}</option><option value="virgl">{tr("QEMU VirGL + DRI3（实验性，需要宿主 GPU）")}</option></InlineSelect></label>}
+      <label>WebGL<InlineSelect inline aria-label="WebGL" value={options.webgl || "native"} onValueChange={value => set("webgl", value)}><option value="native">{tr("使用客机原生图形能力")}</option><option value="disabled">{tr("关闭网页 3D 图形能力")}</option></InlineSelect></label>
+      <label>{tr("Canvas 图像读取")}<InlineSelect inline aria-label={tr("Canvas 图像读取")} value={options.canvas || "native"} onValueChange={value => set("canvas", value)}><option value="native">{tr("允许网页读取 Canvas 图像")}</option><option value="blocked">{tr("阻止网页读取 Canvas 图像")}</option></InlineSelect></label>
+      <p>{tr("后端名称表示实际渲染路径，是否获得硬件加速需在环境检测中核实。关闭 WebGL 或阻止 Canvas 读取会影响部分网站；这些选项不替换真实驱动报告的显卡型号。")}</p>
+      <button type="button" onClick={randomize}>{generating ? tr("正在生成…") : tr("重新随机生成名称和尺寸")}</button>
     </fieldset>}
   </details>;
 }

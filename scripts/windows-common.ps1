@@ -78,11 +78,47 @@ function ConvertTo-SmokeSafeText {
     return $text.Substring(0, [Math]::Min(768, $text.Length))
 }
 
+function Get-WindowsWorkbenchStorageError {
+    param([string]$Profile)
+    if (-not $Profile) { return }
+    # Only include the fixed sharing errors in public build diagnostics.
+    $storageErrors = @('此目录包含或属于凭据、用户资料或版本控制数据，无法共享',
+        'Cage 配置、环境存储及备份不能共享')
+    foreach ($relative in @('logs/events.jsonl', 'desktop-entry/logs/events.jsonl')) {
+        $log = Join-Path $Profile $relative
+        foreach ($line in (Get-Content -LiteralPath $log -Tail 64 -ErrorAction SilentlyContinue)) {
+            try { $event = ConvertFrom-Json -InputObject $line -AsHashtable -ErrorAction Stop }
+            catch { continue }
+            if ($event -is [System.Collections.IDictionary] -and $event['level'] -eq 'error' -and
+                $event['source'] -eq 'command' -and $event['message'] -in $storageErrors) {
+                return $event['message']
+            }
+        }
+    }
+}
+
+function Stop-WindowsWorkbenchAcceptance {
+    param([string]$Message, [string]$ControllerProfile)
+    $storageError = Get-WindowsWorkbenchStorageError $ControllerProfile
+    if ($storageError) { $Message += " Controller error: $storageError." }
+    throw $Message
+}
+
 function Assert-WindowsWorkbenchReport {
-    param([int]$ExitCode, [string]$Report)
-    if (-not (Test-Path -LiteralPath $Report -PathType Leaf)) { throw "Cage workbench acceptance failed ($ExitCode). No smoke report: $Report" }
-    if ((Get-Item -LiteralPath $Report).Length -gt 65536) { throw 'Cage smoke report exceeds the bounded diagnostic size.' }
-    $result = Get-Content -LiteralPath $Report -Raw | ConvertFrom-Json -AsHashtable
+    param([int]$ExitCode, [string]$Report, [string]$ControllerProfile)
+    $reportFile = Get-Item -LiteralPath $Report -ErrorAction SilentlyContinue
+    if ($reportFile -isnot [IO.FileInfo]) {
+        Stop-WindowsWorkbenchAcceptance "Cage workbench acceptance failed ($ExitCode). No smoke report: $Report" $ControllerProfile
+    }
+    if ($reportFile.Length -gt 65536) {
+        Stop-WindowsWorkbenchAcceptance "Cage smoke report exceeds the bounded diagnostic size: $Report" $ControllerProfile
+    }
+    try { $result = Get-Content -LiteralPath $Report -Raw | ConvertFrom-Json -AsHashtable -NoEnumerate }
+    catch { $result = $null }
+    if ($result -isnot [System.Collections.IDictionary]) {
+        Stop-WindowsWorkbenchAcceptance "Cage workbench acceptance failed ($ExitCode). Invalid smoke report: $Report" $ControllerProfile
+    }
+    $failed = $ExitCode -ne 0 -or $result['success'] -ne $true -or $result['nativeBridgeReady'] -ne $true
     $safe = @{ phase = ConvertTo-SmokeSafeText $result['phase']; nativeStatus = ConvertTo-SmokeSafeText $result['nativeStatus']; jsErrors = @() }
     if ($result['prepareExit'] -is [int] -or $result['prepareExit'] -is [long]) { $safe.prepareExit = $result['prepareExit'] }
     if ($result['prepareStatus'] -in @('prepared', 'stop_required', 'error', 'unexpected')) { $safe.prepareStatus = $result['prepareStatus'] }
@@ -98,11 +134,18 @@ function Assert-WindowsWorkbenchReport {
             }
         })
     }
+    if ($failed -and $ControllerProfile) {
+        $storageError = Get-WindowsWorkbenchStorageError $ControllerProfile
+        if ($storageError) {
+            $safe.controllerError = $storageError
+        }
+    }
     # Log only these already-bounded fields, even when the process failed. Do
     # not print launch entries, page URLs, account data or the raw report.
     Write-Host ('Cage smoke diagnostic: ' + ($safe | ConvertTo-Json -Depth 6 -Compress))
-    if ($ExitCode -ne 0 -or $result['success'] -ne $true -or $result['nativeBridgeReady'] -ne $true) {
-        throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $($safe.nativeStatus). Diagnostics: $Report"
+    if ($failed) {
+        $reason = $safe['controllerError'] ?? $safe.nativeStatus
+        throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $reason. Diagnostics: $Report"
     }
 }
 
@@ -134,17 +177,20 @@ function Assert-WindowsWorkbench {
     $testRoot = Join-Path $base ('cage-build-ui-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
     $report = Join-Path $testRoot 'smoke.json'
+    $profile = Join-Path $testRoot 'profile'
     $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $AppDirectory 'Cage.exe'))
     $start.UseShellExecute = $false
     $start.WorkingDirectory = $AppDirectory
-    $start.Environment['CLAUDE_CAGE_CONFIG'] = Join-Path $testRoot 'profile/config.json'
+    $start.Environment['CLAUDE_CAGE_CONFIG'] = Join-Path $profile 'config.json'
     $start.ArgumentList.Add('--smoke-test')
     $start.ArgumentList.Add($report)
     $window = [Diagnostics.Process]::Start($start)
     $passed = $false
     try {
-        if (-not $window.WaitForExit(180000)) { throw "Cage workbench acceptance timed out. Diagnostics retained at $testRoot" }
-        Assert-WindowsWorkbenchReport -ExitCode $window.ExitCode -Report $report
+        if (-not $window.WaitForExit(180000)) {
+            Stop-WindowsWorkbenchAcceptance "Cage workbench acceptance timed out. Diagnostics retained at $testRoot" $profile
+        }
+        Assert-WindowsWorkbenchReport -ExitCode $window.ExitCode -Report $report -ControllerProfile $profile
         Wait-WindowsWorkbenchFiles -AppDirectory $AppDirectory
         $passed = $true
     } finally {
@@ -159,7 +205,7 @@ function Assert-WindowsWorkbench {
                 $cleanup.CreateNoWindow = $true
                 $cleanup.RedirectStandardOutput = $true
                 $cleanup.RedirectStandardError = $true
-                $cleanup.Environment['CLAUDE_CAGE_CONFIG'] = Join-Path $testRoot 'profile/config.json'
+                $cleanup.Environment['CLAUDE_CAGE_CONFIG'] = Join-Path $profile 'config.json'
                 $cleanup.ArgumentList.Add('prepare-update'); $cleanup.ArgumentList.Add('--json')
                 $controller = [Diagnostics.Process]::Start($cleanup)
                 try {
@@ -192,13 +238,20 @@ function Get-BuildCommand {
     if (-not $Optional) { throw "Missing build tool: $($Names -join ' or ')" }
 }
 
+function Publish-WindowsCacheFile {
+    param([string]$Candidate, [string]$Path)
+    # Another build may have published a verified copy while this one downloaded.
+    try { [IO.File]::Move($Candidate, $Path) }
+    catch [IO.IOException] { if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw } }
+}
+
 function Get-VerifiedDependency {
     param($Dependency, [string]$Cache)
     if ($Dependency.url -notlike 'https://*') { throw 'Build dependencies must use HTTPS.' }
     $path = Join-Path $Cache $Dependency.file
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         New-Item -ItemType Directory -Path $Cache -Force | Out-Null
-        $partial = "$path.partial"
+        $partial = "$path.partial-$([guid]::NewGuid().ToString('N'))"
         try {
             # Release hosts and CDNs drop connections now and then. Retry the
             # transfer; the checksum below still decides what is accepted.
@@ -212,7 +265,9 @@ function Get-VerifiedDependency {
                     Start-Sleep -Seconds (5 * $attempt)
                 }
             }
-            Move-Item -LiteralPath $partial -Destination $path -Force
+            $actual = (Get-FileHash -LiteralPath $partial -Algorithm $Dependency.algorithm).Hash
+            if ($actual -ne $Dependency.hash) { throw "Downloaded dependency checksum mismatch: $($Dependency.file)" }
+            Publish-WindowsCacheFile $partial $path
         } finally {
             if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
         }
@@ -220,6 +275,17 @@ function Get-VerifiedDependency {
     $actual = (Get-FileHash -LiteralPath $path -Algorithm $Dependency.algorithm).Hash
     if ($actual -ne $Dependency.hash) { throw "Dependency checksum mismatch: $($Dependency.file). Remove the cached file and retry." }
     return $path
+}
+
+function Assert-SevenZipFormats {
+    param([string]$SevenZip)
+    # Minimal builds named 7z.exe can lack the PE/NSIS handlers needed for the
+    # pinned QEMU installer; find out before the long QEMU compile.
+    $info = (& $SevenZip 'i' 2>&1 | Out-String)
+    $missing = @(@('PE', 'Nsis') | Where-Object { $info -cnotmatch "(?m)\s$_\s" })
+    if ($LASTEXITCODE -ne 0 -or $missing.Count) {
+        throw "7-Zip at $SevenZip does not list the $($missing -join ', ') archive formats. Install the full 7-Zip and put its directory first on PATH. See docs/windows.md#windows-源码构建."
+    }
 }
 
 function Expand-BuildArchive {
@@ -279,7 +345,7 @@ function Get-VerifiedGitArchive {
             }
             $actualHash = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actualHash -ne $Dependency.hash) { throw "Source archive checksum mismatch: $($Dependency.file); expected $($Dependency.hash), actual $actualHash" }
-            Move-Item -LiteralPath $partial -Destination $archive -Force
+            Publish-WindowsCacheFile $partial $archive
         } finally {
             Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -319,6 +385,83 @@ function Invoke-WindowsQemuProbe {
         }
         return $stdout.GetAwaiter().GetResult()
     } finally { $process.Dispose() }
+}
+
+function Enter-WindowsQemuOutputLock {
+    param([string]$Directory)
+    $deadline = [DateTime]::UtcNow.AddMinutes(30)
+    while ($true) {
+        try { return [IO.File]::Open("$Directory.lock", [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+        catch [IO.IOException] {
+            if ($IsWindows -and ($_.Exception.HResult -band 0xffff) -notin @(32, 33)) { throw }
+            if ([DateTime]::UtcNow -ge $deadline) { throw "Timed out waiting for the QEMU runtime cache lock: $Directory.lock" }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+
+function Test-WindowsQemuBuildManifest {
+    param([string]$Directory, [string]$Fingerprint)
+    try {
+        $root = Get-Item -LiteralPath $Directory
+        if ($root -isnot [IO.DirectoryInfo] -or ($root.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+        $files = @{}
+        foreach ($file in (Get-ChildItem -LiteralPath $Directory -Force)) {
+            if ($file -isnot [IO.FileInfo] -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+            $files[$file.Name] = $file.FullName
+        }
+        foreach ($name in @('cage-build.json', 'qemu-system-x86_64.exe', 'qemu-img.exe', 'build-packages.txt', 'build-source-packages.txt')) {
+            if (-not $files.ContainsKey($name)) { return $false }
+        }
+        $manifest = Get-Content -LiteralPath $files['cage-build.json'] -Raw | ConvertFrom-Json -AsHashtable -NoEnumerate
+        if ($manifest -isnot [System.Collections.IDictionary] -or $manifest['fingerprint'] -isnot [string] -or
+            $manifest['fingerprint'] -notmatch '^[0-9a-fA-F]{64}$' -or
+            ($Fingerprint -and $manifest['fingerprint'] -ne $Fingerprint) -or $manifest['files'] -isnot [array]) { return $false }
+        $files.Remove('cage-build.json')
+        foreach ($entry in $manifest['files']) {
+            if ($entry -isnot [System.Collections.IDictionary] -or $entry['name'] -isnot [string] -or $entry['sha256'] -isnot [string] -or
+                -not $files.ContainsKey($entry['name'])) { return $false }
+            if ((Get-FileHash -LiteralPath $files[$entry['name']] -Algorithm SHA256).Hash -ne $entry['sha256']) { return $false }
+            $files.Remove($entry['name'])
+        }
+        return $files.Count -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Publish-WindowsQemuRuntime {
+    param([string]$StagedDirectory, [string]$Directory, [switch]$ManagedCache)
+    # The caller holds the per-output lock and stages the runtime on this volume.
+    $previous = $null
+    if (Test-Path -LiteralPath $Directory) {
+        $current = Get-Item -LiteralPath $Directory
+        if ($current -isnot [IO.DirectoryInfo] -or ($current.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Choose a normal directory for QEMU build output: $Directory"
+        }
+        $empty = -not (Get-ChildItem -LiteralPath $Directory -Force | Select-Object -First 1)
+        $marker = Get-Item -LiteralPath (Join-Path $Directory 'cage-build.json') -ErrorAction SilentlyContinue
+        if (-not $ManagedCache -and -not $empty -and
+            ($marker -isnot [IO.FileInfo] -or ($marker.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+            throw "Choose an empty directory or an existing Cage QEMU build output: $Directory"
+        }
+        $removePrevious = $empty -or (Test-WindowsQemuBuildManifest $Directory)
+        $previous = "$Directory.previous-$([guid]::NewGuid().ToString('N'))"
+        [IO.Directory]::Move($Directory, $previous)
+    }
+    try { [IO.Directory]::Move($StagedDirectory, $Directory) }
+    catch {
+        if ($previous) { [IO.Directory]::Move($previous, $Directory) }
+        throw
+    }
+    if ($previous) {
+        if ($removePrevious) {
+            try { Remove-Item -LiteralPath $previous -Recurse -Force }
+            catch { Write-Warning "The previous QEMU output is retained at $previous." }
+        } else {
+            Write-Warning "The previous QEMU output was incomplete or contained extra files and is retained at $previous."
+        }
+    }
 }
 
 function Assert-WindowsQemuRuntime {

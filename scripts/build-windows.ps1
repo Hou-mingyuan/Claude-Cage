@@ -8,11 +8,22 @@ param(
     [string]$DependencyCache
 )
 . (Join-Path $PSScriptRoot 'windows-common.ps1')
+
+function Assert-NoCageDataInBuildOutput {
+    param([string]$Directory)
+
+    $dataPath = Join-Path $Directory 'CageData'
+    if (Test-Path -LiteralPath $dataPath) {
+        throw "Build output contains CageData user data at '$dataPath'. Choose a separate -OutputDirectory or move the storage using Cage Settings."
+    }
+}
+
 $repository = Split-Path $PSScriptRoot -Parent
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repository '_output/windows-amd64/app' }
 if (-not $DependencyCache) { $DependencyCache = Join-Path $repository '_output/windows-deps' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath (Join-Path $OutputDirectory 'Uninstall.exe')) { throw 'Do not build over an installed application. Choose a separate output directory and use the installer to upgrade.' }
+Assert-NoCageDataInBuildOutput $OutputDirectory
 Assert-WindowsWorkbenchTestBase
 $version = Get-CageVersion $repository
 $signed = $Release -or $Sign
@@ -37,14 +48,17 @@ $go = $tools['Go']
 $dotnet = $tools['.NET SDK']
 $node = $tools['Node.js']
 $sevenZip = $tools['7-Zip']
+Assert-SevenZipFormats $sevenZip
 $dependencies = Get-Content -LiteralPath (Join-Path $repository 'packaging/windows/dependencies.json') -Raw | ConvertFrom-Json
 $stage = Join-Path $repository ("_output/windows-build-" + [guid]::NewGuid().ToString('N'))
+$retainStage = $false
 $savedGoOS, $savedGoArch, $savedCGO = $env:GOOS, $env:GOARCH, $env:CGO_ENABLED
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Push-Location $repository
 try {
     $sdk = (Get-Content -LiteralPath 'global.json' -Raw | ConvertFrom-Json).sdk.version
-    $actualSdk = (& $dotnet '--version' | Select-Object -Last 1)
+    try { $actualSdk = (& $dotnet '--version' | Select-Object -Last 1) }
+    catch { throw "Install .NET SDK $sdk from global.json before building. $($_.Exception.Message)" }
     if ($actualSdk -ne $sdk) { throw "Expected .NET SDK $sdk from global.json; found $actualSdk." }
     foreach ($module in @('.', 'tools/tailnet')) {
         Push-Location $module
@@ -54,8 +68,7 @@ try {
             Invoke-BuildTool $go @('list', '-m')
         } finally { Pop-Location }
     }
-    $qemuBuilt = Join-Path $DependencyCache 'qemu-cage'
-    & (Join-Path $PSScriptRoot 'build-qemu-windows.ps1') -DependencyCache $DependencyCache -OutputDirectory $qemuBuilt
+    $qemuBuilt = & (Join-Path $PSScriptRoot 'build-qemu-windows.ps1') -DependencyCache $DependencyCache -UseFingerprintCache
     Invoke-BuildTool $node @('scripts/bundle-cloud-kit.mjs', '--prefetch')
     if (-not $SkipUI) {
         Invoke-BuildTool $tools['npm'] @('--prefix', 'ui', 'ci', '--no-audit', '--no-fund')
@@ -81,17 +94,6 @@ try {
     $resources = Join-Path $app 'resources'
     New-Item -ItemType Directory -Path $resources -Force | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $resources 'runtime') -Force | Out-Null
-    $guestSetup = New-Item -ItemType Directory -Path (Join-Path $resources 'guest-os')
-    Copy-Item -LiteralPath 'scripts/guest-os/new-windows-test-vm.ps1' -Destination (Join-Path $guestSetup.FullName 'new-windows-guest.ps1')
-    Copy-Item -LiteralPath 'scripts/guest-os/windows-host-image.ps1' -Destination $guestSetup.FullName
-    foreach ($file in @('windows-guest-media.ps1', 'install-guest-powershell.cmd', 'setup-windows-guest.ps1', 'complete-windows-guest.ps1', 'install-windows-host-manager.ps1', 'install-windows-workbench-components.ps1', 'initialize-windows-workbench-user.ps1', 'windows-host-enrollment.ps1', 'maintain-windows-workbench.ps1', 'update-windows-workbench-components.ps1', 'publish-windows-component-manifest.ps1', 'windows-workbench-packages.ps1')) {
-        Copy-Item -LiteralPath (Join-Path 'scripts/guest-os' $file) -Destination $guestSetup.FullName
-    }
-    $bridgeSetup = New-Item -ItemType Directory -Path (Join-Path $guestSetup.FullName 'guest-clipboard-windows')
-    foreach ($file in @('install.ps1', 'install-network.ps1')) {
-        Copy-Item -LiteralPath (Join-Path 'scripts/guest-os/guest-clipboard-windows' $file) -Destination $bridgeSetup.FullName
-    }
-    & (Join-Path $PSScriptRoot 'guest-os/build-windows-workbench-payload.ps1') -Destination (Join-Path $guestSetup.FullName 'payload')
     $tailnetAssets = Join-Path $repository 'internal/tailnetassets/assets'
     New-Item -ItemType Directory -Path $tailnetAssets -Force | Out-Null
     foreach ($tailnetArch in @('amd64','arm64')) {
@@ -209,7 +211,14 @@ try {
         [IO.File]::WriteAllText((Join-Path $app 'DEVELOPMENT-BUILD.txt'), "Unsigned development build. Automatic update installation is disabled. Windows 10/11 runtime acceptance is still required.`n")
     }
     Assert-WindowsQemuRuntime $qemuTarget -Firmware
-    Assert-WindowsWorkbench $app
+    try { Assert-WindowsWorkbench $app }
+    catch {
+        $retainStage = $true
+        Write-Warning "Workbench acceptance failed. Build candidate retained at $app"
+        throw
+    }
+    # Cage may have initialized storage in the old build while this build was running.
+    Assert-NoCageDataInBuildOutput $OutputDirectory
     $previousOutput = $null
     if (Test-Path -LiteralPath $OutputDirectory) {
         $marker = Join-Path $OutputDirectory 'Cage.install-id'
@@ -230,7 +239,7 @@ try {
 } finally {
     Pop-Location
     $env:GOOS = $savedGoOS; $env:GOARCH = $savedGoArch; $env:CGO_ENABLED = $savedCGO
-    if (Test-Path -LiteralPath $stage) {
+    if (-not $retainStage -and (Test-Path -LiteralPath $stage)) {
         try { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop }
         catch { Write-Warning "Temporary build files remain at $stage. Cleanup did not complete: $($_.Exception.Message)" }
     }

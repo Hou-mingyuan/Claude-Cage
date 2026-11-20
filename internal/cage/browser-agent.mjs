@@ -1,4 +1,3 @@
-import { createTailnetClient } from "./tailnet-client.mjs";
 // Chromium is controlled through inherited pipes, never an exposed CDP port.
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -8,18 +7,18 @@ import { open } from "node:fs/promises";
 import http from "node:http";
 import { auditBrowser } from "./browser-audit.mjs";
 import { BrowserVault } from "./browser-vault.mjs";
-import { LoginBrowser } from "./browser-login.mjs";
+import { LoginBrowser, isClaudeSignIn } from "./browser-login.mjs";
 import { PrivateBrowser } from "./browser-private.mjs";
-import { browserCookies } from "./browser-cookies.mjs";
+import { browserCookies, AccountLoginCookies } from "./browser-cookies.mjs";
 import { BrowserExtensions, extensionUploadLimit } from "./browser-extensions.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
-import { BrowserVisibility } from "./browser-visibility.mjs";
+import { BrowserVisibility, rememberOpener, targetAfterClose } from "./browser-visibility.mjs";
 import { BrowserWheel, createActivitySignal, createPointerProbe } from "./browser-wheel.mjs";
 import { nativeInput } from "./native-input.mjs";
 import { createDisplaySettings, displayDensity } from "./display-density.mjs";
 import { DownloadManager } from "./browser-downloads.mjs";
 import { UploadManager, uploadLimit } from "./browser-uploads.mjs";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 const config = JSON.parse(
   readFileSync("/etc/claude-cage/browser-control.json", "utf8"),
@@ -40,7 +39,7 @@ try {
 } catch {}
 function rememberSelection() {
   const tab = targets.get(activeId);
-  if (tab && !tab.login && !tab.incognito)
+  if (tab && !tab.login && !tab.incognito && !tab.routeScoped)
     try {
       writeFileSync(selectionFile, JSON.stringify({ url: tab.url }), {
         mode: 0o600,
@@ -49,10 +48,8 @@ function rememberSelection() {
 }
 const downloadPath = "/home/cage-browser/Downloads";
 mkdirSync(downloadPath, { recursive: true });
-const snapLauncher = "/usr/local/lib/workbench-browser/chromium";
-const snapBrowser = existsSync(snapLauncher);
-const browserBinary = snapBrowser ? snapLauncher : "/usr/bin/chromium";
-const splitDirectory = snapBrowser ? "/var/snap/chromium/common/workbench-extension" : "/usr/local/lib/cage-split";
+const browserBinary = "/usr/bin/chromium";
+const splitDirectory = "/usr/local/lib/cage-split";
 const extensionId = createHash("sha256").update(splitDirectory).digest("hex").slice(0, 32)
   .replace(/./g, c => String.fromCharCode(97 + parseInt(c, 16)));
 const splitURL = `chrome-extension://${extensionId}/control.html`;
@@ -84,6 +81,7 @@ const flags = [
   "--restore-last-session",
   "--no-default-browser-check",
   "--disable-quic",
+  "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
   "--disable-session-crashed-bubble",
   "--window-size=1440,900",
   ...(displaySettings.available ? [] : [`--force-device-scale-factor=${displayScale}`]),
@@ -105,7 +103,7 @@ let navigation = { id: "", back: false, forward: false }, navigationSequence = 0
 // Context IDs and unique blank-page URLs are registered before target creation.
 const auditExclusions = new Set();
 const auditCreations = new Set(), deferredTargetInfo = new Map();
-const loginBrowser = new LoginBrowser(cdp);
+const loginBrowser = new LoginBrowser(cdp, new AccountLoginCookies("/home/cage-browser/LoginProfiles"));
 const privateBrowser = new PrivateBrowser(cdp, downloadPath);
 const browserExtensions = new BrowserExtensions({ directory: "/home/cage-browser", cdp, control: splitController, protectedID: extensionId });
 const pending = new Map(),
@@ -194,7 +192,7 @@ const downloads = new DownloadManager({
     return JSON.parse(output);
   },
 });
-const uploadDirectory = snapBrowser ? "/home/cage-browser/snap/chromium/common/uploads" : "/home/cage-browser/.cage-uploads";
+const uploadDirectory = "/home/cage-browser/.cage-uploads";
 rmSync(uploadDirectory, { recursive: true, force: true });
 const uploadSessions = new Map();
 const uploads = new UploadManager({ directory: uploadDirectory, cdp, changed: () => broadcastState() });
@@ -222,7 +220,8 @@ function updateTargetInfo(t) {
   else inspectors.delete(t.targetId);
   if (!isBrowserTab(t)) return;
   const fresh = !targets.has(t.targetId);
-  targets.set(t.targetId, privateBrowser.tab(loginBrowser.tab(t, targets.get(t.targetId))));
+  const previous = targets.get(t.targetId);
+  targets.set(t.targetId, privateBrowser.tab(loginBrowser.tab(rememberOpener(t, previous), previous)));
   if (isNativeNewTab(t.url)) void restoreHomepage(t.targetId).catch(error => console.error("Could not open homepage:", error.message));
   if (fresh) void session(t.targetId).catch(() => {});
   if (t.targetId === activeId) rememberSelection();
@@ -318,6 +317,7 @@ chrome.stdio[4].on("data", (chunk) => {
       auditExclusions.delete(p.targetId);
       deferredTargetInfo.delete(p.targetId);
       inspectors.delete(p.targetId);
+      void mutate(() => loginBrowser.targetClosed(p.targetId)).catch(() => {});
       if (p.targetId === splitTarget) {
         splitTarget = null; splitSession = null;
         if (!shuttingDown) void mutate(async () => {
@@ -327,7 +327,8 @@ chrome.stdio[4].on("data", (chunk) => {
       }
       closingTargets.get(p.targetId)?.();
       if (!targets.has(p.targetId)) continue;
-      const wasPrivate = targets.get(p.targetId).incognito;
+      const closed = targets.get(p.targetId);
+      const wasPrivate = closed.incognito;
       vault.remove(p.targetId);
       targets.delete(p.targetId);
       browserClipboard.detachTab(p.targetId);
@@ -341,7 +342,7 @@ chrome.stdio[4].on("data", (chunk) => {
       sessions.delete(p.targetId);
       if (wasPrivate) void mutate(() => privateBrowser.prune()).catch(() => {});
       if (activeId === p.targetId) {
-        activeId = [...targets.keys()][0] || "";
+        activeId = targetAfterClose(targets, closed);
         if (activeId) void activate(activeId).catch(() => {});
       }
       broadcastState();
@@ -368,7 +369,9 @@ chrome.stdio[4].on("data", (chunk) => {
       uploads.cancelTab(uploadTab);
   }
 });
-chrome.on("exit", () => {
+chrome.on("exit", (code, signal) => {
+  // Record only how Chromium ended; never page addresses or contents.
+  if (!shuttingDown) console.error(`Chromium exited unexpectedly: code=${code} signal=${signal}`);
   ready = false;
   for (const p of pending.values()) {
     clearTimeout(p.timer);
@@ -378,8 +381,10 @@ chrome.on("exit", () => {
   process.exit(shuttingDown ? 0 : 1);
 });
 for (const channel of chrome.stdio.slice(3))
-  channel.on("error", () => {
-    if (!shuttingDown) process.exit(1);
+  channel.on("error", (error) => {
+    if (shuttingDown) return;
+    console.error(`Chromium control pipe failed: ${error?.code || error?.name || "unknown"}`);
+    process.exit(1);
   });
 async function session(id) {
   if (!targets.has(id)) throw new Error("Tab no longer exists");
@@ -630,9 +635,11 @@ async function restartEditor(workspace) {
 async function tabState() {
   await Promise.allSettled([...auditCreations]);
   const { targetInfos } = await cdp("Target.getTargets");
-  for (const tab of targetInfos)
-    if (isBrowserTab(tab))
-      targets.set(tab.targetId, privateBrowser.tab(loginBrowser.tab(tab, targets.get(tab.targetId))));
+  for (const tab of targetInfos) {
+    if (!isBrowserTab(tab)) continue;
+    const previous = targets.get(tab.targetId);
+    targets.set(tab.targetId, privateBrowser.tab(loginBrowser.tab(rememberOpener(tab, previous), previous)));
+  }
   await refreshNavigation();
   return publicState();
 }
@@ -774,9 +781,6 @@ function pasteImage(png) {
   });
 }
 
-const tailnet = createTailnetClient();
-void tailnet.restore().catch(() => {});
-process.once("exit", () => tailnet.close());
 let phoneBrowser;
 const server = http.createServer(async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
@@ -844,12 +848,11 @@ const server = http.createServer(async (req, res) => {
     let text = "";
     for await (const chunk of req) {
       text += chunk;
-      if (text.length > (req.url === "/paste-image" ? 28 * 1024 * 1024 : req.url === "/paste-text" ? 12 * 1024 * 1024 + 4096 : 65536)) throw new Error("Request too large");
+      if (text.length > (req.url === "/paste-image" ? 28 * 1024 * 1024 : req.url === "/paste-text" ? 12 * 1024 * 1024 + 4096 : req.url === "/cookies" ? 1 << 20 : 65536)) throw new Error("Request too large");
     }
     const input = JSON.parse(text || "{}");
     // Ahead of the queue below: a scroll does not wait for a tab operation.
     if (req.url === "/wheel") { res.end(JSON.stringify(await browserWheel.deliver(input))); return; }
-    if (req.url === "/tailnet") { res.end(JSON.stringify(await tailnet.request(input))); return; }
     if (["/phone-desktop/open", "/phone-desktop/frame", "/phone-desktop/action", "/phone-desktop/close"].includes(req.url)) {
       const { phoneDesktop } = await import("./browser-phone-desktop.mjs");
       try { res.end(JSON.stringify(await phoneDesktop(req.url.split("/").pop(), input))); }
@@ -898,12 +901,14 @@ const server = http.createServer(async (req, res) => {
         try { return await vault.request(input); }
         catch (error) { return { vaultError: error.message }; }
       }
-      if (req.url === "/login-open") {
-        return loginBrowser.open(input.login, input.url, async tab => {
-          if (!targets.has(tab.targetId)) targets.set(tab.targetId, loginBrowser.tab(tab));
+      if (req.url === "/login-open" || (req.url === "/new" && (input.route || isClaudeSignIn(input.url)))) {
+        const external = req.url === "/new" && !isClaudeSignIn(input.url);
+        const privateLogin = !external && !existsSync("/etc/claude-cage/login-browser-mode");
+        return loginBrowser.open(input.login || randomUUID(), input.url, async tab => {
+          targets.set(tab.targetId, loginBrowser.tab(tab));
           await activate(tab.targetId, true);
           return session(tab.targetId);
-        });
+        }, { private: privateLogin, route: input.route, account: input.account, external });
       }
       if (req.url === "/login-finish") {
         await loginBrowser.finish(input.login);
@@ -1085,6 +1090,6 @@ process.on("SIGTERM", () => {
   shuttingDown = true;
   server.close();
   void phoneBrowser?.dispose();
-  cdp("Browser.close").catch(() => {});
+  void loginBrowser.shutdown().finally(() => cdp("Browser.close")).catch(() => {});
   setTimeout(() => process.exit(0), 2000).unref();
 });

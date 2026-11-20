@@ -89,6 +89,12 @@ func stopWindowsCore(profile string) error {
 		return err
 	}
 	defer windows.CloseHandle(handle)
+	// An exited process stays openable while another handle keeps it, and its
+	// image name can no longer be queried (ERROR_GEN_FAILURE). Its PID cannot be
+	// reused meanwhile, so an exited object here never names a running process.
+	if exited, err := windows.WaitForSingleObject(handle, 0); err == nil && exited == windows.WAIT_OBJECT_0 {
+		return removeStaleCore(profile, path)
+	}
 	image, created, err := identifyCore(handle)
 	if err != nil {
 		return err
@@ -142,6 +148,12 @@ func removeStaleCore(profile, path string) error {
 }
 
 func removeWindowsCoreSocket(profile string) error {
+	// Earlier versions kept the socket in Temp, where removing it can fail
+	// (ERROR_CANT_ACCESS_FILE). It is no longer used: clean it up when
+	// possible, and never let it block stopping or starting the core.
+	legacy := legacyWindowsSocket(profile)
+	_ = os.Remove(legacy)
+	_ = os.Remove(filepath.Dir(legacy)) // only when empty
 	if err := os.Remove(Socket(profile)); err != nil && !os.IsNotExist(err) {
 		return &coreError{stage: "socket.remove", err: err}
 	}
@@ -180,7 +192,7 @@ func startWindowsCore(ctx context.Context, profile string, s Store) error {
 	if err != nil {
 		return err
 	}
-	if err := host.EnsurePrivateDir(filepath.Dir(Socket(profile))); err != nil {
+	if _, err := WindowsSocket(profile); err != nil {
 		return err
 	}
 	b, err := s.Runtime(profile)
@@ -253,38 +265,4 @@ func startWindowsCore(ctx context.Context, profile string, s Store) error {
 			}
 		}
 	}
-}
-
-func windowsPhysicalInterface(ctx context.Context) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	// Select only hardware adapters with a usable IPv4 default route. Virtual
-	// VPN/TUN adapters never become the proxy's underlying host connection.
-	const script = `$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $candidates=@(Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | ForEach-Object { $a=$_; $ip=Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.AddressState -eq 'Preferred' -and $_.IPAddress -notlike '169.254.*' }; $routes=Get-NetRoute -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue; if ($ip) { $routes | Where-Object { $_.NextHop -ne '0.0.0.0' } | ForEach-Object { [pscustomobject]@{Name=$a.Name;Index=$a.ifIndex;Metric=($_.RouteMetric+$_.InterfaceMetric)} } } }); $best=$candidates | Sort-Object Metric,Index | Select-Object -First 1; if (!$best) { exit 2 }; $best | ConvertTo-Json -Compress`
-	root := os.Getenv("SystemRoot")
-	if root == "" {
-		root = `C:\Windows`
-	}
-	cmd := exec.CommandContext(ctx, filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	out, err := cmd.Output()
-	if err != nil {
-		var exited *exec.ExitError
-		if errors.As(err, &exited) && exited.ExitCode() == 2 {
-			return "", errors.New("未找到可用的物理 IPv4 网卡。请连接以太网或 Wi-Fi；仅有虚拟网卡的 Windows 虚拟机和云主机暂不可用。Cage 外网保持关闭")
-		}
-		return "", errors.New("无法读取 Windows 物理网卡信息，请确认系统网络服务正常后重试；Cage 外网保持关闭")
-	}
-	var selected struct {
-		Name  string
-		Index int
-	}
-	if json.Unmarshal(out, &selected) != nil || selected.Name == "" || selected.Index <= 0 {
-		return "", errors.New("Windows 物理网卡信息无效")
-	}
-	iface, err := net.InterfaceByIndex(selected.Index)
-	if err != nil || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-		return "", errors.New("物理网卡已断开，请重试")
-	}
-	return iface.Name, nil
 }

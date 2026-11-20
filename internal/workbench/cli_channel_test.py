@@ -45,6 +45,24 @@ class ChannelTests(unittest.TestCase):
         path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         return path
 
+    def test_codex_receipt_belongs_to_one_terminal(self):
+        factory = channel.client_runtime()["CodexMailbox"]
+        mailbox, other = factory(), factory()
+        send = {"name": "send_to_codex", "arguments": {"message": "Review the test."}}
+        with self.assertRaises(ValueError):
+            mailbox.call({"name": "send_to_codex", "arguments": {"message": "Review", "threadId": self.session}})
+        receipt = mailbox.call(send)
+        self.assertEqual(receipt["status"], "pending")
+        self.assertNotIn("message", receipt)
+        fetch = {"name": "codex_result", "arguments": {"request_id": receipt["id"]}}
+        with self.assertRaises(ValueError):
+            other.call(fetch)
+        with self.assertRaises(ValueError):
+            mailbox.call(send)
+        self.assertEqual(mailbox.exchange({"action":"codex-read"}), {"id":receipt["id"],"message":"Review the test."})
+        mailbox.exchange({"action":"codex-done","id":receipt["id"],"status":"completed","answer":"Done."})
+        self.assertEqual(mailbox.call(fetch)["answer"], "Done.")
+
     def test_channel_body_preserves_markup(self):
         request = str(uuid.uuid4())
         body = "show </channel> literally\n<channel cage_request=\"other\">example</channel>"
@@ -68,6 +86,16 @@ class ChannelTests(unittest.TestCase):
             result=channel.prepare_account_switch(request)
             self.assertEqual(Path(result["transcript"]).read_bytes(),original)
             self.assertEqual(channel.prepare_account_switch(request),result)
+        target_config = self.home / ".claude"
+        target_log = self.history(target, self.project, [{"type": "system"}])
+        channel.save(self.root / str(uuid.uuid4()) / "state.json", {
+            "cli_id": target, "config": str(target_config), "resume_transcript": result["transcript"],
+        })
+        pending = channel.view(target_config, target)
+        self.assertFalse(pending["native_history"])
+        self.assertEqual(pending["turns"][0]["prompt"], "perform task")
+        target_log.write_bytes(original)
+        self.assertTrue(channel.view(target_config, target)["native_history"])
         receipt=channel.read_json(Path(result["transcript"]).with_name("receipt.json"))
         self.assertEqual(receipt["requests"],{"accepted":"digest"})
         self.assertEqual(path.read_bytes(),original)
@@ -78,6 +106,30 @@ class ChannelTests(unittest.TestCase):
         self.assertTrue(channel.cancel_account_switch(request)["ok"])
         self.assertFalse(Path(result["transcript"]).exists())
         self.assertTrue(path.exists())
+
+    def test_account_switch_accepts_project_worktrees_and_refuses_other_projects(self):
+        completed=type("Result",(),{"returncode":0,"stdout":"[]"})()
+        for cwd,accepted in ((self.project+"/.claude/worktrees/agent-live",True),(self.project+"/src",True),
+                             (self.project+"-other",False),(str(self.home/"elsewhere"),False)):
+            session,connection,switch_id,target=[str(uuid.uuid4()) for _ in range(4)]
+            path=self.history(session,cwd,[{"type":"user","message":{"content":"start"}},{"type":"assistant","message":{"content":"continued in worktree"}}])
+            request={"cli_id":session,"config":str(self.home/".claude"),"connection":connection,"workspace":self.project,"target_cli_id":target,"switch_id":switch_id}
+            channel.save(self.root/connection/"state.json",{"cli_id":session,"config":request["config"],"workspace":self.project,"busy":False})
+            # The idle source CLI reports the worktree it last worked in.
+            live=[{"pid":4242,"sessionId":session,"cwd":cwd,"status":"idle","kind":"interactive"}]
+            with patch.object(channel,"active_sessions",return_value=live),patch.object(channel.subprocess,"run",return_value=completed), \
+                    patch.object(channel,"terminate_cli") as terminate:
+                if accepted:
+                    self.assertEqual(Path(channel.prepare_account_switch(request)["transcript"]).read_bytes(),path.read_bytes())
+                    terminate.assert_called_once_with(4242)
+                else:
+                    with self.assertRaisesRegex(ValueError,"尚未安全停止"): channel.prepare_account_switch(request)
+                    terminate.assert_not_called()
+            # Without a live process the frozen history is checked on its own.
+            with patch.object(channel,"active_sessions",return_value=[]),patch.object(channel.subprocess,"run",return_value=completed):
+                if not accepted:
+                    with self.assertRaisesRegex(ValueError,"历史项目"): channel.prepare_account_switch(request)
+                    self.assertFalse((self.root.parent/"cli-account-switches"/switch_id/"history.jsonl").exists())
 
     def test_account_switch_refuses_busy_and_unresolved_tools(self):
         path=self.history(self.session,self.project,[{"type":"assistant","message":{"content":[{"type":"tool_use","id":"uncertain","name":"Bash","input":{}}]}}])
@@ -199,6 +251,42 @@ class ChannelTests(unittest.TestCase):
         with patch.object(channel, "active_sessions", side_effect=[[row], [{**row, "status":"busy"}]]), patch.object(channel.os, "kill") as kill:
             self.assertTrue(channel.handoff_session(request)["running"])
             kill.assert_not_called()
+
+    def test_handoff_accepts_a_session_in_a_project_worktree(self):
+        request = {"cli_id":self.session, "config":str(self.home / ".claude"), "workspace":self.project}
+        for cwd, accepted in ((self.project + "/.claude/worktrees/agent", True), (self.project + "-other", False)):
+            row = {"sessionId":self.session, "pid":1234, "cwd":cwd, "status":"idle", "kind":"interactive"}
+            with patch.object(channel, "active_sessions", return_value=[row]), patch.object(channel, "live", return_value=False), patch.object(channel.os, "kill") as kill:
+                if accepted:
+                    self.assertFalse(channel.handoff_session(request)["running"])
+                    kill.assert_called_once_with(1234, channel.signal.SIGTERM)
+                else:
+                    with self.assertRaisesRegex(ValueError, "项目已变化"):
+                        channel.handoff_session(request)
+                    kill.assert_not_called()
+
+    def test_account_switch_carries_rewind_backups_to_the_target_account(self):
+        self.history(self.session, self.project, [{"type":"user","message":{"content":"edit"}}])
+        backups = self.home / ".claude/file-history" / self.session
+        backups.mkdir(parents=True)
+        (backups / "abc@v1").write_text("before edit")
+        connection, switch_id, target = [str(uuid.uuid4()) for _ in range(3)]
+        request = {"cli_id":self.session,"config":str(self.home / ".claude"),"connection":connection,"workspace":self.project,"target_cli_id":target,"switch_id":switch_id}
+        channel.save(self.root/connection/"state.json",{"cli_id":self.session,"config":request["config"],"workspace":self.project,"busy":False})
+        completed = type("Result",(),{"returncode":0,"stdout":"[]"})()
+        with patch.object(channel,"active_sessions",return_value=[]),patch.object(channel.subprocess,"run",return_value=completed):
+            transcript = channel.prepare_account_switch(request)["transcript"]
+        (backups / "abc@v1").write_text("changed after the freeze")
+        target_config = self.home / "target-config"
+        target_config.mkdir()
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(target_config)}), patch.object(channel, "migrate_cage_policy"), \
+                patch.object(channel, "active_session", return_value=False), patch.object(channel.os, "execvpe") as execute:
+            channel.launch({"id": switch_id, "prefix": ["claude"], "session_id": target, "resume_transcript": transcript, "switch_id": switch_id})
+        arguments = execute.call_args.args[1]
+        self.assertIn("--fork-session", arguments)
+        self.assertEqual((target_config / "file-history" / self.session / "abc@v1").read_text(), "before edit")
+        self.assertTrue(channel.cancel_account_switch(request)["ok"])
+        self.assertEqual((target_config / "file-history" / self.session / "abc@v1").read_text(), "before edit")
 
     def test_handoff_waiting_task_requires_fresh_approval(self):
         request = {"cli_id":self.session, "config":str(self.home / ".claude"), "workspace":self.project}
@@ -415,6 +503,131 @@ class ChannelTests(unittest.TestCase):
         self.assertEqual(resumed["params"]["meta"], {"resume":"true"})
         self.assertFalse(select.select([process.stdout], [], [], 0.1)[0], "resume was injected twice")
 
+    def test_turn_completion_state_deduplicates_and_suppresses_failures(self):
+        connection = str(uuid.uuid4())
+        state_path = self.root / connection / "state.json"
+        def fire(event_name, **extra):
+            payload = {"hook_event_name": event_name, "session_id": self.session, "cwd": self.project, **extra}
+            with patch.object(channel.sys, "stdin", io.StringIO(json.dumps(payload))):
+                channel.hook(connection)
+
+        # Stray Stop before any prompt does not advance turn_done.
+        fire("Stop")
+        self.assertIsNone(channel.read_json(state_path).get("turn_done"))
+
+        # Turn 1 completes normally; duplicate Stop keeps turn_done at 1.
+        fire("UserPromptSubmit")
+        fire("Stop")
+        self.assertEqual(channel.read_json(state_path).get("turn_done"), 1)
+        fire("Stop")
+        self.assertEqual(channel.read_json(state_path).get("turn_done"), 1)
+
+        # Turn 2 ends with StopFailure; subsequent Stop must not advance turn_done.
+        fire("UserPromptSubmit")
+        fire("StopFailure", error="rate_limit")
+        fire("Stop")
+        self.assertEqual(channel.read_json(state_path).get("turn_done"), 1)
+
+        # Turn 3 canceled via stopped flag; Stop must not advance turn_done.
+        fire("UserPromptSubmit")
+        with channel.state_file(connection) as state:
+            state["stopped"] = True
+            state["busy"] = False
+        fire("Stop")
+        self.assertEqual(channel.read_json(state_path).get("turn_done"), 1)
+
+        # Turn 4 ends via SessionEnd; no completion advance.
+        fire("UserPromptSubmit")
+        fire("SessionEnd")
+        fire("Stop")
+        self.assertEqual(channel.read_json(state_path).get("turn_done"), 1)
+
+        # Turn 5 completes normally (continuous second completed turn).
+        fire("UserPromptSubmit")
+        fire("Stop")
+        self.assertEqual(channel.read_json(state_path).get("turn_done"), 2)
+
+    def test_late_stop_does_not_release_a_newer_send(self):
+        connection = str(uuid.uuid4())
+        state_path = self.root / connection / "state.json"
+        transcript = self.home / "transcript.jsonl"
+        transcript.write_text(json.dumps({"type": "user", "message": {"content": "earlier"}}) + "\n")
+        def fire(event_name):
+            payload = {"hook_event_name": event_name, "session_id": self.session, "cwd": self.project, "transcript_path": str(transcript)}
+            with patch.object(channel.sys, "stdin", io.StringIO(json.dumps(payload))):
+                channel.hook(connection)
+
+        fire("UserPromptSubmit")
+        # The phone stops the turn, then a new send is admitted before the
+        # cancelled turn's Stop hook arrives.
+        with channel.state_file(connection) as state:
+            state.update(stopped=True, busy=False)
+        request_id = str(uuid.uuid4())
+        with channel.state_file(connection) as state:
+            state.pop("stopped", None)
+            state["pending_send"] = request_id
+        fire("Stop")
+        state = channel.read_json(state_path)
+        self.assertEqual(state.get("pending_send"), request_id, "late Stop released the newer send")
+        self.assertIsNone(state.get("turn_done"), "late Stop counted as a completed reply")
+        # Once Claude has taken the message, its own Stop completes the turn.
+        with transcript.open("a") as stream:
+            stream.write(json.dumps({"type": "user", "isMeta": True, "message": {"content": f'<channel source="cage" request_id="{request_id}">\nhi\n</channel>'}}) + "\n")
+        fire("Stop")
+        state = channel.read_json(state_path)
+        self.assertIsNone(state.get("pending_send"))
+        self.assertEqual(state.get("turn_done"), 1)
+        # A missing transcript never releases a send.
+        with channel.state_file(connection) as state:
+            state["pending_send"] = str(uuid.uuid4())
+        transcript.unlink()
+        fire("Stop")
+        self.assertIsNotNone(channel.read_json(state_path).get("pending_send"))
+
+    def watcher(self, request):
+        source = Path(__file__).with_name("cli_events_watch.py")
+        helper = Path(__file__).with_name("cli_channel.py").read_text(encoding="utf-8")
+        # Mirror the host: the watcher reuses cli_channel.py's ROOT line.
+        root = next(line for line in helper.split("\n") if line.startswith("ROOT = "))
+        script = self.home / "watch.py"
+        script.write_text("import os\nfrom pathlib import Path\n_controller_context = dict(os.environ)\n" + root + "\n" + source.read_text(encoding="utf-8"))
+        watcher = subprocess.Popen(
+            [sys.executable, "-I", str(script), json.dumps(request)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=self.env,
+        )
+        self.addCleanup(lambda: (watcher.kill(), watcher.wait(timeout=5), watcher.stdout.close(), watcher.stderr.close()))
+        return watcher
+
+    def read_event(self, watcher, timeout=5):
+        ready = select.select([watcher.stdout], [], [], timeout)[0]
+        self.assertTrue(ready, "watcher produced no event")
+        return json.loads(watcher.stdout.readline())
+
+    def test_watch_streams_fresh_events_for_active_connections(self):
+        for inotify in (True, False):
+            with self.subTest(inotify=inotify):
+                stale, active, old, late = (str(uuid.uuid4()) for _ in range(4))
+                now = time.time()
+                channel.save(self.root / stale / "state.json", {"cli_id": self.session, "turn_done": 3, "updated_at": now})
+                channel.save(self.root / active / "state.json", {"cli_id": self.session, "turn_done": 1, "updated_at": now})
+                # A completion from before the stream started is a backlog.
+                channel.save(self.root / old / "state.json", {"cli_id": self.session, "turn_done": 4, "updated_at": now - 600,
+                                                             "approvals": [{"id": "a-old"}]})
+                watcher = self.watcher({"connections": [active, old, late], "heartbeat": 30, "inotify": inotify})
+                first = self.read_event(watcher)
+                self.assertEqual(first["id"], f"{active}:turn:1")
+                self.assertEqual(first["event"], "turn_completed")
+                channel.save(self.root / active / "state.json", {"cli_id": self.session, "turn_done": 2, "updated_at": time.time()})
+                self.assertEqual(self.read_event(watcher)["id"], f"{active}:turn:2")
+                # Inactive connections are never read.
+                channel.save(self.root / stale / "state.json", {"cli_id": self.session, "turn_done": 4, "updated_at": time.time()})
+                channel.save(self.root / old / "state.json", {"cli_id": self.session, "turn_done": 5, "updated_at": time.time()})
+                self.assertEqual(self.read_event(watcher)["id"], f"{old}:turn:5")
+                # A connection whose directory appears after the watcher started.
+                channel.save(self.root / late / "state.json", {"cli_id": self.session, "approvals": [{"id": "a1"}], "updated_at": time.time()})
+                event = self.read_event(watcher)
+                self.assertEqual((event["id"], event["event"]), (f"{late}:approval:a1", "approval_requested"))
+                self.assertFalse(select.select([watcher.stdout], [], [], 0.3)[0], "unexpected extra event")
 
 if __name__ == "__main__":
     unittest.main()

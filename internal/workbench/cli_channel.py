@@ -1,7 +1,8 @@
-"""Guest-side Claude terminal discovery and authenticated local channel bridge."""
+# Guest-side Claude terminal discovery and authenticated local channel bridge.
 import contextlib
 import hashlib
 import json
+import mmap
 import os
 from pathlib import Path
 import re
@@ -80,8 +81,11 @@ def save(path, value):
 
 
 @contextlib.contextmanager
-def state_file(connection):
+def state_file(connection, readonly=False):
     folder = ROOT / identifier(connection)
+    if readonly:
+        yield read_json(folder / "state.json", {})
+        return
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (folder / "lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -230,12 +234,15 @@ def connection_for(session_id, config):
 def view(config, session_id, path=None):
     connection, state = connection_for(session_id, config)
     path = path or next((config / "projects").glob("*/" + session_id + ".jsonl"), None)
-    native_history = path is not None
-    if path is None and state.get("resume_transcript"):
+    turns, workspace, title, received = transcript(path)
+    native_history = bool(turns)
+    # The target creates a JSONL header before writing the resumed history.
+    # Keep showing the frozen source until that first target turn is readable.
+    if not native_history and state.get("resume_transcript"):
         frozen = Path(state["resume_transcript"])
         if frozen.parent.parent == ROOT.parent / "cli-account-switches" and frozen.name == "history.jsonl":
             path = frozen
-    turns, workspace, title, received = transcript(path)
+            turns, workspace, title, received = transcript(path)
     has_history = bool(turns)
     if connection and any(sent["id"] in received for sent in state.get("sent", [])):
         with state_file(connection) as latest:
@@ -376,10 +383,20 @@ def discover(request):
     return sessions
 
 
+def delivered(payload, request_id):
+    try:
+        with open(payload["transcript_path"], "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+            return m.rfind(request_id.encode()) >= 0
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+
+
 def hook(connection):
     payload = json.load(sys.stdin)
     event = payload.get("hook_event_name")
     with state_file(connection) as state:
+        if event == "UserPromptSubmit" and state.get("login_subject") and client_runtime().get("changed_prompt_login", lambda _: False)(state):
+            return {"decision": "block", "reason": "正在核对这个终端已更改的 Claude 登录，请稍后继续。"}
         if state.get("account_switch"):
             if event == "UserPromptSubmit":
                 return {"decision": "block", "reason": "Cage 正在切换账号，请在目标会话中继续。"}
@@ -399,8 +416,15 @@ def hook(connection):
             state.pop("pending_send", None)
         if event in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd"):
             state["approvals"] = []
+        # A sent message belongs to this Stop only once it is in the transcript;
+        # a late Stop from a cancelled turn must not release a newer send.
+        own = event in ("Stop", "StopFailure") and state.get("pending_send") and delivered(payload, state["pending_send"])
+        if event == "Stop" and (state.get("busy") or own) and not state.get("stopped") and not state.get("account_failure"):
+            state["turn_done"] = state.get("turn_done", 0) + 1
         if event in ("Stop", "StopFailure", "SessionEnd"):
             state["busy"] = False
+            if own or event == "SessionEnd":
+                state.pop("pending_send", None)
             state.pop("display", None)
         if event == "StopFailure":
             state["account_failure"] = payload.get("error", "unknown")
@@ -503,7 +527,7 @@ def handoff_session(request):
     if live(state.get("pid")) and live(state.get("channel_pid")) and not state.get("closed"):
         return {"running": True, "channel_ready": True}
     for row in rows:
-        if row.get("cwd") != workspace:
+        if not workspace_within(row.get("cwd") or "", workspace):
             raise ValueError("原会话的项目已变化，请重新读取会话列表")
         # A waiting CLI has no executing tool. Resume its task on the shared
         # channel so any permission decision is requested again on the phone.
@@ -513,7 +537,7 @@ def handoff_session(request):
         # Refresh the supported CLI registry immediately before signalling so
         # stale discovery data cannot select a different process or workspace.
         current = active_sessions(session_id, config)
-        matched = next((item for item in current if item.get("pid") == row["pid"] and item.get("cwd") == workspace and item.get("kind") == "interactive" and item.get("status") in ("idle", "waiting")), None)
+        matched = next((item for item in current if item.get("pid") == row["pid"] and workspace_within(item.get("cwd") or "", workspace) and item.get("kind") == "interactive" and item.get("status") in ("idle", "waiting")), None)
         if matched is None:
             return {"running": bool(current)}
         if matched["status"] == "waiting":
@@ -569,7 +593,7 @@ def prepare_account_switch(request):
     if any(row.get("sessionId") != sid and live(row.get("pid")) for row in json.loads(listing.stdout)):
         raise ValueError("原账号仍有其他执行任务，请结束后台任务后再交接")
     for row in rows:
-        if row.get("cwd") != workspace or row.get("status") != "idle" or row.get("kind") != "interactive":
+        if not workspace_within(row.get("cwd") or "", workspace) or row.get("status") != "idle" or row.get("kind") != "interactive":
             raise ValueError("原 Claude Code 尚未安全停止，请先结束本轮任务")
     pid = state.get("pid")
     fingerprint = process_fingerprint(pid) if live(pid) else ""
@@ -607,7 +631,10 @@ def prepare_account_switch(request):
         row = json.loads(line)
         if row.get("isSidechain"):
             continue
-        if row.get("cwd") and row["cwd"] != workspace:
+        # Claude Code records the current directory per message. Worktrees it
+        # creates (.claude/worktrees/<name>) and subdirectories stay inside the
+        # project; history from an unrelated project is still refused.
+        if row.get("cwd") and not workspace_within(row["cwd"], workspace):
             raise ValueError("历史项目与当前项目不一致")
         blocks = (row.get("message") or {}).get("content", [])
         if not isinstance(blocks, list):
@@ -620,6 +647,7 @@ def prepare_account_switch(request):
     if pending:
         raise ValueError("历史仍有结果未确认的工具，不能自动接续")
     folder.mkdir(mode=PRIVATE_MODE, parents=True, exist_ok=True)
+    copy_history(config / "file-history" / sid, folder / "file-history" / sid)
     target = folder / "history.jsonl"
     with tempfile.NamedTemporaryFile(dir=folder, delete=False) as stream:
         stream.write(path.read_bytes())
@@ -629,6 +657,12 @@ def prepare_account_switch(request):
     with state_file(connection) as state:
         state["closed"] = True
     return {"transcript": str(target)}
+
+
+def copy_history(source, target):
+    if source.is_dir() and not source.is_symlink():
+        shutil.copytree(source, target, dirs_exist_ok=True, ignore=lambda d, n: [x for x in n if os.path.islink(os.path.join(d, x))],
+                        copy_function=lambda a, b: os.path.exists(b) or shutil.copy2(a, b))
 
 
 def cancel_account_switch(request):
@@ -701,6 +735,7 @@ def launch(request):
     policy_available = migrate_cage_policy()
     connection = identifier(request["id"])
     folder = ROOT / connection
+    os.environ["CAGE_LOGIN_CONNECTION"] = connection
     folder.mkdir(parents=True, exist_ok=True, mode=PRIVATE_MODE)
     prefix = request["prefix"]
     if os.name == "nt":
@@ -744,7 +779,7 @@ def launch(request):
     with state_file(connection) as state:
         if live(state.get("pid")) and not state.get("closed"):
             raise ValueError("目标会话已有进程，未重复启动")
-        state.update(cli_id=session_id, config=str(config_directory("default")),
+        state.update(codex_enabled=request.get("codex_enabled") is True, cli_id=session_id, config=str(config_directory("default")), login_subject=_controller_context.get("CAGE_CLAUDE_SUBJECT"),
                      workspace=str(Path.cwd()), pid=os.getpid(), closed=False, updated_at=time.time(), approvals=[], busy=False,
                      channel_pid=None, pending_send=None, display=None, stopped=False,
                      requests=previous.get("requests", {}), sent=previous.get("sent", []))
@@ -779,6 +814,8 @@ def launch(request):
         expected = ROOT.parent / "cli-account-switches" / identifier(request["switch_id"]) / "history.jsonl"
         if Path(request["resume_transcript"]) != expected or not expected.is_file():
             raise ValueError("账号交接历史无效")
+        for frozen in (expected.parent / "file-history").glob("*"):
+            copy_history(frozen, Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "file-history" / frozen.name)
         args += ["--resume", _runtime["path"](expected), "--fork-session", "--session-id", session_id]
     else:
         args += ["--resume", session_id] if request.get("resume") else ["--session-id", session_id]
@@ -796,7 +833,7 @@ def rpc(request):
     connection = identifier(request["connection"])
     os.chdir(ROOT / connection)
     with socket.socket(socket.AF_UNIX) as client:
-        client.settimeout(5)
+        client.settimeout(12 if request.get("action") == "codex-read" else 5)
         client.connect("rpc")
         client.sendall(json.dumps(request).encode() + b"\n")
         with client.makefile("rb") as stream:
@@ -812,17 +849,27 @@ def serve(connection):
             sys.stdout.write(json.dumps({"jsonrpc": "2.0", **message}) + "\n")
             sys.stdout.flush()
 
+    mailbox = None
+    if read_json(ROOT / connection / "state.json", {}).get("codex_enabled"):
+        factory = client_runtime().get("CodexMailbox")
+        if factory:
+            mailbox = factory()
+
     class Handler(socketserver.StreamRequestHandler):
         def handle(self):
             self.connection.settimeout(5)
             try:
                 request = json.loads(self.rfile.readline(72 << 10))
-                with state_file(connection) as state:
+                action = request["action"]
+                delegate = mailbox and action in ("codex-read", "codex-done")
+                with state_file(connection, readonly=delegate) as state:
                     if request["cli_id"] != state.get("cli_id") or state.get("closed"):
                         raise ValueError("终端已切换会话，请重新读取列表")
-                    action = request["action"]
                     if state.get("account_switch"):
                         raise ValueError("此会话正在切换账号，请等待交接完成")
+                    if delegate:
+                        self.wfile.write(json.dumps(mailbox.exchange(request)).encode() + b"\n")
+                        return
                     if action == "send":
                         request_id = identifier(request["request_id"])
                         text = request["text"]
@@ -864,7 +911,7 @@ def serve(connection):
                             # inject the same continuation twice.
                             save(ROOT / connection / "state.json", state)
                             emit({"method": "notifications/claude/channel", "params": {
-                                "content": Path(__file__).with_suffix(".account-resume.md" if state.get("account_resume") else ".resume.md").read_text(encoding="utf-8"),
+                                "content": request.get("account_resume_text" if state.get("account_resume") else "resume_text") or Path(__file__).with_suffix(".account-resume.md" if state.get("account_resume") else ".resume.md").read_text(encoding="utf-8"),
                                 "meta": {"resume": "true"}}})
                     else:
                         raise ValueError("unsupported operation")
@@ -896,7 +943,15 @@ def serve(connection):
                 method = message.get("method")
                 if method == "initialize":
                     emit({"id": message["id"], "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "session", "version": "1"},
-                          "capabilities": {"experimental": {"claude/channel": {}, "claude/channel/permission": {}}}}})
+                          "capabilities": {**({"tools": {}} if mailbox else {}), "experimental": {"claude/channel": {}, "claude/channel/permission": {}}}}})
+                elif mailbox and method == "tools/list":
+                    emit({"id": message["id"], "result": {"tools": mailbox.tools}})
+                elif mailbox and method == "tools/call":
+                    try:
+                        result = {"content": [{"type": "text", "text": json.dumps(mailbox.call(message["params"]), ensure_ascii=False)}]}
+                    except (KeyError, TypeError, ValueError) as error:
+                        result = {"isError": True, "content": [{"type": "text", "text": str(error)}]}
+                    emit({"id": message["id"], "result": result})
                 elif method == "notifications/initialized":
                     with state_file(connection) as state:
                         state["channel_pid"] = os.getpid()
@@ -946,6 +1001,16 @@ def main():
             if state.get("cli_id") == request["cli_id"] and state.get("config"):
                 config = Path(state["config"])
             result = view(config, identifier(request["cli_id"]))
+            if "login_stamp" in request and result["running"]:
+                observe = client_runtime().get("changed_login")
+                if observe:
+                    result["login_hint"] = observe(config, request["login_stamp"])
+        elif mode == "account-binding":
+            with state_file(request["connection"]) as state:
+                ok = state.get("cli_id") == request["cli_id"] and re.fullmatch("[a-f0-9]{64}", request["subject"])
+                if ok:
+                    state["login_subject"] = request["subject"]
+                result = {"ok": bool(ok)}
         elif mode == "rpc":
             result = rpc(request)
         elif mode == "active":

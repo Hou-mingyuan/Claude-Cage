@@ -8,8 +8,7 @@ if (-not $MsysDirectory) {
     $MsysDirectory = @('C:\msys64', 'D:\msys64') | Where-Object { Test-Path (Join-Path $_ 'ucrt64/bin/pkg-config.exe') } | Select-Object -First 1
 }
 if (-not $MsysDirectory) { throw 'Set CAGE_MSYS2_ROOT to the MSYS2 UCRT64 build environment.' }
-$runtime = Join-Path $repository '_output/windows-deps/qemu-cage'
-& (Join-Path $PSScriptRoot 'build-qemu-windows.ps1') -OutputDirectory $runtime -MsysDirectory $MsysDirectory
+$runtime = & (Join-Path $PSScriptRoot 'build-qemu-windows.ps1') -MsysDirectory $MsysDirectory -UseFingerprintCache
 $runtimeIdentity = Get-Content (Join-Path $runtime 'cage-build.json') -Raw | ConvertFrom-Json
 $runtimeManifestHash = (Get-FileHash -LiteralPath (Join-Path $runtime 'cage-build.json') -Algorithm SHA256).Hash
 $collectorHash = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'bundle-qemu-sources.sh') -Algorithm SHA256).Hash + (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash

@@ -12,7 +12,6 @@ import (
 
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/containerenv"
-	"github.com/sylvinus/agent-vm/internal/guestos"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 	"github.com/sylvinus/agent-vm/internal/version"
 )
@@ -62,11 +61,23 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.op.TryLock() {
-		http.Error(w, "请先保存工作并停止环境，再完成更新。", http.StatusConflict)
+		http.Error(w, handoffBusyOperation, http.StatusConflict)
 		return
 	}
 	s.handoffLocked(w)
 }
+
+// Each refusal names the condition that kept the controller running. The
+// launcher reports it with stop_required; the conditions themselves are unchanged.
+const (
+	handoffBusyOperation = "后台正在执行其他操作。"
+	handoffBusyJob       = "有环境任务正在运行。"
+	handoffBusyVM        = "环境仍在运行。"
+	handoffVMUnknown     = "无法确认环境是否已停止。"
+	handoffBusyTerminal  = "仍有终端会话在运行。"
+	handoffBusyMobile    = "手机仍在使用此环境。"
+	handoffNotReady      = "后台尚未准备好交接。"
+)
 
 // handoffLocked takes ownership of the operation lock and releases it on all paths.
 func (s *Server) handoffLocked(w http.ResponseWriter) {
@@ -85,13 +96,25 @@ func (s *Server) handoffWithVMOwnerLocked(w http.ResponseWriter, permittedOwner 
 		http.Error(w, "后台正在更新，请重新打开 Cage。", http.StatusServiceUnavailable)
 		return
 	}
-	busy := s.jobs.snapshot().Running || vmBusy
-	busy = busy || s.terminals.hasLive()
-	busy = busy || len(s.mobileCLI.activeAccounts()) != 0
-	if busy || s.shutdown == nil {
+	reason := ""
+	switch {
+	case s.jobs.snapshot().Running:
+		reason = handoffBusyJob
+	case probeError != nil:
+		reason = handoffVMUnknown
+	case vmBusy:
+		reason = handoffBusyVM
+	case s.terminals.hasLive():
+		reason = handoffBusyTerminal
+	case len(s.mobileCLI.activeAccounts()) != 0:
+		reason = handoffBusyMobile
+	case s.shutdown == nil:
+		reason = handoffNotReady
+	}
+	if reason != "" {
 		s.mu.Unlock()
 		s.op.Unlock()
-		http.Error(w, "请先保存工作并停止环境，再完成更新。", http.StatusConflict)
+		http.Error(w, reason, http.StatusConflict)
 		return
 	}
 	s.closing = true
@@ -127,35 +150,10 @@ func controllerVMState(profile string) (bool, error) {
 	return len(owners) != 0, err
 }
 
-// A bound Windows guest is probed through the Hyper-V host manager. A cold
-// Windows PowerShell start alone can take most of this budget.
-const windowsVMProbeTimeout = 15 * time.Second
+// Upper bound for one probe of the environment's running state.
+const vmProbeTimeout = 15 * time.Second
 
 func controllerVMOwners(profile string) ([]string, error) {
-	binding, err := guestos.LoadWindowsProfile(profile)
-	if err != nil {
-		return nil, err
-	}
-	if binding != nil {
-		if binding.Remote() {
-			// Cage owns this controller and its channels, not the cloud machine.
-			// Active terminals/jobs are checked independently during handoff.
-			return nil, nil
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), windowsVMProbeTimeout)
-		defer cancel()
-		state, err := guestos.WindowsVMResources(ctx, profile, 0, 0)
-		if err != nil {
-			return nil, err
-		}
-		if state.State == "" {
-			return nil, errors.New("无法确认已绑定 Windows 客机的运行状态，现有环境保持不变")
-		}
-		if state.State == "Off" || state.State == "Saved" {
-			return nil, nil
-		}
-		return []string{fmt.Sprintf("windows/%s/%s", binding.VMID, state.State)}, nil
-	}
 	if containerenv.Configured(profile) {
 		environment, err := containerenv.Load(profile)
 		if err != nil {

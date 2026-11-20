@@ -7,24 +7,32 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"sync"
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
 )
 
+const terminalLimit = 12
+
 var (
 	errTerminalsClosed  = errors.New("后台正在退出，请重新打开 Cage。")
 	errTerminalBusy     = errors.New("环境正在执行其他操作")
 	errTerminalNotReady = errors.New("环境尚未就绪或正在重启")
-	errTerminalLimit    = errors.New("最多保留 12 个终端，请先关闭不用的会话")
+	errTerminalLimit    = fmt.Errorf("最多同时运行 %d 个终端，请先关闭或归档不用的会话", terminalLimit)
 	errTerminalStart    = errors.New("无法创建终端连接")
 )
 
 type terminalRequest struct {
-	Workspace       string `json:"workspace"`
-	Kind            string `json:"kind"`
-	ClaudeAccountID string `json:"claude_account_id"`
+	BackgroundLogin bool    `json:"background_login,omitempty"`
+	LoginProxyNode  *string `json:"login_proxy_node,omitempty"`
+	Workspace       string  `json:"workspace"`
+	Kind            string  `json:"kind"`
+	ClaudeAccountID string  `json:"claude_account_id"`
+	AutoHandoff     *bool   `json:"auto_handoff,omitempty"`
+	loginDraft      *claudeSelection
+	afterLogin      *terminalSession
 	sharedID        string
 	requestContext  context.Context
 }
@@ -45,9 +53,19 @@ func (m *terminalManager) startSession(cmd *exec.Cmd, workspace, kind string, se
 }
 
 func (m *terminalManager) startSessionWithPTY(cmd *exec.Cmd, workspace, kind string, selection claudeSelection, finished func(), start func() (terminalPTY, error)) (*terminalSession, error) {
+	return m.startReplacing(nil, false, cmd, workspace, kind, selection, finished, start)
+}
+
+func (m *terminalManager) startReplacing(previous *terminalSession, background bool, cmd *exec.Cmd, workspace, kind string, selection claudeSelection, finished func(), start func() (terminalPTY, error)) (*terminalSession, error) {
+	var evicted []*terminalSession
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if err := m.admissionErrorLocked(); err != nil {
+	defer func() {
+		m.mu.Unlock()
+		for _, session := range evicted {
+			session.close()
+		}
+	}()
+	if err := m.admissionErrorLocked(previous); err != nil {
 		return nil, err
 	}
 	file, err := start()
@@ -62,8 +80,13 @@ func (m *terminalManager) startSessionWithPTY(cmd *exec.Cmd, workspace, kind str
 		title = "Claude 账号登录"
 	}
 	session := newTerminalSession(file)
+	session.creationOrder = m.sequence
+	session.backgroundLogin = background
 	session.id, session.title, session.workspace, session.cmd = randomToken()[:16], title, workspace, cmd
-	session.kind, session.claudeAccountID = kind, selection.ID
+	if previous != nil {
+		session.id = previous.id
+	}
+	session.kind, session.claudeAccountID, session.physicalProfile = kind, selection.ID, selection.GuestID
 	if kind == "claude-login" {
 		session.loginGuestID = selection.GuestID
 	}
@@ -75,6 +98,9 @@ func (m *terminalManager) startSessionWithPTY(cmd *exec.Cmd, workspace, kind str
 	if m.sessions == nil {
 		m.sessions = make(map[string]*terminalSession)
 	}
+	if previous == nil {
+		evicted = m.evictEndedLocked()
+	}
 	m.sessions[session.id] = session
 	m.workers.Add(1)
 	go func() {
@@ -83,24 +109,66 @@ func (m *terminalManager) startSessionWithPTY(cmd *exec.Cmd, workspace, kind str
 		if finished != nil {
 			finished()
 		}
+		if background {
+			m.mu.Lock()
+			if m.sessions[session.id] == session {
+				delete(m.sessions, session.id)
+			}
+			m.mu.Unlock()
+		}
 	}()
 	return session, nil
 }
 
-func (m *terminalManager) admissionErrorLocked() error {
+func (m *terminalManager) admissionErrorLocked(previous *terminalSession) error {
 	if m.closed {
 		return errTerminalsClosed
 	}
-	if len(m.sessions) >= 12 {
-		return errTerminalLimit
+	if previous != nil {
+		if m.sessions[previous.id] != previous || !previous.replaceable() {
+			return errors.New("登录终端已关闭")
+		}
+		return nil
+	}
+	live := 0
+	for _, session := range m.sessions {
+		if !session.ended() {
+			live++
+			if live >= terminalLimit {
+				return errTerminalLimit
+			}
+		}
 	}
 	return nil
+}
+
+func (m *terminalManager) evictEndedLocked() []*terminalSession {
+	if len(m.sessions) < terminalLimit {
+		return nil
+	}
+	var ended []*terminalSession
+	for _, session := range m.sessions {
+		if session.ended() {
+			ended = append(ended, session)
+		}
+	}
+	sort.Slice(ended, func(i, j int) bool {
+		return ended[i].creationOrder < ended[j].creationOrder
+	})
+	evicted := ended[:min(len(ended), len(m.sessions)-terminalLimit+1)]
+	for _, session := range evicted {
+		session.mu.Lock()
+		session.dismissed = true
+		session.mu.Unlock()
+		delete(m.sessions, session.id)
+	}
+	return evicted
 }
 
 func (m *terminalManager) canStart() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.admissionErrorLocked()
+	return m.admissionErrorLocked(nil)
 }
 
 func (m *terminalManager) snapshot() []map[string]any {
@@ -117,18 +185,8 @@ func (m *terminalManager) hasLive() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, session := range m.sessions {
-		session.mu.Lock()
-		closed := session.closed
-		session.mu.Unlock()
-		if !closed {
+		if !session.ended() {
 			return true
-		}
-		if session.done != nil {
-			select {
-			case <-session.done:
-			default:
-				return true
-			}
 		}
 	}
 	return false
@@ -154,13 +212,31 @@ func (m *terminalManager) forConversation(connection string) *terminalSession {
 	return nil
 }
 
+func (m *terminalManager) managedConnections() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []string
+	for _, session := range m.sessions {
+		session.mu.Lock()
+		if session.connectionID != "" && !session.closed {
+			out = append(out, session.connectionID)
+		}
+		session.mu.Unlock()
+	}
+	return out
+}
+
 // Reattaching a repeated login request must not create a second OAuth flow.
 // A profile can serve many normal terminals or a single exclusive login.
 func (m *terminalManager) existingClaudeLogin(id string, login bool) (*terminalSession, error) {
+	return m.existingProfileLogin(claudeSelection{ID: id}, login)
+}
+func (m *terminalManager) existingProfileLogin(selection claudeSelection, login bool) (*terminalSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, session := range m.sessions {
-		if session.claudeAccountID != id {
+		sameAccount := session.accountID() == selection.ID
+		if !sameAccount && (selection.GuestID == "" || selection.GuestID != session.physicalProfile) {
 			continue
 		}
 		select {
@@ -168,7 +244,7 @@ func (m *terminalManager) existingClaudeLogin(id string, login bool) (*terminalS
 			continue
 		default:
 		}
-		if session.kind == "claude-login" && login {
+		if sameAccount && session.kind == "claude-login" && login {
 			return session, nil
 		}
 		if login || session.kind == "claude-login" {
@@ -181,6 +257,11 @@ func (m *terminalManager) existingClaudeLogin(id string, login bool) (*terminalS
 func (m *terminalManager) remove(id string) {
 	m.mu.Lock()
 	session := m.sessions[id]
+	if session != nil {
+		session.mu.Lock()
+		session.dismissed = true
+		session.mu.Unlock()
+	}
 	m.mu.Unlock()
 	if session != nil {
 		// Keep its Claude account reserved until the old PTY has exited.
@@ -191,7 +272,7 @@ func (m *terminalManager) remove(id string) {
 	}
 }
 
-// closeAll keeps ended sessions visible until explicitly removed and permits
+// closeAll keeps ended sessions visible until removed or evicted and permits
 // new terminals after the environment starts again. Environment operations
 // serialize this call with createTerminal using Server.op.
 func (m *terminalManager) closeAll() {
@@ -220,13 +301,44 @@ func (s *Server) createTerminal(input terminalRequest) (*terminalSession, error)
 		return nil, errTerminalBusy
 	}
 	defer s.op.Unlock()
+	if input.BackgroundLogin && input.Kind != "claude-login" {
+		return nil, errors.New("后台授权只能用于 Claude 登录")
+	}
+	if input.AutoHandoff != nil && input.Kind != "claude" {
+		return nil, errors.New("只有 Claude Code 会话可选择自动接续")
+	}
+	if input.Kind == "claude" && input.sharedID == "" {
+		s.mu.Lock()
+		launcher := claudeTerminalCommand(s.preferences)
+		s.mu.Unlock()
+		explicit := input.ClaudeAccountID != "" && input.ClaudeAccountID != "auto"
+		if launcher != "claude" && (explicit || input.AutoHandoff != nil) {
+			return nil, errors.New("手选账号与自动接续需要使用官方 claude 启动命令")
+		}
+		if explicit && input.AutoHandoff == nil {
+			disabled := false
+			input.AutoHandoff = &disabled
+		}
+		if input.ClaudeAccountID == "login" {
+			return s.startCodeLogin(input, "")
+		}
+		if validClaudeID(input.ClaudeAccountID) {
+			a, err := s.accountForRoute(input.ClaudeAccountID)
+			if err != nil {
+				return nil, err
+			}
+			if a.Status != "ready" || a.CodeUnlinked {
+				return s.startCodeLogin(input, a.ID)
+			}
+		}
+	}
 	return s.createTerminalLocked(input)
 }
 
 // Caller holds the environment operation lock through PTY publication.
 func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, error) {
-	if s.windowsGuest != nil {
-		return s.createWindowsTerminal(input)
+	if input.LoginProxyNode != nil && (input.Kind != "claude-login" || input.ClaudeAccountID != "" || *input.LoginProxyNode != "" && !s.accountDesktopsSupported()) {
+		return nil, errors.New("仅可为新增的 Linux 账号选择代理节点")
 	}
 	var sharedRecord *mobileRecord
 	if input.sharedID != "" {
@@ -248,7 +360,7 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 		if existing := s.terminals.get(record.TerminalID); existing != nil && existing.ownsConversation() {
 			return existing, nil
 		}
-		if existing := s.terminals.get(record.TerminalID); existing != nil && existing.summary()["closed"] == true {
+		if existing := s.terminals.get(record.TerminalID); existing != nil && existing.ended() {
 			s.terminals.remove(record.TerminalID)
 		}
 	}
@@ -263,23 +375,12 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 	if sharedRecord != nil && (!sharedCLILauncher(command) || sharedRecord.Launcher != "" && sharedRecord.Launcher != command) {
 		return nil, errors.New("主机启动命令与原会话不一致，请恢复原配置后重试")
 	}
-	if s.macosGuest != nil {
-		if input.Kind == "claude" && !sharedCLILauncher(command) {
-			return nil, errors.New("macOS 客机支持 claude 或 ccs 配置名启动命令")
-		}
-		s.mu.Lock()
-		ready := s.ready
-		s.mu.Unlock()
-		if !ready {
-			return nil, errTerminalNotReady
-		}
-	}
 	if !s.vmRunning() || s.busy() {
 		return nil, errTerminalNotReady
 	}
 	// Reject a full manager before opening project shares. start checks again
 	// atomically with process publication because shutdown can race this work.
-	if input.Kind != "claude-login" {
+	if input.Kind != "claude-login" && input.afterLogin == nil {
 		if err := s.terminals.canStart(); err != nil {
 			return nil, err
 		}
@@ -294,13 +395,12 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 	// Login works even when the last project is disconnected or has moved.
 	// It always runs from the guest home, without loading project settings.
 	workspace := s.workspace()
+	if input.loginDraft != nil {
+		workspace = input.Workspace
+	}
 	var err error
 	if input.Kind != "claude-login" {
-		if s.macOSLegacyWorkspace(sharedRecord) != "" {
-			workspace, err = s.projectWorkspace(sharedRecord.Workspace)
-		} else {
-			workspace, err = s.connectProject(input.Workspace, false)
-		}
+		workspace, err = s.connectProject(input.Workspace, false)
 		if err != nil {
 			return nil, err
 		}
@@ -315,18 +415,14 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 			launchCommand += " --add-dir " + shellescape.Quote(directory)
 		}
 	}
-	script := terminalScript(s.cliWorkspace(workspace), input.Kind, launchCommand)
-	if s.macosGuest != nil {
-		script = `cd -- "$HOME" && exec env TERM=xterm-256color COLORTERM=truecolor /bin/zsh -l`
-		if input.Kind != "claude-login" {
-			script = "exec /usr/local/libexec/cage-macos-terminal " + shellescape.Quote(macOSProjectPath(s.macosGuest.User, workspace))
-		}
-	}
+	script := terminalScript(guestPath(workspace), input.Kind, launchCommand)
 	var selection claudeSelection
 	var finished func()
 	if managed {
 		login := input.Kind == "claude-login"
-		if sharedRecord != nil && sharedRecord.Terminal {
+		if input.loginDraft != nil {
+			selection = *input.loginDraft
+		} else if sharedRecord != nil && sharedRecord.Terminal {
 			selection = sharedRecord.Account
 		} else {
 			selection, err = s.selectTerminalClaudeAccount(command, input.ClaudeAccountID, login, workspace)
@@ -334,43 +430,57 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 		if err != nil {
 			return nil, err
 		}
-		if selection.ID != "" {
+		if input.LoginProxyNode != nil {
+			if err = s.setLoginDraftNode(selection.ID, *input.LoginProxyNode); err != nil {
+				return nil, err
+			}
+		}
+		if selection.ID != "" || input.loginDraft != nil {
 			if componentUpdate {
 				return nil, errGuestUpdateRequired
 			}
-			if !validClaudeID(selection.ID) || !validClaudeGuestID(selection.GuestID) || (login && selection.GuestID == "default") {
+			if (input.loginDraft == nil && !validClaudeID(selection.ID)) || !validClaudeGuestID(selection.GuestID) || (login && selection.GuestID == "default") {
 				return nil, errors.New("Claude 账号 ID 无效")
 			}
-			if login && s.mobileCLI.activeAccounts()[selection.ID] > 0 {
+			if login && selection.ID != "" && s.mobileCLI.activeAccounts()[selection.ID] > 0 {
 				return nil, errors.New("请先结束该账号正在执行的移动 CLI 轮次，再重新登录")
 			}
-			if existing, conflict := s.terminals.existingClaudeLogin(selection.ID, login); existing != nil || conflict != nil {
-				return existing, conflict
+			if selection.ID != "" {
+				if existing, conflict := s.terminals.existingProfileLogin(selection, login); existing != nil || conflict != nil {
+					if existing != nil && input.loginDraft != nil {
+						return nil, errors.New("请先完成此账号正在进行的登录")
+					}
+					return existing, conflict
+				}
 			}
 			if !login && selection.Subject == "" {
 				return nil, errors.New("Claude 账号状态已变化，请重试")
 			}
-			script = managedClaudeTerminalScript(s.cliWorkspace(workspace), launchCommand, selection.GuestID, selection.Subject, login)
+			script = managedClaudeTerminalScript(guestPath(workspace), launchCommand, selection.GuestID, selection.Subject, login)
 			if login {
-				if s.macosGuest != nil {
-					ctx, cancel := context.WithTimeout(s.lifetimeContext(), 20*time.Second)
-					_, browserErr := s.guestAPI(ctx, "", "GET", "/health", nil)
-					cancel()
-					if browserErr != nil {
-						return nil, errors.New("客机登录浏览器尚未就绪，请恢复浏览器连接后重试")
+				if input.loginDraft == nil {
+					finished = func() {
+						ctx, cancel := context.WithTimeout(s.lifetimeContext(), 12*time.Second)
+						defer cancel()
+						_ = s.confirmClaudeLogin(ctx, selection.ID)
 					}
-				}
-				finished = func() {
-					ctx, cancel := context.WithTimeout(s.lifetimeContext(), 12*time.Second)
-					defer cancel()
-					_ = s.confirmClaudeLogin(ctx, selection.ID)
 				}
 			}
 		}
 	}
+	ordinaryShell := !managed && !componentUpdate
+	if ordinaryShell {
+		finished = s.refreshShellLoginWatch
+	}
 	var conversation *mobileRecord
 	if input.Kind == "claude" && sharedCLILauncher(command) {
-		script, conversation, err = s.prepareTerminalConversation(workspace, selection, input.sharedID)
+		script, conversation, err = s.prepareTerminalConversation(workspace, selection, input.sharedID, input.AutoHandoff)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if selection.ID != "" {
+		script, err = s.routeAccountCommand(s.lifetimeContext(), selection.ID, script)
 		if err != nil {
 			return nil, err
 		}
@@ -383,9 +493,12 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 			return nil, errMobileLocked
 		}
 	}
-	session, err := s.terminals.startSession(cmd, workspace, input.Kind, selection, finished)
+	session, err := s.terminals.startReplacing(input.afterLogin, input.BackgroundLogin, cmd, workspace, input.Kind, selection, finished, func() (terminalPTY, error) { return startTerminal(cmd, 100, 30) })
 	if input.requestContext != nil {
 		s.account.mu.Unlock()
+	}
+	if err == nil && ordinaryShell {
+		s.refreshShellLoginWatch()
 	}
 	if err == nil && conversation != nil {
 		session.mu.Lock()
@@ -404,6 +517,7 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 		}
 		s.prepareCLIConnection(session, conversation.ID)
 		s.monitorClaudeAccount(session, conversation.ID)
+		s.notifications.wake()
 	}
 	if err == nil && input.Kind == "claude" && selection.ID != "" {
 		s.noteClaudeSelection(selection.ID, workspace)
@@ -425,9 +539,6 @@ func (s *Server) selectTerminalClaudeAccount(command, requested string, login bo
 }
 
 func (s *Server) readClaudeGuestSnapshot(ctx context.Context, id string) (claudeGuestSnapshot, error) {
-	if s.windowsGuest != nil {
-		return s.readWindowsClaudeAccount(ctx, "snapshot", id, "")
-	}
 	return s.readClaudeGuestReport(ctx, id, claudeSnapshotCommand(id))
 }
 
@@ -435,16 +546,28 @@ func (s *Server) readClaudeGuestUsage(ctx context.Context, id, subject string) (
 	if _, err := hex.DecodeString(subject); err != nil || len(subject) != 64 {
 		return claudeGuestSnapshot{}, errors.New("Claude 账号身份无效")
 	}
-	if s.windowsGuest != nil {
-		return s.readWindowsClaudeAccount(ctx, "usage", id, subject)
-	}
-	return s.readClaudeGuestReport(ctx, id, claudeGuestReportCommand(id, subject))
+	return s.readClaudeReportForSubject(ctx, id, subject, claudeGuestReportCommand(id, subject))
+}
+func (s *Server) readClaudeGuestReport(ctx context.Context, id, command string) (claudeGuestSnapshot, error) {
+	return s.readClaudeReportForSubject(ctx, id, "", command)
 }
 
-func (s *Server) readClaudeGuestReport(ctx context.Context, id, command string) (claudeGuestSnapshot, error) {
+func (s *Server) readClaudeReportForSubject(ctx context.Context, id, subject, command string) (claudeGuestSnapshot, error) {
 	var snapshot claudeGuestSnapshot
 	if !validClaudeGuestID(id) {
 		return snapshot, errors.New("Claude 账号 ID 无效")
+	}
+	a, err := s.boundGuestAccount(id, subject)
+	if err != nil {
+		return snapshot, err
+	}
+	if a != nil {
+		if id == "default" && subject == "" {
+			// Discover the mutable default identity locally before sending traffic.
+			command = wrapAccountNamespace("unshare -nm", command)
+		} else if command, err = s.routeSelected(ctx, *a, command); err != nil {
+			return snapshot, err
+		}
 	}
 	data, err := s.guest(ctx, command)
 	if err != nil || json.Unmarshal(data, &snapshot) != nil {

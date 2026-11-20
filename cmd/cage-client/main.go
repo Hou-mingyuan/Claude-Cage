@@ -18,6 +18,7 @@ import (
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/host"
+	"github.com/sylvinus/agent-vm/internal/uilocale"
 	"github.com/sylvinus/agent-vm/internal/version"
 	"github.com/sylvinus/agent-vm/internal/workbench"
 )
@@ -64,6 +65,11 @@ func run(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(value)
 	}
 	switch args[0] {
+	case "interface-language":
+		if len(args) != 2 || args[1] != "--json" {
+			return errors.New("interface-language --json")
+		}
+		return printJSON(uilocale.Native(filepath.Dir(config)))
 	case "serve":
 		return workbench.ServeClient(config)
 	case "log-relay":

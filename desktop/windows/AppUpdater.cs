@@ -12,14 +12,16 @@ internal sealed class AppUpdater : IDisposable
     public static string Root => Path.Combine(Backend.Root, "updates");
     private readonly Action<Dictionary<string, object?>> changed;
     private readonly Action quit, reconnect;
+    private readonly Func<string> readPublisher;
     private readonly Dictionary<string, object?> state = new() { ["phase"] = "idle", ["currentVersion"] = Version, ["message"] = "" };
     private CancellationTokenSource? cancellation;
     private InstallPlan? prepared;
     private bool committed;
 
-    public AppUpdater(Action<Dictionary<string, object?>> changed, Action quit, Action reconnect)
+    public AppUpdater(Action<Dictionary<string, object?>> changed, Action quit, Action reconnect, Func<string>? readPublisher = null)
     {
         this.changed = changed; this.quit = quit; this.reconnect = reconnect;
+        this.readPublisher = readPublisher ?? (() => Authenticode.Publisher(Environment.ProcessPath!));
         try
         {
             var result = Path.Combine(Root, "last-result.json");
@@ -48,7 +50,14 @@ internal sealed class AppUpdater : IDisposable
         {
             case "status": break;
             case "check": if (cancellation == null && prepared == null) _ = Run(true); break;
-            case "install": if (cancellation == null) _ = prepared != null ? Install() : Run(false); break;
+            case "install":
+                if (cancellation == null)
+                {
+                    if (prepared != null) Change("ready", "更新已下载，请保存工作并手动停止环境后安装", true);
+                    else _ = Run(false);
+                }
+                break;
+            case "complete": if (cancellation == null && prepared != null) _ = Install(); break;
             case "cancel": if (!committed && state["phase"] as string != "installing") cancellation?.Cancel(); break;
             default: throw new InvalidDataException("更新操作无效");
         }
@@ -79,10 +88,17 @@ internal sealed class AppUpdater : IDisposable
         Change("checking", "正在检查更新，优先使用主机网络");
         string? archive = null;
         string retryAt = "";
-        using var process = new Process { StartInfo = Backend.StartInfo(Backend.Executable, "app-update", checkOnly ? "check" : "download") };
+        using var process = new Process();
         var started = false;
         try
         {
+            // An unsigned development build cannot authenticate an automatic
+            // replacement. Still check for releases, but never download one.
+            string? publisher = null;
+            try { publisher = await Task.Run(readPublisher, token); }
+            catch (Exception error) when (error is IOException or CryptographicException or UnauthorizedAccessException) { }
+            token.ThrowIfCancellationRequested();
+            process.StartInfo = Backend.StartInfo(Backend.Executable, "app-update", checkOnly || publisher == null ? "check" : "download");
             if (!process.Start()) throw new IOException("无法启动更新检查");
             started = true;
             using var abort = token.Register(() => { try { if (!process.HasExited) process.Kill(); } catch (InvalidOperationException) { } });
@@ -101,24 +117,24 @@ internal sealed class AppUpdater : IDisposable
                         JsonValueKind.Number => property.Value.GetInt64(),
                         _ => property.Value.Clone(),
                     };
-                changed(new(state));
+                if (publisher == null && state.GetValueOrDefault("phase") as string == "available")
+                    Change("manual", "当前 Windows 程序未签名或签名无法验证，请从官方发布页下载安装包，退出 Cage 后安装到原位置；配置、凭据、项目和虚拟机磁盘会保留。");
+                else changed(new(state));
             }
             await process.WaitForExitAsync(token); await errors;
             if (process.ExitCode != 0) throw new IOException(last.ValueKind == JsonValueKind.Object && last.Text("message") is { Length: > 0 } error ? error : "更新请求未完成");
-            if (checkOnly || last.Text("phase") != "downloaded") return;
+            if (checkOnly || publisher == null || last.Text("phase") != "downloaded") return;
             archive = UpdatePolicy.DownloadPath(last.Text("archivePath"), Root);
             var version = last.Text("latestVersion"); var digest = last.Text("sha256");
             if (!UpdatePolicy.IsNewer(version, Version)) throw new IOException("安装包版本无效或不高于当前版本");
             cancellation.CancelAfter(TimeSpan.FromMinutes(25));
             Change("verifying", "正在验证 Windows 签名和安装包内容");
-            var publisher = await Task.Run(() => Authenticode.Publisher(Environment.ProcessPath!), token);
             await Task.Run(() => UpdateInstaller.VerifyArchive(archive, digest, version, publisher), token);
             token.ThrowIfCancellationRequested();
             prepared = new InstallPlan(archive, digest, version, publisher,
                 AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), Environment.ProcessId,
                 Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks, Guid.NewGuid().ToString());
             archive = null;
-            Change("ready", "更新已下载并验证，可安装重启", true);
         }
         catch (OperationCanceledException) { Change("failed", "更新已暂停，可稍后重试", true); }
         catch (Exception error) { Change("failed", error.Message, true, retryAt); }
@@ -128,7 +144,7 @@ internal sealed class AppUpdater : IDisposable
             if (archive != null) { try { Directory.Delete(Path.GetDirectoryName(archive)!, true); } catch (IOException) { } }
             cancellation.Dispose(); cancellation = null;
         }
-        if (prepared != null) await Install();
+        if (prepared != null) Change("ready", "更新已下载，请保存工作并手动停止环境后安装", true);
     }
 
     private async Task Install()
@@ -160,7 +176,7 @@ internal sealed class AppUpdater : IDisposable
             var (exit, data) = await Backend.Json(["prepare-update", "--json"], token);
             if (data.Text("status") == "stop_required")
             {
-                (exit, data) = await Backend.Json(["prepare-update", "--json", "--stop"], token);
+                throw new IOException("环境仍在运行，请在工作台停止环境后重试安装");
             }
             if (exit != 0 || data.Text("status") != "prepared") throw new IOException(data.Text("message") is { Length: > 0 } detail ? detail : "环境未能安全停止");
             if (helper.HasExited) throw new IOException("安装程序已退出，原应用已保留");

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "./interface-language.mjs";
 
 export function EnvironmentClock({ timezone, clock12Hour = false }) {
+  const tr = useTranslation();
   const [now, setNow] = useState(Date.now);
   const formatter = useMemo(() => {
     if (!timezone) return null;
@@ -33,7 +35,7 @@ export function EnvironmentClock({ timezone, clock12Hour = false }) {
     };
   }, []);
 
-  const label = formatter ? `当地时间（${timezone}）` : "当地时间：时区不可用";
+  const label = formatter ? tr("当地时间（{0}）", timezone) : tr("当地时间：时区不可用");
   return <time className="status-clock" dateTime={new Date(now).toISOString()} title={label} aria-label={label}>
     {formatter ? formatter.formatToParts(now).map(({ type, value }) => type === "dayPeriod" ? value.toUpperCase() : value).join("") : "--:--"}
   </time>;

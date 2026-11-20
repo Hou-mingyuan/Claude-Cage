@@ -442,7 +442,7 @@ func runSession(s gliderssh.Session) {
 func (n *node) writeSSHConfig(peers []peer) error {
 	var b strings.Builder
 	if len(peers) > 0 {
-		b.WriteString("# Managed by Cage Tailscale. Only known tailnet devices use this transport.\nHost")
+		b.WriteString("# Managed by the Tailscale helper. Only known tailnet devices use this transport.\nHost")
 		for _, p := range peers {
 			b.WriteString(" " + p.IP)
 			if safeHost(p.Name) {
@@ -521,7 +521,7 @@ func main() {
 			os.Exit(2)
 		}
 		if err := dial(os.Args[2], os.Args[3]); err != nil {
-			fmt.Fprintln(os.Stderr, "Cage Tailscale 连接失败，请检查私网连接与目标 SSH 服务")
+			fmt.Fprintln(os.Stderr, "Tailscale 连接失败，请检查私网连接与目标 SSH 服务")
 			os.Exit(1)
 		}
 		return
@@ -534,9 +534,18 @@ func main() {
 	for _, key := range []string{"TS_AUTHKEY", "TS_AUTH_KEY", "TS_CLIENT_SECRET", "TS_CLIENT_ID", "TSNET_FORCE_LOGIN"} {
 		_ = os.Unsetenv(key)
 	}
+	asMCP := len(os.Args) == 2 && os.Args[1] == "mcp"
 	lock, err := os.OpenFile(filepath.Join(n.dir, "node.lock"), os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil || lockState(lock) != nil {
+	if err != nil {
 		os.Exit(1)
+	}
+	// One node at a time. Started as an MCP server it may come up while the
+	// one before it is still going down, so it waits a little for its turn.
+	for attempt := 0; lockState(lock) != nil; attempt++ {
+		if !asMCP || attempt >= 40 {
+			os.Exit(1)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 	defer lock.Close()
 	if n.config.Enabled {
@@ -568,6 +577,12 @@ func main() {
 			}
 		}
 	}()
+	// As an MCP server, for a page of its own; otherwise the line protocol
+	// the workbench has always spoken.
+	if asMCP {
+		serveMCP(n, os.Stdin, os.Stdout)
+		return
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 4096), 16384)
 	for scanner.Scan() {

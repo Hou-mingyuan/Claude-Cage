@@ -1,0 +1,20 @@
+.startup-language {
+  display: grid;
+  gap: 5px;
+  inline-size: min(13rem, 100%);
+  font-size: .9rem;
+}
+.startup-language > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.startup-language .inline-select-trigger { padding: 5px 8px; }
+.startup-language .inline-select-trigger > span { white-space: nowrap; }
+.startup-language-slot {
+  flex: 0 1 13rem;
+  min-inline-size: 0;
+  margin-inline-start: auto;
+}
+.environment-picker .startup-language-slot { margin-block-end: 16px; max-inline-size: 13rem; }

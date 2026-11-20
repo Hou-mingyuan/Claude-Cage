@@ -3,6 +3,7 @@ package workbench
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
+	"github.com/sylvinus/agent-vm/internal/usererror"
 )
 
 var (
@@ -99,12 +101,15 @@ func (s *Server) proxyStatus(w http.ResponseWriter, r *http.Request) {
 	jsonReply(w, map[string]any{"route": route, "route_error": routeError, "sources": sources, "selected": p.Selected, "port": p.Port, "running": running, "active": active, "state": state, "state_label": label, "network_open": state == "ready", "core_available": coreErr == nil, "version": version.Version, "revision": p.Revision, "bootstrap_dns": strings.Join(managedproxy.BootstrapDNSURLs(), "、"), "udp_blocked": true, "ipv6_blocked": true})
 }
 func (s *Server) proxyMutation(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("action") == "import-local" && !s.requireLocalConfigAccess(w, r) {
+		return
+	}
 	var input proxyInput
 	if !readJSON(w, r, &input, 12<<20) {
 		return
 	}
 	action := r.PathValue("action")
-	allowed := map[string]bool{"import": true, "refresh": true, "edit": true, "delete": true, "select": true, "restart": true, "stop": true, "route": true}
+	allowed := map[string]bool{"import": true, "import-local": true, "refresh": true, "edit": true, "delete": true, "select": true, "restart": true, "stop": true, "route": true}
 	if !allowed[action] {
 		http.NotFound(w, r)
 		return
@@ -146,6 +151,14 @@ func (s *Server) changeProxy(action string, in proxyInput, resumeVersion *uint64
 		return err
 	}
 	ctx := s.operationContext()
+	if action == "import-local" {
+		// Resolve the content-bound handle again inside the serialized job.
+		// Never accept a path, subscription URL, or raw node secrets from the UI.
+		in, err = s.localProxyConfig(in.ID)
+		if err != nil {
+			return err
+		}
+	}
 	if action == "stop" {
 		if err = s.closeProxyGate("内置代理已停止，外网保持关闭"); err != nil {
 			return err
@@ -159,6 +172,12 @@ func (s *Server) changeProxy(action string, in proxyInput, resumeVersion *uint64
 			}
 			p.Chain = append([]string(nil), in.NodeIDs...)
 			p.Selected = p.Chain[len(p.Chain)-1]
+			// A one-node route is the interface's single-exit mode. It keeps
+			// the exit's imported dialer-proxy hops, as select does, instead of
+			// overriding them with a direct connection (#345).
+			if len(p.Chain) == 1 {
+				p.Chain = nil
+			}
 			if _, err := p.Route(); err != nil {
 				return err
 			}
@@ -233,9 +252,11 @@ func (s *Server) changeProxy(action string, in proxyInput, resumeVersion *uint64
 			in.Name, in.URL, in.Interval = src.Name, src.URL, src.Interval
 		} else {
 			data = []byte(in.Content)
-			in.ID = ""
+			if action != "import-local" {
+				in.ID = ""
+			}
 		}
-		if in.URL != "" {
+		if in.URL != "" && action != "import-local" {
 			s.setMessage("正在下载节点订阅…")
 			client, e := s.subscriptionClient(in.HostDownload)
 			if e != nil {
@@ -347,6 +368,8 @@ func (s *Server) applyProxy(p managedproxy.Store, old cage.Config, resumeVersion
 		if returned != nil && !committed {
 			_ = previous.Save(s.profile)
 			_ = writePrivate(s.configPath, old)
+		} else if returned != nil && !errors.Is(returned, context.Canceled) {
+			returned = fmt.Errorf("代理节点已保存，外网尚未恢复；请重新检查联网条件：%w", usererror.Display("恢复联网", returned, "请重新检测；仍失败时导出诊断包。"))
 		}
 	}()
 	p.Revision = managedproxy.Token()
@@ -364,6 +387,7 @@ func (s *Server) applyProxy(p managedproxy.Store, old cage.Config, resumeVersion
 		return err
 	}
 	committed = true
+	s.jobs.execution().settingsSaved()
 	if resumeVersion != nil {
 		if err := s.resumeNetworkIntentAt(*resumeVersion); err != nil {
 			return err
@@ -420,7 +444,7 @@ func (s *Server) proxyDelay(w http.ResponseWriter, r *http.Request) {
 	}
 	err = managedproxy.API(r.Context(), s.profile, "GET", "/proxies/"+url.PathEscape(in.NodeID)+"/delay?timeout=5000&url="+url.QueryEscape("https://www.gstatic.com/generate_204"), nil, &v)
 	if err != nil {
-		requestError(w, errors.New("节点未载入核心或测速失败；请先应用节点以载入当前列表"))
+		requestError(w, managedproxy.DelayError(err))
 		return
 	}
 	jsonReply(w, v)

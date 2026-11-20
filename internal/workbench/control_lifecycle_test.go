@@ -83,6 +83,10 @@ func TestHandoffRequiresLauncherSecretAndIdleEnvironment(t *testing.T) {
 				if w.Code != 409 || stopped.Load() {
 					t.Fatalf("terminated busy controller: %d", w.Code)
 				}
+				reason := map[string]string{"job": handoffBusyJob, "terminal": handoffBusyTerminal, "vm": handoffBusyVM, "operation": handoffBusyOperation}[busy]
+				if got := strings.TrimSpace(w.Body.String()); got != reason {
+					t.Fatalf("handoff refusal does not name its condition: %q, want %q", got, reason)
+				}
 				return
 			}
 			if w.Code != 200 {
@@ -256,8 +260,50 @@ func TestPrepareUpdateWaitsForRoutineProbeAndPreservesActiveWork(t *testing.T) {
 				if result.Status != "stop_required" || stopped.Load() {
 					t.Fatalf("active work was not preserved: %+v stopped=%v", result, stopped.Load())
 				}
+				if !strings.HasSuffix(result.Message, "当前原因："+handoffBusyJob) {
+					t.Fatalf("stop_required omitted the controller's reason: %q", result.Message)
+				}
 			} else if result.Status != "prepared" || !stopped.Load() {
 				t.Fatalf("routine probe prevented idle update: %+v stopped=%v", result, stopped.Load())
+			}
+		})
+	}
+}
+
+// A launcher that starts a replacement while a handed-off service exits keeps
+// the profile lock. The timeout must name that, not report a stuck service.
+func TestHandedOffControllerExitTimeoutNamesReplacement(t *testing.T) {
+	previous := controllerExitPolls
+	controllerExitPolls = 2
+	defer func() { controllerExitPolls = previous }()
+	for _, kind := range []string{"replacement", "same"} {
+		t.Run(kind, func(t *testing.T) {
+			profile := t.TempDir()
+			lock, err := openControllerLock(profile, os.O_CREATE|os.O_RDWR)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Close()
+			if err := lockController(lock); err != nil {
+				t.Fatal(err)
+			}
+			defer unlockController(lock)
+			old := controlFile{Port: 40000, Token: randomToken(), PID: 4242}
+			current := old
+			if kind == "replacement" {
+				current = controlFile{Port: 40001, Token: randomToken(), PID: 4343}
+			}
+			if err := writePrivate(filepath.Join(profile, "control.json"), current); err != nil {
+				t.Fatal(err)
+			}
+			c := &controllerClient{profile: profile, record: old, launch: launchResponse{DesktopGateway: true}}
+			err = c.waitForExit()
+			if err == nil {
+				t.Fatal("held lock reported as released")
+			}
+			replaced := strings.Contains(err.Error(), "又启动了新的桌面连接服务（进程 4343，原进程 4242）")
+			if (kind == "replacement") != replaced || !strings.Contains(err.Error(), "桌面连接服务") {
+				t.Fatalf("exit timeout does not identify the service state: %v", err)
 			}
 		})
 	}

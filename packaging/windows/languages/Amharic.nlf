@@ -1,0 +1,191 @@
+﻿# Header, don't edit
+NLF v6
+# Start editing here
+# Language ID
+1118
+# Font and size - dash (-) means default
+-
+-
+# Codepage - dash (-) means ASCII code page
+-
+# RTL - anything else than RTL means LTR
+-
+# Amharic installer strings
+# ^Branding
+Nullsoft የመጫኛ ሥርዓት %s
+# ^SetupCaption
+$(^Name) ማዋቀሪያ
+# ^UninstallCaption
+$(^Name) ማራገፊያ
+# ^LicenseSubCaption
+: የፍቃድ ስምምነት
+# ^ComponentsSubCaption
+: የመጫኛ አማራጮች
+# ^DirSubCaption
+: የመጫኛ አቃፊ
+# ^InstallingSubCaption
+: በመጫን ላይ
+# ^CompletedSubCaption
+: ተጠናቀቀ
+# ^UnComponentsSubCaption
+: የማራገፊያ አማራጮች
+# ^UnDirSubCaption
+: የማራገፊያ አቃፊ
+# ^ConfirmSubCaption
+: ማረጋገጫ
+# ^UninstallingSubCaption
+: በማራገፍ ላይ
+# ^UnCompletedSubCaption
+: ተጠናቀቀ
+# ^BackBtn
+< &ተመለስ
+# ^NextBtn
+&ቀጣይ >
+# ^AgreeBtn
+&እስማማለሁ
+# ^AcceptBtn
+የፍቃድ ስምምነቱን ውሎች &እቀበላለሁ
+# ^DontAcceptBtn
+የፍቃድ ስምምነቱን ውሎች &አልቀበልም
+# ^InstallBtn
+&ጫን
+# ^UninstallBtn
+&አራግፍ
+# ^CancelBtn
+ሰርዝ
+# ^CloseBtn
+&ዝጋ
+# ^BrowseBtn
+&አስስ...
+# ^ShowDetailsBtn
+&ዝርዝሮችን አሳይ
+# ^ClickNext
+ለመቀጠል ቀጣይ የሚለውን ጠቅ ያድርጉ።
+# ^ClickInstall
+መጫኑን ለመጀመር ጫን የሚለውን ጠቅ ያድርጉ።
+# ^ClickUninstall
+ማራገፉን ለመጀመር አራግፍ የሚለውን ጠቅ ያድርጉ።
+# ^Name
+ስም
+# ^Completed
+ተጠናቀቀ
+# ^LicenseText
+እባክዎ $(^NameDA)ን ከመጫንዎ በፊት የፍቃድ ስምምነቱን ይከልሱ። ሁሉንም የስምምነቱን ውሎች ከተቀበሉ፣ እስማማለሁ የሚለውን ጠቅ ያድርጉ።
+# ^LicenseTextCB
+እባክዎ $(^NameDA)ን ከመጫንዎ በፊት የፍቃድ ስምምነቱን ይከልሱ። ሁሉንም የስምምነቱን ውሎች ከተቀበሉ፣ ከዚህ በታች ያለውን አመልካች ሳጥን ምልክት ያድርጉ። $_CLICK
+# ^LicenseTextRB
+እባክዎ $(^NameDA)ን ከመጫንዎ በፊት የፍቃድ ስምምነቱን ይከልሱ። ሁሉንም የስምምነቱን ውሎች ከተቀበሉ፣ ከዚህ በታች ያለውን የመጀመሪያውን አማራጭ ይምረጡ። $_CLICK
+# ^UnLicenseText
+እባክዎ $(^NameDA)ን ከማራገፍዎ በፊት የፍቃድ ስምምነቱን ይከልሱ። ሁሉንም የስምምነቱን ውሎች ከተቀበሉ፣ እስማማለሁ የሚለውን ጠቅ ያድርጉ።
+# ^UnLicenseTextCB
+እባክዎ $(^NameDA)ን ከማራገፍዎ በፊት የፍቃድ ስምምነቱን ይከልሱ። ሁሉንም የስምምነቱን ውሎች ከተቀበሉ፣ ከዚህ በታች ያለውን አመልካች ሳጥን ምልክት ያድርጉ። $_CLICK
+# ^UnLicenseTextRB
+እባክዎ $(^NameDA)ን ከማራገፍዎ በፊት የፍቃድ ስምምነቱን ይከልሱ። ሁሉንም የስምምነቱን ውሎች ከተቀበሉ፣ ከዚህ በታች ያለውን የመጀመሪያውን አማራጭ ይምረጡ። $_CLICK
+# ^Custom
+ብጁ
+# ^ComponentsText
+ሊጭኗቸው የሚፈልጓቸውን ክፍሎች ምልክት ያድርጉ፣ መጫን የማይፈልጓቸውን ክፍሎች ደግሞ ምልክታቸውን ያንሱ። $_CLICK
+# ^ComponentsSubText1
+የመጫኛውን አይነት ይምረጡ፦
+# ^ComponentsSubText2_NoInstTypes
+የሚጫኑ ክፍሎችን ይምረጡ፦
+# ^ComponentsSubText2
+ወይም ሊጭኗቸው የሚፈልጓቸውን አማራጭ ክፍሎች ይምረጡ፦
+# ^UnComponentsText
+ሊያራግፏቸው የሚፈልጓቸውን ክፍሎች ምልክት ያድርጉ፣ ማራገፍ የማይፈልጓቸውን ክፍሎች ደግሞ ምልክታቸውን ያንሱ። $_CLICK
+# ^UnComponentsSubText1
+የማራገፊያውን አይነት ይምረጡ፦
+# ^UnComponentsSubText2_NoInstTypes
+የሚራገፉ ክፍሎችን ይምረጡ፦
+# ^UnComponentsSubText2
+ወይም ሊያራግፏቸው የሚፈልጓቸውን አማራጭ ክፍሎች ይምረጡ፦
+# ^DirText
+ማዋቀሪያው $(^NameDA)ን በሚከተለው አቃፊ ውስጥ ይጭናል። በሌላ አቃፊ ውስጥ ለመጫን አስስ የሚለውን ጠቅ ያድርጉና ሌላ አቃፊ ይምረጡ። $_CLICK
+# ^DirSubText
+መድረሻ አቃፊ
+# ^DirBrowseText
+$(^NameDA) የሚጫንበትን አቃፊ ይምረጡ፦
+# ^UnDirText
+ማዋቀሪያው $(^NameDA)ን ከሚከተለው አቃፊ ያራግፋል። ከሌላ አቃፊ ለማራገፍ አስስ የሚለውን ጠቅ ያድርጉና ሌላ አቃፊ ይምረጡ። $_CLICK
+# ^UnDirSubText
+""
+# ^UnDirBrowseText
+$(^NameDA) የሚራገፍበትን አቃፊ ይምረጡ፦
+# ^SpaceAvailable
+"የሚገኝ ቦታ: "
+# ^SpaceRequired
+"የሚያስፈልግ ቦታ: "
+# ^UninstallingText
+$(^NameDA) ከሚከተለው አቃፊ ይራገፋል። $_CLICK
+# ^UninstallingSubText
+የሚራገፈው ከ፦
+# ^FileError
+ፋይሉን ለመጻፍ በመክፈት ላይ ስህተት ተፈጥሯል: \r\n\r\n$0\r\n\r\nመጫኑን ለማቆም አቋርጥ የሚለውን፣\r\nእንደገና ለመሞከር እንደገና ሞክር የሚለውን፣ ወይም\r\nይህን ፋይል ለመዝለል ችላ በል የሚለውን ጠቅ ያድርጉ።
+# ^FileError_NoIgnore
+ፋይሉን ለመጻፍ በመክፈት ላይ ስህተት ተፈጥሯል: \r\n\r\n$0\r\n\r\nእንደገና ለመሞከር እንደገና ሞክር የሚለውን፣ ወይም\r\nመጫኑን ለማቆም ሰርዝ የሚለውን ጠቅ ያድርጉ።
+# ^CantWrite
+"መጻፍ አልተቻለም: "
+# ^CopyFailed
+መቅዳት አልተሳካም።
+# ^CopyTo
+"ቅዳ ወደ "
+# ^Registering
+"በመመዝገብ ላይ: "
+# ^Unregistering
+"ምዝገባን በመሰረዝ ላይ: "
+# ^SymbolNotFound
+"ምልክቱ አልተገኘም: "
+# ^CouldNotLoad
+"መጫን አልተቻለም: "
+# ^CreateFolder
+"አቃፊ ፍጠር: "
+# ^CreateShortcut
+"አቋራጭ ፍጠር: "
+# ^CreatedUninstaller
+"ማራገፊያው ተፈጥሯል: "
+# ^Delete
+"ፋይል ሰርዝ: "
+# ^DeleteOnReboot
+"እንደገና ሲነሳ ሰርዝ: "
+# ^ErrorCreatingShortcut
+"አቋራጭ በመፍጠር ላይ ስህተት: "
+# ^ErrorCreating
+"በመፍጠር ላይ ስህተት: "
+# ^ErrorDecompressing
+ውሂቡን በመፍታት ላይ ስህተት ተፈጥሯል! ጫኚው ተበላሽቷል?
+# ^ErrorRegistering
+DLL በመመዝገብ ላይ ስህተት ተፈጥሯል
+# ^ExecShell
+"ExecShell: "
+# ^Exec
+"አሂድ: "
+# ^Extract
+"አውጣ: "
+# ^ErrorWriting
+"አውጣ: ወደ ፋይል በመጻፍ ላይ ስህተት "
+# ^InvalidOpcode
+ጫኚው ተበላሽቷል፦ ልክ ያልሆነ ኦፕኮድ
+# ^NoOLE
+"OLE የለም ለ: "
+# ^OutputFolder
+"የውጤት አቃፊ: "
+# ^RemoveFolder
+"አቃፊ አስወግድ: "
+# ^RenameOnReboot
+"እንደገና ሲነሳ ዳግም ሰይም: "
+# ^Rename
+"ዳግም ሰይም: "
+# ^Skipped
+"ተዘሏል: "
+# ^CopyDetails
+ዝርዝሮችን ወደ ቅንጥብ ሰሌዳ ቅዳ
+# ^LogInstall
+የመጫን ሂደቱን መዝግብ
+# ^Byte
+B
+# ^Kilo
+K
+# ^Mega
+M
+# ^Giga
+G

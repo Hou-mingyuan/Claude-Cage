@@ -19,6 +19,23 @@ export function orderedTabs(tabs, saved) {
   });
 }
 
+export function moveItem(items, from, to, after) {
+  const source = items.indexOf(from);
+  const target = items.indexOf(to);
+  if (source < 0 || target < 0 || source === target) return items;
+  const position = target - Number(source < target) + Number(after);
+  if (position === source) return items;
+  const order = [...items];
+  order.splice(source, 1);
+  order.splice(position, 0, from);
+  return order;
+}
+
+export function dropAfter(row, clientY) {
+  const { top, height } = row.getBoundingClientRect();
+  return clientY > top + height / 2;
+}
+
 const clientMount = /^\/run\/cage-client-projects\/[0-9a-f]{32}$/;
 const folderName = (path) => path?.split(/[\\/]/).filter(Boolean).at(-1);
 
@@ -32,14 +49,14 @@ export function projectGroups(status) {
   return status?.project_groups || (status?.projects || []).map(path => ({ workspace: path, name: projectName(path), folders: [path] }));
 }
 
-export function projectName(path, groups = []) {
+export function projectName(path, groups = [], fallback = "新项目") {
   if (clientMount.test(path)) {
     try { return sessionStorage.getItem(path) || "本机共享项目"; }
     catch { return "本机共享项目"; }
   }
   const group = groups.find(item => item.workspace === path || item.folders.includes(path));
   if (group?.name) return group.name;
-  return folderName(path) || "新项目";
+  return folderName(path) || fallback;
 }
 
 export function tabName(tab, saved, project) {

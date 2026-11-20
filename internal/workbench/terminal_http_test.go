@@ -14,6 +14,80 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestCloseEndedConversationTerminalKeepsRecordUnarchived(t *testing.T) {
+	s, id, _ := metadataFixture(t)
+	t.Cleanup(s.terminals.close)
+	record, err := s.mobileCLI.record(s.profile, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := request(s, "DELETE", "/api/terminals/"+record.TerminalID, s.origin, "", true); w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if s.terminals.get(record.TerminalID) != nil {
+		t.Fatal("ended conversation terminal survived DELETE")
+	}
+	retained, err := s.mobileCLI.record(s.profile, id)
+	if err != nil || retained.Archived || retained.Deleted || retained.Revision != record.Revision {
+		t.Fatal("closing an ended terminal changed its conversation record", retained, err)
+	}
+}
+
+func TestCloseLiveConversationTerminal(t *testing.T) {
+	for _, state := range []string{"existing", "missing", "deleted", "invalid"} {
+		t.Run(state, func(t *testing.T) {
+			s, id, project := metadataFixture(t)
+			t.Cleanup(s.terminals.close)
+			record, err := s.mobileCLI.record(s.profile, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.terminals.remove(record.TerminalID)
+			terminal := startControlledTerminal(t, &s.terminals, nil, false, "claude")
+			terminal.mu.Lock()
+			terminal.sharedID, terminal.workspace = id, project
+			terminal.mu.Unlock()
+			record.TerminalID = terminal.id
+			if state == "deleted" {
+				record.Deleted, record.Purged = true, true
+			}
+			path := mobileRecordPath(s.profile, id)
+			if err := writePrivate(path, record); err != nil {
+				t.Fatal(err)
+			}
+			switch state {
+			case "missing":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			case "invalid":
+				if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			w := request(s, "DELETE", "/api/terminals/"+terminal.id, s.origin, "", true)
+			if state == "invalid" {
+				if w.Code != http.StatusBadRequest || s.terminals.get(terminal.id) != terminal || terminal.ended() {
+					t.Fatal("invalid record did not preserve the terminal and archive error", w.Code, w.Body.String())
+				}
+				return
+			}
+			if w.Code != http.StatusOK {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			if s.terminals.get(terminal.id) != nil || !terminal.ended() {
+				t.Fatal("DELETE left a conversation terminal running")
+			}
+			if state == "existing" {
+				archived, err := s.mobileCLI.record(s.profile, id)
+				if err != nil || !archived.Archived || archived.Deleted {
+					t.Fatal("live conversation was not archived", archived, err)
+				}
+			}
+		})
+	}
+}
+
 func TestTerminalStartupStatePreservesStreamAndReconnect(t *testing.T) {
 	s := testServer(t)
 	t.Cleanup(s.terminals.close)

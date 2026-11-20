@@ -23,9 +23,6 @@ func tailnetClientScript() string {
 	return "sudo tee /usr/local/lib/tailnet-client.mjs >/dev/null <<'CAGE_TAILNET_CLIENT'\n" + tailnetClient + "\nCAGE_TAILNET_CLIENT\n"
 }
 
-//go:embed ubuntu-browser.sh
-var ubuntuBrowser string
-
 //go:embed guest-services.sh
 var guestServices string
 
@@ -122,7 +119,7 @@ var browserSettingsPage string
 var splitControl string
 
 func splitExtensionScript() string {
-	return "split_directory=/usr/local/lib/cage-split\nif cage_is_ubuntu; then split_directory=/var/snap/chromium/common/workbench-extension; fi\nsudo install -d -m 0755 \"$split_directory\"\n" +
+	return "split_directory=/usr/local/lib/cage-split\nsudo install -d -m 0755 \"$split_directory\"\n" +
 		"sudo tee \"$split_directory\"/manifest.json >/dev/null <<'CAGE_MANIFEST'\n" + splitManifest + "\nCAGE_MANIFEST\n" +
 		"sudo tee \"$split_directory\"/control.html >/dev/null <<'CAGE_HTML'\n" + splitPage + "\nCAGE_HTML\n" +
 		"sudo tee \"$split_directory\"/settings.html >/dev/null <<'CAGE_SETTINGS_HTML'\n" + browserSettingsPage + "\nCAGE_SETTINGS_HTML\n" +
@@ -160,10 +157,6 @@ var imageInput string
 
 //go:embed desktop-files.py
 var desktopFiles string
-
-// DesktopFileReceiver shares the same bounded attachment writer with native
-// guests. Its --save-file mode uses only Python's standard library.
-func DesktopFileReceiver() string { return desktopFiles }
 
 //go:embed desktop-downloads.py
 var desktopDownloads string
@@ -247,7 +240,38 @@ var APTBootstrapScript = "set -e\nsudo env APT_CONFIG=\"${CAGE_APT_CONFIG:-/dev/
 
 // DebianPrepareScript runs before Lima's own dependency installation as well
 // as Cage setup. Its version check also covers previously created guests.
-var DebianPrepareScript = "#!/bin/sh\n" + APTBootstrapScript + "\n" + DebianMirrorsScript
+var DebianPrepareScript = DebianPrepareScriptFor("")
+
+// DebianMirrorEnv carries the workbench's Debian source choice to the host
+// cage CLI. It stays on the host: the guest receives the validated value as
+// a non-exported shell variable of the preparation script. The cloud image
+// build's CAGE_DEBIAN_MIRROR names a mirror URL instead, hence the distinct
+// name.
+const DebianMirrorEnv = "CAGE_DEBIAN_MIRROR_ORDER"
+
+// ValidDebianMirror reports whether preference names a Debian source policy:
+// "auto" (official first), "official" (pinned), or "nju" / "ustc" (that
+// domestic mirror first, the other next, the official source last).
+func ValidDebianMirror(preference string) bool {
+	switch preference {
+	case "auto", "official", "nju", "ustc":
+		return true
+	}
+	return false
+}
+
+func debianMirrorChoice(preference string) string {
+	if !ValidDebianMirror(preference) {
+		return ""
+	}
+	return "debian_mirror_choice=" + preference + "\n"
+}
+
+// DebianPrepareScriptFor pins the source policy for this run. An empty or
+// unknown preference keeps the guest's saved choice or its default probe.
+func DebianPrepareScriptFor(preference string) string {
+	return "#!/bin/sh\n" + APTBootstrapScript + "\n" + debianMirrorChoice(preference) + DebianMirrorsScript
+}
 
 //go:embed chromium-download.py
 var chromiumDownload string
@@ -259,7 +283,12 @@ cage_curl_download() {
 ` + toolDownload + `
 CAGE_DOWNLOAD_IDLE
 }
-` + guestTools + "\n" + ubuntuBrowser
+` + guestTools + `
+cage_install_chromium() {
+  cage_cache_chromium --no-install-recommends chromium chromium-l10n
+  sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get install -y --no-install-recommends chromium chromium-l10n </dev/null
+}
+`
 }
 
 func ToolInstallPrelude() string {
@@ -276,7 +305,7 @@ CAGE_CHROMIUM_DOWNLOAD
 }
 
 func RequiredToolVersions() map[string]string {
-	result := map[string]string{"chromium": "Debian security repository / Ubuntu Chromium latest/stable"}
+	result := map[string]string{"chromium": "Debian security repository"}
 	for _, line := range strings.Split(toolVersions, "\n") {
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {

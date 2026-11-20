@@ -71,22 +71,25 @@ test("a size with another density is a different request", async () => {
   } finally { sync.dispose(); }
 });
 
-test("a slow guest applies the newest size last without concurrent requests", async () => {
+test("a slow guest applies the newest size last without concurrent requests", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const requests = [];
-  let release;
-  const sync = displaySizeSync(async (size) => {
+  let releaseFirstRequest;
+  const firstRequest = new Promise((resolve) => { releaseFirstRequest = resolve; });
+  const sync = displaySizeSync((size) => {
     requests.push(size.width);
-    if (requests.length === 1) await new Promise((resolve) => { release = resolve; });
+    if (requests.length === 1) return firstRequest;
   }, { delay: 0 });
   try {
     sync.update({ width: 1000, height: 700 });
-    await pause(10);
+    t.mock.timers.tick(0);
     sync.update({ width: 1200, height: 700 });
     sync.update({ width: 1400, height: 700 });
-    await pause(10);
+    t.mock.timers.tick(0);
     assert.deepEqual(requests, [1000]);
-    release();
-    await pause(10);
+    releaseFirstRequest();
+    await firstRequest;
+    t.mock.timers.tick(0);
     assert.deepEqual(requests, [1000, 1400]);
   } finally { sync.dispose(); }
 });

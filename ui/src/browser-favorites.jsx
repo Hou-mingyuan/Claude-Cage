@@ -13,10 +13,12 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 import { Modal } from "./views";
+import { useTranslation } from "./interface-language.mjs";
 
 // The saved page is primary, folder context secondary, management actions quiet.
 // Reuse paper/strong/muted/line tokens, 8/12/16px spacing and existing modal forms.
 export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, menu = false, returnFocusRef }) {
+  const tr = useTranslation();
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const [editor, setEditor] = useState(null);
@@ -173,7 +175,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
         {current && <button
           className={`${menu ? "browser-menu-item" : "icon-button"} favorite-star ${favorite ? "saved" : ""}`}
           role={menu ? "menuitem" : undefined}
-          aria-label={favorite ? "编辑此页收藏" : "收藏此页"}
+          aria-label={favorite ? tr("编辑此页收藏") : tr("收藏此页")}
           title={shortcut(favorite ? "编辑此页收藏 ⌘D" : "收藏此页 ⌘D")}
           disabled={!canSave || !data}
           onClick={(event) => {
@@ -182,19 +184,19 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
           }}
         >
           <Star size={17} fill={favorite ? "currentColor" : "none"} />
-          {menu && <span>{favorite ? "编辑此页收藏" : "收藏此页"}</span>}
+          {menu && <span>{favorite ? tr("编辑此页收藏") : tr("收藏此页")}</span>}
         </button>}
         <button
           ref={toggle}
           className={menu ? "browser-menu-item" : "icon-button"}
           role={menu ? "menuitem" : undefined}
-          aria-label="收藏夹"
+          aria-label={tr("收藏夹")}
           title={shortcut("收藏夹 ⌘⇧O")}
           aria-expanded={open}
           onClick={() => (open ? setOpen(false) : show())}
         >
           <Folder size={17} />
-          {menu && <span>收藏夹</span>}
+          {menu && <span>{tr("收藏夹")}</span>}
         </button>
       </div>
       {open &&
@@ -209,15 +211,15 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
             <section
               className="favorites-panel"
               role="dialog"
-              aria-label="收藏夹"
+              aria-label={tr("收藏夹")}
               data-browser-dialog
             >
               <header>
-                <h2>收藏夹</h2>
+                <h2>{tr("收藏夹")}</h2>
                 <button
                   className="icon-button"
-                  aria-label="新建收藏夹"
-                  title="新建收藏夹"
+                  aria-label={tr("新建收藏夹")}
+                  title={tr("新建收藏夹")}
                   disabled={!data || saving}
                   onClick={() => {
                     setError("");
@@ -228,7 +230,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                 </button>
                 <button
                   className="icon-button"
-                  aria-label="关闭收藏夹"
+                  aria-label={tr("关闭收藏夹")}
                   onClick={() => setOpen(false)}
                 >
                   <X size={17} />
@@ -238,20 +240,20 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                 <Search size={15} />
                 <input
                   ref={search}
-                  aria-label="搜索收藏"
-                  placeholder="搜索收藏"
+                  aria-label={tr("搜索收藏")}
+                  placeholder={tr("搜索收藏")}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </label>
               <div className="favorites-folder-select">
                 <InlineSelect
-                  aria-label="筛选收藏夹"
+                  aria-label={tr("筛选收藏夹")}
                   value={folder}
                   onValueChange={(next) => setFolder(next)}
                 >
-                  <option value="all">全部收藏</option>
-                  <option value="">未分类</option>
+                  <option value="all">{tr("全部收藏")}</option>
+                  <option value="">{tr("未分类")}</option>
                   {data?.folders.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.title}
@@ -262,8 +264,8 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                   <>
                     <button
                       className="icon-button"
-                      aria-label="重命名收藏夹"
-                      title="重命名收藏夹"
+                      aria-label={tr("重命名收藏夹")}
+                      title={tr("重命名收藏夹")}
                       disabled={saving}
                       onClick={() => {
                         setError("");
@@ -274,8 +276,8 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                     </button>
                     <button
                       className="icon-button"
-                      aria-label="删除收藏夹，收藏移至未分类"
-                      title="删除收藏夹，收藏移至未分类"
+                      aria-label={tr("删除收藏夹，收藏移至未分类")}
+                      title={tr("删除收藏夹，收藏移至未分类")}
                       disabled={saving}
                       onClick={() => remove(folder, true)}
                     >
@@ -287,21 +289,21 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
               {error && !editor && (
                 <div className="favorites-error" role="alert">
                   {error}
-                  <button onClick={load}>重试读取</button>
+                  <button onClick={load}>{tr("重试读取")}</button>
                 </div>
               )}
               <div className="favorites-list">
                 {!data && !error && (
-                  <p className="favorites-empty">正在读取收藏…</p>
+                  <p className="favorites-empty">{tr("正在读取收藏…")}</p>
                 )}
                 {data && visible.length === 0 && (
                   <div className="favorites-empty">
                     <Star size={24} />
-                    <p>{query ? "没有匹配的收藏" : "这里还没有收藏"}</p>
+                    <p>{query ? tr("没有匹配的收藏") : tr("这里还没有收藏")}</p>
                     <span>
                       {query
-                        ? "试试其他名称或网址。"
-                        : "点击地址栏旁的星标，保存常用网页。"}
+                        ? tr("试试其他名称或网址。")
+                        : tr("点击地址栏旁的星标，保存常用网页。")}
                     </span>
                   </div>
                 )}
@@ -325,8 +327,8 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                     </button>
                     <button
                       className="icon-button"
-                      aria-label={`编辑收藏 ${item.title}`}
-                      title="编辑收藏"
+                      aria-label={tr("编辑收藏 {0}", (item.title))}
+                      title={tr("编辑收藏")}
                       disabled={saving}
                       onClick={() => {
                         setError("");
@@ -340,7 +342,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
               </div>
               {data && (
                 <footer>
-                  {visible.length} 个收藏<span>保存在此 Cage 环境</span>
+                  {visible.length}{" " + tr("个收藏")}<span>{tr("保存在此 Cage 环境")}</span>
                 </footer>
               )}
             </section>
@@ -354,11 +356,11 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
               title={
                 editor.kind === "folder"
                   ? editor.id
-                    ? "重命名收藏夹"
-                    : "新建收藏夹"
+                    ? tr("重命名收藏夹")
+                    : tr("新建收藏夹")
                   : editor.id
-                    ? "编辑收藏"
-                    : "添加收藏"
+                    ? tr("编辑收藏")
+                    : tr("添加收藏")
               }
               onClose={
                 saving
@@ -376,7 +378,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                       disabled={saving}
                       onClick={() => remove(editor.id)}
                     >
-                      删除收藏
+                      {tr("删除收藏")}
                     </button>
                   )}
                   <button
@@ -386,7 +388,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                       setError("");
                     }}
                   >
-                    取消
+                    {tr("取消")}
                   </button>
                   <button
                     className="primary"
@@ -394,7 +396,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                     form="favorite-form"
                     disabled={saving}
                   >
-                    {saving ? "保存中…" : "保存"}
+                    {saving ? tr("保存中…") : tr("保存")}
                   </button>
                 </>
               }
@@ -405,9 +407,9 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                 onSubmit={save}
               >
                 <label>
-                  名称
+                  {tr("名称")}
                   <input
-                    aria-label="收藏名称"
+                    aria-label={tr("收藏名称")}
                     required
                     maxLength={250}
                     value={editor.title}
@@ -419,9 +421,9 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                 {editor.kind === "item" && (
                   <>
                     <label>
-                      网址
+                      {tr("网址")}
                       <input
-                        aria-label="收藏网址"
+                        aria-label={tr("收藏网址")}
                         type="url"
                         required
                         value={editor.url}
@@ -431,9 +433,9 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                       />
                     </label>
                     <label>
-                      收藏夹
+                      {tr("收藏夹")}
                       <InlineSelect
-                        aria-label="保存到收藏夹"
+                        aria-label={tr("保存到收藏夹")}
                         value={editor.folder_id}
                         disabled={Boolean(editor.newFolder)}
                         onValueChange={(next) =>
@@ -443,7 +445,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                           })
                         }
                       >
-                        <option value="">未分类</option>
+                        <option value="">{tr("未分类")}</option>
                         {data?.folders.map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.title}
@@ -452,11 +454,11 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                       </InlineSelect>
                     </label>
                     <label>
-                      新建收藏夹（可选）
+                      {tr("新建收藏夹（可选）")}
                       <input
-                        aria-label="新收藏夹名称"
+                        aria-label={tr("新收藏夹名称")}
                         maxLength={250}
-                        placeholder="填写名称后，将收藏保存到新文件夹"
+                        placeholder={tr("填写名称后，将收藏保存到新文件夹")}
                         value={editor.newFolder || ""}
                         onChange={(event) =>
                           setEditor({

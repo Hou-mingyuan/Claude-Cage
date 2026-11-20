@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, writeClipboard } from "./api";
 import { QrCode } from "lucide-react";
+import { useTranslation } from "./interface-language.mjs";
 
 export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
+  const tr = useTranslation();
   const [custom, setCustom] = useState(Boolean(relay));
   const [token, setToken] = useState("");
   const [code, setCode] = useState(null);
@@ -63,7 +65,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
       !(await onConfirm({
         title: "移除配对手机？",
         body: device?.model
-          ? `移除 ${device.model} 后，这部手机需要重新扫码才能访问工作台。`
+          ? tr("移除 {0} 后，这部手机需要重新扫码才能访问工作台。", device.model)
           : "这部手机需要重新扫码才能访问工作台。",
         confirm: "移除手机",
       }))
@@ -85,45 +87,45 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
   }
   // Center the QR and its actions. Relay controls use the same theme below.
   return (
-    <section className="remote-link-settings" aria-label="远程连接">
+    <section className="remote-link-settings" aria-label={tr("远程连接")}>
       <div className="section-title">
-        <h3>远程连接</h3>
+        <h3>{tr("远程连接")}</h3>
         <p>
-          手机配对后可以打开远程浏览器和 Claude Desktop，也可以继续 Claude Code 会话、处理工具审批。
+          {tr("手机配对后可以打开远程浏览器和 Claude Desktop，也可以继续 Claude Code 会话、处理工具审批。")}
         </p>
       </div>
-      <section className="remote-pair-card" aria-label="手机配对">
-        <h4>{paired ? "手机已配对" : "用手机连接 Cage"}</h4>
+      <section className="remote-pair-card" aria-label={tr("手机配对")}>
+        <h4>{paired ? tr("手机已配对") : tr("用手机连接 Cage")}</h4>
         {paired && (
-          <p className="remote-pair-device" aria-label="已配对手机">
+          <p className="remote-pair-device" aria-label={tr("已配对手机")}>
             {device?.model ? (
               <>
                 <strong>{device.model}</strong>
                 <span>{device.platform === "ios" ? "iOS" : "Android"}</span>
               </>
             ) : (
-              <span>型号待获取，请更新手机端 Cage 后重新连接。</span>
+              <span>{tr("型号待获取，请更新手机端 Cage 后重新连接。")}</span>
             )}
           </p>
         )}
         {paired ? (
-          <p role="status">在手机上点「重新连接」即可打开工作台。</p>
+          <p role="status">{tr("在手机上点「重新连接」即可打开工作台。")}</p>
         ) : (
           <p className="remote-pair-instruction">
-            打开手机 Cage，选择「连接电脑」，用「扫码连接」扫描二维码，或选择「使用配对码」粘贴电脑上复制的配对码。
+            {tr("打开手机 Cage，选择「连接电脑」，用「扫码连接」扫描二维码，或选择「使用配对码」粘贴电脑上复制的配对码。")}
           </p>
         )}
-        {paired && power?.active && <p className="note">远程待机已请求主机保持运行，屏幕可正常熄灭。移除配对或结束后台服务后恢复原系统休眠策略。</p>}
-        {paired && power?.error && <p role="alert">主机防休眠未生效：{power.error}</p>}
+        {paired && power?.active && <p className="note">{tr("远程待机已请求主机保持运行，屏幕可正常熄灭。移除配对或结束后台服务后恢复原系统休眠策略。")}</p>}
+        {paired && power?.error && <p role="alert">{tr("主机防休眠未生效：")}{power.error}</p>}
         {code && (
           <div className="remote-pair-code">
             <img
               src={code.image}
-              alt="手机配对二维码"
+              alt={tr("手机配对二维码")}
               width="320"
               height="320"
             />
-            <p className="field-help">二维码约两分钟有效，过期后可刷新。</p>
+            <p className="field-help">{tr("二维码约两分钟有效，过期后可刷新。")}</p>
           </div>
         )}
         {!code && !paired && (
@@ -134,7 +136,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
         <div className="remote-pair-actions">
           {paired ? (
             <button type="button" disabled={busy} onClick={remove}>
-              移除配对手机
+              {tr("移除配对手机")}
             </button>
           ) : (
             <button
@@ -144,7 +146,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
               onClick={generate}
             >
               <QrCode size={18} />
-              {busy ? "正在生成…" : code ? "刷新二维码" : "生成配对二维码"}
+              {busy ? tr("正在生成…") : code ? tr("刷新二维码") : tr("生成配对二维码")}
             </button>
           )}
           {code && (
@@ -159,29 +161,29 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
                 }
               }}
             >
-              复制配对码
+              {tr("复制配对码")}
             </button>
           )}
         </div>
         {!paired && (
           <p className="remote-pair-privacy">
-            只将二维码或配对码交给你希望授权的手机。
+            {tr("只将二维码或配对码交给你希望授权的手机。")}
           </p>
         )}
         {notice && <p role="status">{notice}</p>}
       </section>
-      <section className="remote-relay-settings" aria-label="中继设置">
+      <section className="remote-relay-settings" aria-label={tr("中继设置")}>
         <div className="remote-relay-row">
           <div>
-            <h4>中继服务</h4>
+            <h4>{tr("中继服务")}</h4>
             <p className="field-help">
-              通过中继连接手机与电脑，可使用官方或自建服务。
+              {tr("通过中继连接手机与电脑，可使用官方或自建服务。")}
             </p>
           </div>
           <div
             className="remote-relay-options"
             role="group"
-            aria-label="中继服务"
+            aria-label={tr("中继服务")}
           >
             <button
               type="button"
@@ -193,21 +195,21 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
                 setCode(null);
               }}
             >
-              Cage 官方中继
+              {tr("Cage 官方中继")}
             </button>
             <button
               type="button"
               aria-pressed={custom}
               onClick={() => setCustom(true)}
             >
-              自建中继
+              {tr("自建中继")}
             </button>
           </div>
         </div>
         {custom && (
           <>
             <label>
-              自建中继地址
+              {tr("自建中继地址")}
               <input
                 value={relay}
                 placeholder="https://relay.example.com"
@@ -219,7 +221,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
               />
             </label>
             <label>
-              管理令牌（可选）
+              {tr("管理令牌（可选）")}
               <input
                 type="password"
                 autoComplete="off"
@@ -230,7 +232,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
           </>
         )}
         {relay !== savedRelay && (
-          <small>保存设置后，可使用新中继生成配对码。</small>
+          <small>{tr("保存设置后，可使用新中继生成配对码。")}</small>
         )}
       </section>
     </section>

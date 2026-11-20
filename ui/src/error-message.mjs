@@ -1,13 +1,13 @@
 export function operationName(path = "", method = "GET") {
   const reading = method === "GET";
   if (path === "/client/about") return reading ? "读取软件版本" : "检测应用更新";
+  if (path === "/client/notifications") return reading ? "读取通知设置" : "保存通知设置";
   if (path.startsWith("/api/mobile/cli")) return reading ? "读取会话消息" : "提交会话操作";
   if (path.startsWith("/api/mobile/browser")) return "连接电脑上的浏览器";
   if (path.startsWith("/api/mobile/desktop")) return "连接电脑上的 Claude Desktop";
   if (path.startsWith("/environment/resources")) return reading ? "读取资源配置" : "应用资源配置";
   if (path === "/environment/initialization") return reading ? "读取初始化进度" : "保存初始化状态";
   if (path.startsWith("/environment/versions")) return "读取环境组件版本";
-  if (path.startsWith("/environment/macos-screen-sharing")) return "客机屏幕共享";
   if (path === "/environment/cache/inventory") return "盘点当前环境缓存";
   if (path === "/environment/cache/clean") return "清理所选缓存";
   if (path === "/environment/cache/restore") return "恢复缓存";
@@ -15,6 +15,8 @@ export function operationName(path = "", method = "GET") {
   if (path.startsWith("/input/files") || path.startsWith("/browser/files")) return "传递文件";
   if (path.startsWith("/tailscale")) return reading ? "读取 Tailscale 状态" : "操作 Tailscale";
   if (path.startsWith("/browser")) return "操作浏览器";
+  if (path === "/proxy/local-configs") return "查找本机代理配置";
+  if (path === "/proxy/import-local") return "导入本机代理配置";
   if (path.startsWith("/proxy")) return reading ? "读取代理设置" : "应用代理设置";
   if (path.startsWith("/safety")) return "检查联网条件";
   if (path.startsWith("/settings/probe")) return "验证代理出口";
@@ -24,6 +26,7 @@ export function operationName(path = "", method = "GET") {
   if (path.startsWith("/projects")) return "连接项目目录";
   if (path.startsWith("/account")) return "处理账户操作";
   if (path.startsWith("/claude-desktop")) return "操作 Claude Desktop";
+  if (path === "/token-usage") return reading ? "读取本地用量统计" : "更新本地用量统计";
   if (path.startsWith("/terminals")) return "连接终端";
   if (path === "/start") return "启动环境";
   if (path === "/stop") return "停止环境";
@@ -62,6 +65,6 @@ export function connectionErrorMessage(path, method = "GET") {
 
 export function nativeFailureMessage(action, message = "") {
   if (/\p{Script=Han}/u.test(message) && !["文件操作失败", "原生操作超时，请重试", "操作失败"].includes(message)) return message;
-  const names = { chooseFolder: "选择本机文件夹", chooseUploadFiles: "选择上传文件", uploadHostFiles: "上传本机文件", openHostPath: "打开本机文件", exportDiagnostics: "导出诊断包", appUpdate: "检查或安装应用更新", clipboardRead: "读取剪贴板", clipboardWrite: "写入剪贴板", refreshSession: "恢复工作台登录会话" };
+  const names = { chooseFolder: "选择本机文件夹", chooseUploadFiles: "选择上传文件", uploadHostFiles: "上传本机文件", openHostPath: "打开本机文件", exportDiagnostics: "导出诊断包", appUpdate: "检查或安装应用更新", clipboardRead: "读取剪贴板", clipboardWrite: "写入剪贴板", refreshSession: "恢复工作台登录会话", notificationStatus: "读取系统通知状态", requestNotificationPermission: "请求系统通知权限", showNotification: "发送系统通知", openNotificationSettings: "打开系统通知设置" };
   return `${names[action] || "执行本机操作"}失败：${/timeout|超时/i.test(message) ? "等待本机组件响应超时" : "本机组件没有返回可识别的原因"}。请重新连接 Cage；仍失败时在设置中导出诊断包。`;
 }

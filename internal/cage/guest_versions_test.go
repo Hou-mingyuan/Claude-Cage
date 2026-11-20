@@ -175,7 +175,9 @@ func TestToolDownloadIdleTimeoutAndManualResume(t *testing.T) {
 			run := func() ([]byte, error) {
 				// Shorten only the test's idle interval; use the real curl, TLS,
 				// filesystem, checksum, automatic retries and manual continuation.
-				prelude := strings.Replace(ToolInstallPrelude(), "idle_timeout = 60", "idle_timeout = 0.5", 1)
+				// The idle clock starts before curl connects, so leave room for a
+				// loaded CI host to start curl and finish the TLS handshake.
+				prelude := strings.Replace(ToolInstallPrelude(), "idle_timeout = 60", "idle_timeout = 2", 1)
 				cmd := exec.CommandContext(t.Context(), "bash", "-c", prelude+`cage_download_tool "$DOWNLOAD_URL" "$DOWNLOAD_HASH" "$HOME/package"`)
 				cmd.Env = append(os.Environ(), "CAGE_SETUP_PROGRESS=1", "HOME="+dir, "PATH="+dir+":"+os.Getenv("PATH"), "CURL_CA_BUNDLE="+ca, "DOWNLOAD_URL="+s.URL, fmt.Sprintf("DOWNLOAD_HASH=%x", hash), "NO_PROXY=127.0.0.1", "no_proxy=127.0.0.1")
 				return cmd.CombinedOutput()
@@ -373,12 +375,12 @@ func TestClaudeToolsUpdateRepairsExistingNPMPrefixWithoutReinstalling(t *testing
 			cmd := exec.Command("bash", "-c", ToolInstallPrelude()+`
 set -euo pipefail
 unset npm_config_prefix NPM_CONFIG_PREFIX npm_config_userconfig NPM_CONFIG_USERCONFIG
-export PREFIX=/usr npm_config_userconfig="$HOME/.npmrc" npm_config_globalconfig="$HOME/global-npmrc"
+export npm_config_userconfig="$HOME/.npmrc" npm_config_globalconfig="$HOME/global-npmrc"
 export PATH="$HOME/.local/bin:$PATH"
 package="$HOME/.local/lib/node_modules/@anthropic-ai/claude-code/bin"
 mkdir -p "$HOME/.local/bin" "$package"
 printf 'fund=false\n' > "$HOME/.npmrc"
-printf 'fetch-retries=1\n' > "$HOME/global-npmrc"
+printf 'prefix=/usr\nfetch-retries=1\n' > "$HOME/global-npmrc"
 printf '#!/bin/sh\nprintf "9.9.9 (Claude Code)\\n"\n' > "$package/claude.exe"
 chmod +x "$package/claude.exe"
 if [ "$TEST_INSTALL" = npm ]; then
@@ -400,7 +402,7 @@ test "$(npm prefix --global)" = /usr
 cage_install_tool claude
 cage_install_tool claude
 grep -qx 'fund=false' "$HOME/.npmrc"
-test "$(cat "$HOME/global-npmrc")" = 'fetch-retries=1'
+test "$(cat "$HOME/global-npmrc")" = $'prefix=/usr\nfetch-retries=1'
 if [ "$TEST_INSTALL" = npm ]; then
   grep -qx "prefix=$HOME/.local" "$HOME/.npmrc"
   test "$(npm prefix --global)" = "$HOME/.local"

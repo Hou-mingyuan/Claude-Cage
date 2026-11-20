@@ -39,6 +39,24 @@ func TestCLIChannelProtocol(t *testing.T) {
 	}
 }
 
+// The bundle reindents the helper to fit the command budget. Its syntax tree,
+// including every string constant, must match the source exactly.
+func TestCLIChannelBundlePreservesProgram(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "bundle.py")
+	if err := os.WriteFile(bundle, []byte(cliChannelBundle(cliChannelHelper)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	compare := "import ast,sys\nsource,bundle=(ast.dump(ast.parse(open(p,encoding='utf-8').read())) for p in sys.argv[1:3])\nsys.exit(source!=bundle)\n"
+	if output, err := exec.Command(python, "-I", "-c", compare, "cli_channel.py", bundle).CombinedOutput(); err != nil {
+		t.Fatalf("bundled helper differs from cli_channel.py: %v\n%s", err, output)
+	}
+}
+
 func TestCLIChannelCommandFitsWindows(t *testing.T) {
 	// Leave room in CreateProcessW's 32767 UTF-16 limit for SSH paths and the
 	// login-shell quoting around this command.
@@ -239,6 +257,19 @@ func TestDiscoveryRunningStateUpdatesCatalogAndClearsMissingHistory(t *testing.T
 	}
 }
 
+func installClaudeTestHelpers(t *testing.T, bin string) {
+	t.Helper()
+	for source, dest := range map[string]string{"claude-account.py": "cage-claude-account", "client_runtime.py": "client_runtime.py"} {
+		body, err := os.ReadFile(filepath.Join("../cage", source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(bin, dest), body, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func sharedCLIWorkbench(t *testing.T) (*Server, string, *atomic.Bool) {
 	t.Helper()
 	binary, flags := os.Getenv("CAGE_TEST_CLAUDE_CLI"), os.Getenv("CAGE_TEST_CHANNEL_FEATURES")
@@ -265,6 +296,7 @@ func sharedCLIWorkbench(t *testing.T) (*Server, string, *atomic.Bool) {
 	if err := os.Mkdir(bin, 0700); err != nil {
 		t.Fatal(err)
 	}
+	installClaudeTestHelpers(t, bin)
 	actual, _ := filepath.EvalSymlinks(binary)
 	personal, _ := os.UserHomeDir()
 	quote := func(value string) string { b, _ := json.Marshal(value); return string(b) }

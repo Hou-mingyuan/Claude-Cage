@@ -4,12 +4,69 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
 )
+
+func TestGuestVersionSnapshotFiltersCodeServerOutput(t *testing.T) {
+	names := []string{"python3", "python"}
+	if runtime.GOOS == "windows" {
+		names = []string{"python", "python3"} // python3.exe may be a Windows Store alias.
+	}
+	var python string
+	for _, name := range names {
+		path, err := exec.LookPath(name)
+		if err == nil {
+			version, err := exec.Command(path, "--version").Output()
+			if err == nil && strings.HasPrefix(string(version), "Python 3.") {
+				python = path
+				break
+			}
+		}
+	}
+	if python == "" {
+		t.Skip("Python 3 is required to exercise the Linux guest version probe")
+	}
+	_, script, _ := strings.Cut(guestVersionSnapshot, "\n")
+	script = strings.TrimSuffix(script, "\nCAGE_VERSIONS")
+	const mockTools = `
+import subprocess,sys
+def run(args, **kwargs):
+    if args[0] == 'code-server':
+        assert args == ['code-server', '--version', '--config', '/dev/null']
+        return subprocess.CompletedProcess(args, int(sys.argv[2]), sys.argv[1])
+    output = 'other tool version\nsecond line'
+    return subprocess.CompletedProcess(args, 0, output)
+subprocess.run = run
+`
+	const notice = "[2026-11-16T00:00:00.000Z] info  Wrote default config file to /home/guest/.config/code-server/config.yaml"
+	const version = "4.145.0 2cb3ad3e258891fbb51001ba465c2348d5021644 with Code 1.145.0"
+	for _, test := range []struct{ name, output, status, want string }{
+		{"first run", notice + "\n" + version + "\n", "0", version},
+		{"later run", version + "\n", "0", version},
+		{"no version", notice + "\n", "0", ""},
+		{"failed command", version + "\n", "1", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output, err := exec.Command(python, "-c", mockTools+script, test.output, test.status).CombinedOutput()
+			if err != nil {
+				t.Fatalf("version probe: %v\n%s", err, output)
+			}
+			var snapshot struct{ Tools map[string]string }
+			if err := json.Unmarshal(output, &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.Tools["code_server"] != test.want || snapshot.Tools["git"] != "other tool version" {
+				t.Fatalf("unexpected versions: %v", snapshot.Tools)
+			}
+		})
+	}
+}
 
 func TestGuestConnectionRequiresSuccessfulMatchingManifest(t *testing.T) {
 	required := cage.RequiredGuestManifest()

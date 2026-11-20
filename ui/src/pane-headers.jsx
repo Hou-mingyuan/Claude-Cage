@@ -9,18 +9,22 @@ import { BrowserCookies } from "./browser-cookies";
 import { tabName } from "./workspace-state.mjs";
 import { shortcut } from "./platform.mjs";
 import logo from "./logo.png";
+import { useTranslation } from "./interface-language.mjs";
 
-export const ExpandSidebar = ({ onClick }) => <button className="icon-button sidebar-expand"
-  aria-label="展开侧栏" onClick={onClick}>
+export const ExpandSidebar = ({ onClick }) => { const tr = useTranslation(); return  <button className="icon-button sidebar-expand"
+  aria-label={tr("展开侧栏")} onClick={onClick}>
   <img className="sidebar-expand-logo" src={logo} alt="" />
   <PanelLeftOpen className="sidebar-expand-icon" size={18} />
-</button>;
+</button>; };
 
-export const ExpandPane = ({ onClick }) => <button className="icon-button expand-pane"
-  aria-label="退出分屏" title="在整个工作区显示此页" onClick={onClick}><Maximize2 size={14} /></button>;
+export const ExpandPane = ({ onClick }) => { const tr = useTranslation(); return  <button className="icon-button expand-pane"
+  aria-label={tr("退出分屏")} title={tr("在整个工作区显示此页")} onClick={onClick}><Maximize2 size={14} /></button>; };
 
 export function TerminalHeader({ tab, contentWorkspace, project, metadata, terminalDetail, terminalDetailHint,
   onHome, busy, onClose, sidebarButton, exitButton, location, triggerRef, menu }) {
+  const tr = useTranslation();
+  // Matches closeTab: only a running conversation terminal is archived; an ended one is just closed.
+  const archives = tab?.cli_session_id && !tab.closed;
   return <header className="chrome terminal-chrome">
     <div className="content-heading">
       {sidebarButton}
@@ -48,12 +52,12 @@ export function TerminalHeader({ tab, contentWorkspace, project, metadata, termi
         {tab && (
           <button
             className="icon-button"
-            aria-label={tab.cli_session_id ? "归档当前会话" : "关闭当前标签"}
-            title={shortcut(tab.cli_session_id ? "归档当前会话 ⌘W" : "关闭当前标签 ⌘W")}
+            aria-label={archives ? tr("归档当前会话") : tr("关闭当前标签")}
+            title={shortcut(archives ? "归档当前会话 ⌘W" : "关闭当前标签 ⌘W")}
             onClick={onClose}
             disabled={busy}
           >
-            {tab.cli_session_id ? <Archive size={16} /> : <X size={16} />}
+            {archives ? <Archive size={16} /> : <X size={16} />}
           </button>
         )}
         {exitButton}
@@ -68,13 +72,14 @@ export function TerminalHeader({ tab, contentWorkspace, project, metadata, termi
 // muted/hover tokens, 8px spacing and browser-tab typography in either layout.
 export function BrowserTabRail({ tabs, metadata, active, ready, busy, splitDrag, sidebarButton,
   onSelect, onClose, onRename, onPin, onReorder, onNew }) {
-  return <aside className="chrome browser-tab-rail" aria-label="竖排标签栏">
+  const tr = useTranslation();
+  return <aside className="chrome browser-tab-rail" aria-label={tr("竖排标签栏")}>
     <div className="browser-tab-rail-heading">
-      {sidebarButton}<strong>标签页</strong>
-      <button className="icon-button browser-new-tab" aria-label="新建网页" title={shortcut("新建网页 ⌘T")}
+      {sidebarButton}<strong>{tr("标签页")}</strong>
+      <button className="icon-button browser-new-tab" aria-label={tr("新建网页")} title={shortcut("新建网页 ⌘T")}
         disabled={!ready || busy} onClick={onNew}><Plus size={17} /></button>
     </div>
-    <WorkspaceTabs tabs={tabs} saved={metadata} active={active} label="浏览器标签页" vertical
+    <WorkspaceTabs tabs={tabs} saved={metadata} active={active} label={tr("浏览器标签页")} vertical
       ready={ready} busy={busy} splitDrag={splitDrag} onSelect={onSelect} onClose={onClose}
       onRename={onRename} onPin={onPin} onReorder={onReorder} />
   </aside>;
@@ -83,6 +88,7 @@ export function BrowserTabRail({ tabs, metadata, active, ready, busy, splitDrag,
 export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready, busy, focused, compact, triggerRef, vertical,
   sidebarButton, exitButton, splitDrag, onSelect, onClose, onRename, onPin, onReorder, onNew,
   location, menu, back, forward, action, onNavigate, onOpen, onNewPrivate, onNewRegular, onCloseBrowser, onSettings, onReload, downloads, onStatus, onEditor, onRecover, recoveringEditor }) {
+  const tr = useTranslation();
   const [address, setAddress] = useState("");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [cookiesOpen, setCookiesOpen] = useState(false);
@@ -118,8 +124,8 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
       event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : -1;
     if (next >= 0) { event.preventDefault(); items[next].focus(); }
   };
-  const closeButton = onCloseBrowser && <button className="icon-button browser-close" aria-label="关闭浏览器"
-    title="关闭浏览器并返回之前的页面" onClick={onCloseBrowser}><X size={16} /></button>;
+  const closeButton = onCloseBrowser && <button className="icon-button browser-close" aria-label={tr("关闭浏览器")}
+    title={tr("关闭浏览器并返回之前的页面")} onClick={onCloseBrowser}><X size={16} /></button>;
   return <header className={`chrome browser-chrome ${compact ? "split-chrome" : ""}`} data-browser-tab={tab.id}>
     {!vertical && <div className="browser-tab-bar">
       {sidebarButton}
@@ -127,7 +133,7 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
         tabs={tabs}
         saved={metadata}
         active={tab.id}
-        label="浏览器标签页"
+        label={tr("浏览器标签页")}
         horizontal
         busy={busy}
         ready={ready}
@@ -142,7 +148,7 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
         className="icon-button browser-new-tab"
         ref={triggerRef}
         data-terminal-location={location}
-        aria-label="新建网页"
+        aria-label={tr("新建网页")}
         title={shortcut("新建网页 ⌘T")}
         disabled={!ready || busy}
         onClick={onNew}
@@ -155,7 +161,7 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
       <div className="nav-actions">
         <button
           className="icon-button"
-          aria-label="后退"
+          aria-label={tr("后退")}
           disabled={!ready || !back}
           onClick={() =>
             action("/browser/back", { id: tab.id })
@@ -165,7 +171,7 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
         </button>
         <button
           className="icon-button"
-          aria-label="前进"
+          aria-label={tr("前进")}
           disabled={!ready || !forward}
           onClick={() =>
             action("/browser/forward", { id: tab.id })
@@ -175,7 +181,7 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
         </button>
         <button
           className="icon-button"
-          aria-label="重新加载网页"
+          aria-label={tr("重新加载网页")}
           disabled={!ready}
           onClick={onReload || (() => action("/browser/reload", { id: tab.id }))}
         >
@@ -183,16 +189,16 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
         </button>
       </div>
       <form className="address-bar" onSubmit={event => { event.preventDefault(); onNavigate(address); }}>
-        {tab.incognito ? <span className="browser-private-badge" title="关闭全部无痕标签后清理此会话"><ScanEye size={13} />无痕</span> : <Globe2 size={13} />}
+        {tab.incognito ? <span className="browser-private-badge" title={tab.login ? tr("授权结束后清理本次登录会话") : tr("关闭全部无痕标签后清理此会话")}><ScanEye size={13} />{tr("无痕")}</span> : <Globe2 size={13} />}
         <input
-          aria-label="网页地址或搜索"
+          aria-label={tr("网页地址或搜索")}
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           onFocus={(e) => e.target.select()}
           placeholder={
             ready
-              ? "输入网址或搜索，在 Cage 内打开"
-              : "启动环境后浏览网页"
+              ? tr("输入网址或搜索，在 Cage 内打开")
+              : tr("启动环境后浏览网页")
           }
           disabled={!ready}
           spellCheck="false"
@@ -200,7 +206,7 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
         <button
           className="address-go"
           type="submit"
-          aria-label="打开地址"
+          aria-label={tr("打开地址")}
           disabled={!ready}
         >
           <ArrowUpRight size={15} />
@@ -208,7 +214,7 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
       </form>
       <BrowserFavorites current={tab} shortcuts={focused} ready={ready && !busy} onOpen={onOpen} />
       <BrowserDownloads downloads={downloads} ready={ready && !busy} onStatus={onStatus} />
-      <button className="icon-button browser-more-trigger" aria-label="浏览器菜单" title="浏览器菜单"
+      <button className="icon-button browser-more-trigger" aria-label={tr("浏览器菜单")} title={tr("浏览器菜单")}
         ref={toolsTrigger} aria-haspopup="menu"
         aria-expanded={toolsOpen} aria-controls={`browser-menu-${tab.id}`}
         onKeyDown={event => {
@@ -221,28 +227,28 @@ export function BrowserHeader({ vault, onManageVault, tab, tabs, metadata, ready
       {vertical && exitButton}
       {vertical && closeButton}
     <div className="browser-more-menu" hidden={!toolsOpen} ref={toolsMenu}
-      id={`browser-menu-${tab.id}`} role="menu" aria-label="浏览器菜单" onKeyDown={menuKey}
+      id={`browser-menu-${tab.id}`} role="menu" aria-label={tr("浏览器菜单")} onKeyDown={menuKey}
       onClick={event => {
         const item = event.target.closest('[role="menuitem"]');
         if (item && !item.closest(".vault-browser")) { setToolsOpen(false); toolsTrigger.current?.focus(); }
       }}>
       <div className="browser-more-actions">
-        <button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={onNewPrivate}><ScanEye size={16} />新建无痕标签</button>
-        {tab.incognito && <button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={onNewRegular}><Globe2 size={16} />新建普通标签</button>}
-        {!tab.login && tab.kind !== "browser-settings" && <button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={() => setCookiesOpen(true)}><Cookie size={16} />管理 Cookie</button>}
-        <button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={() => onSettings('extensions')}><Puzzle size={16} />扩展</button>
+        <button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={onNewPrivate}><ScanEye size={16} />{tr("新建无痕标签")}</button>
+        {tab.incognito && <button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={onNewRegular}><Globe2 size={16} />{tr("新建普通标签")}</button>}
+        {!tab.login && tab.kind !== "browser-settings" && <button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={() => setCookiesOpen(true)}><Cookie size={16} />{tr("管理 Cookie")}</button>}
+        <button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={() => onSettings('extensions')}><Puzzle size={16} />{tr("扩展")}</button>
         <BrowserDownloads menu anchorRef={toolsTrigger} downloads={downloads} ready={ready && !busy} onStatus={onStatus} />
-        {tab.kind === "editor" && <button className="browser-menu-item" role="menuitem" aria-label="恢复编辑器" title="单独重启编辑器"
+        {tab.kind === "editor" && <button className="browser-menu-item" role="menuitem" aria-label={tr("恢复编辑器")} title={tr("单独重启编辑器")}
           disabled={!ready || busy || recoveringEditor} onClick={onRecover}>
-          <RefreshCw size={16} className={recoveringEditor ? "spin" : ""} /><span>恢复编辑器</span>
+          <RefreshCw size={16} className={recoveringEditor ? "spin" : ""} /><span>{tr("恢复编辑器")}</span>
         </button>}
       </div>
-      {vault && !tab.incognito && tab.kind === "web" && <BrowserVaultBar menu tab={tab} vault={vault} ready={ready} onManage={onManageVault} />}
-      <div className="browser-settings-menu-row"><button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={() => onSettings('general')}><Settings size={16} />设置</button></div>
+      {vault && !tab.login && !tab.incognito && tab.kind === "web" && <BrowserVaultBar menu tab={tab} vault={vault} ready={ready} onManage={onManageVault} />}
+      <div className="browser-settings-menu-row"><button className="browser-menu-item" role="menuitem" disabled={!ready || busy} onClick={() => onSettings('general')}><Settings size={16} />{tr("设置")}</button></div>
     </div>
     </div>
     {cookiesOpen && <BrowserCookies key={`${tab.id}:${tab.url}`} tab={tab} onClose={() => { setCookiesOpen(false); toolsTrigger.current?.focus(); }} />}
-    {tab.incognito && <p className="browser-private-note">无痕会话 · 关闭全部无痕标签后清理网站数据；下载和主动保存的收藏会保留。</p>}
+    {tab.incognito && <p className="browser-private-note">{tab.login ? tr("本次授权使用独立的无痕会话，授权结束后清理。") : tr("无痕会话 · 关闭全部无痕标签后清理网站数据；下载和主动保存的收藏会保留。")}</p>}
     {menu}
     {busy && <div className="progress-line" />}
   </header>;

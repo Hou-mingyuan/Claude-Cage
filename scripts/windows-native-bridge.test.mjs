@@ -25,6 +25,7 @@ function bridge() {
   return {
     call: request => window.webkit.messageHandlers.cage.postMessage(request),
     reply: value => reply({ data: { id: sent.id, ...value } }),
+    get sent() { return sent; },
     timers,
   };
 }
@@ -51,6 +52,32 @@ test('file failure reaches the caller and the following request can succeed', as
   const second = fixture.call({ action: 'clipboardSyncRead' });
   fixture.reply({ result: { text: 'next copy' } });
   assert.equal((await second).text, 'next copy');
+  assert.equal(fixture.timers.size, 0);
+});
+
+test('deferred file reads preserve the request flag and pending reply', async () => {
+  const fixture = bridge();
+  const pending = fixture.call({ action: 'clipboardSyncRead', connection_id: 'local', defer_files: true });
+  assert.equal(fixture.sent.request.defer_files, true);
+  assert.equal(fixture.sent.request.connection_id, 'local');
+  fixture.reply({ result: { revision: 42, files_pending: true, count: 2 } });
+  const result = await pending;
+  assert.equal(result.revision, 42);
+  assert.equal(result.files_pending, true);
+  assert.equal(result.count, 2);
+  assert.equal('files' in result, false);
+  assert.equal(fixture.timers.size, 0);
+});
+
+test('cancel and an interrupted file read settle independently', async () => {
+  const fixture = bridge();
+  const read = fixture.call({ action: 'clipboardSyncRead' });
+  const id = fixture.sent.id;
+  const cancel = fixture.call({ action: 'clipboardSyncCancel' });
+  fixture.reply({ result: true });
+  assert.equal(await cancel, true);
+  fixture.reply({ id, error: '剪贴板文件传递已取消' });
+  await assert.rejects(read, /剪贴板文件传递已取消/);
   assert.equal(fixture.timers.size, 0);
 });
 

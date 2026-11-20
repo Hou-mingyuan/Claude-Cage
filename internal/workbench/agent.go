@@ -67,9 +67,7 @@ func AgentOperations() []AgentOperation {
 	for _, action := range []string{"import", "refresh", "edit", "delete", "select", "route", "restart", "stop"} {
 		post("proxy."+action, "Proxy operation; import creates a source, refresh updates an existing source. Read state before retrying. select/route applies the route", "/api/proxy/"+action, proxy)
 	}
-	get("guest.options", "Available guest systems and resumable installation state", "/api/environment/guest-systems")
-	get("guest.match", "Inspect a host-matching clean image plan; pass key as clone_key and plan.host.system as guest_system to environment.start", "/api/environment/guest-systems/clone")
-	post("guest.activate", "Activate an installed guest; controller may retire, reconnect afterwards", "/api/environment/guest-systems/activate", object(nil))
+	get("guest.options", "Whether the environment is new, and any installation an earlier version left unfinished", "/api/environment/guest-systems")
 	get("initialization.status", "Read initial setup state", "/api/environment/initialization")
 	post("initialization.set", "action: begin, install or complete; complete requires verified readiness", "/api/environment/initialization", object(map[string]string{"action": "string"}))
 	post("environment.start", "Start or resume installation. Omit guest_system for an existing environment; use guest.options for supported choices", "/api/start", from(guestInstallRequest{}))
@@ -287,8 +285,8 @@ func agentRequest(ctx context.Context, configPath, method, path string, input js
 
 func (s *Server) agentRoutes(mux routeRegistrar) {
 	mux.HandleFunc("GET /api/agent/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		job := s.jobs.snapshot()
-		if job.ID == "" || job.ID != r.PathValue("id") {
+		job, ok := s.jobs.find(r.PathValue("id"))
+		if !ok {
 			http.Error(w, "Original job no longer available", http.StatusGone)
 			return
 		}

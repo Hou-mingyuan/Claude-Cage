@@ -21,16 +21,16 @@ import { sendFiles, shellFilePaths } from "./file-transfer";
 import { installRemoteInput } from "./remote-input";
 import { useWindowVisibility } from "./window-visibility";
 import { displayGeometry, displaySizeSync, watchPixelRatio } from "./remote-display.mjs";
-import { installLocalCursorFallback } from "./remote-cursor.mjs";
 import { guestKeys } from "./guest-keys.mjs";
 import { RefreshCw, Clipboard, ArrowUpRight } from "lucide-react";
 import { SessionAccount } from "./session-account";
 import "@xterm/xterm/css/xterm.css";
+import { useTranslation, translate } from "./interface-language.mjs";
 
 const terminalAccountRequest = (path, options) => api("/cli" + path, options.body);
 
 export const RemoteView = forwardRef(function RemoteView(
-  { visible, focused = true, keyboard, guestPlatform = "linux", systemClipboard = true, tabId, copyScope = tabId, onStatus, onFallback, desktop = false, zoom = 1 },
+  { visible, focused = true, keyboard, systemClipboard = true, tabId, copyScope = tabId, onStatus, onFallback, desktop = false, zoom = 1 },
   ref,
 ) {
   const windowVisible = useWindowVisibility();
@@ -40,7 +40,7 @@ export const RemoteView = forwardRef(function RemoteView(
     input = useRef(),
     current = useRef({ visible, keyboard, onStatus, onFallback }),
     displayResize = useRef();
-  current.current = { visible: screenVisible && focused, keyboard, guestPlatform, systemClipboard, tabId, onStatus, onFallback, zoom };
+  current.current = { visible: screenVisible && focused, keyboard, systemClipboard, tabId, onStatus, onFallback, zoom };
   const failures = useRef(0);
   const [connection, setConnection] = useState("connecting"),
     [attempt, setAttempt] = useState(0),
@@ -92,7 +92,7 @@ export const RemoteView = forwardRef(function RemoteView(
           container,
           runtimeSocketURL(`${desktopPrefix}/vnc`),
           {
-            credentials: { password }, cageBrowserDisplay: !desktop, cageCursorFallback: desktop && guestPlatform === "windows",
+            credentials: { password }, cageBrowserDisplay: !desktop,
             // The Linux browser scrolls its page by the distance of a trackpad
             // gesture. A menu or a second pane declines it and gets wheel steps.
             cageWheelSink: !desktop && pixel_wheel === true
@@ -101,14 +101,9 @@ export const RemoteView = forwardRef(function RemoteView(
           },
         );
         rfb.current = client;
-        if (!/^(windows|darwin|macos)/.test(guestPlatform || "")) {
-          // A Linux guest takes key events as sent; see guest-keys.mjs. The
-          // other systems arrive here as "macos" and "windows-11".
-          keys = guestKeys(client.sendKey.bind(client));
-          client.sendKey = keys.sendKey;
-        }
-        installLocalCursorFallback(client._cursor,
-          !desktop && ["darwin", "macos"].includes(guestPlatform));
+        // A Linux guest takes key events as sent; see guest-keys.mjs.
+        keys = guestKeys(client.sendKey.bind(client));
+        client.sendKey = keys.sendKey;
         client.scaleViewport = true;
         client.resizeSession = false;
         client.background = "#ffffff";
@@ -159,7 +154,6 @@ export const RemoteView = forwardRef(function RemoteView(
             },
             runKeyAction: action => client.cageRunInput(action),
           }, container, {
-            guestPlatform: () => current.current.guestPlatform,
             systemClipboard: () => current.current.systemClipboard,
             copyText: !desktop
               ? (_sendCopy, valid, { id, context, key }) => {
@@ -278,23 +272,23 @@ export const RemoteView = forwardRef(function RemoteView(
       <div className="remote-canvas" ref={box} />
       {sizeError && connection === "connected" && (
         <div className="remote-size-warning connection-banner" role="alert">
-          画面尺寸未能同步，显示比例可能不准确。
-          <button onClick={() => displayResize.current?.retry()}>重试调整</button>
+          {translate("画面尺寸未能同步，显示比例可能不准确。")}
+          <button onClick={() => displayResize.current?.retry()}>{translate("重试调整")}</button>
         </div>
       )}
       {connection !== "connected" && (
         <div className="view-overlay">
           <RefreshCw className={connection === "connecting" ? "spin" : ""} />
           <h3>
-            {connection === "connecting" ? "正在连接画面" : "画面连接已断开"}
+            {connection === "connecting" ? translate("正在连接画面") : translate("画面连接已断开")}
           </h3>
-          <p>后台任务不会因画面断开而自动结束。</p>
+          <p>{translate("后台任务不会因画面断开而自动结束。")}</p>
           {connection === "disconnected" && (
             <button
               className="primary"
               onClick={() => setAttempt((v) => v + 1)}
             >
-              重新连接画面
+              {translate("重新连接画面")}
             </button>
           )}
         </div>
@@ -304,6 +298,7 @@ export const RemoteView = forwardRef(function RemoteView(
 });
 
 export function TerminalView({ session, visible, focused = true, onStatus, onControls, onAccountChanged, onLoginTab }) {
+  const tr = useTranslation();
   const { appearance, theme, variant } = useAppearance();
   const box = useRef(),
     instance = useRef(),
@@ -330,14 +325,14 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
       if (disposed || !visibleRef.current || !focusedRef.current || !isClaudeLoginLink(uri)) return;
       try {
         const tab = await api(`/terminals/${session.id}/login-link`, { url: uri });
-        if (!disposed && visibleRef.current && focusedRef.current) onLoginTab?.(tab);
+        if (!disposed && visibleRef.current && focusedRef.current) await onLoginTab?.({ ...tab, url: uri });
       } catch (error) { if (!disposed) onStatus(error.message); }
     };
     const terminal = new Terminal({
       linkHandler: { activate(event, uri) {
         if (isClaudeLoginLink(uri)) return void activateLogin(event, uri);
         // Keep xterm's user confirmation for other explicit HTTP(S) links.
-        if (window.confirm(`打开此终端链接？\n${uri}`)) window.open(uri, "_blank", "noopener,noreferrer");
+        if (window.confirm(translate("打开此终端链接？\n{0}", uri))) window.open(uri, "_blank", "noopener,noreferrer");
       } },
       fontFamily: theme.fonts.code || systemCodeFont,
       fontSize: appearance.codeFontSize,
@@ -428,15 +423,36 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
       if (historyFrame) {
         historyFrame = false;
         replayingHistory = true;
-        terminal.write(new Uint8Array(event.data), () => { replayingHistory = false; });
+        // History includes old device/color queries. Answering them again can
+        // overflow the remote PTY input queue and close the new connection.
+        // Keep input disabled until xterm has finished parsing the replay;
+        // subsequent live output must still receive normal terminal replies.
+        terminal.options.disableStdin = true;
+        terminal.write(new Uint8Array(event.data), () => {
+          replayingHistory = false;
+          if (!disposed) terminal.options.disableStdin = false;
+        });
       } else terminal.write(new Uint8Array(event.data));
     };
-    ws.onclose = () => { setConnected(false); reveal(); };
+    ws.onclose = () => { if (!disposed) { setConnected(false); reveal(); } };
+    let inputTimer = null, pendingInput = [];
     const send = (data) => {
       if (disposed || ws.readyState !== WebSocket.OPEN) throw new Error("终端已断开，请重新连接后重试");
-      ws.send(JSON.stringify({ type: "input", data }));
+      // A redraw can produce several synchronous device replies. Preserve
+      // byte order but send each event-loop batch as one PTY input message.
+      pendingInput.push(data);
+      if (inputTimer === null) inputTimer = setTimeout(() => {
+        inputTimer = null;
+        const data = pendingInput.join("");
+        pendingInput = [];
+        if (!disposed && ws.readyState === WebSocket.OPEN)
+          ws.send(JSON.stringify({ type: "input", data }));
+      }, 0);
     };
     terminal.onData((data) => {
+      // Replayed history can contain DA/DSR/OSC queries; xterm's answers to
+      // them belong to a past screen and would flood the shell's input.
+      if (disposed || replayingHistory) return;
       if (emittingPaste) send(data);
       else void enqueue(() => send(data)).catch(() => {});
     });
@@ -494,8 +510,8 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
         if (terminal.modes.mouseTrackingMode !== "none")
           void enqueue(() => send("\x1b[99;6u")).catch(() => {});
         onStatus(terminal.modes.mouseTrackingMode === "none"
-          ? "请先拖选要复制的终端文字"
-          : `当前程序接管了鼠标。请按住 ${isMac ? "Option" : "Shift"} 拖选文字，再复制。`);
+          ? translate("请先拖选要复制的终端文字")
+          : translate("当前程序接管了鼠标。请按住 {0} 拖选文字，再复制。", isMac ? "Option" : "Shift"));
         return;
       }
       void writeClipboard(text)
@@ -582,6 +598,8 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
     resize();
     return () => {
       disposed = true;
+      clearTimeout(inputTimer);
+      pendingInput = [];
       clearTimeout(startupTimer);
       revealStartup.current = null;
       startupRender.dispose();
@@ -596,7 +614,7 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
       terminal.dispose();
       instance.current = null;
     };
-  }, [session.id, attempt]);
+  }, [session.id, session.cli_session_id, attempt]);
   useEffect(() => {
     if (visible) {
       fit.current?.fit();
@@ -622,19 +640,19 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
       <div className={`terminal-host ${preparing ? "terminal-preparing" : ""}`} ref={box} aria-hidden={preparing || undefined} />
       {preparing && (
         <div className="terminal-startup" role="status">
-          <span>正在准备 Claude 会话…</span>
-          <button onClick={() => revealStartup.current?.()}>显示启动过程</button>
+          <span>{tr("正在准备 Claude 会话…")}</span>
+          <button onClick={() => revealStartup.current?.()}>{tr("显示启动过程")}</button>
         </div>
       )}
       {!connected && (
         <div className="terminal-note">
           {session.closed
-            ? "终端会话已结束。可点击项目右侧的终端图标新建终端。"
-            : "正在连接终端…"}
+            ? session.login_notice || tr("终端会话已结束。可点击项目右侧的终端图标新建终端。")
+            : tr("正在连接终端…")}
           {!session.closed && (
             <button onClick={() => setAttempt((v) => v + 1)}>
               <RefreshCw size={13} />
-              重新连接
+              {tr("重新连接")}
             </button>
           )}
         </div>

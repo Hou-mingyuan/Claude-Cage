@@ -27,12 +27,14 @@ func TestStreamPreservesManagedProducerSeverity(t *testing.T) {
 	proxy.Close()
 	validation := store.Stream("proxy-validation", "error")
 	validation.Write([]byte("time=\"2026-11-08T00:00:00Z\" level=info msg=\"configuration valid\"\n"))
+	validation.Write([]byte("configuration file /private/config.yaml test is successful\n"))
+	validation.Write([]byte("Parse config error: unsupported type\n"))
 	validation.Close()
 	ordinary := store.Stream("task", "error")
 	ordinary.Write([]byte("{\"level\":\"debug\",\"msg\":\"not a managed log producer\"}\n"))
 	ordinary.Close()
 	events := readEvents(t, store)
-	want := []string{"debug", "info", "error", "error", "warn", "info", "error"}
+	want := []string{"debug", "info", "error", "error", "warn", "info", "info", "error", "error"}
 	if len(events) != len(want) {
 		t.Fatalf("unexpected records: %+v", events)
 	}
@@ -49,23 +51,29 @@ func TestGuestRunnerDistinguishesRequestedStopFromFailure(t *testing.T) {
 	}
 	python, err := exec.Command("uv", "python", "find").Output()
 	if err != nil {
-		t.Skip("uv Python unavailable")
+		path, lookErr := exec.LookPath("python3")
+		if lookErr != nil {
+			t.Skip("Python unavailable")
+		}
+		python = []byte(path)
 	}
 	for _, tc := range []struct {
 		name, child string
 		stop        bool
 		want        int
 	}{
-		{"requested-stop", `import signal,time; signal.signal(signal.SIGTERM,lambda *_:exit(143)); print('ready',flush=True); time.sleep(10)`, true, 0},
+		{"requested-stop", `import signal; signal.signal(signal.SIGTERM,lambda *_:exit(143)); print('ready',flush=True); signal.pause()`, true, 0},
 		{"unexpected-143", `exit(143)`, false, 143},
-		{"failure-during-stop", `import signal,time; signal.signal(signal.SIGTERM,lambda *_:exit(7)); print('ready',flush=True); time.sleep(10)`, true, 7},
+		{"failure-during-stop", `import signal; signal.signal(signal.SIGTERM,lambda *_:exit(7)); print('ready',flush=True); signal.pause()`, true, 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := filepath.Join(t.TempDir(), "runner.py")
 			if err := os.WriteFile(runner, []byte(GuestRunner()), 0600); err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// Only a hang guard: a loaded CI host can take seconds to start two
+			// interpreters, and a timeout would report exit -1 instead of the result.
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			interpreter := strings.TrimSpace(string(python))
 			cmd := exec.CommandContext(ctx, interpreter, runner, interpreter, "-c", tc.child)

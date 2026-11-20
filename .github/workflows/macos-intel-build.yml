@@ -48,8 +48,7 @@ jobs:
       - name: Application version consistency
         run: |
           node scripts/check-version.mjs
-          node --test scripts/macos-sshfs-sources.test.mjs scripts/guest-os/tests/install-macos-project-tools.test.mjs
-      - name: Install native guest and Intel runtime build dependencies
+      - name: Install Intel runtime build dependencies
         run: |
           brew install glib gettext pcre2 libffi pixman pkgconf meson ninja
           brew upgrade glib gettext pcre2
@@ -82,26 +81,12 @@ jobs:
         run: |
           npm run --prefix ui lint
           npm test --prefix ui
-          node --test internal/cage/clipboard.test.cjs internal/cage/browser-audit.test.mjs internal/cage/browser-downloads.test.mjs internal/cage/browser-uploads.test.mjs internal/cage/browser-login.test.mjs internal/cage/browser-clipboard.test.mjs internal/cage/native-input.test.mjs internal/cage/display-density.test.mjs internal/cage/browser-wheel.test.mjs
+          node --test internal/cage/clipboard.test.cjs internal/cage/browser-audit.test.mjs internal/cage/browser-downloads.test.mjs internal/cage/browser-uploads.test.mjs internal/cage/browser-login.test.mjs internal/cage/browser-clipboard.test.mjs internal/cage/browser-visibility.test.mjs internal/cage/native-input.test.mjs internal/cage/display-density.test.mjs internal/cage/browser-wheel.test.mjs
           uv run internal/cage/claude-account.test.py
           uv run internal/cage/display-governor.test.py
           uv run internal/cage/save-download.test.py
           uv run internal/cage/editor-migrate.test.py
-          uv run --no-project scripts/guest-os/tests/native-maintenance.py
-          uv run --no-project scripts/guest-os/tests/macos-release-downloads.py
           uv run --no-project internal/workbench/cache_maintenance_test.py
-      - name: Native Chrome capture window selection
-        run: |
-          check=$(mktemp -d "$RUNNER_TEMP/cage-window-selection.XXXXXX")
-          trap 'rm -rf "$check"' EXIT
-          xcrun swiftc -parse-as-library -O scripts/guest-os/macos-chrome-window-selection.swift scripts/guest-os/tests/macos-chrome-window-selection-test.swift -o "$check/test"
-          "$check/test"
-          xcrun swiftc -parse-as-library -O scripts/guest-os/macos-maintenance-compositor.swift scripts/guest-os/tests/macos-maintenance-compositor-test.swift -o "$check/maintenance-test"
-          "$check/maintenance-test"
-          xcrun swiftc -parse-as-library -O scripts/guest-os/macos-window-socket.swift scripts/guest-os/tests/macos-window-socket-test.swift -o "$check/socket-test"
-          LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 "$check/socket-test"
-          xcrun swiftc -parse-as-library -O scripts/guest-os/macos-project-panel.swift scripts/guest-os/tests/macos-project-panel-test.swift -o "$check/panel-test"
-          "$check/panel-test"
       - name: Go tests and vet
         run: |
           # Intel 上 Lima 使用 QEMU 驱动；与 internal/host/runtime_darwin_amd64.go 一致，使用随包构建的 QEMU
@@ -109,7 +94,8 @@ jobs:
           test -x "$runtime/qemu-system-x86_64"
           export PATH="$runtime:$PATH"
           make test-go
-          go test -race ./internal/cage ./internal/managedproxy ./internal/workbench
+          # The race detector run of these packages is done once, on Apple
+          # Silicon (macos-build.yml); they have no amd64-only source files.
           go vet ./cmd/cage ./internal/cage ./internal/managedproxy ./internal/workbench
       - name: Native application updater
         run: bash scripts/test-app-updates.sh

@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { Transform, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { isMainModule } from './is-main-module.mjs';
 
 const maxChecksums = 64 * 1024;
 // The in-place updater of every published App rejects a larger installer.
@@ -32,7 +32,6 @@ async function releaseNames() {
     linux: `Cage-${version}-linux-amd64.deb`,
     linuxSource: linuxDependencies.mihomoSource.file,
     macSource: `mihomo-${macCore}-source.tar.gz`,
-    macGuestSource: `cage-macos-guest-${version}-source.tar.gz`,
     windowsSource: `mihomo-${dependencies.mihomo.version}-source.tar.gz`,
     qemuPrefix: `qemu-${dependencies.qemu.version}-windows-full-source.`,
     qemuSource: `${dependencies.qemuSource.file}.gz`,
@@ -123,13 +122,12 @@ export async function prepareReleaseAssets({ inputs, output }) {
     if (!mac && !windows && !linux) throw new Error(`No supported package name for VERSION ${names.version}: ${directory}`);
     if (linux && !entries.has(names.linuxSource)) throw new Error(`Missing Linux Mihomo source in SHA256SUMS: ${directory}`);
     if (mac && !entries.has(names.macSource)) throw new Error(`Missing macOS Mihomo source in SHA256SUMS: ${directory}`);
-    if (mac && !entries.has(names.macGuestSource)) throw new Error(`Missing macOS guest corresponding source in SHA256SUMS: ${directory}`);
     if (windows && (!entries.has(names.windowsSource) || ![...entries.keys()].some(name => isQemuArchive(name, names)))) {
       throw new Error(`Windows release requires its Mihomo and complete QEMU source archives in the same SHA256SUMS: ${directory}`);
     }
     for (const [name, digest] of entries) {
       const installer = name === names.mac || name === names.windows || name === names.linux;
-      if (!installer && ![names.macSource, names.macGuestSource, names.windowsSource, names.linuxSource, names.qemuSource, names.qemuKeymap, names.qemuChanges].includes(name) && !isQemuArchive(name, names)) {
+      if (!installer && ![names.macSource, names.windowsSource, names.linuxSource, names.qemuSource, names.qemuKeymap, names.qemuChanges].includes(name) && !isQemuArchive(name, names)) {
         throw new Error(`Unsupported asset or version in SHA256SUMS: ${name}`);
       }
       const existing = all.get(name);
@@ -185,6 +183,6 @@ async function main() {
   console.log(`Prepared Cage ${result.version}: ${result.assets.length} verified assets and one SHA256SUMS in ${result.directory}`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMainModule(import.meta.url)) {
   main().catch(error => { console.error(error.message); process.exitCode = 1; });
 }

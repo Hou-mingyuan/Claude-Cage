@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { api } from "./api";
 import { InlineSelect } from "./inline-select";
 import { Modal } from "./modal";
+import { useTranslation } from "./interface-language.mjs";
 
 const emptyHost = () => ({
   name: "",
@@ -15,6 +16,7 @@ const emptyHost = () => ({
 });
 
 export function HostForm({ initial, platform, onSaved, onClose }) {
+  const tr = useTranslation();
   const [form, setForm] = useState(() =>
     initial ? structuredClone(initial) : emptyHost(),
   );
@@ -46,7 +48,7 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
   }
   return (
     <Modal
-      title={form.id ? "编辑远程主机" : "添加远程主机"}
+      title={form.id ? tr("编辑远程主机") : tr("添加远程主机")}
       onClose={busy ? undefined : onClose}
     >
       <form className="remote-host-form" onSubmit={save}>
@@ -57,29 +59,29 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
         )}
         <fieldset disabled={busy}>
           <label>
-            主机名称
+            {tr("主机名称")}
             <input
               required
               value={form.name}
               onChange={(event) => update("name", event.target.value)}
-              placeholder="例如：东京开发机"
+              placeholder={tr("例如：东京开发机")}
               maxLength={200}
             />
           </label>
           <div className="remote-form-row">
             <label>
-              服务器地址
+              {tr("服务器地址")}
               <input
                 required
                 value={form.host}
                 onChange={(event) => update("host", event.target.value)}
-                placeholder="IP 地址或域名"
+                placeholder={tr("IP 地址或域名")}
                 autoComplete="off"
                 spellCheck="false"
               />
             </label>
             <label className="remote-port">
-              SSH 端口
+              {tr("SSH 端口")}
               <input
                 required
                 type="number"
@@ -91,19 +93,19 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
             </label>
           </div>
           <label>
-            远程系统
+            {tr("远程系统")}
             <InlineSelect
               inline
-              aria-label="远程系统"
+              aria-label={tr("远程系统")}
               value={form.platform || "linux"}
               onValueChange={(value) => update("platform", value)}
             >
               <option value="linux">Linux</option>
-              <option value="windows">Windows（已部署服务）</option>
+              <option value="windows">{tr("Windows（已部署服务）")}</option>
             </InlineSelect>
           </label>
           <label>
-            SSH 用户名
+            {tr("SSH 用户名")}
             <input
               required
               value={form.user}
@@ -114,9 +116,9 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
             />
           </label>
           <label>
-            SSH 登录方式
+            {tr("SSH 登录方式")}
             <InlineSelect
-              aria-label="SSH 登录方式"
+              aria-label={tr("SSH 登录方式")}
               value={form.auth.kind}
               onValueChange={(kind) =>
                 update("auth", {
@@ -126,15 +128,15 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
                 })
               }
             >
-              <option value="key_file">本机密钥文件</option>
-              <option value="agent">本机 SSH agent</option>
+              <option value="key_file">{tr("本机密钥文件")}</option>
+              <option value="agent">{tr("本机 SSH agent")}</option>
             </InlineSelect>
           </label>
           {form.auth.kind === "key_file" && (
             <label>
-              本机私钥文件
+              {tr("本机私钥文件")}
               <input
-                aria-label="本机私钥文件"
+                aria-label={tr("本机私钥文件")}
                 required
                 value={form.auth.identity_file}
                 onChange={(event) =>
@@ -145,48 +147,48 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
                 }
                 placeholder={
                   platform === "windows"
-                    ? "C:\\Users\\你的名字\\.ssh\\id_ed25519"
-                    : "/Users/你的名字/.ssh/id_ed25519"
+                    ? tr("C:\\Users\\你的名字\\.ssh\\id_ed25519")
+                    : tr("/Users/你的名字/.ssh/id_ed25519")
                 }
                 autoComplete="off"
                 spellCheck="false"
               />
-              <small>填写绝对路径。密钥留在本机，不上传到云端。</small>
+              <small>{tr("填写绝对路径。密钥留在本机，不上传到云端。")}</small>
             </label>
           )}
           <details>
-            <summary>云端安装路径</summary>
+            <summary>{tr("云端安装路径")}</summary>
             <div className="remote-advanced">
               <label>
-                Cage 程序路径
+                {tr("Cage 程序路径")}
                 <input
                   value={form.executable || ""}
                   onChange={(event) => update("executable", event.target.value)}
                   placeholder="cage"
                   spellCheck="false"
                 />
-                <small>默认使用 cage，也可填写云端程序的绝对路径。</small>
+                <small>{tr("默认使用 cage，也可填写云端程序的绝对路径。")}</small>
               </label>
               <label>
-                Cage 配置文件
+                {tr("Cage 配置文件")}
                 <input
                   value={form.config_path || ""}
                   onChange={(event) =>
                     update("config_path", event.target.value)
                   }
-                  placeholder={form.platform === "windows" ? "例如 C:\\ProgramData\\Cage Remote\\config.json" : "默认使用云端账户的 ~/.claude-cage/config.json"}
+                  placeholder={form.platform === "windows" ? tr("例如 C:\\ProgramData\\Cage Remote\\config.json") : tr("默认使用云端账户的 ~/.claude-cage/config.json")}
                   spellCheck="false"
                 />
-                <small>自定义时填写云端绝对路径。</small>
+                <small>{tr("自定义时填写云端绝对路径。")}</small>
               </label>
             </div>
           </details>
           <div className="remote-button-row">
             <button className="primary" type="submit">
-              保存主机
+              {tr("保存主机")}
             </button>
             <button type="button" onClick={onClose}>
-              取消
+              {tr("取消")}
             </button>
           </div>
         </fieldset>

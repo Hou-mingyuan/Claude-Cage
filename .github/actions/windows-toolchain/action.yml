@@ -11,7 +11,11 @@ runs:
   steps:
     - uses: actions/setup-go@v5
       with:
-        go-version-file: go.mod
+        # tools/tailnet requires the newer of the two Go versions.
+        go-version-file: tools/tailnet/go.mod
+        cache-dependency-path: |
+          go.sum
+          tools/tailnet/go.sum
     - uses: actions/setup-node@v4
       with:
         node-version: 24
@@ -27,7 +31,7 @@ runs:
         msystem: UCRT64
         update: true
         install: >-
-          make patch diffutils git findutils curl
+          make patch diffutils git tar gzip findutils curl
           mingw-w64-ucrt-x86_64-gcc
           mingw-w64-ucrt-x86_64-glib2
           mingw-w64-ucrt-x86_64-pixman
@@ -56,7 +60,7 @@ runs:
         path: |
           _output/windows-deps
           _output/linux-deps/mihomo-*.gz
-        key: windows-deps-v2-${{ hashFiles('packaging/windows/dependencies.json', 'packaging/linux/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
+        key: windows-deps-v3-${{ hashFiles('packaging/windows/dependencies.json', 'packaging/linux/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
         restore-keys: |
           windows-deps-v2-
           cage-windows-deps-
@@ -66,10 +70,11 @@ runs:
       env:
         CAGE_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
       run: |
-        ./scripts/build-qemu-windows.ps1
-        $identity = Get-Content '_output/windows-deps/qemu-cage/cage-build.json' -Raw | ConvertFrom-Json
+        $runtime = ./scripts/build-qemu-windows.ps1 -UseFingerprintCache
+        $manifest = Join-Path $runtime 'cage-build.json'
+        $identity = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
         "fingerprint=$($identity.fingerprint)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-        "manifest=$((Get-FileHash '_output/windows-deps/qemu-cage/cage-build.json' -Algorithm SHA256).Hash)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        "manifest=$((Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         $collectorHash = (Get-FileHash 'scripts/bundle-qemu-sources.sh' -Algorithm SHA256).Hash + (Get-FileHash 'scripts/prepare-qemu-release.ps1' -Algorithm SHA256).Hash
         "collector=$collectorHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
     - name: Download and verify bundled dependencies
@@ -82,7 +87,7 @@ runs:
         path: |
           _output/windows-deps
           _output/linux-deps/mihomo-*.gz
-        key: windows-deps-v2-${{ hashFiles('packaging/windows/dependencies.json', 'packaging/linux/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
+        key: windows-deps-v3-${{ hashFiles('packaging/windows/dependencies.json', 'packaging/linux/dependencies.json', 'patches/qemu/**', 'scripts/build-qemu-windows.*') }}
     - uses: actions/cache/restore@v4
       if: inputs.corresponding-sources == 'true'
       id: qemu_sources

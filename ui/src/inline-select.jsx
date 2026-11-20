@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useSelectPopup } from "./select-popup";
 import { Check, ChevronDown } from "lucide-react";
 import "./inline-select.css";
+import { useTranslation } from "./interface-language.mjs";
 
 // Keep keyboard focus on the control for both inline and popup lists.
 export function InlineSelect({
@@ -15,6 +16,7 @@ export function InlineSelect({
   displayLabel,
   ...props
 }) {
+  const tr = useTranslation();
   const id = useId();
   const root = useRef(null);
   const control = useRef(null);
@@ -29,6 +31,7 @@ export function InlineSelect({
         label:
           Children.toArray(option.children).join("") || String(option.value),
         disabled: option.disabled,
+        lang: option.lang,
         group,
       }),
     );
@@ -140,7 +143,7 @@ export function InlineSelect({
       ref={list}
       id={id}
       role="listbox"
-      aria-label={(props["aria-label"] || "") + "选项"}
+      aria-label={props["aria-label"] ? tr("{0}选项", props["aria-label"]) : tr("选项")}
       className={`inline-select-list${inline ? " inline-select-list--inline" : ""}`}
       style={inline ? undefined : position}
       onMouseDown={(event) => event.preventDefault()}
@@ -163,7 +166,7 @@ export function InlineSelect({
             aria-selected={item === selected}
             onClick={() => choose(item)}
           >
-            <span>
+            <span lang={item.lang} dir="auto">
               {editable && item.label !== item.value ? item.value + " · " : ""}
               {item.label}
             </span>
@@ -199,7 +202,7 @@ export function InlineSelect({
             open ? setOpen(false) : show();
           }}
         >
-          <span>{displayLabel ?? selected?.label ?? value}</span>
+          <span lang={displayLabel ? undefined : selected?.lang} dir="auto">{displayLabel ?? selected?.label ?? value}</span>
           <ChevronDown size={14} aria-hidden="true" />
         </button>
       )}

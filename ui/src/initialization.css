@@ -2,7 +2,7 @@
 .initialization-brand { display: flex; align-items: center; gap: 10px; padding: 24px 32px; }
 .initialization-brand img { width: 28px; height: 28px; }
 .initialization-brand strong { font-size: 18px; color: var(--strong); }
-.initialization-brand > span { margin-left: 8px; color: var(--muted); font-size: 14px; }
+.initialization-brand > span { margin-inline-start: 8px; color: var(--muted); font-size: 14px; }
 .initialization-content { width: min(720px, calc(100% - 64px)); margin: 32px auto 60px; line-height: 1.65; animation: initialization-enter 180ms ease-out; }
 .initialization-steps { display: flex; gap: 24px; list-style: none; padding: 0; margin: 0 0 36px; color: var(--muted); font-size: 14px; }
 .initialization-steps li { display: flex; align-items: center; gap: 8px; }
@@ -40,7 +40,7 @@
 .initialization .settings-group { margin-top: 22px; }
 .initialization-notice { padding: 16px; margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; overflow-wrap: anywhere; }
 .initialization-notice h2 { font-size: 17px; margin: 0 0 8px; }
-.initialization-notice button { margin-top: 10px; margin-right: 10px; }
+.initialization-notice button { margin-top: 10px; margin-inline-end: 10px; }
 .initialization-notice pre, .initialization .job-log { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 .initialization-operation { padding: 24px; background: var(--chrome); border-radius: 12px; }
 .initialization-operation p { margin: 8px 0 16px; }
@@ -52,26 +52,19 @@
 @keyframes initialization-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 @media (max-width: 600px) { .initialization-brand { padding: 18px 20px; } .initialization-content { width: calc(100% - 40px); margin-top: 20px; } .initialization-steps { gap: 12px; flex-wrap: wrap; font-size: 13px; margin-bottom: 26px; } .initialization h1 { font-size: 25px; } .initialization .guest-system-picker { grid-template-columns: 1fr; } .initialization .storage-actions { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .initialization-content, .initialization-stage { animation: none; } .initialization button { transition: none; } }
-.mac-setup-eyebrow { margin-bottom: 8px !important; font-size: 13px !important; }
-.mac-setup-checklist { display: grid; gap: 0; list-style: none; padding: 0; margin: 24px 0; border-block: 1px solid var(--line); }
-.mac-setup-checklist li { display: flex; align-items: center; gap: 12px; padding: 14px 8px; color: var(--muted); transition: background 180ms, color 180ms; }
-.mac-setup-checklist li + li { border-top: 1px solid var(--line); }
-.mac-setup-checklist li[aria-current] { color: var(--strong); background: var(--chrome); }
-.mac-setup-marker { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 50%; font-size: 13px; flex: none; }
-.mac-setup-checklist li[data-complete="true"] .mac-setup-marker { color: var(--success); }
-.mac-setup-checklist small { margin-left: auto; font-size: 13px; }
-.mac-setup-task h2 { margin: 0 0 10px; font-size: 19px; font-weight: 550; }
-.mac-setup-task > button { margin-top: 14px; }
-.mac-setup-help { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 18px; }
-.mac-setup-help summary { cursor: pointer; }
-.mac-setup-help p, .mac-setup-retention { font-size: 14px; color: var(--muted); }
-.initialization-checks { padding-left: 22px; font-size: 14px; }
+.initialization-checks { padding-inline-start: 22px; font-size: 14px; }
+.initialization-actions:dir(rtl) .lucide-chevron-left { transform: scaleX(-1); }
 .initialization-checks li { margin: 10px 0; }
 .initialization-checks p { margin: 4px 0; }
-@media (prefers-reduced-motion: reduce) { .mac-setup-checklist li { transition: none; } }
 .guest-profile-options { margin: 1rem 0; }
 .guest-profile-options summary { cursor: pointer; }
 .guest-profile-options fieldset { border: 0; padding: 0; display: grid; gap: .75rem; }
 .guest-profile-options label { display: grid; gap: .25rem; }
 .guest-profile-size { display: flex; gap: .5rem; align-items: center; }
 .guest-profile-size input { min-width: 0; width: 45%; }
+.mirror-samples { width: 100%; border-collapse: collapse; margin: 8px 0 12px; }
+.mirror-samples td { padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
+.mirror-samples td:last-child { text-align: right; white-space: nowrap; }
+.mirror-error { color: var(--danger, #c0392b); }
+.mirror-option { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.mirror-option em { font-style: normal; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--accent-soft, rgba(0, 120, 212, 0.12)); }

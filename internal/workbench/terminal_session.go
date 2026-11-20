@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 var errTerminalInputFull = errors.New("terminal input queue is full")
@@ -19,20 +20,28 @@ type terminalPTY interface {
 }
 
 type terminalSession struct {
+	backgroundLogin       bool
 	mu                    sync.Mutex
 	id, title             string
+	creationOrder         int
 	sharedID              string
 	connectionID          string
 	conversationEnded     bool
 	workspace             string
 	kind, claudeAccountID string
 	loginGuestID          string
+	physicalProfile       string
+	loginRequested        time.Time
+	loginPrefix           int
 	loginLinkMu           sync.Mutex
 	loginLinkCleanup      sync.Once
 	claudeAccountSource   string
 	cmd                   *exec.Cmd
 	file                  terminalPTY
 	history               []byte
+	loginNotice           string
+	dismissed             bool
+	exitOK                bool
 	closed                bool
 	clients               map[chan []byte]bool
 	done                  chan struct{}
@@ -40,6 +49,34 @@ type terminalSession struct {
 	stopping              chan struct{}
 	closeOnce             sync.Once
 	cliStartupDone        chan struct{}
+}
+
+func (t *terminalSession) accountID() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.claudeAccountID
+}
+
+func (t *terminalSession) ended() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.closed {
+		return false
+	}
+	if t.done != nil {
+		select {
+		case <-t.done:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (t *terminalSession) replaceable() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.closed && !t.dismissed && t.kind == "claude-login"
 }
 
 func (t *terminalSession) ownsConversation() bool {
@@ -66,7 +103,7 @@ func (t *terminalSession) summary() map[string]any {
 	}
 	return map[string]any{"id": t.id, "title": t.title, "closed": closed, "workspace": t.workspace, "kind": t.kind,
 		"claude_account_id": t.claudeAccountID, "claude_account_source": t.claudeAccountSource, "cli_session_id": t.sharedID,
-		"cli_starting": t.cliStartupPendingLocked()}
+		"background_login": t.backgroundLogin, "login_notice": t.loginNotice, "cli_starting": t.cliStartupPendingLocked()}
 }
 
 func (t *terminalSession) cliStartupPendingLocked() bool {
@@ -107,6 +144,9 @@ func (t *terminalSession) stopPTY() {
 }
 
 func (t *terminalSession) close() {
+	t.mu.Lock()
+	t.dismissed = true
+	t.mu.Unlock()
 	t.stopPTY()
 	if t.done != nil {
 		<-t.done
@@ -117,6 +157,37 @@ func (t *terminalSession) close() {
 // PTY write, so disconnecting or locking the account can drain its handler
 // while a guest process is not reading input. A full queue rejects the viewer
 // immediately, so the handler never waits to read a WebSocket close either.
+// Keep only the length of a matching command prefix, never the input line.
+// This also identifies the origin on platforms whose native login browser
+// cannot invoke the guest's BROWSER launcher.
+func (t *terminalSession) noteLoginInputLocked(data string) {
+	const command = "/login"
+	if t.kind != "claude" {
+		return
+	}
+	for _, c := range []byte(data) {
+		switch c {
+		case '\r', '\n':
+			if t.loginPrefix == len(command) {
+				t.loginRequested = time.Now()
+			}
+			t.loginPrefix = 0
+		case 3, 21:
+			t.loginPrefix = 0
+		case 8, 127:
+			if t.loginPrefix > 0 && t.loginPrefix <= len(command) {
+				t.loginPrefix--
+			}
+		default:
+			if t.loginPrefix < len(command) && c == command[t.loginPrefix] {
+				t.loginPrefix++
+			} else {
+				t.loginPrefix = len(command) + 1
+			}
+		}
+	}
+}
+
 func (t *terminalSession) enqueueInput(ctx context.Context, input string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -128,9 +199,31 @@ func (t *terminalSession) enqueueInput(ctx context.Context, input string) error 
 	}
 	select {
 	case t.inputs <- input:
+		t.noteLoginInputLocked(input)
 		return nil
 	default:
 		return errTerminalInputFull
+	}
+}
+
+// terminalInputWait bounds how long a burst of client input, such as a
+// terminal answering many queries at once, may wait for the PTY writer.
+const terminalInputWait = 2 * time.Second
+
+// enqueueInputWait retries a full queue until the writer drains it, keeping
+// input order; it fails only when the PTY stays blocked or the request ends.
+func (t *terminalSession) enqueueInputWait(ctx context.Context, input string, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	for {
+		err := t.enqueueInput(ctx, input)
+		if !errors.Is(err, errTerminalInputFull) || !time.Now().Before(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
@@ -193,7 +286,7 @@ func (t *terminalSession) run() {
 	// An SSH process can remain alive after its output side closes. Once no
 	// output can be read, terminate and reap it before completing the session.
 	t.stopPTY()
-	_ = t.file.Wait()
+	waitErr := t.file.Wait()
 	<-writerDone
 	// Admission is sealed under mu before stopping the writer. Release queued
 	// input even when the closed terminal remains visible with its history.
@@ -201,6 +294,7 @@ func (t *terminalSession) run() {
 		<-t.inputs
 	}
 	t.mu.Lock()
+	t.exitOK = waitErr == nil
 	for channel := range t.clients {
 		close(channel)
 		delete(t.clients, channel)

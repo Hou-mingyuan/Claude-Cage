@@ -10,7 +10,7 @@ import (
 
 func TestDebianMirrorFailureFallbackAndPreference(t *testing.T) {
 	old := "https://mirrors.nju.edu.cn/debian\tpriority:1\nhttps://mirrors.ustc.edu.cn/debian\tpriority:2\nhttps://deb.debian.org/debian\tpriority:3\n"
-	for _, mode := range []string{"reachable", "bookworm", "tls-failure", "official-failure", "nju-failure", "official", "custom", "old", "reboot", "invalid"} {
+	for _, mode := range []string{"reachable", "bookworm", "tls-failure", "official-failure", "nju-failure", "official", "custom", "old", "reboot", "invalid", "nju", "ustc", "ustc-nju-failure", "host-ustc", "host-invalid"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			mirrors := filepath.Join(dir, "mirrors")
@@ -29,8 +29,14 @@ func TestDebianMirrorFailureFallbackAndPreference(t *testing.T) {
 			os.WriteFile(list, []byte(content), 0644)
 			os.WriteFile(filepath.Join(mirrors, "debian-security.list"), []byte("https://deb.debian.org/debian-security\n"), 0644)
 			preference := filepath.Join(dir, "preference")
-			if mode == "official" || mode == "invalid" {
+			switch mode {
+			case "official", "invalid", "nju", "ustc":
 				os.WriteFile(preference, []byte(mode+"\n"), 0644)
+			case "ustc-nju-failure":
+				os.WriteFile(preference, []byte("ustc\n"), 0644)
+			case "host-ustc":
+				// The host's choice replaces an older saved preference.
+				os.WriteFile(preference, []byte("official\n"), 0644)
 			}
 			for name, body := range map[string]string{
 				"sudo": "#!/bin/sh\nexec \"$@\"\n",
@@ -39,7 +45,7 @@ printf '%s\n' "$*" >> "$FIXTURE/probes"
 [ "$MODE" != tls-failure ] || exit 1
 case "$*" in
  *deb.debian.org*) [ "$MODE" != nju-failure ] && [ "$MODE" != official-failure ] || exit 1;;
- *mirrors.nju*) [ "$MODE" != nju-failure ] || exit 1;;
+ *mirrors.nju*) [ "$MODE" != nju-failure ] && [ "$MODE" != ustc-nju-failure ] || exit 1;;
 esac
 exit 0
 `,
@@ -59,13 +65,21 @@ exit 0
 				t.Fatal(err)
 			}
 			script = strings.ReplaceAll(script, "/etc/os-release", osRelease)
-			run := func() ([]byte, error) {
-				cmd := exec.Command("sh", "-c", script)
+			run := func(choice string) ([]byte, error) {
+				cmd := exec.Command("sh", "-c", choice+script)
 				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE="+dir, "MODE="+mode)
 				return cmd.CombinedOutput()
 			}
-			out, err := run()
-			if mode == "invalid" {
+			first := ""
+			switch mode {
+			case "host-ustc":
+				first = debianMirrorChoice("ustc")
+			case "host-invalid":
+				// Go never emits an unknown value; the guest script still rejects one.
+				first = "debian_mirror_choice=fastest\n"
+			}
+			out, err := run(first)
+			if mode == "invalid" || mode == "host-invalid" {
 				if err == nil {
 					t.Fatal("invalid preference accepted")
 				}
@@ -89,9 +103,30 @@ exit 0
 				if strings.Contains(got, "mirrors.nju") || !strings.Contains(got, "mirrors.ustc") {
 					t.Fatal(got)
 				}
-			default:
-				if !strings.Contains(got, "mirrors.nju") {
+			case "ustc", "host-ustc":
+				// The mirror measured fastest comes first, not a fixed order.
+				if got != "# Cage managed Debian mirrors\nhttps://mirrors.ustc.edu.cn/debian\tpriority:1\nhttps://mirrors.nju.edu.cn/debian\tpriority:2\nhttps://deb.debian.org/debian\tpriority:3\n" {
 					t.Fatal(got)
+				}
+			case "ustc-nju-failure":
+				if got != "# Cage managed Debian mirrors\nhttps://mirrors.ustc.edu.cn/debian\tpriority:1\nhttps://deb.debian.org/debian\tpriority:2\n" {
+					t.Fatal(got)
+				}
+			default:
+				// official-failure and nju: nju, ustc, then the official source.
+				if got != "# Cage managed Debian mirrors\n"+old {
+					t.Fatal(got)
+				}
+			}
+			if mode == "nju" || mode == "ustc" || mode == "host-ustc" {
+				if probes, _ := os.ReadFile(filepath.Join(dir, "probes")); strings.Contains(string(probes), "deb.debian.org") {
+					t.Fatal("domestic preference probed the official source first")
+				}
+			}
+			if mode == "host-ustc" {
+				// The host's measured choice is kept for later runs without it.
+				if saved, _ := os.ReadFile(preference); strings.TrimSpace(string(saved)) != "ustc" {
+					t.Fatalf("host choice not persisted: %q", saved)
 				}
 			}
 			if mode == "official" {
@@ -108,7 +143,7 @@ exit 0
 					t.Fatal("reachable official source still contacted domestic mirrors")
 				}
 			}
-			if out, err := run(); err != nil {
+			if out, err := run(""); err != nil {
 				t.Fatalf("repeat: %v %s", err, out)
 			}
 			after, _ := os.ReadFile(list)
@@ -116,5 +151,17 @@ exit 0
 				t.Fatal("preference changed on repeated setup")
 			}
 		})
+	}
+}
+
+// The host's choice reaches only the root shell that rewrites the sources.
+// It must not become an exported variable that later installers inherit.
+func TestDebianPrepareScriptKeepsChoiceOutOfEnvironment(t *testing.T) {
+	if DebianPrepareScriptFor("fastest") != DebianPrepareScript || strings.Contains(DebianPrepareScript, "debian_mirror_choice=") {
+		t.Fatal("unknown or empty preference reached the guest")
+	}
+	script := DebianPrepareScriptFor("ustc")
+	if !strings.Contains(script, "\ndebian_mirror_choice=ustc\n") || strings.Contains(script, "export debian_mirror_choice") || strings.Contains(script, DebianMirrorEnv+"=") {
+		t.Fatalf("choice not passed as a plain shell variable: %q", script)
 	}
 }

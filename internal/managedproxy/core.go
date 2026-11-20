@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,8 +27,9 @@ import (
 // Preserve causes for errors.Is/As without exposing private socket paths,
 // request URLs, credentials or response contents in displayed/logged errors.
 type coreError struct {
-	stage string
-	err   error
+	stage  string
+	err    error
+	status int // HTTP status from the core API, 0 when no response arrived
 }
 
 func (e *coreError) Error() string {
@@ -136,7 +138,7 @@ func API(ctx context.Context, profile, method, path string, body any, reply any)
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return &coreError{stage: fmt.Sprintf("api.http-%d", res.StatusCode)}
+		return &coreError{stage: fmt.Sprintf("api.http-%d", res.StatusCode), status: res.StatusCode}
 	}
 	if reply != nil {
 		if err := json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(reply); err != nil {
@@ -145,6 +147,32 @@ func API(ctx context.Context, profile, method, path string, body any, reply any)
 	}
 	return nil
 }
+
+// DelayError explains a failed /proxies/{id}/delay call. The core answers 404
+// for a node it has not loaded, 504 when the test URL timed out and 503 when the
+// node failed to connect or respond. Only fixed text and the API stage are
+// reported; node addresses and core output stay out of the message.
+func DelayError(err error) error {
+	var core *coreError
+	if !errors.As(err, &core) {
+		return fmt.Errorf("测速失败：%w", err)
+	}
+	switch {
+	case core.status == http.StatusNotFound:
+		return errors.New("节点未载入核心；请先应用节点以载入当前列表")
+	case core.status == http.StatusGatewayTimeout || core.status == http.StatusRequestTimeout:
+		return errors.New("测速超时：节点已载入核心，但 5 秒内没有收到测速地址的响应；请检查节点或上游代理")
+	case core.status == http.StatusServiceUnavailable:
+		return errors.New("测速失败：节点已载入核心，但连接节点或上游代理时出错；请检查节点或上游代理")
+	case core.status != 0:
+		return fmt.Errorf("测速失败：代理核心返回 HTTP %d", core.status)
+	case strings.HasPrefix(core.stage, "api.transport"):
+		return fmt.Errorf("代理核心未运行或无法连接；请先应用节点。%w", err)
+	default:
+		return fmt.Errorf("测速失败：%w", err)
+	}
+}
+
 func Running(ctx context.Context, profile string, s Store) bool {
 	return checkRunning(ctx, profile, s) == nil
 }
@@ -185,6 +213,15 @@ func checkRunning(ctx context.Context, profile string, s Store) error {
 func label(profile string) string {
 	h := sha256.Sum256([]byte(profile))
 	return fmt.Sprintf("local.claude-cage.managed-proxy.%x", h[:8])
+}
+// coreReadyTimeout matches Linux and Windows; a freshly signed core can take
+// several seconds on its first launch.
+const coreReadyTimeout = 15 * time.Second
+
+// launchdStartArgs registers the per-profile job and then starts that job.
+func launchdStartArgs(uid int, label, plist string) (bootstrap, kickstart []string) {
+	domain := "gui/" + strconv.Itoa(uid)
+	return []string{"bootstrap", domain, plist}, []string{"kickstart", domain + "/" + label}
 }
 func servicePath(profile string) string { return filepath.Join(Dir(profile), "managed-service.plist") }
 func Stop(profile string) error {
@@ -276,12 +313,19 @@ func Start(ctx context.Context, profile string, s Store) error {
 	if err = Write(servicePath(profile), []byte(plist)); err != nil {
 		return err
 	}
-	if exec.CommandContext(ctx, "launchctl", "bootstrap", "gui/"+strconv.Itoa(os.Getuid()), servicePath(profile)).Run() != nil {
+	bootstrap, kickstart := launchdStartArgs(os.Getuid(), label(profile), servicePath(profile))
+	if exec.CommandContext(ctx, "launchctl", bootstrap...).Run() != nil {
 		return errors.New("无法启动 Cage 自带代理核心")
+	}
+	// RunAtLoad is only a request: a GUI domain in on-demand-only mode keeps
+	// the job pending. Start it explicitly; without -k a running job is kept.
+	// The readiness wait below still decides whether the core is usable.
+	if err := exec.CommandContext(ctx, "launchctl", kickstart...).Run(); err != nil {
+		diagnostics.Log("warn", "proxy", "launchd kickstart failed; waiting for RunAtLoad")
 	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	deadline := time.NewTimer(10 * time.Second)
+	deadline := time.NewTimer(coreReadyTimeout)
 	defer deadline.Stop()
 	for {
 		select {

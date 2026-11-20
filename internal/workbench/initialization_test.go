@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
-	"github.com/sylvinus/agent-vm/internal/guestos"
 )
 
 func initializationRequest(s *Server, action string, trusted bool) *httptest.ResponseRecorder {
@@ -29,6 +28,49 @@ func initializationRequest(s *Server, action string, trusted bool) *httptest.Res
 	w := httptest.NewRecorder()
 	s.handler().ServeHTTP(w, r)
 	return w
+}
+
+func TestInitializationBeginAndInstallAfterFirstAccountCreation(t *testing.T) {
+	s := testServer(t)
+	account, err := loadLocalAccount(s.profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.account = account
+	t.Cleanup(account.lock)
+
+	actions := []string{"begin", "install"}
+	for _, action := range actions {
+		if w := initializationRequest(s, action, true); w.Code != http.StatusLocked {
+			t.Fatalf("%s before account creation: %d %s", action, w.Code, w.Body.String())
+		}
+	}
+	path := filepath.Join(s.profile, "initialization.json")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected no initialization record before account creation, stat error: %v", err)
+	}
+
+	w := request(s, http.MethodPost, "/api/account/create", s.origin, `{"username":"firstuser","password":"test-password","confirm_password":"test-password"}`, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create first account: %d %s", w.Code, w.Body.String())
+	}
+	for _, action := range actions {
+		if w := initializationRequest(s, action, true); w.Code != http.StatusOK {
+			t.Fatalf("%s after account creation: %d %s", action, w.Code, w.Body.String())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var record initializationRecord
+		if err := json.Unmarshal(data, &record); err != nil {
+			t.Fatal(err)
+		}
+		want := initializationRecord{Version: 1, Started: action == "install"}
+		if record != want {
+			t.Fatalf("%s wrote %+v, want %+v", action, record, want)
+		}
+	}
 }
 
 func TestInitializationPersistsBeforeDiskCreationAndDoesNotResetExisting(t *testing.T) {
@@ -72,15 +114,6 @@ func TestInitializationPersistsBeforeDiskCreationAndDoesNotResetExisting(t *test
 	if read().Required {
 		t.Fatal("existing Linux installation forced to reinstall")
 	}
-	s.windowsGuest = &guestos.WindowsProfile{}
-	if next, err := s.initializationState(); err != nil || next.Required {
-		t.Fatalf("existing Windows installation: %+v %v", next, err)
-	}
-	s.windowsGuest = nil
-	s.macosGuest = &guestos.MacOSProfile{}
-	if next, err := s.initializationState(); err != nil || next.Required {
-		t.Fatalf("existing Mac installation: %+v %v", next, err)
-	}
 }
 
 func TestInitializationCompletionRequiresReadyGuestAndCurrentNetworkEvidence(t *testing.T) {
@@ -94,8 +127,10 @@ func TestInitializationCompletionRequiresReadyGuestAndCurrentNetworkEvidence(t *
 	if w := initializationRequest(s, "complete", true); w.Code == 200 {
 		t.Fatal("unready guest accepted")
 	}
-	s.windowsGuest = &guestos.WindowsProfile{}
-	s.windowsState.Running = true
+	marker := filepath.Join(s.instanceDir(), "cage-running.json")
+	if err := writePrivate(marker, map[string]int{"pid": os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
 	s.ready = true
 	if w := initializationRequest(s, "complete", true); w.Code == 200 {
 		t.Fatal("missing network report accepted")
@@ -119,11 +154,17 @@ func TestInitializationCompletionRequiresReadyGuestAndCurrentNetworkEvidence(t *
 		t.Fatal("stale configuration accepted")
 	}
 	s.safety.Gate.Configuration = cfg.Fingerprint()
+	// A concurrent health read must not make the final button fail. It also
+	// must not bypass the readiness/report checks above once the lock is free.
+	s.op.Lock()
+	time.AfterFunc(50*time.Millisecond, s.op.Unlock)
 	if w := initializationRequest(s, "complete", true); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	s.ready = false
-	s.windowsState.Running = false
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
 	if view, err := s.initializationState(); err != nil || view.Required {
 		t.Fatalf("completed stopped environment lost initialization: %+v %v", view, err)
 	}

@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Ubuntu installs or migrates its workbench launcher in the service setup.
-if ! cage_is_ubuntu && [[ ! -x /usr/bin/chromium ]]; then
-  echo 'Missing chromium; run cage setup first.' >&2
+missing_tool() {
+  echo "Missing $1; this environment may have been created from an older base." >&2
+  case "$1" in
+    chromium|code-server) echo 'Run cage update-tools, then cage up to install the missing tool in this VM.' >&2 ;;
+  esac
+  echo 'To rebuild from the base, run cage setup --preinstall=default, then cage up --reset (files and logins on its disk are lost).' >&2
   exit 1
+}
+if [[ ! -x /usr/bin/chromium ]]; then
+  missing_tool chromium
 fi
 for app in code-server Xtigervnc openbox websockify; do
-  command -v "$app" >/dev/null || { echo "Missing $app; run cage setup first." >&2; exit 1; }
+  command -v "$app" >/dev/null || missing_tool "$app"
 done
 # English text keeps its requested fonts. For missing Han glyphs, prefer the
 # Simplified Chinese face of the installed Noto collection.
@@ -44,7 +50,7 @@ cat "$HOME/.config/claude-cage/browser-password" | sudo -u cage-browser sh -c 'u
 sudo systemctl stop cage-browser || true
 # Existing images may predate the explicit locale dependency. The scoped
 # maintenance channel can install it while business networking stays closed.
-if ! cage_is_ubuntu && ! dpkg-query -W -f='${Status}' chromium-l10n 2>/dev/null | grep -qx 'install ok installed'; then
+if ! dpkg-query -W -f='${Status}' chromium-l10n 2>/dev/null | grep -qx 'install ok installed'; then
   # APT can reuse an empty Packages file after an InRelease cache hit. Clear
   # empty package indexes under APT's lists lock so they are fetched again.
   sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get \

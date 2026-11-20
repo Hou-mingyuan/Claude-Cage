@@ -1,0 +1,191 @@
+﻿# Header, don't edit
+NLF v6
+# Start editing here
+# Language ID
+1139
+# Font and size - dash (-) means default
+-
+-
+# Codepage - dash (-) means ASCII code page
+-
+# RTL - anything else than RTL means LTR
+-
+# Tigrinya installer strings
+# ^Branding
+Nullsoft ስርዓት ምትካል %s
+# ^SetupCaption
+$(^Name) ምትካል
+# ^UninstallCaption
+$(^Name) ምእላይ
+# ^LicenseSubCaption
+: ስምምዕ ፍቓድ
+# ^ComponentsSubCaption
+: ኣማራጺታት ምትካል
+# ^DirSubCaption
+: ማህደር ምትካል
+# ^InstallingSubCaption
+: ይትከል ኣሎ
+# ^CompletedSubCaption
+: ተዛዚሙ
+# ^UnComponentsSubCaption
+: ኣማራጺታት ምእላይ
+# ^UnDirSubCaption
+: ማህደር ምእላይ
+# ^ConfirmSubCaption
+: ምርግጋጽ
+# ^UninstallingSubCaption
+: ይእለ ኣሎ
+# ^UnCompletedSubCaption
+: ተዛዚሙ
+# ^BackBtn
+< &ንድሕሪት
+# ^NextBtn
+&ቀጺሉ >
+# ^AgreeBtn
+&ይሰማማዕ እየ
+# ^AcceptBtn
+ውዕላት ስምምዕ ፍቓድ &እቕበል እየ
+# ^DontAcceptBtn
+ውዕላት ስምምዕ ፍቓድ &ኣይቕበልን እየ
+# ^InstallBtn
+&ምትካል
+# ^UninstallBtn
+&ምእላይ
+# ^CancelBtn
+ምስራዝ
+# ^CloseBtn
+&ምዕጻው
+# ^BrowseBtn
+&ምድላይ...
+# ^ShowDetailsBtn
+&ዝርዝር ምርኣይ
+# ^ClickNext
+ንምቕጻል ቀጺሉ ዝብል ጠውቑ።
+# ^ClickInstall
+ምትካል ንምጅማር ምትካል ዝብል ጠውቑ።
+# ^ClickUninstall
+ምእላይ ንምጅማር ምእላይ ዝብል ጠውቑ።
+# ^Name
+ስም
+# ^Completed
+ተዛዚሙ
+# ^LicenseText
+በጃኹም ቅድሚ $(^NameDA) ምትካልኩም ስምምዕ ፍቓድ ርኣዩ። ኩሉ ውዕላት ናይቲ ስምምዕ እንተተቐቢልኩም፡ ይሰማማዕ እየ ዝብል ጠውቑ።
+# ^LicenseTextCB
+በጃኹም ቅድሚ $(^NameDA) ምትካልኩም ስምምዕ ፍቓድ ርኣዩ። ኩሉ ውዕላት ናይቲ ስምምዕ እንተተቐቢልኩም፡ ኣብ ታሕቲ ዘሎ ሳጹን ምልክት ጠውቑ። $_CLICK
+# ^LicenseTextRB
+በጃኹም ቅድሚ $(^NameDA) ምትካልኩም ስምምዕ ፍቓድ ርኣዩ። ኩሉ ውዕላት ናይቲ ስምምዕ እንተተቐቢልኩም፡ ኣብ ታሕቲ ዘሎ ቀዳማይ ኣማራጺ ምረጹ። $_CLICK
+# ^UnLicenseText
+በጃኹም ቅድሚ $(^NameDA) ምእላይኩም ስምምዕ ፍቓድ ርኣዩ። ኩሉ ውዕላት ናይቲ ስምምዕ እንተተቐቢልኩም፡ ይሰማማዕ እየ ዝብል ጠውቑ።
+# ^UnLicenseTextCB
+በጃኹም ቅድሚ $(^NameDA) ምእላይኩም ስምምዕ ፍቓድ ርኣዩ። ኩሉ ውዕላት ናይቲ ስምምዕ እንተተቐቢልኩም፡ ኣብ ታሕቲ ዘሎ ሳጹን ምልክት ጠውቑ። $_CLICK
+# ^UnLicenseTextRB
+በጃኹም ቅድሚ $(^NameDA) ምእላይኩም ስምምዕ ፍቓድ ርኣዩ። ኩሉ ውዕላት ናይቲ ስምምዕ እንተተቐቢልኩም፡ ኣብ ታሕቲ ዘሎ ቀዳማይ ኣማራጺ ምረጹ። $_CLICK
+# ^Custom
+ብድሌት
+# ^ComponentsText
+ክትተክልዎም እትደልዩ ክፍልታት ምልክት ግበሩሎም፡ ክትተክልዎም ዘይትደልዩ ክፍልታት ድማ ምልክት ኣልዩሎም። $_CLICK
+# ^ComponentsSubText1
+ዓይነት ምትካል ምረጹ፦
+# ^ComponentsSubText2_NoInstTypes
+ዝትከሉ ክፍልታት ምረጹ፦
+# ^ComponentsSubText2
+ወይ ድማ፡ ክትተክልዎም እትደልዩ ኣማራጺ ክፍልታት ምረጹ፦
+# ^UnComponentsText
+ክትኣልይዎም እትደልዩ ክፍልታት ምልክት ግበሩሎም፡ ክትኣልይዎም ዘይትደልዩ ክፍልታት ድማ ምልክት ኣልዩሎም። $_CLICK
+# ^UnComponentsSubText1
+ዓይነት ምእላይ ምረጹ፦
+# ^UnComponentsSubText2_NoInstTypes
+ዝእለዩ ክፍልታት ምረጹ፦
+# ^UnComponentsSubText2
+ወይ ድማ፡ ክትኣልይዎም እትደልዩ ኣማራጺ ክፍልታት ምረጹ፦
+# ^DirText
+መደብ ምትካል $(^NameDA) ኣብዚ ዝስዕብ ማህደር ክተክሎ እዩ። ኣብ ካልእ ማህደር ንምትካል፡ ምድላይ ጠውቑ እሞ ካልእ ማህደር ምረጹ። $_CLICK
+# ^DirSubText
+መዕለቢ ማህደር
+# ^DirBrowseText
+$(^NameDA) ዝትከለሉ ማህደር ምረጹ፦
+# ^UnDirText
+መደብ ምትካል $(^NameDA) ካብዚ ዝስዕብ ማህደር ክኣልዮ እዩ። ካብ ካልእ ማህደር ንምእላይ፡ ምድላይ ጠውቑ እሞ ካልእ ማህደር ምረጹ። $_CLICK
+# ^UnDirSubText
+""
+# ^UnDirBrowseText
+$(^NameDA) ዝእለየሉ ማህደር ምረጹ፦
+# ^SpaceAvailable
+"ዘሎ ቦታ: "
+# ^SpaceRequired
+"ዘድሊ ቦታ: "
+# ^UninstallingText
+$(^NameDA) ካብዚ ዝስዕብ ማህደር ክእለ እዩ። $_CLICK
+# ^UninstallingSubText
+ካብዚ ይእለ ኣሎ፦
+# ^FileError
+ፋይል ንምጽሓፍ ኣብ ምኽፋት ጌጋ: \r\n\r\n$0\r\n\r\nምትካል ደው ንምባል ኣቋርጽ፣\r\nእንደገና ንምፍታን ደጊምካ ፈትን፣ ወይ\r\nነዚ ፋይል ንምሕላፍ ሸለል በል ጠውቑ።
+# ^FileError_NoIgnore
+ፋይል ንምጽሓፍ ኣብ ምኽፋት ጌጋ: \r\n\r\n$0\r\n\r\nእንደገና ንምፍታን ደጊምካ ፈትን፣ ወይ\r\nምትካል ደው ንምባል ምስራዝ ጠውቑ።
+# ^CantWrite
+"ክጽሓፍ ኣይከኣለን: "
+# ^CopyFailed
+ምቕዳሕ ኣይተዓወተን
+# ^CopyTo
+"ምቕዳሕ ናብ "
+# ^Registering
+"ምምዝጋብ: "
+# ^Unregistering
+"ምዝገባ ምስራዝ: "
+# ^SymbolNotFound
+"ምልክት ክርከብ ኣይከኣለን: "
+# ^CouldNotLoad
+"ክጽዓን ኣይከኣለን: "
+# ^CreateFolder
+"ማህደር ምፍጣር: "
+# ^CreateShortcut
+"ኣቋራጭ ምፍጣር: "
+# ^CreatedUninstaller
+"መእለዪ መደብ ተፈጢሩ: "
+# ^Delete
+"ፋይል ምድምሳስ: "
+# ^DeleteOnReboot
+"ኣብ ዳግማይ ምጅማር ምድምሳስ: "
+# ^ErrorCreatingShortcut
+"ኣቋራጭ ኣብ ምፍጣር ጌጋ: "
+# ^ErrorCreating
+"ኣብ ምፍጣር ጌጋ: "
+# ^ErrorDecompressing
+ዳታ ኣብ ምፍታሕ ጌጋ! መደብ ምትካል ተበላሽዩ ድዩ?
+# ^ErrorRegistering
+DLL ኣብ ምምዝጋብ ጌጋ
+# ^ExecShell
+"ExecShell: "
+# ^Exec
+"ምፍጻም: "
+# ^Extract
+"ምውጻእ: "
+# ^ErrorWriting
+"ምውጻእ: ናብ ፋይል ኣብ ምጽሓፍ ጌጋ "
+# ^InvalidOpcode
+መደብ ምትካል ተበላሽዩ: ዘይቅኑዕ opcode
+# ^NoOLE
+"OLE የለን ን: "
+# ^OutputFolder
+"ማህደር ውጽኢት: "
+# ^RemoveFolder
+"ማህደር ምድምሳስ: "
+# ^RenameOnReboot
+"ኣብ ዳግማይ ምጅማር ስም ምቕያር: "
+# ^Rename
+"ስም ምቕያር: "
+# ^Skipped
+"ተሓሊፉ: "
+# ^CopyDetails
+ዝርዝር ናብ ክሊፕቦርድ ምቕዳሕ
+# ^LogInstall
+መስርሕ ምትካል ምምዝጋብ
+# ^Byte
+B
+# ^Kilo
+K
+# ^Mega
+M
+# ^Giga
+G

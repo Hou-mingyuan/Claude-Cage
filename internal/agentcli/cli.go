@@ -143,7 +143,7 @@ func runAgent(args []string, stdin io.Reader, stdout io.Writer, clientOnly bool)
 		response, err := workbench.AgentRequest(ctx, path, workbench.AgentTarget{Scope: *scope, Connection: *connection}, "GET", "/api/agent/routes", nil, "", "")
 		return finish(response.Data, err)
 	case "help", "--help", "capabilities":
-		return finish(map[string]any{"platform": runtime.GOOS, "arch": runtime.GOARCH, "commands": []string{"capabilities", "doctor", "init", "service.start", "host.inspect", "call NAME", "request METHOD /api/PATH", "socket /api/PATH", "routes", "job ID", "diagnostics"}, "operations": workbench.AgentOperations(), "routes": "agent routes reads the actual registered routes from the chosen live listener", "exit_codes": map[string]int{"completed_or_accepted": 0, "operation_failed": 1, "invalid_input": 2, "user_action_required": 3, "wait_timeout": 4}, "guide": "https://claude-cage.com/docs/agent/", "scope": "local: owning workload; desktop: client configuration; selected: explicit desktop connection generation; client: lightweight client listener", "request": map[string]any{"methods": []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}, "path": "relative /api/ endpoint from the UI", "binary": "--input FILE --content-type application/octet-stream; --output ABSOLUTE_NEW_FILE", "native": "call native.submit --scope desktop; request GET /api/agent/native/ID --scope desktop; use the same native action and connection_id as the open window"}, "job_retention": "only the latest job; query promptly and never resubmit an unknown mutation automatically"}, nil)
+		return finish(map[string]any{"platform": runtime.GOOS, "arch": runtime.GOARCH, "commands": []string{"capabilities", "doctor", "init", "service.start", "host.inspect", "call NAME", "request METHOD /api/PATH", "socket /api/PATH", "routes", "job ID", "diagnostics"}, "operations": workbench.AgentOperations(), "routes": "agent routes reads the actual registered routes from the chosen live listener", "exit_codes": map[string]int{"completed_or_accepted": 0, "operation_failed": 1, "invalid_input": 2, "user_action_required": 3, "wait_timeout": 4}, "guide": "https://claude-cage.com/docs/agent/", "scope": "local: owning workload; desktop: client configuration; selected: explicit desktop connection generation; client: lightweight client listener", "request": map[string]any{"methods": []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}, "path": "relative /api/ endpoint from the UI", "binary": "--input FILE --content-type application/octet-stream; --output ABSOLUTE_NEW_FILE", "native": "call native.submit --scope desktop; request GET /api/agent/native/ID --scope desktop; use the same native action and connection_id as the open window"}, "job_retention": "the latest job and the job it replaced (superseded_by names the replacement; a running job replaced by a stop reads as canceled); query promptly and never resubmit an unknown mutation automatically"}, nil)
 	case "init":
 		if _, err := os.Stat(path); err == nil {
 			if _, err := cage.Load(path); err != nil {
@@ -258,6 +258,12 @@ func runAgent(args []string, stdin io.Reader, stdout io.Writer, clientOnly bool)
 		var data json.RawMessage
 		if command == "call" {
 			body := []byte("{}")
+			// Input is read only with --input. Data already waiting on stdin
+			// means the caller expected it to be read; do not run the
+			// operation as if no fields had been given.
+			if f, ok := stdin.(*os.File); ok && *input == "" && pendingInput(f) {
+				return bad("Standard input has data, but call reads input only with --input - or --input FILE. Repeat the call with --input -.")
+			}
 			if *input != "" {
 				reader := stdin
 				if *input != "-" {

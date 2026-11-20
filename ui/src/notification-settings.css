@@ -1,0 +1,119 @@
+.settings-page .notification-settings {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-page .notification-permission-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  margin-bottom: 28px;
+  border-radius: var(--s-radius);
+  border: 1px solid var(--line);
+  background: var(--chrome);
+}
+
+.settings-page .notification-permission-card[data-state="denied"] {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+
+.settings-page .notification-permission-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-page .notification-permission-copy svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.settings-page .notification-permission-card[data-state="denied"] .notification-permission-copy svg {
+  color: var(--danger);
+}
+
+.settings-page .notification-permission-card[data-state="authorized"] .notification-permission-copy svg,
+.settings-page .notification-permission-card[data-state="provisional"] .notification-permission-copy svg {
+  color: var(--success);
+}
+
+.settings-page .notification-permission-copy strong {
+  display: block;
+  font-size: var(--s-sm);
+  font-weight: 600;
+  color: var(--strong);
+}
+
+.settings-page .notification-permission-copy p {
+  margin: 2px 0 0;
+  font-size: var(--s-xs);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.settings-page .notification-permission-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.settings-page .notification-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.settings-page .notification-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.settings-page .notification-row-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-page .notification-row-copy strong {
+  display: block;
+  font-size: var(--s-md);
+  font-weight: 600;
+  color: var(--strong);
+}
+
+.settings-page .notification-row-copy small {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--s-xs);
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.settings-page .notification-row-control {
+  flex: none;
+  min-width: 152px;
+}
+
+.settings-page .notification-row-control .inline-select {
+  width: 100%;
+}
+
+.settings-page .notification-test-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-page .notification-test-row .footnote {
+  margin: 0;
+}

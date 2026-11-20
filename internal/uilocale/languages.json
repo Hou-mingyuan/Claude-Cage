@@ -1,0 +1,17 @@
+[
+  {"id":"zh-CN","name":"简体中文","windowsInstallerId":2052},
+  {"id":"zh-TW","name":"繁體中文","windowsInstallerId":1028},
+  {"id":"ru","name":"Русский","windowsInstallerId":1049},
+  {"id":"ar","name":"العربية","rtl":true,"windowsInstallerId":1025},
+  {"id":"fa","name":"فارسی","rtl":true,"windowsInstallerId":1065},
+  {"id":"ko","name":"한국어","windowsInstallerId":1042},
+  {"id":"es","name":"Español","windowsInstallerId":1034},
+  {"id":"my","name":"မြန်မာဘာသာ","windowsInstallerId":1109},
+  {"id":"be","name":"Беларуская","windowsInstallerId":1059},
+  {"id":"ps","name":"پښتو","rtl":true,"windowsInstallerId":1123},
+  {"id":"prs","name":"دری","rtl":true,"windowsInstallerId":1164},
+  {"id":"am","name":"አማርኛ","windowsInstallerId":1118},
+  {"id":"so","name":"Soomaali","windowsInstallerId":1143},
+  {"id":"ti","name":"ትግርኛ","windowsInstallerId":1139},
+  {"id":"fr","name":"Français","windowsInstallerId":1036}
+]
