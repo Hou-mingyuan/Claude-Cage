@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
@@ -75,6 +76,31 @@ func TestTransferMountMigrationRequiresRestartAtEveryEntry(t *testing.T) {
 		s := transferMountServer(t, state.running, state.mount)
 		if err := s.requireCurrentLinuxTransferMount(); err != nil {
 			t.Fatalf("compatible or stopped share was rejected: %v", err)
+		}
+	}
+}
+
+// A user folder with a space puts one in the transfer directory next to the
+// configuration. Lima cannot share it: the start says so before any setup.
+func TestStartRefusesTransferDirectoryLimaCannotShare(t *testing.T) {
+	for _, name := range []string{"Jae Young", "JaeYoung"} {
+		s := testServer(t)
+		transfer := filepath.Join(t.TempDir(), name, ".claude-cage-downloads")
+		if err := os.MkdirAll(transfer, 0700); err != nil {
+			t.Fatal(err)
+		}
+		transfer, _ = filepath.EvalSymlinks(transfer)
+		if err := writePrivate(filepath.Join(s.profile, "environment.json"), cage.EnvironmentRecord{Directory: transfer}); err != nil {
+			t.Fatal(err)
+		}
+		s.exe = filepath.Join(t.TempDir(), "must-not-start")
+		err := s.startEnvironment(false)
+		refused := err != nil && strings.Contains(err.Error(), "路径含有空格")
+		if refused != strings.Contains(name, " ") {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if refused && (!strings.Contains(err.Error(), transfer) || !strings.Contains(err.Error(), "用户目录含空格时环境无法启动")) {
+			t.Fatalf("no path or next step: %v", err)
 		}
 	}
 }

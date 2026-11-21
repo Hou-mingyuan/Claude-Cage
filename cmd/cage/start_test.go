@@ -19,7 +19,7 @@ func TestStartEnvironmentDispatch(t *testing.T) {
 			t.Run(command+"/reset="+strconv.FormatBool(reset), func(t *testing.T) {
 				args := []string{"run", "true"}
 				if reset {
-					args = append([]string{"--reset", "--cpus=1", "--memory", "2", "--disk=24", "--ssh-port", "55022"}, args...)
+					args = append([]string{"--reset"}, args...)
 				}
 				input := strings.NewReader("login input")
 				var stdout, stderr bytes.Buffer
@@ -66,7 +66,7 @@ func TestStartUsageBeforeOpeningProfile(t *testing.T) {
 			{"--help", "--unknown"}, {"-h", "unexpected"},
 			{"--rm"}, {"--scratch"}, {"--readonly"}, {"--tty"},
 			{"--unsafe-writable-git"}, {"--unsafe-disable-security-prompts"},
-			{"--cpus"}, {"--memory=0"}, {"--disk", "10G"}, {"--ssh-port=80"},
+			{"--cpus", "2"}, {"--memory=4"}, {"--ram", "4"}, {"--disk", "24"}, {"--ssh-port", "55022"},
 		} {
 			t.Run(command+"/"+strings.Join(args, " "), func(t *testing.T) {
 				profile := filepath.Join(t.TempDir(), "profile")

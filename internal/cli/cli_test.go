@@ -88,6 +88,8 @@ func TestHelp(t *testing.T) {
 	}
 	strip := func(s string) string {
 		s = strings.Replace(s, "agent-vm rm agent-vm-old-name-1a2b3c4d     ", "agent-vm rm old-name-1a2b3c4d              ", 1)
+		// --workdir is new.
+		s = strings.Replace(s, "etc.; --workdir DIR runs it\n                     from DIR, an absolute directory in the VM)\n", "etc.)\n", 1)
 		// code-opencode is new.
 		s = strings.Replace(s, "(or code-opencode, code-codex", "(or code-codex", 1)
 		for _, cut := range []string{

@@ -10,6 +10,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable instancetype)connectSavedRelay:(NSString *)relay lookup:(NSString *)lookup pin:(NSString *)pin
     assets:(NSString *)assets error:(NSError **)error NS_SWIFT_NAME(connectSaved(relay:lookup:pin:assets:));
 @property(nonatomic, readonly) NSURL *launchURL;
+- (void)suspend;
+- (BOOL)resume;
 - (void)close;
 @end
 NS_ASSUME_NONNULL_END

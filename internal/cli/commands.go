@@ -122,12 +122,18 @@ func (s *start) printResources() {
 // env's status (an agent installed only as an editor extension has none);
 // a path is env's to run, and to say why it cannot (126).
 func (s *start) lima(tty bool, args ...string) int {
+	return s.limaIn(paths.Guest(s.dir), tty, args...)
+}
+
+// limaIn is lima from workdir, a directory in the VM. The command does not
+// run when the VM cannot cd there.
+func (s *start) limaIn(workdir string, tty bool, args ...string) int {
 	b, err := s.backend()
 	if err != nil {
 		return 1
 	}
 	code, err := b.Shell(s.ctx, s.name, vm.ShellOpts{
-		Workdir: paths.Guest(s.dir),
+		Workdir: workdir,
 		Args: append([]string{"zsh", "-l", "-c",
 			`case "$1" in *=*|*/*) ;; *) command -v -- "$1" >/dev/null || { print -r -- "agent-vm: $1 is not installed in this VM." >&2; exit 127; } ;; esac; exec env -- "$@"`,
 			"agent-vm"}, args...),
@@ -168,19 +174,118 @@ func (e *app) agentCmd(ctx context.Context, agent string, opts VMOpts, args []st
 	return e.inVM(ctx, opts, func(s *start) int { return s.lima(a.tty || tty, cmd...) })
 }
 
-// `run [--tty] <command> [args]`: --tty gives the command a terminal, which
-// full-screen programs need to draw.
+// `run [--tty] [--workdir DIR] <command> [args]`: --tty gives the command a
+// terminal, which full-screen programs need to draw. --workdir runs it from
+// DIR, an absolute directory in the VM, instead of the project.
 func (e *app) runCmd(ctx context.Context, opts VMOpts, args []string) int {
+	workdir, args, err := TakeWorkdir(args)
+	if err != nil {
+		fmt.Fprintf(e.io.Stderr, "Error: %v\n", err)
+		return exitUsage
+	}
 	rest, tty, err := opts.split(args)
 	if err != nil {
 		fmt.Fprintf(e.io.Stderr, "Error: %v\n", err)
 		return exitUsage
 	}
 	if len(rest) == 0 {
-		fmt.Fprintln(e.io.Stderr, "Usage: agent-vm run [--tty] <command> [args]")
+		fmt.Fprintln(e.io.Stderr, "Usage: agent-vm run [--tty] [--workdir DIR] <command> [args]")
 		return exitUsage
 	}
-	return e.inVM(ctx, opts, func(s *start) int { return s.lima(tty, rest...) })
+	return e.inVM(ctx, opts, func(s *start) int {
+		if workdir != "" {
+			return s.limaIn(workdir, tty, rest...)
+		}
+		return s.lima(tty, rest...)
+	})
+}
+
+// SplitRun reads a run's words as runCmd does: its --workdir, whether it
+// asked for a terminal, whether it gave VM options, and the command.
+func SplitRun(args []string) (workdir string, tty, vmOptions bool, command []string, err error) {
+	workdir, args, err = TakeWorkdir(args)
+	if err != nil {
+		return "", false, false, nil, err
+	}
+	opts := newVMOpts()
+	command, tty, err = opts.split(args)
+	return workdir, tty, opts != newVMOpts(), command, err
+}
+
+// TakeWorkdir removes `--workdir DIR` (or --workdir=DIR) from the options of
+// a run, the words before its command, and returns DIR: "" when not given.
+// DIR is a directory in the VM, so it must be an absolute POSIX path.
+func TakeWorkdir(args []string) (workdir string, rest []string, err error) {
+	rest = make([]string, 0, len(args))
+	given := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		var probe VMOpts
+		if n, err := probe.take(args[i:]); err != nil {
+			return "", nil, err
+		} else if n > 0 {
+			rest = append(rest, args[i:i+n]...)
+			i += n - 1
+			continue
+		}
+		value, ok := "", false
+		switch {
+		case a == "--tty":
+			rest = append(rest, a)
+			continue
+		case a == "--workdir":
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("--workdir needs a directory in the VM")
+			}
+			value, ok = args[i+1], true
+			i++
+		case strings.HasPrefix(a, "--workdir="):
+			value, ok = strings.TrimPrefix(a, "--workdir="), true
+		}
+		if !ok {
+			// "--" or the command: everything from here is the command's.
+			return workdir, append(rest, args[i:]...), nil
+		}
+		if given {
+			return "", nil, fmt.Errorf("--workdir given more than once")
+		}
+		if !strings.HasPrefix(value, "/") || strings.ContainsFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+			return "", nil, fmt.Errorf("--workdir must be an absolute directory in the VM (got: '%s')", value)
+		}
+		workdir, given = value, true
+	}
+	return workdir, rest, nil
+}
+
+// TakeRunFlag removes a boolean flag, such as a caller's own --here, from the
+// options of a run (the words before its command) and reports whether it was
+// given. Words from the command on are left alone.
+func TakeRunFlag(args []string, flag string) (given bool, rest []string, err error) {
+	rest = make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		var probe VMOpts
+		if n, err := probe.take(args[i:]); err != nil {
+			return false, nil, err
+		} else if n > 0 {
+			rest = append(rest, args[i:i+n]...)
+			i += n - 1
+			continue
+		}
+		switch {
+		case a == flag:
+			given = true
+		case a == "--tty" || strings.HasPrefix(a, "--workdir="):
+			rest = append(rest, a)
+		case a == "--workdir" && i+1 < len(args):
+			rest = append(rest, a, args[i+1])
+			i++
+		default:
+			// "--" or the command: everything from here is the command's.
+			return given, append(rest, args[i:]...), nil
+		}
+	}
+	return given, rest, nil
 }
 
 // `shell [-c "command"]`: a login zsh in the VM, ~/.zshenv loaded. A word

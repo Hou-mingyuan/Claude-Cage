@@ -3,9 +3,11 @@ package workbench
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 	"github.com/sylvinus/agent-vm/internal/usererror"
@@ -15,6 +17,8 @@ var physicalProxyInterface = managedproxy.PhysicalInterface
 
 type proxyInterfaceObservation struct {
 	name, configuration, jobID string
+	bound                      string
+	bindingErr                 error
 	err                        error
 }
 
@@ -25,12 +29,27 @@ func (s *Server) observeProxyInterface(ctx context.Context) proxyInterfaceObserv
 	if job.Running {
 		return proxyInterfaceObservation{}
 	}
-	cfg, err := loadConfig(s.configPath)
-	if err != nil || cfg.RequireManagedProxy(s.profile) != nil {
+	// While a local VM is stopped no guest traffic uses the proxy, and the
+	// start path checks and rebinds the interface itself; skip reading the host
+	// route (three processes per tick on macOS). A container's state query
+	// would itself run engine commands, so containers keep observing.
+	if !containerenv.Configured(s.profile) && !s.vmRunning() {
 		return proxyInterfaceObservation{}
 	}
-	name, err := physicalProxyInterface(ctx)
-	return proxyInterfaceObservation{name: name, configuration: cfg.Fingerprint(), jobID: job.ID, err: err}
+	cfg, err := loadConfig(s.configPath)
+	if err != nil {
+		return proxyInterfaceObservation{}
+	}
+	observed := proxyInterfaceObservation{configuration: cfg.Fingerprint(), jobID: job.ID}
+	observed.bound, observed.bindingErr = managedproxy.BoundInterface(filepath.Join(managedproxy.Dir(s.profile), "config.yaml"))
+	if errors.Is(observed.bindingErr, managedproxy.ErrLocalProxyNode) {
+		return observed
+	}
+	if s.proxyStore.Applied(s.profile, cfg.ProxyURL, cfg.ProxyRevision) != nil {
+		return proxyInterfaceObservation{}
+	}
+	observed.name, observed.err = physicalProxyInterface(ctx)
+	return observed
 }
 
 // The lifecycle lock covers effects such as revocation and recovery admission.
@@ -41,7 +60,16 @@ func (s *Server) applyProxyInterfaceObservation(observed proxyInterfaceObservati
 		return
 	}
 	cfg, err := loadConfig(s.configPath)
-	if err != nil || cfg.Fingerprint() != observed.configuration || cfg.RequireManagedProxy(s.profile) != nil {
+	if err != nil || cfg.Fingerprint() != observed.configuration {
+		return
+	}
+	if errors.Is(observed.bindingErr, managedproxy.ErrLocalProxyNode) {
+		if err := s.retireLocalProxyCore(); err != nil {
+			diagnostics.Log("error", "proxy", "停止旧代理核心失败："+err.Error())
+		}
+		return
+	}
+	if s.proxyStore.Applied(s.profile, cfg.ProxyURL, cfg.ProxyRevision) != nil {
 		return
 	}
 	if observed.err != nil {
@@ -57,8 +85,7 @@ func (s *Server) applyProxyInterfaceObservation(observed proxyInterfaceObservati
 	lost := s.proxyNetworkLost
 	retry := s.proxyNetworkRetry
 	s.mu.Unlock()
-	bound, err := managedproxy.BoundInterface(filepath.Join(managedproxy.Dir(s.profile), "config.yaml"))
-	if err != nil || (bound == observed.name && !lost) {
+	if observed.bindingErr != nil && !(lost && os.IsNotExist(observed.bindingErr)) || (observed.bound == observed.name && !lost) {
 		return
 	}
 	if lost && time.Now().Before(retry) {

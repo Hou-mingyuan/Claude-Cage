@@ -2,12 +2,14 @@ import React, { useEffect, useState } from "react";
 import { api } from "./api";
 import { SafetyMessage } from "./safety-message";
 import { useTranslation } from "./interface-language.mjs";
+import { useWindowVisibility } from "./window-visibility";
 
 const gib = (bytes) => `${(bytes / 1073741824).toFixed(1)} GiB`;
 const allocationFrom = (data) => ({ automatic: data.automatic, memory_gib: data.memory_gib, cpus: data.cpus });
 
 export function ResourceSettings({ status, onConfirm, onDirtyChange }) {
   const tr = useTranslation();
+  const windowVisible = useWindowVisibility();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [readError, setReadError] = useState("");
@@ -32,6 +34,7 @@ export function ResourceSettings({ status, onConfirm, onDirtyChange }) {
     finally { setStarting(false); }
   };
   useEffect(() => {
+    if (!windowVisible) return;
     let live = true;
     let timer;
     const refresh = async () => {
@@ -43,7 +46,7 @@ export function ResourceSettings({ status, onConfirm, onDirtyChange }) {
     };
     refresh();
     return () => { live = false; clearTimeout(timer); };
-  }, [status.vm_running, status.job?.running]);
+  }, [status.vm_running, status.job?.running, windowVisible]);
   const apply = async () => {
     if (!(await onConfirm({
       title: "重启并应用已保存的资源配置？",

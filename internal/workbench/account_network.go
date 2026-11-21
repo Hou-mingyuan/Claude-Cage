@@ -66,6 +66,9 @@ func (s *Server) ensureAccountNetwork(ctx context.Context, id, node string) erro
 	if !validClaudeID(id) || !validClaudeID(node) || !s.accountDesktopsSupported() {
 		return errUnsupportedAccountNetwork
 	}
+	if err := s.validateAccountNode(node); err != nil {
+		return err
+	}
 	m := &s.accountNetworks
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -222,23 +225,31 @@ func (s *Server) setLoginDraftNode(id, node string) error {
 	if id == "" || list.PendingLogin != id {
 		return errors.New("新增账号授权已结束，请刷新")
 	}
+	if node != "" {
+		if err := s.validateAccountNode(node); err != nil {
+			return err
+		}
+	}
 	if node == list.PendingProxyNode {
 		return nil
 	}
 	if s.claudeLoginActive(id) {
 		return errors.New("已有授权正在进行，请先完成或取消")
 	}
-	if node != "" {
-		store, err := managedproxy.Load(s.profile)
-		if err != nil {
-			return err
-		}
-		if _, ok := store.Find(node); !validClaudeID(node) || !ok {
-			return errors.New("代理节点已移除，请刷新")
-		}
-	}
 	list.PendingProxyNode = node
 	return s.saveClaudeAccounts(list)
+}
+
+func (s *Server) validateAccountNode(node string) error {
+	store, err := managedproxy.Load(s.profile)
+	if err != nil {
+		return err
+	}
+	if !validClaudeID(node) {
+		return errors.New("代理节点无效，请重新选择")
+	}
+	_, err = store.NodeEndpoint(node)
+	return err
 }
 
 // The caller holds the operation and account locks, also used by terminal admission.
@@ -249,12 +260,8 @@ func (s *Server) setAccountNode(list *claudeAccountList, in claudeAccountInput) 
 	}
 	node := *in.ProxyNodeID
 	if node != "" {
-		store, err := managedproxy.Load(s.profile)
-		if err != nil {
+		if err := s.validateAccountNode(node); err != nil {
 			return err
-		}
-		if _, ok := store.Find(node); !ok || !validClaudeID(node) {
-			return errors.New("代理节点已移除，请刷新账号列表")
 		}
 	}
 	if node == a.ProxyNodeID && !a.DesktopDedicatedNetwork {

@@ -67,6 +67,8 @@ cage_engine="$HOME/.claude-cage/container-engine/tools/docker"
 
 先从同一份源码构建 Linux Cage 后端：`make cage GOOS=linux GOARCH=amd64 CGO_ENABLED=0`。构建会生成工作台资产及 `_output/bin/cage`；不运行发布或版本修改流程。
 
+Linux ARM64（aarch64）服务器可在本机原生构建：后端改用 `GOARCH=arm64`，并自备 rootless Docker 与 ARM64 的 Mihomo，`build-guest.sh` 接受 `aarch64`，基础镜像为同一固定 digest 的多平台清单。项目 CI 与桌面端一键部署只覆盖 amd64；ARM64 构建由社区实测（[#449](https://github.com/Lee-xeo/Claude-Cage/issues/449)），未纳入官方验证，产物不得与 amd64 的发行文件混用。
+
 通过 `Dockerfile.guest` 构建基础层，再创建独立的镜像构建容器。构建容器不挂载项目、个人主目录、代理配置或账户；安装下载使用单独的构建网络。默认 Debian 镜像已经固定 digest，APT 继续验证发行版签名。若部署网络需要镜像站，只调整构建阶段的 Debian 软件源，保留签名验证；基础层和完整镜像提交前均恢复 `deb.debian.org` 官方源，以符合运行环境的维护下载来源限制。
 
 基础层在批量安装前使用共同的 `internal/cage/apt-bootstrap.sh` 检查 APT；Debian 13 低于 3.0.4 时先通过官方安全源升级，升级下载禁用重试。`build-guest.sh` 将该脚本与 Dockerfile 复制到本次构建的临时上下文，部署工具包包含同一份脚本。升级失败会保留构建证据并停止后续安装。

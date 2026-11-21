@@ -148,9 +148,11 @@ func API(ctx context.Context, profile, method, path string, body any, reply any)
 	return nil
 }
 
-// DelayError explains a failed /proxies/{id}/delay call. The core answers 404
-// for a node it has not loaded, 504 when the test URL timed out and 503 when the
-// node failed to connect or respond. Only fixed text and the API stage are
+// DelayError explains a failed /proxies/{id}/delay call. Checked against the
+// bundled mihomo v1.19.33 hub/route: 404 when the node is not loaded
+// (findProxyByName), 504 when the test timed out, 503 when the node failed to
+// connect or respond, 400 for an invalid query. 408 is not sent by that version
+// and is treated as a timeout only for forward compatibility. Only fixed text and the API stage are
 // reported; node addresses and core output stay out of the message.
 func DelayError(err error) error {
 	var core *coreError
@@ -178,6 +180,9 @@ func Running(ctx context.Context, profile string, s Store) bool {
 }
 
 func checkRunning(ctx context.Context, profile string, s Store) error {
+	if _, err := s.Route(); err != nil {
+		return err
+	}
 	var cfg struct {
 		Port         int    `json:"mixed-port"`
 		Interface    string `json:"interface-name"`
@@ -214,6 +219,7 @@ func label(profile string) string {
 	h := sha256.Sum256([]byte(profile))
 	return fmt.Sprintf("local.claude-cage.managed-proxy.%x", h[:8])
 }
+
 // coreReadyTimeout matches Linux and Windows; a freshly signed core can take
 // several seconds on its first launch.
 const coreReadyTimeout = 15 * time.Second
@@ -247,6 +253,9 @@ func Stop(profile string) error {
 	return nil
 }
 func Start(ctx context.Context, profile string, s Store) error {
+	if _, err := s.Route(); err != nil {
+		return err
+	}
 	if runtime.GOOS == "windows" {
 		return startWindowsCore(ctx, profile, s)
 	}

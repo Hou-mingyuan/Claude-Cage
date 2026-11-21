@@ -39,31 +39,18 @@ func TestCLIChannelProtocol(t *testing.T) {
 	}
 }
 
-// The bundle reindents the helper to fit the command budget. Its syntax tree,
-// including every string constant, must match the source exactly.
-func TestCLIChannelBundlePreservesProgram(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 unavailable")
-	}
-	dir := t.TempDir()
-	bundle := filepath.Join(dir, "bundle.py")
-	if err := os.WriteFile(bundle, []byte(cliChannelBundle(cliChannelHelper)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	compare := "import ast,sys\nsource,bundle=(ast.dump(ast.parse(open(p,encoding='utf-8').read())) for p in sys.argv[1:3])\nsys.exit(source!=bundle)\n"
-	if output, err := exec.Command(python, "-I", "-c", compare, "cli_channel.py", bundle).CombinedOutput(); err != nil {
-		t.Fatalf("bundled helper differs from cli_channel.py: %v\n%s", err, output)
-	}
-}
-
 func TestCLIChannelCommandFitsWindows(t *testing.T) {
 	// Leave room in CreateProcessW's 32767 UTF-16 limit for SSH paths and the
 	// login-shell quoting around this command.
-	command := cliChannelCommand("launch", `{"id":"`+uuid.NewString()+`","prefix":["claude"]}`)
-	t.Logf("embedded command: %d UTF-16 units", len(utf16.Encode([]rune(command))))
-	if size := len(utf16.Encode([]rune(command))); size > 16000 {
-		t.Fatalf("channel command uses %d UTF-16 units", size)
+	// The helper itself travels on standard input, so neither command line
+	// grows with it.
+	for _, command := range []string{cliChannelCommand("launch", `{"id":"`+uuid.NewString()+`","prefix":["claude"]}`), cliChannelInstallCommand()} {
+		if size := len(utf16.Encode([]rune(command))); size > 2000 {
+			t.Fatalf("channel command uses %d UTF-16 units", size)
+		}
+	}
+	if strings.Contains(cliChannelCommand("discover", "-"), "decompress") {
+		t.Fatal("helper source must not travel on the command line")
 	}
 }
 
@@ -254,6 +241,161 @@ func TestDiscoveryRunningStateUpdatesCatalogAndClearsMissingHistory(t *testing.T
 		if err != nil || len(list) != 1 || list[0].Running != phase.running || list[0].ClaudeDesktop != (phase.running && phase.desktop) {
 			t.Fatalf("phase %+v: summaries = %+v, error = %v", phase, list, err)
 		}
+	}
+}
+
+// Session lists reuse a discovery for a few seconds; a write request, a
+// finished terminal or the reuse limit makes the next list observe the guest.
+func TestCachedDiscoveryReuseIsBoundedAndInvalidatedByWrites(t *testing.T) {
+	s, id, project := metadataFixture(t)
+	home, _ := filepath.EvalSymlinks(t.TempDir())
+	mobileTestSSH(t, s, home, []string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/local/bin"})
+	record, err := s.mobileCLI.record(s.profile, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.mobileCLI.summaries(s.profile, map[string]bool{project: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	observation := filepath.Join(home, "observation.json")
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	if err := os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(home, "calls")
+	code := fmt.Sprintf("import json,sys\njson.load(sys.stdin)\nopen(%q,'a').write('.')\nprint(open(%q).read())\n", calls, observation)
+	if err := os.WriteFile(helper, []byte(code), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.ready = true
+	observe := func(running bool) {
+		t.Helper()
+		found := []terminalConversation{{CLIID: record.CLIID, Workspace: guestPath(project), Config: filepath.Join(home, ".claude"), Running: running}}
+		if err := writePrivate(observation, found); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(cached bool) bool {
+		t.Helper()
+		discover := s.discoverTerminalConversations
+		if cached {
+			discover = s.discoverTerminalConversationsCached
+		}
+		if err := discover(context.Background(), []string{project}); err != nil {
+			t.Fatal(err)
+		}
+		summaries, err := s.mobileCLI.summaries(s.profile, map[string]bool{project: true}, false)
+		if err != nil || len(summaries) != 1 {
+			t.Fatalf("summaries = %+v, error = %v", summaries, err)
+		}
+		return summaries[0].Running
+	}
+	guestCalls := func() int { data, _ := os.ReadFile(calls); return len(data) }
+	observe(true)
+	if !list(true) || guestCalls() != 1 {
+		t.Fatal("first list did not observe the guest")
+	}
+	observe(false)
+	if !list(true) || guestCalls() != 1 {
+		t.Fatal("a list within the reuse window ran discovery again")
+	}
+	if list(false) || guestCalls() != 2 {
+		t.Fatal("an uncached discovery reused an earlier result")
+	}
+	observe(true)
+	s.invalidateConversationDiscovery() // as any POST, PUT or DELETE request does
+	if !list(true) || guestCalls() != 3 {
+		t.Fatal("a write request did not invalidate the reused discovery")
+	}
+	observe(false)
+	s.terminals.exits.Add(1)
+	if list(true) || guestCalls() != 4 {
+		t.Fatal("a finished terminal did not invalidate the reused discovery")
+	}
+	observe(true)
+	s.conversationMu.Lock()
+	s.conversationDiscovered.at = time.Now().Add(-conversationDiscoveryReuse)
+	s.conversationMu.Unlock()
+	if !list(true) || guestCalls() != 5 {
+		t.Fatal("a discovery was reused past its limit")
+	}
+	// Writes through the HTTP handler invalidate as well.
+	before := s.conversationGeneration.Load()
+	request(s, "POST", "/api/cli/sessions/"+id+"/metadata", s.origin, `{}`, true)
+	if s.conversationGeneration.Load() == before {
+		t.Fatal("a write request did not advance the discovery generation")
+	}
+}
+
+// A view whose guest inputs are unchanged reuses the last full view instead
+// of transferring and parsing the transcript again; a new token replaces it.
+func TestTerminalViewReusesUnchangedGuestView(t *testing.T) {
+	s, id, project := metadataFixture(t)
+	home, _ := filepath.EvalSymlinks(t.TempDir())
+	mobileTestSSH(t, s, home, []string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/local/bin"})
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	if err := os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	observation, requests := filepath.Join(home, "view.json"), filepath.Join(home, "requests")
+	code := fmt.Sprintf(`import json,sys
+request=json.load(sys.stdin)
+open(%q,"a").write(json.dumps(request)+"\n")
+view=json.load(open(%q))
+if request.get("known")==view["token"]:
+    view={"unchanged":True,"token":view["token"],"running":view["running"]}
+print(json.dumps(view))
+`, requests, observation)
+	if err := os.WriteFile(helper, []byte(code), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.ready = true
+	record, err := s.mobileCLI.record(s.profile, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(token, title string) {
+		t.Helper()
+		view := terminalConversation{CLIID: record.CLIID, Workspace: guestPath(project), Config: record.GuestConfig, Connection: record.Connection, Title: title, HasHistory: true, Token: token,
+			Turns: []mobileTurn{{ID: "turn", Prompt: "hello", Text: title, Status: "completed"}}}
+		if err := writePrivate(observation, view); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() mobileSession {
+		t.Helper()
+		view, err := s.terminalConversationView(context.Background(), id)
+		if err != nil {
+			data, _ := os.ReadFile(requests)
+			logs, _ := os.ReadFile(filepath.Join(s.profile, "logs", "events.jsonl"))
+			t.Fatalf("%v; requests: %s; logs: %s", err, data, logs)
+		}
+		return view
+	}
+	known := func() []string {
+		data, _ := os.ReadFile(requests)
+		var tokens []string
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			var request map[string]any
+			_ = json.Unmarshal([]byte(line), &request)
+			value, _ := request["known"].(string)
+			tokens = append(tokens, value)
+		}
+		return tokens
+	}
+	write("token-1", "first")
+	if view := read(); view.Title != "first" || len(view.Turns) != 1 || view.Turns[0].Text != "first" {
+		t.Fatalf("first view: %+v", view)
+	}
+	if view := read(); view.Title != "first" || len(view.Turns) != 1 || view.Turns[0].Text != "first" {
+		t.Fatalf("reused view changed: %+v", view)
+	}
+	write("token-2", "second")
+	if view := read(); view.Title != "second" || view.Turns[0].Text != "second" {
+		t.Fatalf("changed guest inputs were not read: %+v", view)
+	}
+	if got := known(); len(got) != 3 || got[0] != "" || got[1] != "token-1" || got[2] != "token-1" {
+		t.Fatalf("known tokens sent: %q", got)
 	}
 }
 
@@ -1008,5 +1150,31 @@ func runSharedConversationBrowser(t *testing.T, s *Server, project string) {
 			terminal.mu.Unlock()
 		}
 		t.Fatalf("shared browser: %v\n%s", err, output)
+	}
+}
+
+func TestCLIChannelInstallsHelperOverStandardInput(t *testing.T) {
+	s, _, _ := metadataFixture(t)
+	home := t.TempDir()
+	mobileTestSSH(t, s, home, []string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/local/bin"})
+	epoch, ok := s.account.access()
+	if !ok {
+		t.Fatal("missing unlock epoch")
+	}
+	ctx := context.WithValue(context.Background(), accountEpochKey{}, epoch)
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
+	for range 2 {
+		// A fresh guest, then one whose helper was removed, both recover.
+		var found []terminalConversation
+		if err := s.runCLIChannel(ctx, "discover", map[string]any{"accounts": []string{"default"}, "workspaces": map[string]string{}}, &found); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(helper)
+		if err != nil || !strings.Contains(string(data), "def prepare_account_switch(") {
+			t.Fatalf("helper not installed: %v", err)
+		}
+		if err = os.Remove(helper); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

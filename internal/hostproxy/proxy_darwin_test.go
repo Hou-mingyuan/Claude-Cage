@@ -38,10 +38,12 @@ func TestMacPACResolutionUsesNativeCodeWithoutChangingSystemSettings(t *testing.
 	sourceC += `
 #include <stdio.h>
 int main(int argc, char **argv) {
-    CFStringRef pacText = CFStringCreateWithCString(NULL, argv[1], kCFStringEncodingUTF8);
-    CFURLRef pacURL = CFURLCreateWithString(NULL, pacText, NULL);
-    const void *keys[] = { kCFProxyTypeKey, kCFProxyAutoConfigurationURLKey };
-    const void *values[] = { kCFProxyTypeAutoConfigurationURL, pacURL };
+    if (argc < 3) return 3;
+    int inlineJS = strcmp(argv[1], "inline") == 0;
+    CFStringRef input = CFStringCreateWithCString(NULL, argv[2], kCFStringEncodingUTF8);
+    CFTypeRef pacValue = inlineJS ? (CFTypeRef)input : (CFTypeRef)CFURLCreateWithString(NULL, input, NULL);
+    const void *keys[] = { kCFProxyTypeKey, inlineJS ? kCFProxyAutoConfigurationJavaScriptKey : kCFProxyAutoConfigurationURLKey };
+    const void *values[] = { inlineJS ? kCFProxyTypeAutoConfigurationJavaScript : kCFProxyTypeAutoConfigurationURL, pacValue };
     CFDictionaryRef proxy = CFDictionaryCreate(NULL, keys, values, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     const void *items[] = {proxy};
     CFArrayRef proxies = CFArrayCreate(NULL, items, 1, &kCFTypeArrayCallBacks);
@@ -50,7 +52,9 @@ int main(int argc, char **argv) {
     if (result.failed) return 2;
     puts(result.url ? result.url : "DIRECT");
     free(result.url);
-    CFRelease(target); CFRelease(proxies); CFRelease(proxy); CFRelease(pacURL); CFRelease(pacText);
+    CFRelease(target); CFRelease(proxies); CFRelease(proxy);
+    if (!inlineJS) CFRelease(pacValue);
+    CFRelease(input);
     return 0;
 }`
 	program := filepath.Join(t.TempDir(), "pac-check")
@@ -59,31 +63,37 @@ int main(int argc, char **argv) {
 	if output, err := compile.CombinedOutput(); err != nil {
 		t.Fatalf("compile native PAC harness: %v\n%s", err, output)
 	}
-	for _, test := range []struct {
-		name, script, want string
-		failure            bool
-	}{
-		{"http", `function FindProxyForURL(url,host){return "PROXY 127.0.0.1:7896";}`, "http://127.0.0.1:7896", false},
-		{"direct", `function FindProxyForURL(url,host){return "DIRECT";}`, "DIRECT", false},
-		{"socks", `function FindProxyForURL(url,host){return "SOCKS 127.0.0.1:7896";}`, "socks5://127.0.0.1:7896", false},
-		{"broken-script", `this is not a PAC script`, "", true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
-				w.Write([]byte(test.script))
-			}))
-			defer server.Close()
-			output, err := exec.CommandContext(t.Context(), program, server.URL+"/proxy.pac").CombinedOutput()
-			if test.failure {
-				if err == nil {
-					t.Fatalf("broken PAC became direct: %s", output)
+	for _, mode := range []string{"url", "inline"} {
+		for _, test := range []struct {
+			name, script, want string
+			failure            bool
+		}{
+			{"http", `function FindProxyForURL(url,host){return "PROXY 127.0.0.1:7896";}`, "http://127.0.0.1:7896", false},
+			{"direct", `function FindProxyForURL(url,host){return "DIRECT";}`, "DIRECT", false},
+			{"socks", `function FindProxyForURL(url,host){return "SOCKS 127.0.0.1:7896";}`, "socks5://127.0.0.1:7896", false},
+			{"broken-script", `this is not a PAC script`, "", true},
+		} {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				arg := test.script
+				if mode == "url" {
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
+						w.Write([]byte(test.script))
+					}))
+					defer server.Close()
+					arg = server.URL + "/proxy.pac"
 				}
-				return
-			}
-			if err != nil || !bytes.Equal(bytes.TrimSpace(output), []byte(test.want)) {
-				t.Fatalf("result=%q err=%v want=%q", output, err, test.want)
-			}
-		})
+				output, err := exec.CommandContext(t.Context(), program, mode, arg).CombinedOutput()
+				if test.failure {
+					if err == nil {
+						t.Fatalf("broken PAC became direct: %s", output)
+					}
+					return
+				}
+				if err != nil || !bytes.Equal(bytes.TrimSpace(output), []byte(test.want)) {
+					t.Fatalf("result=%q err=%v want=%q", output, err, test.want)
+				}
+			})
+		}
 	}
 }

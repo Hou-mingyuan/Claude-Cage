@@ -496,3 +496,33 @@ func TestTraceIPRequiresSingleLine(t *testing.T) {
 		}
 	}
 }
+
+func TestExitProbeDistinguishesProxyConnectFailureFromTimeout(t *testing.T) {
+	// Closed local port -> immediate proxy connection failure (not timeout).
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedAddr := listener.Addr().String()
+	_ = listener.Close()
+
+	cfg := DefaultConfig()
+	cfg.ProxyURL = "http://" + closedAddr
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ip, err := ProbeExitIP(ctx, cfg)
+	if ip != "" || !errors.Is(err, ErrProxyConnectFailed) || errors.Is(err, ErrExitProbeTimeout) || !strings.Contains(err.Error(), "代理连接失败") {
+		t.Fatalf("closed proxy expected ErrProxyConnectFailed, got ip=%q err=%v", ip, err)
+	}
+
+	// Slow service with short client timeout -> ErrExitProbeTimeout + context.DeadlineExceeded.
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer stalled.Close()
+	services := []exitProbeService{{id: "slow", name: "慢检测服务", endpoint: stalled.URL}}
+	ip, err = probeExitIPServices(context.Background(), &http.Client{Timeout: 80 * time.Millisecond}, services, time.Minute)
+	if ip != "" || !errors.Is(err, ErrExitProbeTimeout) || !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrProxyConnectFailed) || !strings.Contains(err.Error(), "实时出口采样超时") {
+		t.Fatalf("stalled service expected ErrExitProbeTimeout, got ip=%q err=%v", ip, err)
+	}
+}

@@ -14,11 +14,11 @@
 
 **GitHub 显示 404，或看不到安装包。** 仓库与公开发布的附件无需仓库授权。从[项目主页](https://claude-cage.com/#download)点击“下载应用”并选择平台，检查网络与链接是否完整。macOS 使用 `.dmg`，Windows 使用 `.exe` 安装器，Debian/Ubuntu Linux 使用 `.deb`。Release 中的源码压缩包用于开发，不能当作安装包使用；尚无公开安装包的平台会提供安装与构建说明。
 
-**Mac 提示应用损坏、无法验证或不支持。** 确认使用 Apple Silicon、macOS 14+，重新下载对应 Release 的完整安装包，并核对该 Release 的签名、公证说明和校验文件。保留系统提示的原文反馈问题；不要通过关闭 Gatekeeper 或删除隔离属性来掩盖发行问题。
+**Mac 提示应用损坏、无法验证或不支持。** 确认使用 macOS 14+，且下载的 DMG 与芯片一致（Apple Silicon 为 `macos-arm64`，Intel 为 `macos-amd64`），重新下载对应 Release 的完整安装包，并核对该 Release 的签名、公证说明和校验文件。保留系统提示的原文反馈问题；不要通过关闭 Gatekeeper 或删除隔离属性来掩盖发行问题。
 
 **Windows 显示未知发布者，或 Linux 无法安装。** Windows 未签名预览包的身份限制与实测范围见 [Windows 指南](windows.md)和对应发行说明；不要把它当作已签名版本。Linux 先确认使用 Debian 12 / Ubuntu 22.04 / 24.04 x86_64，通过 APT 安装 `.deb` 的依赖，并按 [Linux 指南](linux.md)检查 KVM 权限。
 
-**首页提示 macOS / Windows 客机已不再支持。** 当前版本只使用 Debian 13 环境。旧系统的磁盘和文件原样留在电脑上，Cage 不会删除；处理方式见[早期版本创建的其他系统](guide/guest-systems.md#早期版本创建的其他系统)。
+**首页提示 macOS / Windows / Ubuntu 客机已不再支持。** 当前版本只使用 Debian 13 环境。旧系统的磁盘和文件原样留在电脑上，Cage 不会删除。旧 Ubuntu 环境会挡住新环境的创建，需在首页点击“保留旧 Ubuntu 环境并新建 Debian”；处理方式见[早期版本创建的其他系统](guide/guest-systems.md#早期版本创建的其他系统)。
 
 **提示缺少代理核心。** 完整应用随附 Mihomo。重新安装对应平台的完整安装包，不要只拷贝其中的命令行文件。请使用对应平台的完整安装包。
 
@@ -72,7 +72,7 @@ Cage 需要先选择自己的代理。首次首页点击“配置网络与代理
 
 ## 订阅导入失败，或导入后没有节点
 
-支持含 `proxies` 或 `payload` 的 Clash/Mihomo YAML。Base64 列表、节点分享链接、仅含远程 provider 的配置不属于当前支持格式。检查是否拿到了节点订阅地址；不要把网站登录页地址当作订阅地址，也不要将私人订阅提交给在线转换网站或 Issue。
+支持含 `proxies` 或 `payload` 的 Clash/Mihomo YAML，也可粘贴受支持的明文节点分享链接，每行一个。如果服务商返回整份 Base64 编码列表，或配置仅引用远程 provider，请获取包含具体节点的配置。遇到本机代理端口提示时，请按[代理链迁移步骤](guide/network.md#把原客户端的代理链迁到-cage)操作。检查是否拿到了节点订阅地址；不要把网站登录页地址当作订阅地址，也不要将私人订阅提交给在线转换网站或 Issue。
 
 代理链需要引用同一来源内的具体节点，选择分组和 DIRECT 链路会被拒绝。具体协议字段还需通过随附 Mihomo 核心的校验，错误详情可用于确认缺失字段。
 
@@ -98,6 +98,30 @@ Debian 13 的 APT 3.0.3 在下载重试时可能积存大量 `Tried to start del
 
 正在启动或检查时可以停止环境。网络设置需要重启时，先保存文件；不要同时运行多个安装副本或手动修改运行中的私有配置。
 
+## 用户目录含空格时环境无法启动
+
+Cage 在配置目录旁建立内部传输目录（默认为 `%USERPROFILE%\.claude-cage-downloads`），并通过 Lima 共享进环境。Lima 无法共享路径中含空格的目录，因此 Windows 账户名含空格（例如 `C:\Users\Jae Young`）时，环境无法启动。启动时 Cage 会直接指出这个目录；较早的版本要先完成基础系统安装，最后才提示“退出码 1，未返回可识别的原因”，操作详情末尾是 `project path contains whitespace, which Lima cannot mount`。
+
+处理方法是把整个配置目录移到不含空格的路径，再让 Cage 使用新位置。账户、设置、代理和已下载的基础系统都会随目录一起移动，无需重新创建账户。
+
+1. 在 Cage 中停止环境，从系统托盘退出 Cage，并在任务管理器中确认没有 `cage.exe` 和 `mihomo.exe` 仍在运行。
+2. 在同一磁盘内移动配置目录。复制或跨磁盘移动会改变文件权限，Cage 会拒绝使用权限异常的私有文件。
+
+   ```powershell
+   New-Item -ItemType Directory C:\CageData
+   Move-Item -LiteralPath "$env:USERPROFILE\.claude-cage" -Destination C:\CageData\.claude-cage
+   ```
+
+3. 删除 `C:\CageData\.claude-cage\environment.json`。它记录了原来含空格的内部传输目录，删除后 Cage 会按新位置重新生成。若该文件中有 `identity_directory` 字段，说明环境曾在其他位置运行过，先保留文件并导出诊断包反馈。
+4. 为当前用户设置 `CLAUDE_CAGE_CONFIG`，然后注销并重新登录 Windows，让开始菜单和桌面快捷方式读取新设置：
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable('CLAUDE_CAGE_CONFIG', 'C:\CageData\.claude-cage\config.json', 'User')
+   ```
+
+5. 打开 Cage，用原密码解锁后启动环境。已下载的基础系统会被复用，Cage 只需在新位置创建环境。
+
+原来的 `%USERPROFILE%\.claude-cage-downloads` 若为空可以删除。以后的启动、更新和维护都应继续使用同一个 `CLAUDE_CAGE_CONFIG`；要改回默认位置，先退出 Cage，把目录移回原处，再删除这个用户环境变量。
 ## 节点已经应用，但外网仍然离线
 
 “已应用”表示代理核心的节点选择成功，工作台的网络检查还需要通过。点击底部网络状态，查看失败或未知的关键项：
@@ -113,7 +137,7 @@ Debian 13 的 APT 3.0.3 在下载重试时可能积存大量 `Tried to start del
 | 已暂停或检查报告过期 | 确认配置后重新检查。关键项通过才会恢复外网。 |
 | 主机网络切换后暂时离线 | 等待 Cage 重新绑定当前物理网卡并完成检查；若曾手动暂停，仍需主动重检。 |
 
-位置查询通过所选代理，依次向 ipwho.is、IP.SB、ipwhois.app、GeoJS 和 ipapi.co 发送已经测得的出口 IP，取得有效位置后立即停止。每家最多等待 8 秒，五家串行查询最多约 40 秒，也受当前检查的剩余时间限制；所有服务都失败时不会改用直连。
+位置查询通过所选代理，依次向 ipwho.is、IP.SB、ipwhois.app、GeoJS 和 ipapi.co 发送已经测得的出口 IP，取得有效位置后立即停止。每家最多等待 8 秒，五家串行查询最多约 40 秒，也受当前检查的剩余时间限制；所有服务都失败时不会改用直连。若在“设置 → 网络与代理”中显式开启了“出口位置查询备用服务 ipinfo.io”（默认关闭），五家都失败后还会经所选代理向 ipinfo.io 发送同一出口 IP，最多再等 8 秒；它的结果只用于国家或地区判断，界面显示两位代码，州、省和城市留空，按州、省或城市限定的出口规则此时仍保持外网关闭。
 
 离线时可以继续使用终端、共享文件和 Linux 环境中的本地服务。绿色盾牌表示当前状态与检查通过，不能推导账户资格或平台风险。
 

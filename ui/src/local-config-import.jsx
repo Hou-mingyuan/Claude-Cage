@@ -28,7 +28,7 @@ export function LocalConfigImport({ busy, onImport }) {
     } finally { importing.current = false; }
   }
   return <section className="local-config-import" aria-label={tr("导入本机代理配置")}>
-    <div className="local-config-heading"><h4>{tr("从已有代理软件导入")}</h4><button type="button" disabled={busy || loading} onClick={detect}><RefreshCw size={14} />{tr("重新检测")}</button></div>
+    <div className="local-config-heading"><h4>{tr("从已有代理软件导入节点")}</h4><button type="button" disabled={busy || loading} onClick={detect}><RefreshCw size={14} />{tr("重新检测")}</button></div>
     <p>{tr("自动查找这台电脑里已保存的代理配置。导入后由 Cage 独立连接，原软件的配置会保留。")}</p>
     {loading ? <p role="status"><LoaderCircle size={16} className="spin" />{tr("正在查找本机配置…")}</p> : error ? <p role="alert" className="local-config-error">{error}</p> : configs.length ? <ul className="local-config-list">{configs.map(config => <li key={config.id}>
       <div><strong>{config.client} · {config.name}</strong><p>{[config.current && tr("当前配置"), ...(config.error ? [config.error] : [tr("{0} 个可导入节点", config.nodes), config.skipped && tr("{0} 个节点不兼容", config.skipped), config.refreshable ? tr("保留订阅链接，可手动更新") : tr("本地副本")])].filter(Boolean).join(" · ")}</p>{config.warning && <p className="local-config-warning">{config.warning}</p>}</div>

@@ -7,8 +7,16 @@ import { join } from 'node:path';
 import { isMainModule } from './is-main-module.mjs';
 
 const repo = 'Lee-xeo/Claude-Cage';
-const gh = args => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+const gh = args => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const api = (path, args = []) => JSON.parse(gh(['api', `repos/${repo}/${path}`, ...args]));
+
+// compareWithMain asks only for the fields assertPublishableRun reads. The
+// full comparison lists every commit and changed file, which for an old
+// commit can exceed any output buffer.
+export function compareWithMain(sha, call = api) {
+  assert.match(sha, /^[a-f0-9]{40}$/);
+  return call(`compare/${sha}...main`, ['--jq', '{status: .status, behind_by: .behind_by}']);
+}
 const digest = data => createHash('sha256').update(data).digest('hex');
 
 export function stagePreview(windows, linux, destination, version, dependencies) {
@@ -74,6 +82,21 @@ export function mergeReleaseChecksums(release, text, files, version) {
   return [...entries].map(([name, hash]) => `${hash}  ${name}\n`).join('');
 }
 
+// Packages come from a successful run of the exact commit main now contains:
+// a push or manual run of ci.yml on main, or a merge queue run of
+// pr-checks.yml (whose tested merge commit becomes main unchanged).
+export function assertPublishableRun(run, compareWithMain) {
+  assert.equal(run.conclusion, 'success');
+  assert.equal(run.head_repository.full_name, repo);
+  assert.match(run.head_sha, /^[a-f0-9]{40}$/);
+  const mainRun = run.path === '.github/workflows/ci.yml' && ['push', 'workflow_dispatch'].includes(run.event) && run.head_branch === 'main';
+  const queueRun = run.path === '.github/workflows/pr-checks.yml' && run.event === 'merge_group' &&
+    typeof run.head_branch === 'string' && run.head_branch.startsWith('gh-readonly-queue/main/');
+  assert.ok(mainRun || queueRun, 'Packages must come from main CI or the main merge queue');
+  const { status } = compareWithMain(run.head_sha);
+  assert.ok(status === 'identical' || status === 'ahead', 'The tested commit is not part of main');
+}
+
 async function main() {
   assert.equal(process.env.GITHUB_EVENT_NAME, 'workflow_dispatch');
   assert.equal(process.env.GITHUB_REPOSITORY, repo);
@@ -81,10 +104,7 @@ async function main() {
   const runID = process.env.CAGE_PREVIEW_RUN;
   assert.match(runID || '', /^\d+$/);
   const run = api(`actions/runs/${runID}`);
-  assert.equal(run.conclusion, 'success');
-  assert.equal(run.path, '.github/workflows/ci.yml');
-  assert.equal(run.head_repository.full_name, repo);
-  assert.match(run.head_sha, /^[a-f0-9]{40}$/);
+  assertPublishableRun(run, sha => compareWithMain(sha));
   const sourceFile = path => Buffer.from(api(`contents/${path}?ref=${run.head_sha}`).content, 'base64').toString('utf8');
   const version = sourceFile('VERSION').trim();
   assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);

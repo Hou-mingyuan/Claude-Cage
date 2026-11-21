@@ -241,3 +241,99 @@ func TestGuestSessionToleratesLoginShellOutputAndRejectsOtherServers(t *testing.
 		t.Fatal("startup was not bounded")
 	}
 }
+
+func TestGuestSessionPassesInputAndCallerOutputLimit(t *testing.T) {
+	_, session, starts := localGuestSession(t)
+	command := func(ctx context.Context) *exec.Cmd {
+		starts.Add(1)
+		return exec.CommandContext(ctx, "python3", "-I", "-u", "-c", guestSessionServer)
+	}
+	ctx := context.Background()
+	input := []byte(strings.Repeat("输入", 150000) + "\x00end")
+	reply, sent, err := session.runInput(ctx, ctx, command, "cat; printf '|%s' \"$0\"", input, 4<<20)
+	if err != nil || !sent || reply.code != 0 || string(reply.stdout) != string(input)+"|/bin/bash" {
+		t.Fatalf("stdin did not round-trip: len=%d code=%d sent=%v err=%v", len(reply.stdout), reply.code, sent, err)
+	}
+	// A larger caller limit is still enforced by the guest.
+	reply, _, err = session.runInput(ctx, ctx, command, "head -c 3000000 /dev/zero", []byte{}, 1<<20)
+	if err != nil || len(reply.stdout) != 1<<20 || reply.code == 0 {
+		t.Fatalf("limit not enforced: stdout=%d code=%d err=%v", len(reply.stdout), reply.code, err)
+	}
+	// Scripts without input keep an empty stdin on the same connection.
+	reply, _, err = session.run(ctx, ctx, command, "cat; printf done")
+	if err != nil || string(reply.stdout) != "done" {
+		t.Fatalf("plain request changed: %+v %v", reply, err)
+	}
+	if _, sent, err = session.runInput(ctx, ctx, command, "true", make([]byte, (1<<20)+1), 0); sent || err == nil {
+		t.Fatal("oversized input was sent")
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("%d connections opened", starts.Load())
+	}
+}
+
+// A transport that stops answering (the SSH connection half dead) must not
+// make every later call wait for its full timeout: after consecutive
+// timeouts the shared connection is closed and callers use their own SSH.
+func TestGuestSessionDropsStalledTransport(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash is unavailable")
+	}
+	session := &guestSession{}
+	t.Cleanup(session.close)
+	var starts atomic.Int32
+	stalled := func(ctx context.Context) *exec.Cmd {
+		starts.Add(1)
+		// Starts like the server, then never answers.
+		return exec.CommandContext(ctx, "bash", "-c", "echo '"+guestSessionReady+"'; exec sleep 600")
+	}
+	call := func() (bool, error, time.Duration) {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		started := time.Now()
+		_, sent, err := session.run(ctx, context.Background(), stalled, "true")
+		return sent, err, time.Since(started)
+	}
+	for i := 1; i <= guestSessionTimeouts; i++ {
+		if sent, err, _ := call(); !sent || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("call %d: sent=%v err=%v", i, sent, err)
+		}
+	}
+	session.mu.Lock()
+	dropped := session.conn == nil
+	session.mu.Unlock()
+	if !dropped {
+		t.Fatal("stalled connection kept after consecutive timeouts")
+	}
+	// The next call is not sent on the shared connection and returns at once,
+	// so the caller falls back to an SSH connection of its own.
+	if sent, err, took := call(); sent || err == nil || took > 100*time.Millisecond {
+		t.Fatalf("after a stall: sent=%v err=%v took=%v", sent, err, took)
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("stalled transport reopened %d times during the hold-off", starts.Load())
+	}
+}
+
+// A reply in between proves the transport alive: a single slow script does
+// not close the shared connection.
+func TestGuestSessionKeepsLiveTransportAfterOneTimeout(t *testing.T) {
+	run, session, starts := localGuestSession(t)
+	for range guestSessionTimeouts + 1 {
+		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+		if _, sent, err := run(ctx, "sleep 5"); !sent || !errors.Is(err, context.DeadlineExceeded) {
+			cancel()
+			t.Fatalf("slow script: sent=%v err=%v", sent, err)
+		}
+		cancel()
+		if reply, _, err := run(context.Background(), "printf ok"); err != nil || string(reply.stdout) != "ok" {
+			t.Fatal(reply, err)
+		}
+	}
+	session.mu.Lock()
+	kept := session.conn != nil
+	session.mu.Unlock()
+	if !kept || starts.Load() != 1 {
+		t.Fatalf("live transport dropped: kept=%v starts=%d", kept, starts.Load())
+	}
+}

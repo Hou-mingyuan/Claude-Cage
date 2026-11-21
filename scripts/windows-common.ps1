@@ -249,6 +249,14 @@ function Get-VerifiedDependency {
     param($Dependency, [string]$Cache)
     if ($Dependency.url -notlike 'https://*') { throw 'Build dependencies must use HTTPS.' }
     $path = Join-Path $Cache $Dependency.file
+    $fetcher = Join-Path $PSScriptRoot 'fetch-build-artifact.mjs'
+    $node = Get-BuildCommand @('node.exe', 'node') -Optional
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf) -and $node -and (Test-Path -LiteralPath $fetcher -PathType Leaf)) {
+        # The shared fetcher resumes with HTTP Range after each interruption and
+        # only publishes a file whose pinned digest matches.
+        New-Item -ItemType Directory -Path $Cache -Force | Out-Null
+        Invoke-BuildTool $node @($fetcher, $Dependency.url, $Dependency.hash, $path)
+    }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         New-Item -ItemType Directory -Path $Cache -Force | Out-Null
         $partial = "$path.partial-$([guid]::NewGuid().ToString('N'))"

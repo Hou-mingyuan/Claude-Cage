@@ -308,13 +308,12 @@
 }
 .account-device-option {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   text-align: left;
   gap: 12px;
   margin: 20px 0;
   cursor: var(--control-cursor);
 }
-.account-device-option input { margin: 4px 0 0; accent-color: var(--accent); }
 .account-device-option span { display: flex; flex-direction: column; gap: 6px; }
 .account-device-option strong { font-size: 14px; font-weight: 550; }
 .account-device-option small { color: var(--muted); font-size: 12px; line-height: 1.6; }

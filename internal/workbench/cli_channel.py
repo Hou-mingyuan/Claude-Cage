@@ -67,17 +67,23 @@ def identifier(value):
 
 def read_json(path, default=None):
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return default
 
 
 def save(path, value):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
         json.dump(value, stream, ensure_ascii=False)
+        stream.flush()
+        os.fsync(stream.fileno())
         temporary = stream.name
-    os.replace(temporary, path)
+    try:
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 @contextlib.contextmanager
@@ -181,7 +187,7 @@ def transcript(path):
     turns, seen, workspace, title = [], set(), "", ""
     if not path or not path.is_file() or path.is_symlink():
         return turns, workspace, title, seen
-    with path.open() as stream:
+    with path.open(encoding="utf-8") as stream:
         for line in stream:
             if len(line) > 4 * 1024 * 1024:
                 continue
@@ -222,12 +228,15 @@ def transcript(path):
     return turns, workspace, title, seen
 
 
-def connection_for(session_id, config):
+def connection_states():
+    return [(path.parent.name, read_json(path, {})) for path in ROOT.glob("*/state.json")]
+
+
+def connection_for(session_id, config, states=None):
     matches = []
-    for path in ROOT.glob("*/state.json"):
-        state = read_json(path, {})
+    for name, state in connection_states() if states is None else states:
         if state.get("cli_id") == session_id and state.get("config") == str(config):
-            matches.append((path.parent.name, state))
+            matches.append((name, state))
     return max(matches, key=lambda item: (live(item[1].get("pid")) and not item[1].get("closed"), live(item[1].get("channel_pid")), item[1].get("updated_at", 0)), default=("", {}))
 
 
@@ -289,9 +298,29 @@ def view(config, session_id, path=None):
             "resume_pending": bool(state.get("resume_task")), "native_history": native_history}
 
 
+def stamp(info):
+    # The change time also moves when a write keeps the size and modification time.
+    return [info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino]
+
+
+def view_token(config, session_id):
+    states = [(n, s) for n, s in connection_states() if s.get("cli_id") == session_id and s.get("config") == str(config)]
+    conn, state = connection_for(session_id, config, states)
+    path = next((config / "projects").glob("*/" + session_id + ".jsonl"), None)
+    def st(t):
+        try:
+            return [str(t), *stamp(t.stat())]
+        except (OSError, AttributeError, TypeError):
+            return [str(t or "")]
+    frozen = state.get("resume_transcript")
+    parts = [str(config), session_id, conn, st(path), st(Path(frozen)) if isinstance(frozen, str) and frozen else None,
+             [[n, v, live(v.get("pid")), live(v.get("channel_pid"))] for n, v in states]]
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest(), bool(live(state.get("pid")) and not state.get("closed"))
+
+
 def history_summary(path):
     workspace, title = "", ""
-    with path.open() as stream:
+    with path.open(encoding="utf-8") as stream:
         for _ in range(64):
             line = stream.readline(4 << 20)
             if not line:
@@ -326,12 +355,45 @@ def history_summary(path):
     return workspace, title
 
 
+def cache_path(kind, config):
+    return ROOT.parent / "cli-channel-cache" / (kind + "-" + hashlib.sha256(str(config).encode()).hexdigest()[:24] + ".json")
+
+
+def read_cache(path):
+    try:
+        value = read_json(path, {})
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+AGENTS_REFRESH = 30
+
+
+def running_sessions_cached(config, fresh=False):
+    try:
+        with os.scandir(Path(config) / "sessions") as entries:
+            sig = sorted([e.name, *stamp(e.stat())] for e in entries if e.name.endswith(".json"))
+    except FileNotFoundError:
+        sig = []
+    path = cache_path("agents", config)
+    cached = {} if fresh else read_cache(path)
+    rows, at = cached.get("rows"), cached.get("at")
+    if fresh or cached.get("signature") != sig or not (isinstance(at, (int, float)) and 0 <= time.time() - at < AGENTS_REFRESH) or not isinstance(rows, list):
+        rows = running_sessions(config)
+        try:
+            save(path, {"signature": sig, "at": time.time(), "rows": rows})
+        except OSError:
+            pass
+    return [row for row in rows if isinstance(row, dict) and live(row.get("pid"))]
+
+
 def discover(request):
     allowed = request["workspaces"]
     sessions = []
+    states = connection_states()
     configs = {str(config_directory(account)) for account in request["accounts"]}
-    for state_path in ROOT.glob("*/state.json"):
-        state = read_json(state_path, {})
+    for _, state in states:
         if state.get("config"):
             configs.add(state["config"])
     for config_name in configs:
@@ -340,36 +402,59 @@ def discover(request):
         def observed_running():
             nonlocal running
             if running is None:
-                running = running_sessions(config_name)
+                running = running_sessions_cached(config_name, fresh=bool(request.get("fresh")))
             return running
         def process_state(session_id):
             rows = [row for row in observed_running() if row.get("sessionId") == session_id]
             return {"running": bool(rows), "claude_desktop": any(
                 session_entrypoint(row, config) in ("claude-desktop", "claude-desktop-3p", "local-agent", "local_agent", "remote_desktop")
                 for row in rows)}
-        paths = sorted((config / "projects").glob("*/*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-        found = set()
-        for path in paths:
+        summary_path = cache_path("summaries", config_name)
+        summaries = read_cache(summary_path)
+        changed = False
+        listed = []
+        for path in (config / "projects").glob("*/*.jsonl"):
+            try:
+                listed.append((path, path.lstat()))
+            except OSError:
+                continue
+        listed.sort(key=lambda item: item[1].st_mtime, reverse=True)
+        found, current = set(), set()
+        for path, info in listed:
             if path.is_symlink():
                 continue
             try:
                 session_id = identifier(path.stem)
             except ValueError:
                 continue
-            workspace, title = history_summary(path)
+            key, sig = str(path), stamp(info)
+            current.add(key)
+            entry = summaries.get(key)
+            if isinstance(entry, list) and len(entry) == 3 and entry[0] == sig:
+                workspace, title = entry[1], entry[2]
+            else:
+                workspace, title = history_summary(path)
+                summaries[key] = [sig, workspace, title]
+                changed = True
             if not any(workspace_within(workspace, root) for root in allowed):
                 continue
-            connection, state = connection_for(session_id, config)
+            connection, state = connection_for(session_id, config, states)
             process = process_state(session_id)
-            item = {"cli_id": session_id, "config": config_name, "connection": connection,
-                    "workspace": workspace, "title": title or "Claude Code", "updated_at": path.stat().st_mtime,
-                    "running": process["running"] or bool(live(state.get("pid")) and not state.get("closed")),
-                    "claude_desktop": process["claude_desktop"],
-                    "active": bool(live(state.get("pid")) and not state.get("closed") and (state.get("busy") or state.get("approvals")))}
+            alive = bool(live(state.get("pid")) and not state.get("closed"))
+            sessions.append({"cli_id": session_id, "config": config_name, "connection": connection,
+                             "workspace": workspace, "title": title or "Claude Code", "updated_at": info.st_mtime,
+                             "running": process["running"] or alive, "claude_desktop": process["claude_desktop"],
+                             "active": bool(alive and (state.get("busy") or state.get("approvals")))})
             found.add(session_id)
-            sessions.append(item)
-        for state_path in ROOT.glob("*/state.json"):
-            state = read_json(state_path, {})
+        stale = set(summaries) - current
+        for key in stale:
+            del summaries[key]
+        if changed or stale:
+            try:
+                save(summary_path, summaries)
+            except OSError:
+                pass
+        for _, state in states:
             session_id = state.get("cli_id")
             workspace = state.get("workspace", "")
             if state.get("config") != config_name or not session_id or session_id in found or not any(workspace_within(workspace, root) for root in allowed):
@@ -466,7 +551,7 @@ if value == {"permissions": {"defaultMode": "bypassPermissions"}, "tui": "fullsc
         backup.write_bytes(old)
         backup.chmod(0o600)
     value['channelsEnabled'] = True
-    with tempfile.NamedTemporaryFile(dir=p.parent, mode='w', delete=False) as f:
+    with tempfile.NamedTemporaryFile(dir=p.parent, mode='w', encoding='utf-8', delete=False) as f:
         json.dump(value, f)
         name = f.name
     os.chmod(name, 0o644)
@@ -507,7 +592,7 @@ def session_entrypoint(row, config):
     if not isinstance(pid, int) or pid <= 0:
         return ""
     try:
-        with (config / "sessions" / (str(pid) + ".json")).open() as stream:
+        with (config / "sessions" / (str(pid) + ".json")).open(encoding="utf-8") as stream:
             state = json.loads(stream.read(64 << 10))
         if (state.get("pid") == pid and state.get("sessionId") == row.get("sessionId")
                 and row.get("startedAt") is not None and state.get("startedAt") == row["startedAt"]):
@@ -564,7 +649,10 @@ def prepare_account_switch(request):
     sid = identifier(request["cli_id"])
     switch_id = identifier(request["switch_id"])
     config = Path(request["config"]).resolve()
-    connection = identifier(request["connection"])
+    # A session found in an account's history but never opened through Cage has
+    # no channel. It may still be continued by another account once no process
+    # owns it; the source account need not be signed in to read its history.
+    connection = identifier(request["connection"]) if request["connection"] else ""
     workspace = request["workspace"]
     folder = ROOT.parent / "cli-account-switches" / switch_id
     receipt = folder / "receipt.json"
@@ -574,23 +662,31 @@ def prepare_account_switch(request):
         if saved["binding"] != binding:
             raise ValueError("账号交接编号已用于另一项操作")
         return {"transcript": str(folder / "history.jsonl")}
-    with state_file(connection) as state:
-        if state.get("cli_id") != sid or state.get("config") != str(config) or state.get("workspace") != workspace:
-            raise ValueError("原会话身份或项目已变化，请刷新后重试")
-        if state.get("busy") or state.get("approvals") or state.get("pending_send") or state.get("sent"):
-            raise ValueError("原会话仍有任务、待发消息或审批，请结束后再切换账号")
-        existing = state.get("account_switch")
-        if existing and existing != switch_id:
-            raise ValueError("此会话已有账号交接尚未完成")
-        state["account_switch"] = switch_id
-        save(ROOT / connection / "state.json", state)
+    state = {}
+    if not connection:
+        if connection_for(sid, config)[0] or active_sessions(sid, str(config)):
+            raise ValueError("原会话正在运行或已在其他终端打开，请先结束后再用其他账号继续")
+    else:
+        with state_file(connection) as state:
+            if state.get("cli_id") != sid or state.get("config") != str(config) or state.get("workspace") != workspace:
+                raise ValueError("原会话身份或项目已变化，请刷新后重试")
+            if state.get("busy") or state.get("approvals") or state.get("pending_send") or state.get("sent"):
+                raise ValueError("原会话仍有任务、待发消息或审批，请结束后再切换账号")
+            existing = state.get("account_switch")
+            if existing and existing != switch_id:
+                raise ValueError("此会话已有账号交接尚未完成")
+            state["account_switch"] = switch_id
+            save(ROOT / connection / "state.json", state)
     rows = active_sessions(sid, str(config))
     # Any other live worker in this account can represent a background
     # child of the source. The registry does not expose a complete ancestry.
     listing = subprocess.run(["claude", "agents", "--json"], env={**os.environ, "CLAUDE_CONFIG_DIR": str(config)}, capture_output=True, text=True, timeout=10)
     if listing.returncode != 0:
         raise ValueError("无法确认后台任务，未切换账号")
-    if any(row.get("sessionId") != sid and live(row.get("pid")) for row in json.loads(listing.stdout)):
+    agents = json.loads(listing.stdout)
+    if not connection and any(row.get("sessionId") == sid and live(row.get("pid")) for row in agents):
+        raise ValueError("原会话正在运行或已在其他终端打开，请先结束后再用其他账号继续")
+    if any(row.get("sessionId") != sid and live(row.get("pid")) for row in agents):
         raise ValueError("原账号仍有其他执行任务，请结束后台任务后再交接")
     for row in rows:
         if not workspace_within(row.get("cwd") or "", workspace) or row.get("status") != "idle" or row.get("kind") != "interactive":
@@ -627,7 +723,7 @@ def prepare_account_switch(request):
     if path is None or path.is_symlink():
         raise ValueError("原会话历史不可用，未切换账号")
     pending = set()
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         row = json.loads(line)
         if row.get("isSidechain"):
             continue
@@ -654,8 +750,9 @@ def prepare_account_switch(request):
         temporary = stream.name
     os.replace(temporary, target)
     save(receipt, {"binding": binding, "requests": state.get("requests", {})})
-    with state_file(connection) as state:
-        state["closed"] = True
+    if connection:
+        with state_file(connection) as state:
+            state["closed"] = True
     return {"transcript": str(target)}
 
 
@@ -666,12 +763,12 @@ def copy_history(source, target):
 
 
 def cancel_account_switch(request):
-    connection = identifier(request["connection"])
     switch_id = identifier(request["switch_id"])
-    with state_file(connection) as state:
-        if state.get("cli_id") != identifier(request["cli_id"]) or state.get("account_switch") not in (None, switch_id):
-            raise ValueError("原会话交接已变化")
-        state.pop("account_switch", None)
+    if request["connection"]:
+        with state_file(identifier(request["connection"])) as state:
+            if state.get("cli_id") != identifier(request["cli_id"]) or state.get("account_switch") not in (None, switch_id):
+                raise ValueError("原会话交接已变化")
+            state.pop("account_switch", None)
     # The source may already be stopped, but it remains resumable. Remove only
     # this operation's frozen copy so a later retry cannot use stale history.
     folder = ROOT.parent / "cli-account-switches" / switch_id
@@ -767,11 +864,13 @@ def launch(request):
         account = runpy.run_path(_controller_context["CAGE_CLI_ACCOUNT_HELPER"])
         if not account["has_status_line"](account["profile"](account_id)):
             status_command = _runtime["command_text"](_controller_context["CAGE_CLI_ACCOUNT_HELPER"], ["statusline", account_id])
-            settings["statusLine"] = {"type": "command", "command": status_command}
+            settings["statusLine"] = account["status_line"](status_command) if "status_line" in account else {"type": "command", "command": status_command}
     elif len(prefix) == 5 and Path(prefix[2]).name == "cage-claude-account" and prefix[3] == "run":
         account = runpy.run_path(prefix[2])
         if not account["has_status_line"](account["profile"](prefix[4])):
-            settings["statusLine"] = {"type": "command", "command": _runtime["command_text"](prefix[2], ["statusline", prefix[4]])}
+            command = _runtime["command_text"](prefix[2], ["statusline", prefix[4]])
+            # A newer account helper carries the user's status line padding.
+            settings["statusLine"] = account["status_line"](command) if "status_line" in account else {"type": "command", "command": command}
     save(folder / "settings.json", settings)
     argv = _runtime["command"](__file__, ["serve", connection])
     config = {"mcpServers": {connection: {"command": argv[0], "args": argv[1:]}}}
@@ -1000,7 +1099,14 @@ def main():
             state = read_json(ROOT / identifier(request.get("connection") or request["cli_id"]) / "state.json", {})
             if state.get("cli_id") == request["cli_id"] and state.get("config"):
                 config = Path(state["config"])
-            result = view(config, identifier(request["cli_id"]))
+            session_id = identifier(request["cli_id"])
+            token, running = view_token(config, session_id)
+            if request.get("known") == token:
+                # The caller holds this exact view; skip reading the transcript.
+                result = {"unchanged": True, "token": token, "running": running}
+            else:
+                result = view(config, session_id)
+                result["token"] = token
             if "login_stamp" in request and result["running"]:
                 observe = client_runtime().get("changed_login")
                 if observe:

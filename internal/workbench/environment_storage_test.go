@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
@@ -109,5 +110,75 @@ func TestStorageChangeIsLocalAndRequiresUnlockedSession(t *testing.T) {
 	s.account.lock()
 	if r := request(s, "POST", endpoint, s.origin, "{}", true); r.Code != http.StatusLocked {
 		t.Fatal("locked user could change storage", r.Code)
+	}
+}
+
+// A storage directory deleted by hand must not leave settings unable to pick
+// a new one. An unplugged disk (parent gone too) keeps the reconnect error.
+func TestDeletedStorageDirectoryCanBeReplaced(t *testing.T) {
+	s := testServer(t)
+	const endpoint = "/api/environment/storage"
+	type view struct {
+		cage.StorageLocation
+		Error string `json:"error"`
+	}
+	query := func() (int, view, string) {
+		t.Helper()
+		r := request(s, "GET", endpoint, s.origin, "", true)
+		var v view
+		_ = json.Unmarshal(r.Body.Bytes(), &v)
+		return r.Code, v, r.Body.String()
+	}
+	write := func(body map[string]any) Job {
+		t.Helper()
+		data, _ := json.Marshal(body)
+		if r := request(s, "POST", endpoint, s.origin, string(data), true); r.Code != http.StatusOK {
+			t.Fatal(r.Code, r.Body.String())
+		}
+		return awaitJobIdle(t, &s.jobs)
+	}
+	_, initial, _ := query()
+	target := filepath.Join(t.TempDir(), "CageData")
+	if job := write(map[string]any{"directory": target, "previous": initial.Directory, "migrate": false}); job.Error != "" {
+		t.Fatal(job)
+	}
+	_, moved, _ := query()
+	if err := os.RemoveAll(target); err != nil {
+		t.Fatal(err)
+	}
+	code, gone, raw := query()
+	if code != http.StatusOK || !gone.Missing || gone.Directory != moved.Directory || gone.HasEnvironment || !strings.Contains(gone.Error, "已不存在") {
+		t.Fatal("deleted storage hid the location from settings", code, raw)
+	}
+	next := filepath.Join(t.TempDir(), "New CageData")
+	if job := write(map[string]any{"directory": next, "previous": gone.Directory, "migrate": false}); job.Error == "" {
+		t.Fatal("a request unaware of the deleted directory was accepted")
+	}
+	if job := write(map[string]any{"directory": next, "previous": gone.Directory, "migrate": false, "missing": true}); job.Error != "" {
+		t.Fatal(job)
+	}
+	code, replaced, raw := query()
+	real, err := filepath.EvalSymlinks(next)
+	if code != http.StatusOK || err != nil || replaced.Directory != real || replaced.Missing || replaced.Backup != "" {
+		t.Fatal("replacement location", code, raw, err)
+	}
+	if err := s.prepareEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	if entries, err := os.ReadDir(s.profile); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "state-backup-") || strings.HasPrefix(entry.Name(), ".storage-link-") || entry.Name() == "environment-storage-pending.json" {
+				t.Fatal("replacement left", entry.Name())
+			}
+		}
+	}
+
+	if err := os.RemoveAll(filepath.Dir(next)); err != nil {
+		t.Fatal(err)
+	}
+	if code, unplugged, raw := query(); code == http.StatusOK || unplugged.Missing || !strings.Contains(raw, "重新连接原磁盘") {
+		t.Fatal("a missing parent was treated as deleted storage", code, raw)
 	}
 }

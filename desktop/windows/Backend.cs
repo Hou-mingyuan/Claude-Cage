@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cage.Windows;
 
@@ -32,7 +34,7 @@ internal static class Backend
                     // A released profile lock alone does not release its image.
                     _ = process.SafeHandle;
                     if (process.HasExited) { process.Dispose(); continue; }
-                    if (!string.Equals(Path.GetFullPath(process.MainModule!.FileName), Path.GetFullPath(Executable), StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(Path.GetFullPath(ProcessImage(process.SafeHandle)), Path.GetFullPath(Executable), StringComparison.OrdinalIgnoreCase))
                         throw new IOException("自检后台身份与当前应用不符，未等待其他程序");
                     processes.Add(process);
                 }
@@ -41,6 +43,20 @@ internal static class Backend
             return processes;
         }
         catch { foreach (var process in processes) process.Dispose(); throw; }
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool QueryFullProcessImageName(SafeProcessHandle process, int flags, StringBuilder name, ref int size);
+
+    // Read the image path through the handle pinned above. MainModule enumerates
+    // modules and is null for a process that has just started.
+    private static string ProcessImage(SafeProcessHandle handle)
+    {
+        var size = 32768;
+        var name = new StringBuilder(size);
+        if (!QueryFullProcessImageName(handle, 0, name, ref size))
+            throw new IOException($"无法读取自检后台的程序路径（Win32 错误 {Marshal.GetLastWin32Error()}）");
+        return name.ToString(0, size);
     }
 
     public static ProcessStartInfo StartInfo(string executable, params string[] arguments)

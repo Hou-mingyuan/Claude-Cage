@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -194,6 +195,7 @@ func TestMonitorTimingRecordsRenewalAndSkips(t *testing.T) {
 
 func TestNetworkMonitorRecordsAllOuterStages(t *testing.T) {
 	s := testServer(t)
+	markTestVMRunning(t, s)
 	previous := physicalProxyInterface
 	physicalProxyInterface = func(context.Context) (string, error) {
 		time.Sleep(30 * time.Millisecond)
@@ -214,5 +216,38 @@ func TestNetworkMonitorRecordsAllOuterStages(t *testing.T) {
 	duration, err := strconv.Atoi(records[0]["physical_interface_ms"])
 	if err != nil || duration < 30 {
 		t.Fatalf("slow interface check was not attributed: %v", records[0])
+	}
+}
+
+func TestSteadyMonitorRoundsAreSummarized(t *testing.T) {
+	s := testServer(t)
+	round := func(result string, duration time.Duration, until time.Time) {
+		timing := &monitorTiming{started: time.Now().Add(-duration), result: result, until: until}
+		s.recordMonitorTiming("network", timing)
+	}
+	for i := 0; i < 5; i++ {
+		round("completed", 0, time.Time{})
+	}
+	round("operation_lock_busy", 0, time.Time{})
+	round("operation_lock_busy", 0, time.Time{})
+	round("completed", 0, time.Time{})
+	round("completed", 0, time.Time{})
+	round("completed", 3*time.Second, time.Time{})        // slow
+	round("completed", 0, time.Now().Add(10*time.Second)) // short lease margin
+	round("completed", 0, time.Now().Add(cage.GateLease)) // healthy, same result
+	s.monitorTimingMu.Lock()
+	last := s.monitorTimingLogs["network"]
+	last.recorded = time.Now().Add(-monitorTimingQuietInterval)
+	s.monitorTimingLogs["network"] = last
+	s.monitorTimingMu.Unlock()
+	round("completed", 0, time.Time{}) // periodic summary
+	records := monitorTimingRecords(t, s, "network")
+	var got []string
+	for _, record := range records {
+		got = append(got, record["result"]+":"+record["unrecorded_steady_rounds"])
+	}
+	want := []string{"completed:0", "operation_lock_busy:4", "operation_lock_busy:0", "completed:0", "completed:1", "completed:0", "completed:1"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("records %v, want %v", got, want)
 	}
 }

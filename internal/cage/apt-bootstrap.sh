@@ -6,6 +6,13 @@ set -eu
 if [ "$ID" != debian ] || [ "${VERSION_ID:-}" != 13 ]; then
   exit 0
 fi
+# A package transaction cut off by a stopped environment or a power loss leaves
+# dpkg's journal behind, and every later apt-get refuses to run until it is
+# replayed. Replaying it only finishes the packages that were already chosen.
+if [ -n "$(ls -A /var/lib/dpkg/updates 2>/dev/null)" ]; then
+  printf 'Finishing an interrupted package installation...\n'
+  env DEBIAN_FRONTEND=noninteractive dpkg --configure -a </dev/null
+fi
 version=$(dpkg-query -W -f='${Version}' apt)
 if dpkg --compare-versions "$version" ge 3.0.4; then
   exit 0

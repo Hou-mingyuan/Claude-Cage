@@ -30,7 +30,7 @@ func TestWebSocketAliasesSurviveImportStoreAndRuntime(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				data := fmt.Sprintf(`proxies: [{name: local, type: %s, server: 127.0.0.1, port: 443, network: ws, %s}]`, protocol, tc.fields)
+				data := fmt.Sprintf(`proxies: [{name: local, type: %s, server: 203.0.113.10, port: 443, network: ws, %s}]`, protocol, tc.fields)
 				if err := store.Import("websocket", "", []byte(data), "websocket", 0, ""); err != nil {
 					t.Fatal(err)
 				}
@@ -102,7 +102,7 @@ func TestWebSocketInvalidAliasesSkipNodeAndDependentWithoutLeakingValues(t *test
 		t.Run(fields, func(t *testing.T) {
 			store, _ := Load(t.TempDir())
 			data := `proxies:
- - {name: good, type: http, server: 127.0.0.1, port: 8080}
+ - {name: good, type: http, server: 203.0.113.10, port: 8080}
  - {name: bad, type: vless, server: example.com, port: 443, network: ws, ` + fields + `}
  - {name: dependent, type: socks5, server: example.com, port: 1080, dialer-proxy: bad}
 `

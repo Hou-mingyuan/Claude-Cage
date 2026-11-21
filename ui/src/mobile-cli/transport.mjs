@@ -24,13 +24,19 @@ async function requestAPI(path, { body, signal, keepalive } = {}) {
   }
   if (!response.ok) {
     let message;
+    const isPlainText = (response.headers.get("Content-Type") || "").startsWith("text/plain");
     if (response.status === 401) message = "连接授权已失效，请从 Cage 重新打开此页面。";
-    else if (response.status === 423) message = "Cage 已锁定。请在电脑上解锁，再重新读取。";
-    else if ((response.headers.get("Content-Type") || "").startsWith("text/plain")) {
+    else if (response.status === 423) {
+      const detail = isPlainText ? (await response.text()).trim().slice(0, 1200) : "";
+      message = detail && detail !== "Cage 已锁定，请先登录" && detail !== "请先解锁 Cage"
+        ? detail
+        : "Cage 已锁定。请在电脑上解锁，再重新读取。";
+    } else if (isPlainText) {
       message = (await response.text()).trim().slice(0, 1200);
     }
     const error = new Error(message || httpErrorMessage(path, response.status));
     error.status = response.status;
+    error.recovery = response.headers.get("X-Cage-Recovery") || "";
     throw error;
   }
   if (response.status === 204) return null;

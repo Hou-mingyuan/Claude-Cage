@@ -13,7 +13,7 @@ import { isMainModule } from './is-main-module.mjs';
 export const versionPaths = ['VERSION', 'ui/package.json', 'ui/package-lock.json', 'www/package.json', 'www/package-lock.json'];
 const repoRoot = fileURLToPath(new URL('../', import.meta.url));
 const shaPattern = /^[0-9a-f]{40}$/;
-const platforms = ['macos', 'windows', 'linux'];
+const platforms = ['macos', 'macos-intel', 'windows', 'linux'];
 
 function checkContext(context) {
   if (context.repository !== 'Lee-xeo/Claude-Cage' || !shaPattern.test(context.sourceSha) || !/^\d+$/.test(context.runId) || context.defaultBranch !== 'main') {
@@ -155,8 +155,8 @@ export async function assembleRelease({ directory, output, version, commitSha, a
     }
   }
   const result = await assemble({ inputs: platforms.map(platform => join(directory, platform)), output });
-  const required = [`Cage-${version}-macos-arm64.dmg`, `Cage-${version}-windows-amd64-setup.exe`, `Cage-${version}-linux-amd64.deb`];
-  if (result.version !== version || required.some(name => !result.assets.includes(name))) throw new Error('All three verified platform installers are required.');
+  const required = [`Cage-${version}-macos-arm64.dmg`, `Cage-${version}-macos-amd64.dmg`, `Cage-${version}-windows-amd64-setup.exe`, `Cage-${version}-linux-amd64.deb`];
+  if (result.version !== version || required.some(name => !result.assets.includes(name))) throw new Error('All four verified platform installers are required.');
   return result;
 }
 
@@ -220,7 +220,7 @@ export async function publishRelease({ api, upload, promote, root, files, ...con
     release = await api('POST', `${base}/releases`, {
       tag_name: `v${context.version}`, target_commitish: context.commitSha,
       name: `Cage ${context.version}`, draft: true, prerelease: context.version.includes('-'),
-      body: `${marker(context)}\n\n${notes.body || ''}${customNotes ? '' : `\n\nThree platform builds, package verification and automated checks completed for ${context.commitSha}. Hardware virtualization and real Claude account acceptance are separate checks; see the platform guides.`}`,
+      body: `${marker(context)}\n\n${notes.body || ''}${customNotes ? '' : `\n\nPlatform builds (Apple Silicon and Intel macOS, Windows, Linux), package verification and automated checks completed for ${context.commitSha}. Hardware virtualization and real Claude account acceptance are separate checks; see the platform guides.`}`,
     });
   }
   const assets = await api('GET', `${base}/releases/${release.id}/assets?per_page=100`);

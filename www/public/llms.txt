@@ -1,10 +1,12 @@
 # Cage
 
-> Cage is a local and remote isolated development workbench. External agents can help users download, install, configure and diagnose it through the versioned JSON CLI.
+> Cage is a lightweight local and remote isolated development workbench for Claude-related programs, extending controlled host and workspace capabilities through an open MCP + extension plugin marketplace. External agents can help users download, install, configure and diagnose it through the versioned JSON CLI.
 
 - [Agent guide](https://claude-cage.com/agent.md): Read this first. Installation paths, protocol discovery, JSON input, tasks, recovery and user authorization boundaries.
 - [Full agent guide](https://claude-cage.com/llms-full.txt): Plain-text copy of the same source.
 - [User guide](https://claude-cage.com/docs/agent/): Rendered guide.
+- [Plugin Marketplace](https://claude-cage.com/plugins/): Browse open MCP tools and Cage UI extensions from cage-plugins.
+- [Plugins & Marketplace guide](https://claude-cage.com/docs/plugins/): Open plugin marketplace (MCP + UI extensions), host authorization and permissions.
 - [Download helper](https://claude-cage.com/agent-bootstrap.mjs): Node.js 20+, public release discovery and verified package download. Returns an installation plan; does not install.
 - [Releases](https://github.com/Lee-xeo/Claude-Cage/releases): Published packages and platform-specific validation limits.
 

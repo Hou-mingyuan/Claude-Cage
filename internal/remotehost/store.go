@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -50,6 +51,26 @@ func newID() string {
 	raw[8] = (raw[8] & 63) | 128
 	s := hex.EncodeToString(raw[:])
 	return s[:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:]
+}
+
+// validAgentSocket checks the saved agent location without touching the file
+// system, so a profile stays readable while the agent is not running. Windows
+// accepts only local named pipes; other systems accept absolute socket paths
+// that fit sockaddr_un. Ownership and file type are checked before dialing.
+func validAgentSocket(goos, value string) bool {
+	if value == "" || hasControl(value) {
+		return false
+	}
+	if goos == "windows" {
+		const prefix = `\\.\pipe\`
+		return len(value) > len(prefix) && len(value) <= 256 && strings.EqualFold(value[:len(prefix)], prefix) &&
+			!strings.Contains(value[len(prefix):], "/")
+	}
+	limit := 107 // sockaddr_un.sun_path on Linux, less the terminating NUL
+	if goos == "darwin" || strings.HasSuffix(goos, "bsd") {
+		limit = 103
+	}
+	return strings.HasPrefix(value, "/") && len(value) <= limit
 }
 
 func hasControl(s string) bool {
@@ -92,6 +113,15 @@ func normalizeProfile(p HostProfile) (HostProfile, error) {
 	}
 	if p.Auth.Kind == "agent" {
 		p.Auth.IdentityFile = ""
+		p.Auth.AgentSocket = strings.TrimSpace(p.Auth.AgentSocket)
+		if p.Auth.AgentSocket != "" && !validAgentSocket(runtime.GOOS, p.Auth.AgentSocket) {
+			if runtime.GOOS == "windows" {
+				return p, failure("invalid_profile", `SSH agent 需要填写本机命名管道，格式为 \\.\pipe\名称`)
+			}
+			return p, failure("invalid_profile", "SSH agent 套接字需要使用本机绝对路径，且不超过系统长度上限")
+		}
+	} else {
+		p.Auth.AgentSocket = ""
 	}
 	absolute := path.IsAbs
 	if p.Platform == "windows" {

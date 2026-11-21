@@ -11,6 +11,11 @@ export function operationName(path = "", method = "GET") {
   if (path === "/environment/cache/inventory") return "盘点当前环境缓存";
   if (path === "/environment/cache/clean") return "清理所选缓存";
   if (path === "/environment/cache/restore") return "恢复缓存";
+  if (path === "/environment/device-reset") return "读取换机状态";
+  if (path === "/environment/device-reset/preview") return "预览新机配置";
+  if (path === "/environment/device-reset/execute") return "执行环境换机";
+  if (path === "/environment/device-reset/restore") return "恢复旧环境";
+  if (path === "/environment/device-reset/delete-archive") return "删除旧环境归档";
   if (path.startsWith("/environment/")) return "更新环境";
   if (path.startsWith("/input/files") || path.startsWith("/browser/files")) return "传递文件";
   if (path.startsWith("/tailscale")) return reading ? "读取 Tailscale 状态" : "操作 Tailscale";

@@ -1,6 +1,7 @@
 package cage
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -23,7 +24,14 @@ type StorageLocation struct {
 	Custom         bool   `json:"custom"`
 	HasEnvironment bool   `json:"has_environment"`
 	Backup         string `json:"backup,omitempty"`
+	// Missing marks a custom directory deleted while its parent remains; the
+	// location is then returned together with ErrStorageMissing.
+	Missing bool `json:"missing,omitempty"`
 }
+
+// ErrStorageMissing lets a new, empty location replace one whose directory
+// was deleted. A disconnected disk keeps the ordinary reconnect error.
+var ErrStorageMissing = errors.New("环境存储目录已不存在")
 
 type storageRecord struct {
 	Directory string   `json:"directory"`
@@ -193,6 +201,10 @@ func getStorageLocation(profile string) (StorageLocation, error) {
 		target, te := paths.Resolve(filepath.Join(r.Directory, "state"))
 		marker, me := os.ReadFile(filepath.Join(r.Directory, storageMarker))
 		if err != nil || te != nil || me != nil || string(marker) != r.ID || !sameStoragePath(real, target) {
+			if storageDeleted(anchor, r.Directory) {
+				loc.Missing = true
+				return loc, fmt.Errorf("%w：%s。如果它位于外接磁盘，请连接磁盘后重新打开设置；否则请选择新的存储位置，Cage 会在那里重新创建环境，原环境数据无法恢复。", ErrStorageMissing, r.Directory)
+			}
 			return loc, fmt.Errorf("环境存储不可用，请重新连接原磁盘：%s", r.Directory)
 		}
 		if err = localStorageVolume(target); err != nil {
@@ -237,6 +249,23 @@ func getStorageLocation(profile string) (StorageLocation, error) {
 		return loc, err
 	}
 	return loc, nil
+}
+
+// storageDeleted requires the anchor to be only a link (or absent) and the
+// directory's parent to still exist, so an unplugged volume is not mistaken
+// for deleted data and nothing real is left behind the anchor.
+func storageDeleted(anchor, directory string) bool {
+	if _, err := os.Lstat(directory); !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	if parent, err := os.Stat(filepath.Dir(directory)); err != nil || !parent.IsDir() {
+		return false
+	}
+	if _, err := os.Readlink(anchor); err == nil {
+		return true
+	}
+	_, err := os.Lstat(anchor)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func GetStorageLocation(profile string) (StorageLocation, error) {
@@ -421,6 +450,11 @@ func stoppedStorage(source string) error {
 			var pid int
 			started := ""
 			if name == "cage-running.json" {
+				if len(bytes.TrimSpace(data)) == 0 || !json.Valid(data) {
+					// Records are replaced atomically after fsync, so an empty or
+					// cut-off file only comes from an interrupted write and names no live VM.
+					continue
+				}
 				var record runningProfile
 				err = json.Unmarshal(data, &record)
 				pid, started = record.PID, record.Started
@@ -454,10 +488,14 @@ func MoveStorageWithRuntime(ctx context.Context, profile, directory string, expe
 		return loc, bindingErr
 	}
 	loc, err = getStorageLocation(profile)
-	if err != nil {
+	missing := expected.Missing && loc.Missing && errors.Is(err, ErrStorageMissing)
+	if err != nil && !missing {
 		return loc, err
 	}
-	if !sameStoragePath(expected.Directory, loc.Directory) || expected.HasEnvironment != loc.HasEnvironment {
+	if missing && runtime != nil {
+		return loc, err
+	}
+	if !sameStoragePath(expected.Directory, loc.Directory) || expected.HasEnvironment != loc.HasEnvironment || expected.Missing != loc.Missing {
 		return loc, errors.New("环境或存储位置已改变，请重新选择")
 	}
 	if err = ValidateStorageTarget(profile, directory); err != nil {
@@ -468,8 +506,10 @@ func MoveStorageWithRuntime(ctx context.Context, profile, directory string, expe
 		return loc, err
 	}
 	anchor := storageAnchor(profile)
-	if err = stoppedStorage(anchor); err != nil {
-		return loc, err
+	if !missing {
+		if err = stoppedStorage(anchor); err != nil {
+			return loc, err
+		}
 	}
 	previous, err := readStorageRecord(profile)
 	if err != nil {
@@ -487,7 +527,9 @@ func MoveStorageWithRuntime(ctx context.Context, profile, directory string, expe
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return loc, statErr
 	}
-	if statErr == nil {
+	// A deleted directory has nothing to copy or keep; its dangling link is
+	// still renamed aside so an interrupted switch can be rolled back.
+	if statErr == nil && !missing {
 		backup := anchorBackup
 		if loc.Custom {
 			backup = loc.Directory
@@ -565,7 +607,7 @@ func MoveStorageWithRuntime(ctx context.Context, profile, directory string, expe
 			return loc, err
 		}
 	}
-	if info != nil {
+	if info != nil && !missing {
 		if err = copyStorageExcluding(ctx, src, destState, excluded, report); err != nil {
 			return loc, err
 		}

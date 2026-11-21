@@ -16,9 +16,16 @@ function paragraphs(text: string) {
 function bullets(text: string) {
   return [...text.matchAll(/^- (.+)$/gm)].map(match => match[1]);
 }
+function numbered(text: string) {
+  return [...text.matchAll(/^\d+\.\s+(.+)$/gm)].map(match => match[1]);
+}
 function pair(text: string): [string, string] {
   const bold = text.match(/^\*\*(.+?)\*\*\s*(.*)$/);
   return bold ? [plain(bold[1]), plain(bold[2])] : ['', plain(text)];
+}
+function premisePair(text: string): [string, string] {
+  const [title, body] = pair(text);
+  return [title, body.replace(/^[\s—–\-:：]+/, '').trim()];
 }
 function readCopy(language: typeof languages[number]) {
   const file = language.code === 'zh' ? 'README.md' : `README.${language.code}.md`;
@@ -26,17 +33,20 @@ function readCopy(language: typeof languages[number]) {
   if (!source) throw new Error(`Missing website language source: ${file}`);
   const allHeadings = [...source.matchAll(/^## (.+)$/gm)];
   const headings = allHeadings.filter(heading => !/^Star (?:History|增长曲线|成長曲線)$/.test(heading[1]));
-  if (headings.length !== 9) throw new Error(`${file}: expected the nine shared README sections; update the website mapping when the document structure changes`);
+  if (headings.length !== 10) throw new Error(`${file}: expected the ten shared README sections; update the website mapping when the document structure changes`);
   const sections = headings.map(heading => ({
     title: heading[1], body: source.slice(heading.index! + heading[0].length, allHeadings[allHeadings.indexOf(heading) + 1]?.index ?? source.length),
   }));
-  const [reason, uses, quick, installation, steps, boundaries, contribution, license] = sections;
+  const [philosophy, reason, uses, quick, installation, steps, boundaries, contribution, license] = sections;
+  const philosophyPremises = numbered(philosophy.body).map(premisePair);
+  const philosophyGoals = bullets(philosophy.body).map(pair);
+  const philosophyLead = paragraphs(philosophy.body)[0] || '';
   const reasonParagraphs = paragraphs(reason.body);
   const installParagraphs = paragraphs(installation.body);
   const captions = [...reason.body.matchAll(/^\*\*(.+?)\*\*\s*$/gm)].map(match => plain(match[1]));
   const stepHeadings = [...steps.body.matchAll(/^### \d+\. (.+)$/gm)];
-  if (stepHeadings.length !== 3 || bullets(reason.body).length !== 4 || bullets(boundaries.body).length !== 4) {
-    throw new Error(`${file}: README feature, setup or boundary structure has changed`);
+  if (philosophyPremises.length !== 3 || philosophyGoals.length !== 3 || stepHeadings.length !== 3 || bullets(reason.body).length !== 4 || bullets(boundaries.body).length !== 4) {
+    throw new Error(`${file}: README philosophy, feature, setup or boundary structure has changed`);
   }
   const setup = stepHeadings.map((heading, i): [string,string] => [heading[1], plain(steps.body.slice(heading.index! + heading[0].length, stepHeadings[i+1]?.index ?? steps.body.length))]);
   const docs = [...contribution.body.matchAll(/^\|\s*([^|]+)\s*\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\|/gm)].map(match => ({
@@ -52,6 +62,7 @@ function readCopy(language: typeof languages[number]) {
     heroAccent: language.code === 'zh' ? '关起来。' : language.code === 'zh-TW' ? '關起來。' : '',
     tagline: isChinese ? plain(slogan).split(/[，,]/).slice(1).join('，') : plain(slogan),
     intro: reasonParagraphs[1], requirements: 'macOS · Windows · Linux · Android · iOS', artAlt: 'Claude Cage',
+    philosophyTitle: philosophy.title, philosophyPremises, philosophyLead, philosophyGoals,
     why: reason.title, whyText: reasonParagraphs[0], whyNote: limit,
     keyFeatures: bullets(reason.body).map(plain),
     featureTitle: uses.title, features: bullets(uses.body).map(pair),

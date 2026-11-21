@@ -61,7 +61,7 @@ func TestCoreWebSocketAliasesReachHandshake(t *testing.T) {
 				if pathField == "ws-opts.path" {
 					pathOptions = `ws-opts: {path: "/legacy?source=cage", headers: {X-Modern: retained}}`
 				}
-				data := fmt.Sprintf(`proxies: [{name: local, type: %s, server: 127.0.0.1, port: %s, uuid: 00000000-0000-4000-8000-000000000000, password: local-test-password, alterId: 0, cipher: auto, tls: true, skip-cert-verify: true, network: ws, WS_HEADERS: {host: edge.example, X-Legacy: local-token, X_Underscore: preserved}, %s}]`, protocol, port, pathOptions)
+				data := fmt.Sprintf(`proxies: [{name: local, type: %s, server: upstream.example.test, port: %s, uuid: 00000000-0000-4000-8000-000000000000, password: local-test-password, alterId: 0, cipher: auto, tls: true, skip-cert-verify: true, network: ws, WS_HEADERS: {host: edge.example, X-Legacy: local-token, X_Underscore: preserved}, %s}]`, protocol, port, pathOptions)
 				if err := store.Import("local", "", []byte(data), "local", 0, ""); err != nil {
 					t.Fatal(err)
 				}
@@ -130,6 +130,7 @@ func TestCoreWebSocketAliasesReachHandshake(t *testing.T) {
 					case <-ticker.C:
 					}
 				}
+				attachLocalTestServer(t, ctx, profile)
 				// The local server closes after the WebSocket upgrade. The protocol tunnel
 				// then fails, while the observed HTTP request proves transport parameters.
 				_ = API(ctx, profile, "GET", "/proxies/"+store.Selected+"/delay?timeout=2000&url="+url.QueryEscape("http://127.0.0.1:1/"), nil, nil)

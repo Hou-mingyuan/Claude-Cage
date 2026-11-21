@@ -15,17 +15,8 @@ download() {
     fi
 }
 download qemu-11.1.3.tar.xz https://download.qemu.org/qemu-11.1.3.tar.xz 5a8289c7940dc77d3873c81a6c29ba3afe1446fc9d36e77fa1658cdbecb84b22
-download OpenCore-1.0.8-RELEASE.zip https://github.com/acidanthera/OpenCorePkg/releases/download/1.0.8/OpenCore-1.0.8-RELEASE.zip 2011e8b7216ecb2645d97ea710df965947edd406846e92050b9bc4190be6d27b
-download Lilu-1.7.2-RELEASE.zip https://github.com/acidanthera/Lilu/releases/download/1.7.2/Lilu-1.7.2-RELEASE.zip 53967d7dcfaab01023a33df2e969a89522f13d6654a6a56ac4711b62dabf3ab8
-download VirtualSMC-1.3.8-RELEASE.zip https://github.com/acidanthera/VirtualSMC/releases/download/1.3.8/VirtualSMC-1.3.8-RELEASE.zip 2e29a8aaf91b4eb0bcdf5913ed17e70f5cf76531122acd4132eff7813a54de8b
 download glib-2.88.3-source.tar.xz https://download.gnome.org/sources/glib/2.88/glib-2.88.3.tar.xz ab24d24e698dfa1e408b7bcdb508f4aafc906185a8b8ce72fdf79bbbdc9b383b
 download pcre2-10.47.tar.bz2 https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.bz2 47fe8c99461250d42f89e6e8fdaeba9da057855d06eb7fc08d9ca03fd08d7bc7
-for component in OpenCore-1.0.8 Lilu-1.7.2 VirtualSMC-1.3.8; do
-    if [[ ! -d $cache/source/$component ]]; then
-        mkdir "$cache/source/$component"
-        unzip -q "$cache/downloads/$component-RELEASE.zip" -d "$cache/source/$component"
-    fi
-done
 if [[ ! -d $cache/source/qemu-11.1.3 ]]; then tar -xf "$cache/downloads/qemu-11.1.3.tar.xz" -C "$cache/source"; fi
 python=${CAGE_BUILD_PYTHON:-python3}
 "$python" -c 'import sys; assert sys.version_info >= (3, 11), "QEMU build needs Python 3.11 or newer"'
@@ -34,6 +25,16 @@ command -v pkg-config >/dev/null
 export MACOSX_DEPLOYMENT_TARGET=14.0
 sdk=$(xcrun --show-sdk-path)
 mkdir -p "$cache/pkgconfig"
+# Homebrew keeps some formulae, such as pixman, outside the default pkg-config
+# search path. Add the installed ones that QEMU links against.
+if command -v brew >/dev/null; then
+    for formula in pixman libffi; do
+        if prefix=$(brew --prefix "$formula" 2>/dev/null) && [[ -d $prefix/lib/pkgconfig ]]; then
+            PKG_CONFIG_PATH="$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+        fi
+    done
+    export PKG_CONFIG_PATH
+fi
 ffi_pc=$(pkg-config --variable=pcfiledir libffi)/libffi.pc
 sed "s#^homebrew_sdkroot=.*#homebrew_sdkroot=$sdk#" "$ffi_pc" > "$cache/pkgconfig/libffi.pc"
 export PKG_CONFIG_PATH="$cache/pkgconfig:${PKG_CONFIG_PATH:-}"

@@ -18,7 +18,7 @@ func TestProxyRouteAPIIsAtomicAndSurvivesRefresh(t *testing.T) {
 	s := testServer(t)
 	p, _ := managedproxy.Load(s.profile)
 	entry := p.Selected
-	if err := p.Import("home", "https://example.com/home?token=private-token", []byte(`proxies: [{name: home, type: http, server: 127.0.0.1, port: 1080, password: private-password}]`), "home", 0, ""); err != nil {
+	if err := p.Import("home", "https://example.com/home?token=private-token", []byte(`proxies: [{name: home, type: http, server: 192.0.2.1, port: 1080, password: private-password}]`), "home", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	exit := p.Sources[1].Nodes[0].ID
@@ -95,7 +95,7 @@ func TestProxyRouteAPIIsAtomicAndSurvivesRefresh(t *testing.T) {
 		t.Fatal("active transit source removed")
 	}
 	fetchProxySource = func(context.Context, *http.Client, string) ([]byte, string, error) {
-		return []byte(`proxies: [{name: home, type: http, server: 127.0.0.1, port: 2080, password: updated}]`), "", nil
+		return []byte(`proxies: [{name: home, type: http, server: 192.0.2.1, port: 2080, password: updated}]`), "", nil
 	}
 	if err := s.changeProxy("refresh", proxyInput{ID: "home", HostDownload: true}, nil); err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestProxyRouteAPIIsAtomicAndSurvivesRefresh(t *testing.T) {
 		t.Fatal("subscription refresh lost the chain")
 	}
 	fetchProxySource = func(context.Context, *http.Client, string) ([]byte, string, error) {
-		return []byte(`proxies: [{name: replacement, type: http, server: 127.0.0.1, port: 3080}]`), "", nil
+		return []byte(`proxies: [{name: replacement, type: http, server: 192.0.2.1, port: 3080}]`), "", nil
 	}
 	if err := s.changeProxy("refresh", proxyInput{ID: "home", HostDownload: true}, nil); err == nil {
 		t.Fatal("missing exit silently replaced")
@@ -132,7 +132,7 @@ func TestProxySelectReplacesExistingChain(t *testing.T) {
 	s := testServer(t)
 	p, _ := managedproxy.Load(s.profile)
 	a := p.Selected
-	if err := p.Import("home", "", []byte(`proxies: [{name: home, type: http, server: 127.0.0.1, port: 1080}]`), "home", 0, ""); err != nil {
+	if err := p.Import("home", "", []byte(`proxies: [{name: home, type: http, server: 192.0.2.1, port: 1080}]`), "home", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	b := p.Sources[1].Nodes[0].ID
@@ -205,9 +205,9 @@ func TestSingleNodeRouteKeepsImportedDialer(t *testing.T) {
 	s := testServer(t)
 	p, _ := managedproxy.Load(s.profile)
 	if err := p.Import("chain", "", []byte(`proxies:
-  - {name: T, type: http, server: 127.0.0.1, port: 1080}
-  - {name: A, type: socks5, server: 127.0.0.1, port: 1081, dialer-proxy: T}
-  - {name: B, type: socks5, server: 127.0.0.1, port: 1082, dialer-proxy: T}
+  - {name: T, type: http, server: transit.example, port: 1080}
+  - {name: A, type: socks5, server: exit-a.example, port: 1081, dialer-proxy: T}
+  - {name: B, type: socks5, server: exit-b.example, port: 1082, dialer-proxy: T}
 `), "chain", 0, ""); err != nil {
 		t.Fatal(err)
 	}

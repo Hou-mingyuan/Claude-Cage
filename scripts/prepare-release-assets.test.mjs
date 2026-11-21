@@ -49,6 +49,20 @@ test('includes Linux deb only with its verified corresponding source and merges 
   assert.equal(prepared.assets.filter(name => name === dependencies.mihomoSource.file).length, 1);
 });
 
+test('Intel Mac DMG shares the Apple Silicon Mihomo source', async t => {
+  const f = await fixture(t);
+  const intel = join(f.root, 'macos-intel');
+  const dmg = `Cage-${version}-macos-amd64.dmg`;
+  await platform(intel, { [dmg]: 'Intel Mac package fixture' });
+  // Without the Apple Silicon output, the Intel package has no source beside it.
+  await assert.rejects(prepareReleaseAssets({ inputs: [intel], output: f.output }), /Intel macOS release requires/);
+  await platform(f.mac, macAssets());
+  const prepared = await prepareReleaseAssets({ inputs: [f.mac, intel], output: f.output });
+  assert.ok(prepared.assets.includes(dmg) && prepared.assets.includes(names.mac));
+  assert.equal(prepared.assets.filter(name => name === names.macSource).length, 1);
+  assert.equal(await readFile(join(f.output, dmg), 'utf8'), 'Intel Mac package fixture');
+});
+
 test('combines both platforms, deduplicates identical sources and keeps website checksum lookup valid', async t => {
   const f = await fixture(t);
   const extraSource = `${dependencies.qemuSource.file}.gz`;

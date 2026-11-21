@@ -11,6 +11,10 @@ foreach ($name in @('mihomo', 'mihomoSource', 'openssh', 'qemu', 'webview2', 'qe
     $path = Get-VerifiedDependency $dependencies.$name $DependencyCache
     Write-Host "Verified $name at $path"
 }
+foreach ($wheel in $dependencies.qemuPythonWheels) {
+    $path = Get-VerifiedDependency $wheel (Join-Path $DependencyCache 'qemu-python-wheels')
+    Write-Host "Verified QEMU build wheel $($wheel.name) at $path"
+}
 Push-Location $repository
 try { Invoke-BuildTool (Get-BuildCommand @('node.exe', 'node')) @('scripts/bundle-cloud-kit.mjs', '--prefetch') }
 finally { Pop-Location }

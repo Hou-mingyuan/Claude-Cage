@@ -29,7 +29,8 @@ import { TailscalePanel } from "./tailscale";
 import { HostPluginsPanel, pluginPages, pluginPageTitle, useHostPlugins } from "./host-plugins";
 import { PluginView } from "./plugin-view";
 import { WorkspaceSidebar } from "./workspace-sidebar";
-import { useCLISessions, sessionsChanged } from "./cli-sessions";
+import { useCLISessions, desktopSessionRequest, sessionsChanged } from "./cli-sessions";
+import { SessionAccount } from "./session-account";
 import { TerminalMenu } from "./terminal-menu";
 import { TERMINAL_LIMIT, liveTerminalCount } from "./session-order.mjs";
 import { InitializationGate } from "./initialization";
@@ -53,6 +54,9 @@ import {
   projectName,
   projectGroups,
   tabName,
+  sameState,
+  mergeTabs,
+  mergeBrowserTabs,
 } from "./workspace-state.mjs";
 import { SafetyPanel } from "./safety";
 import { SafetyChecklistContext, SafetyMessage } from "./safety-message";
@@ -91,6 +95,7 @@ function App() {
   const [desktopOpen, setDesktopOpen] = useState(false);
   const [terminalChoice, setTerminalChoice] = useState(null);
   const [openingSession, setOpeningSession] = useState("");
+  const [sessionAccount, setSessionAccount] = useState(null);
   const [sessionOpenError, setSessionOpenError] = useState(null);
   const sessionOpenRequest = useRef(null);
   useEffect(() => () => {
@@ -357,16 +362,22 @@ function App() {
     }
   };
   const clipboardConnection = getClientContext().connection_id;
+  const clipboardRef = useRef(null);
   useEffect(() => {
     if (!status?.ready || viewingAccountDesktop || !nativeAvailable()) return;
     const clipboard = shareClipboard({
       connect: () => new WebSocket(runtimeSocketURL("/clipboard")), native,
       onStatus: setToast,
       setActive: active => { window.cageSharedClipboardActive = active; },
+      isVisible: () => windowVisibleRef.current,
     });
+    clipboardRef.current = clipboard;
     window.cageSyncClipboard = () => clipboard.sync();
-    return () => { clipboard.dispose(); delete window.cageSyncClipboard; };
+    return () => { clipboardRef.current = null; clipboard.dispose(); delete window.cageSyncClipboard; };
   }, [status?.ready, viewingAccountDesktop, clipboardConnection]);
+  useEffect(() => {
+    clipboardRef.current?.setVisible(windowVisible);
+  }, [windowVisible]);
   const desktopFiles = useDesktopFiles(Boolean(status?.ready && !viewingAccountDesktop), notify, desktopOpen && !settingsOpen && !managementPage && !storageRecovery && windowVisible, windowVisible);
   const downloads = [...(browser.downloads || []), ...desktopFiles.downloads];
   useDownloadNotifications(downloads, notify, Boolean(browser.uploads?.length || desktopFiles.uploads.length));
@@ -765,7 +776,7 @@ function App() {
         const next = await api("/status");
         if (!live) return;
         jobRunning = next.job.running;
-        setStatus(next);
+        setStatus((previous) => (sameState(previous, next) ? previous : next));
         setStartRequest(pending => pending?.id && pending.id === next.job.id ? null : pending);
         setConnectionError("");
         if (
@@ -804,7 +815,7 @@ function App() {
           }
           if (!live) return;
           browserSnapshot.current = b;
-          setBrowser(b);
+          setBrowser((previous) => (sameState(previous, b) ? previous : b));
           const enrollment = t.find(item => item.background_login);
           if (enrollment) {
             accountLogin.current = enrollment.id;
@@ -826,15 +837,7 @@ function App() {
               kind: "terminal",
             })),
           ];
-          setTabs((previous) => {
-            const map = new Map(all.map((item) => [item.id, item]));
-            return [
-              ...previous
-                .filter((item) => map.has(item.id))
-                .map((item) => map.get(item.id)),
-              ...all.filter((item) => !previous.some((p) => p.id === item.id)),
-            ];
-          });
+          setTabs((previous) => mergeTabs(previous, all));
           if (b.tabs.some(t => t.login && t.id === b.active) && !browserIds.current.has(b.active)) setManagementPage("");
           if (!browserDismissed.current && initialized.current && b.active && b.active !== activeRef.current && !browserIds.current.has(b.active)) {
             setDesktopOpen(false);
@@ -899,16 +902,25 @@ function App() {
   useEffect(() => {
     if (windowVisible) refreshStatus.current?.();
   }, [windowVisible]);
+  const statusLoaded = Boolean(status);
   useEffect(() => {
-    if (!settings || !status || fatal || connectionError || launchAcknowledged.current || !nativeAvailable()) return;
+    if (!settings || !statusLoaded || fatal || connectionError || launchAcknowledged.current || !nativeAvailable()) return;
     // Effects run after the workbench render commits. HTML navigation alone
     // cannot confirm a successful upgrade when session/API startup failed.
     let live = true;
-    native("workbenchReady").then((accepted) => {
-      if (live && accepted === true) launchAcknowledged.current = true;
-    }).catch(() => {});
-    return () => { live = false; };
-  }, [settings, status, fatal, connectionError]);
+    let timer;
+    const acknowledge = () => {
+      native("workbenchReady").then((accepted) => {
+        if (!live) return;
+        if (accepted === true) launchAcknowledged.current = true;
+        else timer = setTimeout(acknowledge, 3000);
+      }).catch(() => {
+        if (live) timer = setTimeout(acknowledge, 3000);
+      });
+    };
+    acknowledge();
+    return () => { live = false; clearTimeout(timer); };
+  }, [settings, statusLoaded, fatal, connectionError]);
   const notificationPrefsRef = useRef(defaultNotificationPreferences);
   const notificationDedupRef = useRef(null);
   if (!notificationDedupRef.current) notificationDedupRef.current = createNotificationDeduplicator();
@@ -1030,16 +1042,11 @@ function App() {
         setLayout({ active: survivor });
       }
       browserSnapshot.current = b;
-      setBrowser((previous) => ({ ...previous, ...b }));
-      setTabs((previous) => {
-        const map = new Map(b.tabs.map((t) => [t.id, t]));
-        return [
-          ...previous
-            .filter((t) => t.kind === "terminal" || map.has(t.id))
-            .map((t) => map.get(t.id) || t),
-          ...b.tabs.filter((t) => !previous.some((p) => p.id === t.id)),
-        ];
+      setBrowser((previous) => {
+        const merged = { ...previous, ...b };
+        return sameState(previous, merged) ? previous : merged;
       });
+      setTabs((previous) => mergeBrowserTabs(previous, b.tabs));
       const focusLogin = b.focus && b.tabs.some(tab => tab.id === b.active && tab.login);
       if (focusLogin) {
         if (accountLogin.current) tabsBeforeLogin.current = b.active;
@@ -1634,6 +1641,7 @@ function App() {
             onSessionOpen={openSessionTerminal}
             openingSession={openingSession}
             sessionOpenError={sessionOpenError}
+            onSessionAccount={setSessionAccount}
             onSessionArchive={archiveSession}
             onSessionPin={pinSession}
             onSessionRename={session => setRename({id:session.id, title:session.title, session:true})}
@@ -1994,6 +2002,21 @@ function App() {
                     <div className="start-error" role="status">
                       <strong>{status.abandoned_guests.map(name => ({ macos: "macOS", windows: "Windows", ubuntu: "Ubuntu" })[name] || name).join(" / ")}{" " + tr("客机已不再支持")}</strong>
                       <p>{tr("原有客机数据仍原样保留在磁盘上，未做任何改动；如不再需要，可以手动删除。")}</p>
+                      {status.abandoned_environment && !running && status.local_vm_storage && !isRemoteClient() && (
+                        <button
+                          className="text-button"
+                          disabled={busy}
+                          onClick={async () => {
+                            if (await confirm({
+                              title: tr("保留旧 Ubuntu 环境并新建 Debian？"),
+                              body: tr("旧 Ubuntu 环境会原样移到数据目录的 state/guests-removed 文件夹，不删除任何文件。随后 Cage 下载并创建新的 Debian 环境；旧环境里的文件和登录状态不会带到新环境。"),
+                              confirm: tr("保留并新建 Debian"),
+                            })) startEnvironment({ set_aside_abandoned: true });
+                          }}
+                        >
+                          {tr("保留旧 Ubuntu 环境并新建 Debian")}
+                        </button>
+                      )}
                     </div>
                   )}
                   {!storageRecovery && !setupProgress && status.job?.error && (
@@ -2181,6 +2204,32 @@ function App() {
               }
             />
           </form>
+        </Modal>
+      )}
+      {sessionAccount && (
+        <Modal
+          title={tr("用其他账号继续")}
+          onClose={() => setSessionAccount(null)}
+          footer={<button onClick={() => setSessionAccount(null)}>{tr("关闭")}</button>}
+        >
+          <div className="modal-body">
+            <SessionAccount
+              id={sessionAccount.id}
+              request={desktopSessionRequest}
+              defaultOpen
+              onChanged={async (view) => {
+                sessionsChanged();
+                if (view?.desktop_terminal_id) {
+                  try {
+                    const terminals = await api("/terminals");
+                    const terminal = terminals.find(item => item.id === view.desktop_terminal_id && item.cli_session_id === sessionAccount.id);
+                    if (terminal) showTerminal(terminal);
+                  } catch (error) { notify(error.message); }
+                  setSessionAccount(null);
+                }
+              }}
+            />
+          </div>
         </Modal>
       )}
       {transfer && (

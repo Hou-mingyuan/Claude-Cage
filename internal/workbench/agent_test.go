@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -61,6 +62,23 @@ func TestAgentAuthenticationAndLockedAccount(t *testing.T) {
 	}
 	if w := request(s, "POST", "/api/agent/settings", s.origin, `{"patch":{"keyboard":"native"}}`, false); w.Code != 401 {
 		t.Fatal("agent routes bypassed session", w.Code)
+	}
+}
+
+// A profile without an account asks for account.create, not account.unlock.
+func TestAgentMissingAccountAsksForCreate(t *testing.T) {
+	s := agentTestController(t)
+	s.account.lock()
+	s.account.mu.Lock()
+	s.account.record = nil
+	s.account.mu.Unlock()
+	_, err := AgentCall(context.Background(), s.configPath, "settings.get", nil)
+	var ae *AgentError
+	if !errors.As(err, &ae) || ae.Code != "account_missing" || ae.NextAction != "account.create" || ae.HTTPStatus != 423 {
+		t.Fatalf("missing account: %#v", err)
+	}
+	if w := request(s, "GET", "/api/settings", "", "", true); w.Code != 423 || w.Header().Get("X-Cage-Recovery") != accountMissingRecovery {
+		t.Fatalf("missing account response: %d %q", w.Code, w.Header().Get("X-Cage-Recovery"))
 	}
 }
 
@@ -243,5 +261,166 @@ func TestAgentNativeDiagnosticExport(t *testing.T) {
 				t.Fatal("existing bundle changed")
 			}
 		})
+	}
+}
+
+func TestAgentTrustedLoginOmitsRejectedCreate(t *testing.T) {
+	for _, op := range AgentOperations() {
+		if op.Name != "client.trusted-login" {
+			continue
+		}
+		if strings.Contains(strings.ReplaceAll(op.Description, "account.create", ""), "create") || !strings.Contains(op.Description, "account.create") {
+			t.Fatalf("trusted-login advertises an action the launcher rejects: %q", op.Description)
+		}
+		return
+	}
+	t.Fatal("client.trusted-login is not listed")
+}
+
+func TestAgentStartRejectedDuringDesktopOnboardingAndAllowedHeadless(t *testing.T) {
+	s := agentTestController(t)
+	// Headless agent calling initialization.set begin does not claim desktop onboarding.
+	if _, err := AgentCall(context.Background(), s.configPath, "initialization.set", json.RawMessage(`{"action":"begin"}`)); err != nil {
+		t.Fatalf("agent begin: %v", err)
+	}
+	raw, err := AgentCall(context.Background(), s.configPath, "initialization.status", nil)
+	if err != nil {
+		t.Fatalf("initialization.status: %v", err)
+	}
+	var view initializationView
+	if err := json.Unmarshal(raw, &view); err != nil || !view.Required || view.DesktopActive {
+		t.Fatalf("agent begin unexpectedly activated desktop onboarding: %+v %v", view, err)
+	}
+
+	// Desktop onboarding screen polling /api/status with setup initiator claims the lease.
+	w := requestWithHeader(s, "GET", "/api/status", "", jobInitiatorHeader, jobInitiatorSetup)
+	if w.Code != 200 {
+		t.Fatalf("setup status: %d %s", w.Code, w.Body.String())
+	}
+	raw, err = AgentCall(context.Background(), s.configPath, "initialization.status", nil)
+	if err != nil {
+		t.Fatalf("initialization.status after setup poll: %v", err)
+	}
+	if err := json.Unmarshal(raw, &view); err != nil || !view.DesktopActive {
+		t.Fatalf("expected desktop_active=true: %+v %v", view, err)
+	}
+
+	// Agent environment.start must be rejected with state_conflict without starting a job.
+	_, err = AgentCall(context.Background(), s.configPath, "environment.start", json.RawMessage(`{}`))
+	var ae *AgentError
+	if !errors.As(err, &ae) || ae.Code != "state_conflict" || ae.HTTPStatus != 409 || !strings.Contains(ae.Message, "首次引导") {
+		t.Fatalf("expected state_conflict during desktop onboarding, got: %v", err)
+	}
+	if s.jobs.snapshot().ID != "" {
+		t.Fatalf("rejected agent start published a job: %+v", s.jobs.snapshot())
+	}
+
+	// Once onboarding lease expires, agent start is no longer blocked by desktop onboarding.
+	s.clearDesktopOnboarding()
+	_, err = AgentCall(context.Background(), s.configPath, "environment.start", json.RawMessage(`{"guest_system":"macos"}`))
+	if !errors.As(err, &ae) || strings.Contains(ae.Message, "首次引导") {
+		t.Fatalf("stale onboarding guard remained active: %v", err)
+	}
+}
+
+func TestAgentJobExposesInitiatorAndCanceledByWhenStoppedByDesktop(t *testing.T) {
+	s := agentTestController(t)
+	started, canceled := make(chan struct{}), make(chan struct{})
+	first, err := s.submitJobWithInitiator(jobInitiatorAgent, "start", func() error {
+		close(started)
+		<-s.operationContext().Done()
+		close(canceled)
+		return context.Canceled
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitJobSignal(t, started)
+
+	// Desktop setup screen issues POST /api/stop.
+	w := requestWithHeader(s, "POST", "/api/stop", "{}", jobInitiatorHeader, jobInitiatorSetup)
+	if w.Code != 200 {
+		t.Fatalf("setup stop failed: %d %s", w.Code, w.Body.String())
+	}
+	var stopJob Job
+	if err := json.Unmarshal(w.Body.Bytes(), &stopJob); err != nil || stopJob.Initiator != jobInitiatorSetup {
+		t.Fatalf("stop job missing setup initiator: %+v %v", stopJob, err)
+	}
+	awaitJobSignal(t, canceled)
+
+	data, err := AgentJob(context.Background(), s.configPath, first.ID)
+	if err != nil {
+		t.Fatalf("AgentJob(%s): %v", first.ID, err)
+	}
+	var queried Job
+	if err := json.Unmarshal(data, &queried); err != nil {
+		t.Fatal(err)
+	}
+	if queried.Initiator != jobInitiatorAgent || !queried.Canceled || queried.CanceledBy != jobInitiatorSetup || queried.SupersededBy != stopJob.ID {
+		t.Fatalf("agent job missing cancellation source: %+v", queried)
+	}
+}
+
+func requestWithHeader(s *Server, method, path, body, header, value string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, s.origin+path, strings.NewReader(body))
+	r.Header.Set("Origin", s.origin)
+	if body != "" {
+		r.Header.Set("Content-Type", "application/json")
+	}
+	r.Header.Set(header, value)
+	r.AddCookie(&http.Cookie{Name: s.cookieName(), Value: s.session})
+	r.AddCookie(&http.Cookie{Name: s.cookieName() + "-desktop", Value: trustedViewProof(s.token)})
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, r)
+	return w
+}
+
+func TestAgentReleasesDesktopOnboardingWithoutQuittingWindow(t *testing.T) {
+	s := agentTestController(t)
+	desktopActive := func() bool {
+		t.Helper()
+		raw, err := AgentCall(context.Background(), s.configPath, "initialization.status", nil)
+		var view initializationView
+		if err != nil || json.Unmarshal(raw, &view) != nil {
+			t.Fatalf("initialization.status: %s %v", raw, err)
+		}
+		return view.DesktopActive
+	}
+	poll := func() {
+		t.Helper()
+		for _, path := range []string{"/api/status", "/api/environment/initialization"} {
+			if w := requestWithHeader(s, "GET", path, "", jobInitiatorHeader, jobInitiatorSetup); w.Code != 200 {
+				t.Fatalf("setup poll %s: %d %s", path, w.Code, w.Body.String())
+			}
+		}
+	}
+	poll()
+	if !desktopActive() {
+		t.Fatal("onboarding poll did not claim the lease")
+	}
+	if _, err := AgentCall(context.Background(), s.configPath, "initialization.set", json.RawMessage(`{"action":"release"}`)); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.profile, "initialization.json")); err != nil {
+		t.Fatal("release did not record the started setup, so a reopened window would claim it again", err)
+	}
+	// The still-open onboarding screen keeps polling.
+	poll()
+	if desktopActive() {
+		t.Fatal("onboarding polling reclaimed a released lease")
+	}
+	var ae *AgentError
+	if _, err := AgentCall(context.Background(), s.configPath, "environment.start", json.RawMessage(`{"guest_system":"macos"}`)); !errors.As(err, &ae) || strings.Contains(ae.Message, "首次引导") {
+		t.Fatalf("released onboarding still blocked the agent: %v", err)
+	}
+	// Starting the install from the window takes setup back.
+	if w := initializationRequest(s, "install", true); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if !desktopActive() {
+		t.Fatal("a desktop install did not reclaim onboarding")
+	}
+	if _, err := AgentCall(context.Background(), s.configPath, "environment.start", json.RawMessage(`{}`)); !errors.As(err, &ae) || ae.Code != "state_conflict" {
+		t.Fatalf("agent start during reclaimed onboarding: %v", err)
 	}
 }

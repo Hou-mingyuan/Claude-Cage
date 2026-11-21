@@ -39,9 +39,22 @@ type Config struct {
 	URL         string `json:"-"`
 }
 
+// Layout selects how a client directory is read. Plain scans top-level
+// config files; Verge and Party read the runtime config plus the client's
+// profile index without running any enhancement scripts.
+type Layout int
+
+const (
+	Plain Layout = iota
+	Verge
+	// Party is Clash Party (formerly Mihomo Party). Its root config.yaml holds
+	// app settings, while mihomo runs from work/ with work/config.yaml.
+	Party
+)
+
 type Location struct {
 	Client, Directory string
-	Verge             bool
+	Layout            Layout
 }
 
 // Locations also makes platform path rules testable without probing another
@@ -60,28 +73,35 @@ func Locations(platform, home, dataHome, configHome string) []Location {
 			dataHome = filepath.Join(home, ".local", "share")
 		}
 	}
+	// Clash Party is an Electron app; its userData lives under the config
+	// home on Linux rather than the data home.
+	partyHome := configHome
+	if platform == "darwin" || platform == "windows" {
+		partyHome = dataHome
+	}
 	out := []Location{
-		{"FlClash", filepath.Join(dataHome, "com.follow.clash"), false},
-		{"FlClash", filepath.Join(dataHome, "com.follow.clash", "profiles"), false},
-		{"Clash Verge Rev", filepath.Join(dataHome, "io.github.clash-verge-rev.clash-verge-rev"), true},
+		{"FlClash", filepath.Join(dataHome, "com.follow.clash"), Plain},
+		{"FlClash", filepath.Join(dataHome, "com.follow.clash", "profiles"), Plain},
+		{"Clash Verge Rev", filepath.Join(dataHome, "io.github.clash-verge-rev.clash-verge-rev"), Verge},
 		// Clash Neo is a Verge fork and keeps the same profile layout.
-		{"Clash Neo", filepath.Join(dataHome, "io.github.clash-neo"), true},
-		{"Clash Verge", filepath.Join(configHome, "clash-verge"), true},
-		{"Clash / ClashX", filepath.Join(configHome, "clash"), false},
-		{"Mihomo", filepath.Join(configHome, "mihomo"), false},
-		{"ShadowsocksR", filepath.Join(configHome, "shadowsocksr"), false},
-		{"Shadowsocks", filepath.Join(configHome, "shadowsocks"), false},
+		{"Clash Neo", filepath.Join(dataHome, "io.github.clash-neo"), Verge},
+		{"Clash Party", filepath.Join(partyHome, "mihomo-party"), Party},
+		{"Clash Verge", filepath.Join(configHome, "clash-verge"), Verge},
+		{"Clash / ClashX", filepath.Join(configHome, "clash"), Plain},
+		{"Mihomo", filepath.Join(configHome, "mihomo"), Plain},
+		{"ShadowsocksR", filepath.Join(configHome, "shadowsocksr"), Plain},
+		{"Shadowsocks", filepath.Join(configHome, "shadowsocks"), Plain},
 	}
 	if platform == "darwin" {
-		out = append(out, Location{"ShadowsocksX-NG", filepath.Join(home, ".ShadowsocksX-NG"), false})
+		out = append(out, Location{"ShadowsocksX-NG", filepath.Join(home, ".ShadowsocksX-NG"), Plain})
 	}
 	if platform == "windows" {
 		out = append(out,
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash"), false},
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash", "profiles"), false},
-			Location{"Clash / Mihomo", filepath.Join(home, ".config", "clash"), false},
-			Location{"Clash Verge", filepath.Join(home, ".config", "clash-verge"), true},
-			Location{"ShadowsocksR", filepath.Join(dataHome, "ShadowsocksR"), false})
+			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash"), Plain},
+			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash", "profiles"), Plain},
+			Location{"Clash / Mihomo", filepath.Join(home, ".config", "clash"), Plain},
+			Location{"Clash Verge", filepath.Join(home, ".config", "clash-verge"), Verge},
+			Location{"ShadowsocksR", filepath.Join(dataHome, "ShadowsocksR"), Plain})
 	}
 	return out
 }
@@ -110,7 +130,9 @@ func Scan(locations []Location, key []byte) []Config {
 			continue
 		}
 		seen[root] = true
-		add := func(file, name, remote string, current bool) {
+		// providers is the directory, relative to root, that the client's
+		// mihomo core uses to resolve proxy-provider cache paths.
+		add := func(file, providers, name, remote string, current bool) {
 			data, err := readWithin(root, file)
 			if os.IsNotExist(err) {
 				return
@@ -120,7 +142,7 @@ func Scan(locations []Location, key []byte) []Config {
 			if err != nil {
 				c.Error = "无法读取这份配置，请检查文件权限或改为手动导入"
 			} else {
-				c.Data, c.Warning, err = nodeData(root, data)
+				c.Data, c.Warning, err = nodeData(root, providers, data)
 				if err != nil {
 					c.Error = "这份配置没有可导入的节点，或格式暂不支持；请从原软件导出 Clash/Mihomo 配置"
 				}
@@ -129,6 +151,9 @@ func Scan(locations []Location, key []byte) []Config {
 				var preview managedproxy.Store
 				if err := preview.Import(c.Name, "", c.Data, "preview", 0, ""); err != nil {
 					c.Error = "这份配置没有可导入的节点；请从原软件导出含节点的 Clash/Mihomo 配置"
+					if errors.Is(err, managedproxy.ErrLocalProxyNode) {
+						c.Error = err.Error()
+					}
 				} else {
 					c.Nodes = len(preview.Sources[0].Nodes)
 					c.Skipped = len(preview.Sources[0].Skipped)
@@ -148,12 +173,47 @@ func Scan(locations []Location, key []byte) []Config {
 			c.ID = hex.EncodeToString(mac.Sum(nil))
 			out = append(out, c)
 		}
-		if loc.Verge {
+		switch loc.Layout {
+		case Party:
+			add(filepath.Join("work", "config.yaml"), "work", "当前生效配置", "", true)
+			data, err := readWithin(root, "profile.yaml")
+			if err != nil {
+				continue
+			}
+			var index struct {
+				Current string `yaml:"current"`
+				Items   []struct {
+					ID   string `yaml:"id"`
+					Name string `yaml:"name"`
+					Type string `yaml:"type"`
+					URL  string `yaml:"url"`
+				} `yaml:"items"`
+			}
+			if yaml.Unmarshal(data, &index) != nil {
+				continue
+			}
+			for i, item := range index.Items {
+				if i >= 64 {
+					break
+				}
+				if item.Type != "remote" && item.Type != "local" {
+					continue
+				}
+				if item.ID == "" || item.ID == "." || item.ID == ".." || filepath.Base(item.ID) != item.ID || strings.ContainsAny(item.ID, `/\\`) {
+					continue
+				}
+				name := item.Name
+				if name == "" {
+					name = "已保存的配置"
+				}
+				add(filepath.Join("profiles", item.ID+".yaml"), "work", name, item.URL, item.ID == index.Current)
+			}
+		case Verge:
 			// Prefer the latest generated runtime file, which includes local
 			// overrides; never execute profile enhancement scripts ourselves.
 			for _, file := range []string{"clash-verge.yaml", "config.yaml"} {
 				if _, err := os.Stat(filepath.Join(root, file)); !os.IsNotExist(err) {
-					add(file, "当前生效配置", "", true)
+					add(file, "", "当前生效配置", "", true)
 					break
 				}
 			}
@@ -188,9 +248,9 @@ func Scan(locations []Location, key []byte) []Config {
 				if name == "" {
 					name = "已保存的配置"
 				}
-				add(filepath.Join("profiles", item.File), name, item.URL, item.UID == index.Current)
+				add(filepath.Join("profiles", item.File), "", name, item.URL, item.UID == index.Current)
 			}
-		} else {
+		default:
 			files, err := os.ReadDir(root)
 			if err != nil {
 				continue
@@ -205,7 +265,7 @@ func Scan(locations []Location, key []byte) []Config {
 					break
 				}
 				count++
-				add(file.Name(), file.Name(), "", file.Name() == "config.yaml" || file.Name() == "config.json" || file.Name() == "gui-config.json")
+				add(file.Name(), "", file.Name(), "", file.Name() == "config.yaml" || file.Name() == "config.json" || file.Name() == "gui-config.json")
 			}
 		}
 	}
@@ -255,7 +315,7 @@ func readWithin(root, relative string) ([]byte, error) {
 	return data, nil
 }
 
-func nodeData(root string, data []byte) ([]byte, string, error) {
+func nodeData(root, providers string, data []byte) ([]byte, string, error) {
 	var input struct {
 		Proxies   []map[string]any `yaml:"proxies"`
 		Payload   []map[string]any `yaml:"payload"`
@@ -277,11 +337,11 @@ func nodeData(root string, data []byte) ([]byte, string, error) {
 	sort.Strings(names)
 	for i, name := range names {
 		provider := input.Providers[name]
-		if i >= 32 || provider.Path == "" {
+		if i >= 32 || !filepath.IsLocal(provider.Path) {
 			missing++
 			continue
 		}
-		cached, err := readWithin(root, provider.Path)
+		cached, err := readWithin(root, filepath.Join(providers, provider.Path))
 		total += len(cached)
 		if err != nil || total > managedproxy.MaxImport {
 			missing++

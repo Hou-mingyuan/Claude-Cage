@@ -13,7 +13,7 @@ func TestRouteOverridesAcrossSourcesWithoutRewritingSubscription(t *testing.T) {
 	if err := s.Import("airport", "", []byte(testNodes), "airport", 0, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Import("home", "", []byte(`proxies: [{name: home, type: socks5, server: 127.0.0.1, port: 1081, password: private-home}]`), "home", 0, ""); err != nil {
+	if err := s.Import("home", "", []byte(`proxies: [{name: home, type: socks5, server: 203.0.113.10, port: 1081, password: private-home}]`), "home", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	entry := s.Sources[0].Nodes[1] // Already has an imported dialer, which the explicit entry must override.
@@ -46,7 +46,7 @@ func TestRouteOverridesAcrossSourcesWithoutRewritingSubscription(t *testing.T) {
 	if route, err := loaded.Route(); err != nil || !reflect.DeepEqual(route, s.Chain) {
 		t.Fatal("chain was not durable", route, err)
 	}
-	if err := loaded.Import("home", "", []byte(`proxies: [{name: home, type: socks5, server: 127.0.0.1, port: 2081, password: refreshed-home}]`), "home", 0, ""); err != nil {
+	if err := loaded.Import("home", "", []byte(`proxies: [{name: home, type: socks5, server: 203.0.113.10, port: 2081, password: refreshed-home}]`), "home", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	if route, err := loaded.Route(); err != nil || !reflect.DeepEqual(route, s.Chain) {

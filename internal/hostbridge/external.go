@@ -141,13 +141,113 @@ func (e *RefusedError) Unwrap() error { return e.Reason }
 // ErrNotForPage is a page asking for a tool its plugin does not offer pages.
 var ErrNotForPage = errors.New("the tool is not offered to pages")
 
+// ProjectDirPlaceholder is replaced in plugin command arguments with the active
+// project directory (the host path for host plugins, the guest workspace path
+// for guest plugins).
+const ProjectDirPlaceholder = "${PROJECT_DIR}"
+
+// ErrNoProjectDir is returned when a plugin's command uses ProjectDirPlaceholder
+// but no project folder is currently open.
+var ErrNoProjectDir = errors.New("no project folder is open")
+
+// MissingProgramError reports that a host plugin's runtime program (such as uv,
+// uvx, npx, node or python3) could not be found on PATH.
+type MissingProgramError struct {
+	Plugin  string
+	Program string
+	Err     error
+}
+
+func (e *MissingProgramError) Error() string {
+	hint := programInstallHint(e.Program)
+	if hint != "" {
+		return fmt.Sprintf("plugin %s: %s was not found on PATH (%s)", e.Plugin, e.Program, hint)
+	}
+	return fmt.Sprintf("plugin %s: %s was not found on PATH", e.Plugin, e.Program)
+}
+
+func (e *MissingProgramError) Unwrap() error { return e.Err }
+
+func programInstallHint(program string) string {
+	base := strings.ToLower(strings.TrimSuffix(filepath.Base(program), ".exe"))
+	switch base {
+	case "uv", "uvx":
+		return "install uv from https://docs.astral.sh/uv/ and reload plugins"
+	case "npx", "node", "npm":
+		return "install Node.js from https://nodejs.org/ and reload plugins"
+	case "python3", "python":
+		return "install Python 3 from https://www.python.org/ and reload plugins"
+	default:
+		return ""
+	}
+}
+
+// MissingSettingsError reports that a plugin is not started because settings
+// it requires have no value.
+type MissingSettingsError struct {
+	Plugin string
+	// Settings are the titles of the settings to fill in.
+	Settings []string
+}
+
+func (e *MissingSettingsError) Error() string {
+	return fmt.Sprintf("plugin %s needs these settings: %s", e.Plugin, strings.Join(e.Settings, ", "))
+}
+
+// MissingProjectDirError reports that a plugin needs an open project folder to
+// expand ProjectDirPlaceholder.
+type MissingProjectDirError struct {
+	Plugin string
+}
+
+func (e *MissingProjectDirError) Error() string {
+	return fmt.Sprintf("plugin %s requires an open project folder (%s)", e.Plugin, ProjectDirPlaceholder)
+}
+
+func (e *MissingProjectDirError) Unwrap() error { return ErrNoProjectDir }
+
+// CommandUsesProjectDir reports whether any argument in command references
+// ProjectDirPlaceholder.
+func CommandUsesProjectDir(command []string) bool {
+	for _, arg := range command[min(1, len(command)):] {
+		if strings.Contains(arg, ProjectDirPlaceholder) {
+			return true
+		}
+	}
+	return false
+}
+
+// ExpandCommand returns a copy of command with ProjectDirPlaceholder in
+// arguments (never the executable name itself) replaced by projectDir.
+func ExpandCommand(command []string, projectDir string) ([]string, error) {
+	if len(command) == 0 {
+		return nil, nil
+	}
+	out := slices.Clone(command)
+	for i := 1; i < len(out); i++ {
+		if !strings.Contains(out[i], ProjectDirPlaceholder) {
+			continue
+		}
+		if strings.TrimSpace(projectDir) == "" {
+			return nil, ErrNoProjectDir
+		}
+		out[i] = strings.ReplaceAll(out[i], ProjectDirPlaceholder, projectDir)
+	}
+	return out, nil
+}
+
 // External is a plugin run as a child program. Its tools are offered under
 // their own names once they pass CheckWording; every call first goes
 // through Approve, if set.
 type External struct {
 	Manifest Manifest
 	Dir      string
-	Approve  func(context.Context, ToolRequest) error
+	// ProjectDir is substituted for ${PROJECT_DIR} in host plugin arguments.
+	ProjectDir string
+	Approve    func(context.Context, ToolRequest) error
+	// Env, if set, gives the variables added for the plugin's program on
+	// this computer, read again each time it starts.
+	Env func(context.Context) ([]string, error)
 	// Spawn, if set, makes the command that runs the plugin's program
 	// somewhere other than this computer; Dir is then only where its files
 	// are kept here.
@@ -156,6 +256,8 @@ type External struct {
 	mu      sync.Mutex
 	session *mcp.ClientSession
 	tools   []*mcp.Tool
+	// restarting serializes Restart, which starts the program outside mu.
+	restarting sync.Mutex
 }
 
 // Start runs the program and reads its tools. It fails, leaving nothing
@@ -167,32 +269,113 @@ func (e *External) Start(ctx context.Context) error {
 }
 
 func (e *External) startLocked(ctx context.Context) error {
+	session, tools, err := e.open(ctx, e.ProjectDir)
+	if err != nil {
+		return err
+	}
+	e.session, e.tools = session, tools
+	return nil
+}
+
+// UsesProjectDir reports whether the plugin's server command takes
+// ProjectDirPlaceholder, so it has to run again when the project changes.
+func (e *External) UsesProjectDir() bool {
+	return CommandUsesProjectDir(e.Manifest.serverCommand())
+}
+
+// Running reports whether the plugin's program is up.
+func (e *External) Running() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.session != nil
+}
+
+// Restart stops the program and runs it again, as for a new project folder.
+// projectDir, if set, gives the folder when the program starts. Calls to
+// this plugin fail while it restarts; other plugins are not affected, and
+// its tools stay readable meanwhile. On failure nothing runs and the plugin
+// offers no tools until it is restarted.
+func (e *External) Restart(ctx context.Context, projectDir func() string) error {
+	e.restarting.Lock()
+	defer e.restarting.Unlock()
+	e.mu.Lock()
+	old := e.session
+	e.session = nil
+	if projectDir != nil {
+		e.ProjectDir = projectDir()
+	}
+	dir := e.ProjectDir
+	e.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	session, tools, err := e.open(ctx, dir)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err != nil {
+		e.tools = nil
+		return err
+	}
+	e.session, e.tools = session, tools
+	return nil
+}
+
+// open runs the program for projectDir and reads its tools. It fails,
+// leaving nothing running, if a tool's wording is not acceptable.
+func (e *External) open(ctx context.Context, projectDir string) (*mcp.ClientSession, []*mcp.Tool, error) {
 	if !e.Manifest.Supported() {
-		return fmt.Errorf("plugin %s does not support %s", e.Manifest.Name, runtime.GOOS)
+		return nil, nil, fmt.Errorf("plugin %s does not support %s", e.Manifest.Name, runtime.GOOS)
 	}
 	command := e.Manifest.serverCommand()
 	if len(command) == 0 {
-		return fmt.Errorf("plugin %s has no MCP server", e.Manifest.Name)
+		return nil, nil, fmt.Errorf("plugin %s has no MCP server", e.Manifest.Name)
 	}
 	var cmd *exec.Cmd
+	bareProgram := ""
 	if e.Spawn != nil {
 		var err error
 		if cmd, err = e.Spawn(ctx); err != nil {
-			return fmt.Errorf("plugin %s: %w", e.Manifest.Name, err)
+			if errors.Is(err, ErrNoProjectDir) {
+				return nil, nil, &MissingProjectDirError{Plugin: e.Manifest.Name}
+			}
+			if missing, ok := errors.AsType[*MissingSettingsError](err); ok {
+				return nil, nil, missing
+			}
+			return nil, nil, fmt.Errorf("plugin %s: %w", e.Manifest.Name, err)
 		}
 	} else {
-		program := command[0]
-		if !filepath.IsAbs(program) && (filepath.Base(program) != program || fileExists(filepath.Join(e.Dir, program))) {
+		expanded, err := ExpandCommand(command, projectDir)
+		if err != nil {
+			if errors.Is(err, ErrNoProjectDir) {
+				return nil, nil, &MissingProjectDirError{Plugin: e.Manifest.Name}
+			}
+			return nil, nil, fmt.Errorf("plugin %s: %w", e.Manifest.Name, err)
+		}
+		program := expanded[0]
+		localFile := !filepath.IsAbs(program) && (filepath.Base(program) != program || fileExists(filepath.Join(e.Dir, program)))
+		if localFile {
 			program = filepath.Join(e.Dir, program)
+		} else if filepath.Base(program) == program {
+			bareProgram = program
 		}
 		env := userEnv()
+		if e.Env != nil {
+			extra, err := e.Env(ctx)
+			if err != nil {
+				if missing, ok := errors.AsType[*MissingSettingsError](err); ok {
+					return nil, nil, missing
+				}
+				return nil, nil, fmt.Errorf("plugin %s: %w", e.Manifest.Name, err)
+			}
+			env = withEnv(env, extra)
+		}
 		// A bare name is found on the PATH the program is given, which may
 		// be longer than this process's own.
 		if filepath.Base(program) == program {
 			program = lookProgram(program, env)
 		}
 		// The program outlives the call that starts it.
-		cmd = exec.Command(program, command[1:]...)
+		cmd = exec.Command(program, expanded[1:]...)
 		cmd.Dir = e.Dir
 		cmd.Env = env
 		hideWindow(cmd)
@@ -202,21 +385,23 @@ func (e *External) startLocked(ctx context.Context) error {
 	defer cancel()
 	session, err := client.Connect(connect, &mcp.CommandTransport{Command: cmd, TerminateDuration: 2 * time.Second}, nil)
 	if err != nil {
-		return fmt.Errorf("plugin %s: %w", e.Manifest.Name, err)
+		if bareProgram != "" && (errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist)) {
+			return nil, nil, &MissingProgramError{Plugin: e.Manifest.Name, Program: bareProgram, Err: err}
+		}
+		return nil, nil, fmt.Errorf("plugin %s: %w", e.Manifest.Name, err)
 	}
 	listed, err := session.ListTools(connect, nil)
 	if err != nil {
 		_ = session.Close()
-		return fmt.Errorf("plugin %s: %w", e.Manifest.Name, err)
+		return nil, nil, fmt.Errorf("plugin %s: %w", e.Manifest.Name, err)
 	}
 	for _, tool := range listed.Tools {
 		if word, found := CheckWording(tool); found {
 			_ = session.Close()
-			return fmt.Errorf("plugin %s: tool %s mentions %q; tools describe only what they do", e.Manifest.Name, tool.Name, word)
+			return nil, nil, fmt.Errorf("plugin %s: tool %s mentions %q; tools describe only what they do", e.Manifest.Name, tool.Name, word)
 		}
 	}
-	e.session, e.tools = session, listed.Tools
-	return nil
+	return session, listed.Tools, nil
 }
 
 // Tools are the names of the tools the plugin offers the model, once
@@ -387,6 +572,18 @@ func (e *External) run(ctx context.Context, name string, arguments json.RawMessa
 	return session.CallTool(ctx, params)
 }
 
+// Withdraw stops the program and offers none of its tools until it is
+// restarted.
+func (e *External) Withdraw() {
+	e.mu.Lock()
+	session := e.session
+	e.session, e.tools = nil, nil
+	e.mu.Unlock()
+	if session != nil {
+		_ = session.Close()
+	}
+}
+
 // Close stops the program.
 func (e *External) Close() {
 	e.mu.Lock()
@@ -412,7 +609,13 @@ type LoadOptions struct {
 	Off []string
 	// Version is this application's, for the plugins' engines ranges.
 	Version string
-	Approve func(context.Context, ToolRequest) error
+	// ProjectDir is the active project folder on this computer, substituted for
+	// ${PROJECT_DIR} in host plugin arguments.
+	ProjectDir string
+	Approve    func(context.Context, ToolRequest) error
+	// Env gives the variables from the user's settings for a plugin that
+	// runs on this computer; see External.Env.
+	Env func(ctx context.Context, manifest Manifest) ([]string, error)
 	// Guest makes the command that runs a guest plugin's server, given its
 	// manifest and where its files are here. Nil where there is nowhere to
 	// run one.
@@ -426,7 +629,8 @@ type LoadOptions struct {
 // already taken, is left out and reported; the others still load. Not
 // started either: those turned off, those this application cannot run (see
 // Unavailable), and a plugin handling a link scheme that one loaded before
-// it already handles.
+// it already handles. A plugin that needs a project folder while none is
+// open is reported and returned without running, so it can be restarted.
 func LoadPlugins(ctx context.Context, dir string, options LoadOptions) ([]*External, []error) {
 	taken, off, version, approve := options.Taken, options.Off, options.Version, options.Approve
 	entries, err := os.ReadDir(dir)
@@ -464,12 +668,19 @@ func LoadPlugins(ctx context.Context, dir string, options LoadOptions) ([]*Exter
 		if options.GuestOnly && manifest.Kind != KindGuest {
 			continue
 		}
-		plugin := &External{Manifest: manifest, Dir: path, Approve: approve}
+		plugin := &External{Manifest: manifest, Dir: path, ProjectDir: options.ProjectDir, Approve: approve}
 		if manifest.Kind == KindGuest {
 			plugin.Spawn = func(ctx context.Context) (*exec.Cmd, error) { return options.Guest(ctx, manifest, path) }
+		} else if options.Env != nil {
+			plugin.Env = func(ctx context.Context) ([]string, error) { return options.Env(ctx, manifest) }
 		}
 		if err := plugin.Start(ctx); err != nil {
 			failures = append(failures, err)
+			// One that needs a project folder waits, not running, for the
+			// next project to be opened (see Restart).
+			if _, waiting := errors.AsType[*MissingProjectDirError](err); waiting {
+				loaded = append(loaded, plugin)
+			}
 			continue
 		}
 		clash := ""
@@ -488,6 +699,30 @@ func LoadPlugins(ctx context.Context, dir string, options LoadOptions) ([]*Exter
 		loaded = append(loaded, plugin)
 	}
 	return loaded, failures
+}
+
+// withEnv is env with the variables of extra set, replacing any of the same
+// name. Windows does not tell names apart by case.
+func withEnv(env, extra []string) []string {
+	if len(extra) == 0 {
+		return env
+	}
+	same := func(a, b string) bool {
+		if runtime.GOOS == "windows" {
+			return strings.EqualFold(a, b)
+		}
+		return a == b
+	}
+	out := slices.Clone(env)
+	for _, entry := range extra {
+		name, _, _ := strings.Cut(entry, "=")
+		out = slices.DeleteFunc(out, func(old string) bool {
+			oldName, _, _ := strings.Cut(old, "=")
+			return same(oldName, name)
+		})
+		out = append(out, entry)
+	}
+	return out
 }
 
 func fileExists(path string) bool {

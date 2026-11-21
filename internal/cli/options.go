@@ -110,26 +110,21 @@ func (o *VMOpts) takeAll(args []string) (taken, rest []string, err error) {
 	}
 }
 
-// StartArgs validates a persistent VM start and places its options before run.
+// StartArgs validates the options of Cage's persistent start. Only --reset is
+// accepted: every Cage start applies the app's CPU and memory allocation, so a
+// value given here would be silently replaced.
 func StartArgs(args []string) ([]string, error) {
-	opts := newVMOpts()
 	var result []string
-	for len(args) > 0 {
-		name, _, _ := strings.Cut(args[0], "=")
-		switch name {
-		case "--reset", "--disk", "--memory", "--ram", "--cpus", "--ssh-port":
+	for _, arg := range args {
+		name, _, _ := strings.Cut(arg, "=")
+		switch {
+		case arg == "--reset":
+			result = []string{"--reset"}
+		case name == "--cpus" || name == "--memory" || name == "--ram":
+			return nil, fmt.Errorf("%s is not supported: Cage sets CPUs and memory from the resource settings in the Cage app", name)
 		default:
-			return nil, fmt.Errorf("unsupported start argument: %s", args[0])
+			return nil, fmt.Errorf("unsupported start argument: %s", arg)
 		}
-		n, err := opts.take(args)
-		if err != nil {
-			return nil, err
-		}
-		if n == 0 {
-			return nil, fmt.Errorf("unsupported start argument: %s", args[0])
-		}
-		result = append(result, args[:n]...)
-		args = args[n:]
 	}
 	return append(result, "run", "true"), nil
 }

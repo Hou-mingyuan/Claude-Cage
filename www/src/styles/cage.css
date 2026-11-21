@@ -801,6 +801,19 @@ figure { margin: 0; }
 .story-copy .requirements { display: block; margin-top: 16px; }
 .character { overflow: hidden; border-radius: 13px; border: 1px solid var(--line); }
 .character img { width: 100%; }
+.philosophy { border-top: 1px solid var(--line); padding: 72px 0 64px; }
+.philosophy h2 { margin-bottom: 32px; }
+.philosophy-premises { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 36px; }
+.philosophy-premises li { border-top: 1px solid var(--line); padding-top: 22px; min-width: 0; }
+.philosophy-step { display: block; color: var(--accent); font-size: 13px; font-weight: 550; margin-bottom: 14px; }
+.philosophy-premises h3 { font-size: 18px; line-height: 1.55; margin-bottom: 10px; }
+.philosophy-premises p { font-size: 14.5px; color: var(--muted); }
+.philosophy-lead { margin: 42px 0 22px; font-size: 17px; font-weight: 550; color: #302c29; }
+.philosophy-goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+.philosophy-goals article { background: #f3eee6; border: 1px solid #dacebf; border-radius: 12px; padding: 24px 22px; min-width: 0; }
+.philosophy-goals h3 { font-size: 18px; line-height: 1.5; margin-bottom: 10px; color: #302c29; }
+.philosophy-goals p { font-size: 14.5px; color: #5b534b; }
+.philosophy-actions { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 28px; }
 .manifesto { border-top: 1px solid var(--line); padding-top: 60px; }
 .manifesto h2 { margin: 15px 0 24px; }
 .manifesto > p { max-width: 850px; }
@@ -825,6 +838,8 @@ figure { margin: 0; }
 @media (max-width: 900px) {
   .story-hero { gap: 30px; }
   .story-copy h1 { font-size: 42px; }
+  .philosophy-premises,
+  .philosophy-goals { grid-template-columns: 1fr; gap: 22px; }
 
   .nav nav { gap: 16px; }
   .nav .brand { font-size: 21px; }

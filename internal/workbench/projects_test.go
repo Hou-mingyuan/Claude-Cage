@@ -72,8 +72,10 @@ func TestLiveProjectTransportConfinesReadsAndAllowsGitWrites(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("private"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(parent, filepath.Join(root, "escape")); err != nil {
-		t.Fatal(err)
+	escapes := []string{outside}
+	linkErr := os.Symlink(parent, filepath.Join(root, "escape"))
+	if linkErr == nil {
+		escapes = append(escapes, filepath.Join(root, "escape", "secret"))
 	}
 	server, conn := net.Pipe()
 	done := make(chan struct{})
@@ -98,7 +100,7 @@ func TestLiveProjectTransportConfinesReadsAndAllowsGitWrites(t *testing.T) {
 	if err != nil || string(data) != "shared" {
 		t.Fatal("project write did not reach the host")
 	}
-	for _, p := range []string{outside, filepath.Join(root, "escape", "secret")} {
+	for _, p := range escapes {
 		f, err := client.Open(p)
 		if err == nil {
 			_ = f.Close()
@@ -116,6 +118,9 @@ func TestLiveProjectTransportConfinesReadsAndAllowsGitWrites(t *testing.T) {
 	got, err := io.ReadAll(f)
 	if err != nil || string(got) != "shared" {
 		t.Fatal("shared file read failed")
+	}
+	if linkErr != nil {
+		t.Skip("symlink unavailable, the link out of the project was not checked: " + linkErr.Error())
 	}
 }
 

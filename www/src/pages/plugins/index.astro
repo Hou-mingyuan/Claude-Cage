@@ -1,0 +1,334 @@
+---
+import '@fontsource-variable/inter';
+import { RefreshCw, Search, ShieldCheck, Sparkles, X } from '@lucide/astro';
+import GoogleAnalytics from '../../components/GoogleAnalytics.astro';
+import rawMarketIndex from '../../data/plugins-market.json';
+import {
+  CATEGORY_LABELS,
+  CATEGORY_ORDER,
+  MARKET_REPO_URL,
+  PERMISSION_INFO,
+  countByCategory,
+  formatBytes,
+  formatPlatformList,
+  normalizeMarketIndex,
+  pluginHue,
+  pluginMonogram,
+} from '../../lib/plugins-market';
+import '../../styles/cage.css';
+import '../../styles/plugins-market.css';
+
+const base = import.meta.env.BASE_URL;
+const repo = 'https://github.com/Lee-xeo/Claude-Cage';
+const plugins = normalizeMarketIndex(rawMarketIndex, base);
+const counts = countByCategory(plugins);
+const hostCount = plugins.filter(p => p.kind === 'host').length;
+const guestCount = plugins.filter(p => p.kind === 'guest').length;
+const canonical = new URL(`${base}plugins/`, Astro.site);
+const title = '插件市场 · Claude Cage';
+const description =
+  'Claude Cage 开放插件市场（cage-plugins）：插件 = MCP + 扩展，为轻量化本地隔离环境中的 Claude 接入安全、受控的本机与环境能力，并定制工作台页面。';
+---
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <GoogleAnalytics />
+  <meta name="description" content={description} />
+  <meta name="theme-color" content="#faf8f4" />
+  <title>{title}</title>
+  <link rel="canonical" href={canonical} />
+  <link rel="icon" href={`${base}cage-icon.png`} />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Claude Cage" />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <meta property="og:url" content={canonical} />
+</head>
+<body class="market-page">
+  <header class="nav wrap market-header">
+    <a class="brand" href={base} aria-label="Claude Cage">
+      <img src={`${base}cage-icon.png`} width="36" height="36" alt="" />
+      <span>Claude Cage</span>
+    </a>
+    <nav aria-label="网站导航">
+      <a href={`${base}ask/`}>使用答疑</a>
+      <a href={`${base}plugins/`} aria-current="page">插件市场</a>
+      <a href={`${base}docs/`}>使用文档</a>
+      <a href={base}>官网首页</a>
+      <a href={MARKET_REPO_URL} target="_blank" rel="noopener noreferrer">cage-plugins ↗</a>
+      <a class="nav-download" href={`${base}#download`}>下载应用 ↓</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="pm-hero-band">
+      <div class="pm-hero wrap">
+        <div class="pm-hero-copy">
+          <span class="eyebrow"><span class="seed"></span>CAGE PLUGIN MARKETPLACE · MCP + 扩展</span>
+          <h1>把能力接进 Cage，<br /><em>把风险留在门外。</em></h1>
+          <p class="pm-hero-lead">
+            在轻量化本地隔离环境里运行 Claude，再通过开放插件市场按需连接本机桌面、Office 文档、Blender、浏览器自动化与自定义工作台页面。开源社区在 <code>cage-plugins</code> 自由共建，每一次越出环境的调用均受权限声明与确认弹窗保护。
+          </p>
+          <div class="pm-hero-actions">
+            <a class="button" href={MARKET_REPO_URL} target="_blank" rel="noopener noreferrer">提交你的插件 ↗</a>
+            <a class="text-link" href={`${base}docs/plugins/`}>插件与授权指南 →</a>
+            <a class="text-link" href={`${repo}/blob/main/docs/plugins.md`} target="_blank" rel="noopener noreferrer">开发规范 ↗</a>
+          </div>
+        </div>
+
+        <aside class="pm-formula-card" aria-label="插件生态概览">
+          <div class="pm-formula-stats">
+            <div class="pm-stat pm-stat--accent">
+              <strong id="pm-stat-total">{plugins.length}</strong>
+              <span>开放插件</span>
+            </div>
+            <div class="pm-stat">
+              <strong id="pm-stat-host">{hostCount}</strong>
+              <span>主机插件</span>
+            </div>
+            <div class="pm-stat">
+              <strong id="pm-stat-guest">{guestCount}</strong>
+              <span>环境内插件</span>
+            </div>
+          </div>
+
+          <div class="pm-equation" aria-label="插件等于 MCP 加扩展">
+            <div class="pm-eq-box">
+              <strong>MCP 工具</strong>
+              <span>给 Claude 的安全、受控本机与环境能力</span>
+            </div>
+            <span class="pm-eq-op" aria-hidden="true">＋</span>
+            <div class="pm-eq-box">
+              <strong>沙箱扩展页面</strong>
+              <span>定制 Cage 侧栏视图与专属工作流</span>
+            </div>
+          </div>
+
+          <div class="pm-trust-row">
+            <span><ShieldCheck size={14} aria-hidden="true" /> SHA-256 校验安装</span>
+            <span><Sparkles size={14} aria-hidden="true" /> 显式权限与弹窗授权</span>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="pm-catalog wrap" aria-labelledby="pm-catalog-heading">
+      <h2 id="pm-catalog-heading" class="skip">浏览开放插件</h2>
+
+      <div class="pm-controls">
+        <div class="pm-search-bar">
+          <span class="pm-search-icon" aria-hidden="true"><Search size={18} /></span>
+          <label class="skip" for="pm-search">搜索插件</label>
+          <input
+            id="pm-search"
+            type="search"
+            placeholder="搜索插件名称、功能、权限或上游开源项目（如 Blender、Office、Playwright）…"
+            autocomplete="off"
+          />
+          <kbd class="pm-kbd" aria-hidden="true">/</kbd>
+          <button type="button" id="pm-search-clear" class="pm-search-clear" aria-label="清空搜索" hidden>
+            <X size={14} />
+          </button>
+        </div>
+
+        <div id="pm-categories" class="pm-categories" role="group" aria-label="按分类筛选">
+          <button type="button" class="pm-cat-btn is-active" data-category="all" aria-pressed="true">
+            <span>全部</span>
+            <span class="pm-cat-count">{counts.all}</span>
+          </button>
+          {CATEGORY_ORDER.map(key => (
+            <button type="button" class="pm-cat-btn" data-category={key} aria-pressed="false">
+              <span>{CATEGORY_LABELS[key]}</span>
+              <span class="pm-cat-count">{counts[key]}</span>
+            </button>
+          ))}
+        </div>
+
+        <div class="pm-subbar">
+          <div class="pm-filter-groups">
+            <div class="pm-segmented" role="group" aria-label="按运行位置筛选">
+              <button type="button" class="is-active" data-filter-kind="all" aria-pressed="true">全部位置</button>
+              <button type="button" data-filter-kind="host" aria-pressed="false">主机 (host)</button>
+              <button type="button" data-filter-kind="guest" aria-pressed="false">环境内 (guest)</button>
+            </div>
+            <div class="pm-segmented" role="group" aria-label="按能力形态筛选">
+              <button type="button" class="is-active" data-filter-cap="all" aria-pressed="true">全部形态</button>
+              <button type="button" data-filter-cap="mcp" aria-pressed="false">MCP 工具</button>
+              <button type="button" data-filter-cap="view" aria-pressed="false">界面扩展</button>
+            </div>
+          </div>
+
+          <div class="pm-status-bar">
+            <span id="pm-count" role="status" aria-live="polite">共 {plugins.length} 款开放插件</span>
+            <span>·</span>
+            <span><i class="pm-status-dot" aria-hidden="true"></i><span id="pm-sync-status">构建快照 · {plugins.length} 款插件</span></span>
+            <button type="button" id="pm-refresh" class="pm-refresh-btn">
+              <RefreshCw size={13} aria-hidden="true" />
+              刷新索引
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pm-grid" class="pm-grid">
+        {plugins.map(plugin => {
+          const metaParts: string[] = [formatPlatformList(plugin.platforms)];
+          if (plugin.source?.project) {
+            metaParts.push(plugin.source.license ? `${plugin.source.project} · ${plugin.source.license}` : plugin.source.project);
+          } else if (plugin.author?.name) {
+            metaParts.push(plugin.author.official ? `Cage 官方 · ${plugin.author.name}` : plugin.author.name);
+          } else if (plugin.minBytes > 0) {
+            metaParts.push(formatBytes(plugin.minBytes));
+          }
+          return (
+            <article class="pm-card" data-plugin={plugin.name} data-kind={plugin.kind}>
+              <a class="pm-card-trigger" href={plugin.repoUrl} target="_blank" rel="noopener noreferrer">
+                <div class="pm-card-head">
+                  <span
+                    class={`pm-icon pm-icon--card ${plugin.icon ? '' : 'pm-icon--mono'}`}
+                    aria-hidden="true"
+                    style={`--pm-hue:${pluginHue(plugin.name)}`}
+                  >
+                    {plugin.icon ? <img src={plugin.icon} alt="" loading="lazy" decoding="async" /> : pluginMonogram(plugin.name)}
+                  </span>
+                  <div class="pm-card-heading">
+                    <div class="pm-card-title-row">
+                      <h3>{plugin.title}</h3>
+                      <span class="pm-version">v{plugin.version}</span>
+                    </div>
+                    <div class="pm-card-sub">
+                      <span class={`pm-pill pm-pill--${plugin.kind}`}>
+                        {plugin.kind === 'host' ? '主机插件' : '环境内插件'}
+                      </span>
+                      {plugin.hasMcp && <span class="pm-pill pm-pill--mcp">MCP 工具</span>}
+                      {plugin.hasView && <span class="pm-pill pm-pill--view">界面扩展</span>}
+                    </div>
+                  </div>
+                </div>
+                <p class="pm-card-desc">{plugin.summary || plugin.description}</p>
+                <div class="pm-card-tags">
+                  {plugin.categories.map(cat => <span class="pm-tag">{CATEGORY_LABELS[cat] || cat}</span>)}
+                  {plugin.kind === 'host' && plugin.permissions.length > 0 ? (
+                    <span class="pm-tag pm-tag--perm">
+                      需授权：{plugin.permissions.map(p => PERMISSION_INFO[p]?.title || p).join(' · ')}
+                    </span>
+                  ) : plugin.permissions.length === 0 ? (
+                    <span class="pm-tag pm-tag--safe">零越权</span>
+                  ) : null}
+                </div>
+                <div class="pm-card-foot">
+                  <span class="pm-card-meta">{metaParts.join(' · ')}</span>
+                  <span class="pm-card-cta">查看详情 →</span>
+                </div>
+              </a>
+            </article>
+          );
+        })}
+      </div>
+
+      <div id="pm-empty" class="pm-empty" hidden>
+        <h3>没有找到匹配的插件</h3>
+        <p>可以换个关键词或清空筛选条件，也可以前往 cage-plugins 贡献一个新插件。</p>
+        <button type="button" id="pm-reset" class="pm-reset-btn">重置全部筛选</button>
+      </div>
+    </section>
+
+    <section class="pm-build-band" aria-labelledby="pm-build-title">
+      <div class="pm-build-grid wrap">
+        <div class="pm-build-copy">
+          <span class="eyebrow"><span class="seed"></span>OPEN ECOSYSTEM · 解耦协作</span>
+          <h2 id="pm-build-title">用任何语言写插件，<br />把能力贡献给社区</h2>
+          <p>
+            插件采用标准输入输出 MCP 协议与静态 HTML 沙箱页面，无需依赖特定 SDK。社区可以直接在 <code>cage-plugins</code> 提 PR 上架，让全球 Cage 用户一键安装。
+          </p>
+          <ol class="pm-build-steps">
+            <li>
+              <span>01</span>
+              <div>
+                <strong>编写 MCP 服务或沙箱页面</strong>
+                <p>Python、Node.js、Go、Rust 或封装已有开源 MCP（支持 <code>uvx</code> / <code>npx</code> 固定版本启动）均可。</p>
+              </div>
+            </li>
+            <li>
+              <span>02</span>
+              <div>
+                <strong>声明 plugin.json 与权限边界</strong>
+                <p>明确填写运行位置（<code>host</code> 或 <code>guest</code>）、分类与所需权限，放入本地 <code>plugins/</code> 即刻调试。</p>
+              </div>
+            </li>
+            <li>
+              <span>03</span>
+              <div>
+                <strong>向 cage-plugins 提交 PR</strong>
+                <p>自动化脚本完成清单校验、打包与 SHA-256 索引生成，合入后自动同步到所有 Cage 客户端与官网市场。</p>
+              </div>
+            </li>
+          </ol>
+          <div class="pm-hero-actions">
+            <a class="button" href={MARKET_REPO_URL} target="_blank" rel="noopener noreferrer">前往 cage-plugins ↗</a>
+            <a class="text-link" href={`${repo}/blob/main/docs/plugins.md`} target="_blank" rel="noopener noreferrer">阅读完整开发规范 ↗</a>
+          </div>
+        </div>
+
+        <div class="pm-code-card" aria-label="plugin.json 示例">
+          <div class="pm-code-bar">
+            <span>my-plugin/plugin.json</span>
+            <span>MCP + View</span>
+          </div>
+          <pre><code>{`{
+  "name": "system-status",
+  "displayName": "System Status",
+  "version": "0.1.0",
+  "description": "Shows processor load, memory and disk use.",
+  "icon": "icon.svg",
+  "engines": { "cage": ">=0.1.8" },
+  "kind": "guest",
+  "permissions": [],
+  "categories": ["system"],
+  "contributes": {
+    "mcpServers": [
+      { "id": "status", "command": ["python3", "server.py"] }
+    ],
+    "views": [
+      {
+        "id": "status",
+        "title": "System Status",
+        "entry": "view/index.html",
+        "server": "status"
+      }
+    ]
+  }
+}`}</code></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    <a class="brand" href={base}><img src={`${base}cage-icon.png`} width="28" height="28" alt="" />Claude Cage</a>
+    <div>
+      <a href={`${base}plugins/`}>插件市场</a>
+      <a href={`${base}docs/`}>使用文档</a>
+      <a href={MARKET_REPO_URL} target="_blank" rel="noopener noreferrer">cage-plugins ↗</a>
+      <a href={repo} target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+      <a href={`${base}privacy/`}>统计与隐私</a>
+    </div>
+    <small>Cage 是独立社区项目，与 Anthropic 无隶属关系。插件索引与压缩包来自开源仓库 cage-plugins，安装时由客户端核对 SHA-256。</small>
+  </footer>
+
+  <dialog id="pm-dialog" class="pm-dialog" aria-labelledby="pm-dialog-title">
+    <div class="pm-dialog-head">
+      <h2 id="pm-dialog-title">插件详情</h2>
+      <form method="dialog">
+        <button class="dialog-close" aria-label="关闭">×</button>
+      </form>
+    </div>
+    <div id="pm-dialog-body"></div>
+  </dialog>
+
+  <script id="plugins-market-data" type="application/json" set:html={JSON.stringify(plugins).replaceAll('<', '\\u003c')} />
+  <script>import '../../lib/plugins-market-client';</script>
+</body>
+</html>

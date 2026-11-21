@@ -56,6 +56,11 @@ if [[ "$phase" == configure ]]; then
     archive=$(cygpath -u "$3")
     keymap_archive=$(cygpath -u "$4")
     patch_dir=$(cygpath -u "$5")
+    # Offline Python bootstrap: mkvenv finds pip, setuptools and wheel in the
+    # verified wheel directory and the source tree's python/wheels.
+    export PIP_NO_INDEX=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_FIND_LINKS=$(cygpath -m "$6")
+    export PIP_FIND_LINKS
     mkdir -p "$source_dir" "$build_dir"
     # Materialize relative links as native-readable copies without privileges.
     export MSYS=winsymlinks:deepcopy

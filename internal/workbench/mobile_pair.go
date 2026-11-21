@@ -178,12 +178,18 @@ func (s *Server) stopPhone() {
 func (s *Server) phoneStatus(w http.ResponseWriter, r *http.Request) {
 	p := &s.phones
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	var device *mobilelink.DeviceInfo
 	if p.record != nil {
 		device = p.record.Device
 	}
-	jsonReply(w, map[string]any{"paired": p.record != nil, "status": p.status, "device": device, "keep_awake": p.power})
+	paired, status, power := p.record != nil, p.status, p.power
+	p.mu.Unlock()
+	reply := map[string]any{"paired": paired, "status": status, "device": device, "keep_awake": power}
+	if _, access := s.account.accessStateFor(false, true); access == accountAccessDesktopOnly {
+		reply["mobile_access_blocked"] = true
+		reply["mobile_access_reason"] = s.account.desktopOnlyMobileMessage()
+	}
+	jsonReply(w, reply)
 }
 
 // Only the active, pinned phone tunnel may describe the enrolled phone.

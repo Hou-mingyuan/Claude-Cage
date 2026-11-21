@@ -198,8 +198,8 @@ func inspectStatusWithPIDFiles(instDir string, inst *limatype.Instance, y *limat
 }
 
 // ReadPIDFile returns 0 if the PID file does not exist, was written during a previous boot
-// of the host, or the process has already terminated (in which case the PID file will be
-// removed).
+// of the host, the PID was verifiably reused, or the process has already terminated
+// (in which case the PID file will be removed).
 func ReadPIDFile(path string) (int, error) {
 	// The boot is checked before the PID is read, so that a PID file of a previous boot is
 	// never trusted, not even when another process refreshes the marker in between.
@@ -213,23 +213,42 @@ func ReadPIDFile(path string) (int, error) {
 		logrus.Debugf("Ignoring PID file %#q left behind by a previous boot", path)
 		return 0, nil
 	}
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, nil
 		}
 		return 0, err
 	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		_ = f.Close()
+		return 0, err
+	}
+	info, err := f.Stat()
+	_ = f.Close()
+	if err != nil {
+		return 0, err
+	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
 	if err != nil {
 		return 0, err
 	}
+	if processStartedAfter(pid, info.ModTime()) {
+		// Leave removal to the next writer, as for a previous-boot marker.
+		logrus.Warnf("Ignoring stale PID file %#q: PID %d now belongs to a newer process", path, pid)
+		return 0, nil
+	}
 	proc, err := os.FindProcess(pid)
+	if err == nil {
+		defer proc.Release()
+	}
 	if runtime.GOOS == "windows" {
 		// On Windows, os.FindProcess will fail if the process does not exist.
 		// It succeeds for an exited process that another handle keeps open.
 		if err == nil {
 			if processExited(pid) {
+				logrus.Warnf("Removing stale PID file %#q: process %d has exited", path, pid)
 				_ = os.Remove(path)
 				return 0, nil
 			}
@@ -238,6 +257,7 @@ func ReadPIDFile(path string) (int, error) {
 		var errno syscall.Errno
 		const ErrorInvalidParameter syscall.Errno = 0x57
 		if errors.As(err, &errno) && errno == ErrorInvalidParameter {
+			logrus.Warnf("Removing stale PID file %#q: process %d has exited", path, pid)
 			_ = os.Remove(path)
 			return 0, nil
 		}
@@ -248,6 +268,7 @@ func ReadPIDFile(path string) (int, error) {
 	err = proc.Signal(syscall.Signal(0))
 	if err != nil {
 		if errors.Is(err, os.ErrProcessDone) {
+			logrus.Warnf("Removing stale PID file %#q: process %d has exited", path, pid)
 			_ = os.Remove(path)
 			return 0, nil
 		}

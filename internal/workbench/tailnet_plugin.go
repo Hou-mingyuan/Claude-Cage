@@ -36,7 +36,7 @@ const tailnetPluginManifest = `{
 // tailnetTools are the plugin's tools for the actions of the workbench.
 var tailnetTools = map[string]string{
 	"status": "status", "connect": "connect", "login": "login", "disconnect": "disconnect", "logout": "logout",
-	"add-key": "add_key", "remove-key": "remove_key", "open-service": "open_service",
+	"control-server": "set_control_url", "add-key": "add_key", "remove-key": "remove_key", "open-service": "open_service",
 }
 
 func (s *Server) tailnetPluginDir() string { return filepath.Join(s.hostPluginDir(), tailnetPlugin) }

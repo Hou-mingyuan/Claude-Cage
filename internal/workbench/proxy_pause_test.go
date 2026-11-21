@@ -37,7 +37,7 @@ func pendingProxyApply(t *testing.T) (*Server, *cage.EgressGate, <-chan struct{}
 		return err
 	}
 	fetchProxySource = func(_ context.Context, _ *http.Client, _ string) ([]byte, string, error) {
-		return []byte(`proxies: [{name: qa, type: socks5, server: 127.0.0.1, port: 1, password: updated-test-value}]`), "", nil
+		return []byte(`proxies: [{name: qa, type: socks5, server: 192.0.2.1, port: 1, password: updated-test-value}]`), "", nil
 	}
 	started, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once

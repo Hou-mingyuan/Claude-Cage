@@ -147,6 +147,17 @@ static void setError(NSError **error, NSString *text) {
     [client reportDevice:@"ios" model:model ?: UIDevice.currentDevice.model];
     return [self workspaceWithClient:client assets:assets error:error];
 }
+- (void)suspend {
+    CagemobileClient *client;
+    @synchronized (self) { client = _client; }
+    [client suspend];
+}
+- (BOOL)resume {
+    CagemobileClient *client;
+    @synchronized (self) { client = _client; }
+    if (!client) return NO;
+    return [client resume];
+}
 - (void)close {
     CagemobileClient *client;
     @synchronized (self) { client = _client; _client = nil; }

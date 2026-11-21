@@ -241,6 +241,31 @@ func TestHostToolsViewListsPluginFolders(t *testing.T) {
 
 // A newer version replaces the installed one, which is kept aside; when the
 // new one cannot be installed the old one is put back.
+func TestMarketViewKeepsListingAttribution(t *testing.T) {
+	s := &Server{profile: t.TempDir()}
+	s.hostMarket.fetched = time.Now()
+	s.hostMarket.entries = []hostbridge.MarketEntry{
+		{Name: "official", Author: &hostbridge.MarketAuthor{Name: "Lee-xeo", Official: true}},
+		{Name: "community", Author: &hostbridge.MarketAuthor{Name: "Lin"}},
+		{Name: "legacy"},
+	}
+	recorder := httptest.NewRecorder()
+	s.getHostMarket(recorder, httptest.NewRequest(http.MethodGet, "/api/host-tools/market", nil))
+	var view struct {
+		Entries []struct {
+			Author *hostbridge.MarketAuthor `json:"author"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &view); err != nil || len(view.Entries) != len(s.hostMarket.entries) {
+		t.Fatalf("unexpected market response: %s", recorder.Body.String())
+	}
+	for i, entry := range view.Entries {
+		if !reflect.DeepEqual(entry.Author, s.hostMarket.entries[i].Author) {
+			t.Errorf("%s: got author %+v, want %+v", s.hostMarket.entries[i].Name, entry.Author, s.hostMarket.entries[i].Author)
+		}
+	}
+}
+
 func TestInstallFromMarketReplacesAndRestores(t *testing.T) {
 	manifest := func(version string) string {
 		return `{"name":"notes","version":"` + version + `","description":"Notes.","permissions":[],"command":["python3","server.py"]}`
@@ -302,5 +327,74 @@ func TestInstallFromMarketReplacesAndRestores(t *testing.T) {
 	}
 	if err := s.installFromMarket(context.Background(), "missing", false); err == nil {
 		t.Fatal("installed a plugin the list does not have")
+	}
+}
+
+func TestMissingProgramMessageAndProjectPlaceholderHelpers(t *testing.T) {
+	for program, want := range map[string]string{
+		"uv":      "https://docs.astral.sh/uv/",
+		"uvx":     "https://docs.astral.sh/uv/",
+		"npx":     "https://nodejs.org/",
+		"node":    "https://nodejs.org/",
+		"python3": "https://www.python.org/",
+		"custom":  "custom",
+	} {
+		msg := missingProgramMessage(program)
+		if !strings.Contains(msg, want) {
+			t.Errorf("missingProgramMessage(%q) = %q, want %q", program, msg, want)
+		}
+	}
+
+	s := &Server{
+		profile:       t.TempDir(),
+		preferences:   Preferences{HostTools: true, Workspace: "/p/main"},
+		projectShares: map[string]*projectShare{"/p/main": {}, "/p/other": {}},
+		hostTools: &hostTools{
+			serving:         true,
+			pluginProblems:  map[string]string{"blender": missingProgramMessage("uv")},
+			missingPrograms: map[string]string{"blender": "uv"},
+		},
+	}
+	if got := s.hostActiveProjectDir(); got != "/p/main" {
+		t.Fatalf("hostActiveProjectDir = %q, want /p/main", got)
+	}
+	if got := s.guestActiveProjectDir(); got == "" {
+		t.Fatal("guestActiveProjectDir returned empty")
+	}
+	// The current workspace is not shared: no other shared folder stands in.
+	s.preferences.Workspace = "/env/default"
+	if got := s.hostActiveProjectDir(); got != "" {
+		t.Fatalf("hostActiveProjectDir for an unshared workspace = %q, want empty", got)
+	}
+	if got := s.guestActiveProjectDir(); got != "" {
+		t.Fatalf("guestActiveProjectDir for an unshared workspace = %q, want empty", got)
+	}
+	s.preferences.Workspace = "/p/main"
+	s.clientWorkspace = "/mnt/client/demo"
+	if host, guest := s.hostActiveProjectDir(), s.guestActiveProjectDir(); host != "" || guest != "/mnt/client/demo" {
+		t.Fatalf("client workspace: host %q guest %q", host, guest)
+	}
+	s.clientWorkspace = ""
+	blenderDir := filepath.Join(s.hostPluginDir(), "blender")
+	if err := os.MkdirAll(blenderDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blenderDir, hostbridge.ManifestFile), []byte(
+		`{"name":"blender","version":"0.1.0","description":"Blender","permissions":["files"],"command":["uv","run","--with","blender-mcp==1.3.1","python","server.py","--root","${PROJECT_DIR}"]}`,
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view := s.hostToolsView()
+	found := false
+	for _, p := range view.Plugins {
+		if p.Name == "blender" {
+			found = true
+			if p.MissingProgram != "uv" || !strings.Contains(p.Problem, "https://docs.astral.sh/uv/") {
+				t.Fatalf("blender plugin view: %+v", p)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("blender not found in hostToolsView")
 	}
 }

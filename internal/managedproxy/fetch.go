@@ -19,8 +19,15 @@ import (
 )
 
 // BootstrapClient serves only explicitly host-routed subscription requests.
-func BootstrapClient() *http.Client {
-	return &http.Client{Transport: subscriptionHostTransport{hostproxy.NewTransport(), BootstrapDNSURLs()}, Timeout: 30 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+func BootstrapClient() *http.Client { return BootstrapClientWith(BootstrapDNSURLs()) }
+
+// BootstrapClientWith downloads over the host network, resolving names with
+// the given numeric DoH endpoints.
+func BootstrapClientWith(servers []string) *http.Client {
+	if len(servers) == 0 {
+		servers = BootstrapDNSURLs()
+	}
+	return &http.Client{Transport: subscriptionHostTransport{hostproxy.NewTransport(), servers}, Timeout: 30 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 3 || r.URL.Scheme != "https" || r.URL.User != nil {
 			return errors.New("订阅重定向被拒绝")
 		}

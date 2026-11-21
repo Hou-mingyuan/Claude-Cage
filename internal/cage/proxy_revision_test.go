@@ -75,7 +75,7 @@ func TestProxyRevisionControlUpdatesHostRunningRecord(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.ProxyRevision = "initial"
 	p, _ := managedproxy.Load(profile)
-	if err := p.Import("qa", "", []byte(`proxies: [{name: qa, type: socks5, server: 127.0.0.1, port: 1}]`), "qa", 0, ""); err != nil {
+	if err := p.Import("qa", "", []byte(`proxies: [{name: qa, type: socks5, server: 192.0.2.1, port: 1}]`), "qa", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	p.Selected = p.Sources[0].Nodes[0].ID

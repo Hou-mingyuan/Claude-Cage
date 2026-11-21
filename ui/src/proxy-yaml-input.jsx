@@ -189,9 +189,9 @@ export function ProxyYAMLInput({
         </p>
       )}
       <label>
-        {selected ? tr("配置内容") : tr("或直接粘贴配置")}
+        {selected ? tr("配置内容") : tr("粘贴 v2rayN 导出的节点分享链接（每行一个），或导入 Clash/Mihomo YAML。")}
         <textarea
-          aria-label={tr("节点 YAML")}
+          aria-label={tr("节点配置")}
           rows={7}
           value={content}
           disabled={disabled || reading}

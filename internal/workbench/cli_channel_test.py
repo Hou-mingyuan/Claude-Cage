@@ -131,6 +131,34 @@ class ChannelTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,"历史项目"): channel.prepare_account_switch(request)
                     self.assertFalse((self.root.parent/"cli-account-switches"/switch_id/"history.jsonl").exists())
 
+    def test_account_switch_continues_a_session_never_opened_through_cage(self):
+        path=self.history(self.session,self.project,[{"type":"user","message":{"content":"older work"}}])
+        backups=self.home/".claude/file-history"/self.session; backups.mkdir(parents=True); (backups/"x@v1").write_text("checkpoint")
+        switch_id,target=str(uuid.uuid4()),str(uuid.uuid4())
+        request={"cli_id":self.session,"config":str(self.home/".claude"),"connection":"","workspace":self.project,"target_cli_id":target,"switch_id":switch_id}
+        completed=type("Result",(),{"returncode":0,"stdout":"[]"})()
+        running=[{"sessionId":self.session,"pid":4242,"cwd":self.project,"status":"idle","kind":"interactive"}]
+        # A process (for example the account's own Desktop) still owns it: refuse, and never signal it.
+        with patch.object(channel,"active_sessions",return_value=running),patch.object(channel.subprocess,"run",return_value=completed),patch.object(channel,"terminate_cli") as terminate:
+            with self.assertRaisesRegex(ValueError,"正在运行"): channel.prepare_account_switch(request)
+            terminate.assert_not_called()
+        agent_running=type("Result",(),{"returncode":0,"stdout":json.dumps([{"sessionId":self.session,"pid":os.getpid()}])})()
+        with patch.object(channel,"active_sessions",return_value=[]),patch.object(channel.subprocess,"run",return_value=agent_running),patch.object(channel,"terminate_cli") as terminate:
+            with self.assertRaisesRegex(ValueError,"正在运行"): channel.prepare_account_switch(request)
+            terminate.assert_not_called()
+        self.assertFalse((self.root.parent/"cli-account-switches"/switch_id).exists())
+        with patch.object(channel,"active_sessions",return_value=[]),patch.object(channel.subprocess,"run",return_value=completed):
+            transcript=Path(channel.prepare_account_switch(request)["transcript"])
+            self.assertEqual(channel.prepare_account_switch(request)["transcript"],str(transcript))
+        self.assertEqual(transcript.read_bytes(),path.read_bytes())
+        self.assertEqual((transcript.parent/"file-history"/self.session/"x@v1").read_text(),"checkpoint")
+        self.assertEqual(json.loads((transcript.parent/"receipt.json").read_text())["binding"]["connection"],"")
+        self.assertEqual(list(self.root.glob("*/state.json")),[])
+        self.assertTrue(path.exists())
+        self.assertTrue(channel.cancel_account_switch(request)["ok"])
+        self.assertFalse(transcript.exists())
+        self.assertTrue(path.exists())
+
     def test_account_switch_refuses_busy_and_unresolved_tools(self):
         path=self.history(self.session,self.project,[{"type":"assistant","message":{"content":[{"type":"tool_use","id":"uncertain","name":"Bash","input":{}}]}}])
         connection,switch_id,target=[str(uuid.uuid4()) for _ in range(3)]
@@ -328,6 +356,8 @@ class ChannelTests(unittest.TestCase):
         self.history(other, self.project, [{"type":"user", "message":{"content":"other"}}])
         request = {"accounts":["default"], "workspaces":{self.project:self.project}}
         registry = [{"sessionId": self.session, "pid": os.getpid(), "status":"idle"}]
+        registration = self.home / ".claude/sessions" / (str(os.getpid()) + ".json")
+        channel.save(registration, registry[0])
         completed = subprocess.CompletedProcess([], 0, json.dumps(registry), "")
         with patch.object(channel.subprocess, "run", return_value=completed) as run:
             found = {item["cli_id"]: item for item in channel.discover(request)}
@@ -336,8 +366,14 @@ class ChannelTests(unittest.TestCase):
             self.assertFalse(found[other]["running"])
             self.assertEqual(run.call_count, 1, "registry must be read once per config, not per history")
             self.assertEqual(run.call_args.kwargs["env"]["CLAUDE_CONFIG_DIR"], str(self.home / ".claude"))
+            # Unchanged registrations reuse the listing on later polls.
+            self.assertTrue({item["cli_id"]: item for item in channel.discover(request)}[self.session]["running"])
+            self.assertEqual(run.call_count, 1, "unchanged registrations reran the registry listing")
+            # The CLI removes its registration when it exits.
             completed.stdout = "[]"
+            registration.unlink()
             self.assertFalse(any(item["running"] for item in channel.discover(request)))
+            self.assertEqual(run.call_count, 2)
 
     def test_discovery_identifies_desktop_from_live_registration_only(self):
         self.history(self.session, self.project, [{"type":"user", "entrypoint":"claude-desktop", "message":{"content":"hello"}}])
@@ -358,9 +394,121 @@ class ChannelTests(unittest.TestCase):
             registry.unlink()
             self.assertFalse(channel.discover(request)[0]["claude_desktop"], "transcript origin was used as live ownership")
             row["entrypoint"] = "claude-desktop"
+            channel.save(registry, row)  # the CLI rewrites its registration
             self.assertTrue(channel.discover(request)[0]["claude_desktop"], "explicit CLI source was ignored")
+            registry.unlink()
         with patch.object(channel, "running_sessions", return_value=[]):
             self.assertFalse(channel.discover(request)[0]["claude_desktop"])
+
+    def test_discovery_running_flag_follows_process_and_registrations(self):
+        self.history(self.session, self.project, [{"type":"user", "message":{"content":"hello"}}])
+        request = {"accounts":["default"], "workspaces":{self.project:self.project}}
+        registrations = self.home / ".claude/sessions"
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        rows = [{"sessionId": self.session, "pid": child.pid, "status": "idle"}]
+        listing = patch.object(channel, "running_sessions", side_effect=lambda config="": [dict(row) for row in rows])
+        calls = listing.start()
+        self.addCleanup(listing.stop)
+        channel.save(registrations / (str(child.pid) + ".json"), rows[0])
+        self.assertTrue(channel.discover(request)[0]["running"])
+        self.assertTrue(channel.discover(request)[0]["running"])
+        self.assertEqual(calls.call_count, 1)
+        # A process that dies without removing its registration is not running
+        # on the very next poll: liveness is checked on every call.
+        child.kill(); child.wait()
+        self.assertFalse(channel.discover(request)[0]["running"])
+        self.assertEqual(calls.call_count, 1)
+        # A new registration reruns the listing on the next poll.
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(lambda: (other.kill(), other.wait()))
+        rows[:] = [{"sessionId": self.session, "pid": other.pid, "status": "idle"}]
+        channel.save(registrations / (str(other.pid) + ".json"), rows[0])
+        self.assertTrue(channel.discover(request)[0]["running"])
+        self.assertEqual(calls.call_count, 2)
+        # The listing is also refreshed after AGENTS_REFRESH seconds.
+        with patch.object(channel.time, "time", return_value=time.time() + channel.AGENTS_REFRESH + 1):
+            channel.discover(request)
+        self.assertEqual(calls.call_count, 3)
+
+    def test_discovery_fresh_request_bypasses_guest_listing_cache(self):
+        # A forced refresh from the workbench ("fresh") must rerun the process
+        # listing even when the guest's cached listing is still valid.
+        self.history(self.session, self.project, [{"type":"user", "message":{"content":"hello"}}])
+        request = {"accounts":["default"], "workspaces":{self.project:self.project}}
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        rows = [{"sessionId": self.session, "pid": child.pid, "status": "idle"}]
+        listing = patch.object(channel, "running_sessions", side_effect=lambda config="": [dict(row) for row in rows])
+        calls = listing.start()
+        self.addCleanup(listing.stop)
+        channel.save(self.home / ".claude/sessions" / (str(child.pid) + ".json"), rows[0])
+        channel.discover(request)
+        channel.discover(request)
+        self.assertEqual(calls.call_count, 1)
+        self.assertTrue(channel.discover({**request, "fresh": True})[0]["running"])
+        self.assertEqual(calls.call_count, 2)
+        channel.running_sessions_cached(str(self.home / ".claude"), fresh=True)
+        self.assertEqual(calls.call_count, 3)
+        # Without fresh the refreshed cache is used again.
+        channel.discover(request)
+        self.assertEqual(calls.call_count, 3)
+
+    def test_view_token_changes_with_every_view_input(self):
+        config = self.home / ".claude"
+        path = self.history(self.session, self.project, [{"type":"user", "message":{"content":"hello"}}])
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        connection = str(uuid.uuid4())
+        with channel.state_file(connection) as state:
+            state.update(cli_id=self.session, config=str(config), workspace=self.project, pid=child.pid)
+        token, running = channel.view_token(config, self.session)
+        self.assertTrue(running)
+        self.assertEqual(channel.view_token(config, self.session), (token, True), "token is not stable")
+        tokens = {token}
+        def changed(step):
+            current, _ = channel.view_token(config, self.session)
+            self.assertNotIn(current, tokens, step + " kept the previous token")
+            tokens.add(current)
+        with path.open("a") as stream:
+            stream.write(json.dumps({"type":"assistant", "uuid":str(uuid.uuid4()), "message":{"content":"reply"}}) + "\n")
+        changed("an appended transcript")
+        info = path.stat()
+        time.sleep(0.05)  # change times advance at the kernel clock tick
+        rewritten = path.read_text().replace("reply", "REPLY")
+        path.write_text(rewritten)
+        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        changed("an in-place rewrite with the same size and time")
+        with channel.state_file(connection) as state:
+            state["busy"] = True
+        changed("a connection state change")
+        child.kill(); child.wait()
+        changed("a process exit")
+        self.assertFalse(channel.view_token(config, self.session)[1])
+        other = str(uuid.uuid4())
+        with channel.state_file(other) as state:
+            state.update(cli_id=self.session, config=str(config), workspace=self.project)
+        changed("another connection for the session")
+        path.unlink()
+        changed("a removed transcript")
+
+    def test_discovery_summary_cache_follows_transcript_changes(self):
+        path = self.history(self.session, self.project, [{"type":"user", "message":{"content":"first title"}}])
+        request = {"accounts":["default"], "workspaces":{self.project:self.project}}
+        with patch.object(channel, "running_sessions", return_value=[]):
+            with patch.object(channel, "history_summary", wraps=channel.history_summary) as summary:
+                self.assertEqual(channel.discover(request)[0]["title"], "first title")
+                self.assertEqual(channel.discover(request)[0]["title"], "first title")
+                self.assertEqual(summary.call_count, 1, "unchanged transcript was reread")
+                with path.open("a") as stream:
+                    stream.write(json.dumps({"type":"custom-title", "customTitle":"renamed", "uuid":str(uuid.uuid4())}) + "\n")
+                self.assertEqual(channel.discover(request)[0]["title"], "renamed")
+                self.assertEqual(summary.call_count, 2)
+                path.unlink()
+                self.assertEqual(channel.discover(request), [])
+        cached = channel.read_json(channel.cache_path("summaries", str(self.home / ".claude")))
+        self.assertEqual(cached, {}, "removed transcript kept a cache entry")
+        self.assertTrue(str(channel.cache_path("agents", "x")).startswith(str(self.home)))
 
     def test_purge_removes_only_target_transcripts_and_retries(self):
         target = self.history(self.session, self.project, [{"type":"user", "message":{"content":"delete this"}}])
@@ -502,6 +650,27 @@ class ChannelTests(unittest.TestCase):
         resumed = json.loads(process.stdout.readline())
         self.assertEqual(resumed["params"]["meta"], {"resume":"true"})
         self.assertFalse(select.select([process.stdout], [], [], 0.1)[0], "resume was injected twice")
+
+    def test_launch_preserves_status_line_padding_and_utf8_state(self):
+        utf8_path = self.root / "utf8.json"
+        channel.save(utf8_path, {"title": "中文会话🚀"})
+        self.assertEqual(channel.read_json(utf8_path)["title"], "中文会话🚀")
+        fake_account = self.home / "cage-claude-account"
+        fake_account.write_text(
+            "def profile(name): return name\n"
+            "def has_status_line(base): return False\n"
+            "def status_line(command): return {'type': 'command', 'command': command, 'padding': 2}\n",
+            encoding="utf-8",
+        )
+        connection = str(uuid.uuid4())
+        account_id = "1" * 24
+        with patch.object(channel, "migrate_cage_policy"), patch.object(channel, "active_session", return_value=False), \
+                patch.object(channel.os, "execvpe") as execute:
+            channel.launch({"id": connection, "session_id": self.session,
+                            "prefix": ["env", "CAGE_CLAUDE_SUBJECT=" + "a" * 64, str(fake_account), "run", account_id]})
+        self.assertTrue(execute.called)
+        settings = channel.read_json(self.root / connection / "settings.json")
+        self.assertEqual(settings["statusLine"]["padding"], 2)
 
     def test_turn_completion_state_deduplicates_and_suppresses_failures(self):
         connection = str(uuid.uuid4())

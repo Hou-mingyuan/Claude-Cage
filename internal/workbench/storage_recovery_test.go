@@ -241,10 +241,17 @@ func TestStorageRecoveryProductionStartupKeepsLoginAndDiagnostics(t *testing.T) 
 		t.Fatal(err)
 	}
 	account.lock()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestStorageRecoveryProductionStartupKeepsLoginAndDiagnostics$", "-test.timeout=40s")
-	command.Env = append(os.Environ(), "CAGE_TEST_STORAGE_RECOVERY_CONFIG="+s.configPath)
+	// The go test deadline is the only hang guard: startup and the password key
+	// derivation can take any time on a loaded host. The helper's own timeout
+	// only stops an orphan if this process is killed.
+	ctx := t.Context()
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestStorageRecoveryProductionStartupKeepsLoginAndDiagnostics$", "-test.timeout=10m")
+	// The production startup must not see the developer's real home or caches.
+	home := t.TempDir()
+	command.Env = append(os.Environ(), "CAGE_TEST_STORAGE_RECOVERY_CONFIG="+s.configPath, "HOME="+home, "USERPROFILE="+home,
+		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"), "XDG_CACHE_HOME="+filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME="+filepath.Join(home, ".local", "share"), "XDG_STATE_HOME="+filepath.Join(home, ".local", "state"),
+		"LOCALAPPDATA="+filepath.Join(home, "AppData", "Local"), "APPDATA="+filepath.Join(home, "AppData", "Roaming"))
 	var output bytes.Buffer
 	command.Stdout, command.Stderr = &output, &output
 	if err := command.Start(); err != nil {
@@ -263,8 +270,8 @@ func TestStorageRecoveryProductionStartupKeepsLoginAndDiagnostics(t *testing.T) 
 		}
 	})
 	var control controlFile
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	// Wait for the published control record, or for the workbench to exit.
+	for {
 		data, err := os.ReadFile(filepath.Join(s.profile, "control.json"))
 		if err == nil && json.Unmarshal(data, &control) == nil && control.PID == command.Process.Pid {
 			break
@@ -273,9 +280,8 @@ func TestStorageRecoveryProductionStartupKeepsLoginAndDiagnostics(t *testing.T) 
 		case err := <-done:
 			finished = true
 			t.Fatalf("storage recovery terminated the production workbench: %v", err)
-		default:
+		case <-time.After(10 * time.Millisecond):
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if control.PID != command.Process.Pid {
 		t.Fatal("pending recovery did not publish a reachable workbench")
@@ -284,9 +290,9 @@ func TestStorageRecoveryProductionStartupKeepsLoginAndDiagnostics(t *testing.T) 
 	base, _ := url.Parse(origin)
 	jar, _ := cookiejar.New(nil)
 	jar.SetCookies(base, []*http.Cookie{{Name: cookieName + "_" + base.Port() + "-desktop", Value: trustedViewProof(control.Token), Path: "/"}})
-	// Unlocking derives the password key, which takes several seconds on
-	// slower CI machines.
-	client := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+	// Requests carry the test context; unlocking derives the password key and
+	// has no fixed time limit here.
+	client := &http.Client{Jar: jar}
 	call := func(method, path, body string, expected int) []byte {
 		t.Helper()
 		request, err := http.NewRequestWithContext(ctx, method, origin+path, strings.NewReader(body))

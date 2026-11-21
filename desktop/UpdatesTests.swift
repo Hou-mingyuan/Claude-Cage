@@ -177,24 +177,22 @@ enum UpdatesTests {
         let probe = resources.appendingPathComponent("cage")
         try Data(script.utf8).write(to: probe)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: probe.path)
-        #if arch(x86_64)
-        // Real Intel bundles must never invoke the ARM64-only update channel.
-        // The standalone process fixture below still verifies its retry protocol.
-        for suffix in ["", ".intel-macos-test"] {
-            let manualBundle = root.appendingPathComponent("manual\(suffix).app")
+        // The Intel test bundle has its own identity and never uses the public
+        // update channel. A released Intel bundle uses it like Apple Silicon.
+        do {
+            let manualBundle = root.appendingPathComponent("manual.intel-macos-test.app")
             let manualResources = manualBundle.appendingPathComponent("Contents/Resources")
             try CageUpdateFiles.privateDirectory(manualResources)
             try FileManager.default.copyItem(at: probe, to: manualResources.appendingPathComponent("cage"))
-            let info: [String: Any] = ["CFBundleIdentifier": cageUpdateBundleID + suffix, "CFBundlePackageType": "APPL", "CageVersion": "0.0.0"]
+            let info: [String: Any] = ["CFBundleIdentifier": cageUpdateBundleID + ".intel-macos-test", "CFBundlePackageType": "APPL", "CageVersion": "0.0.0"]
             let plist = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
             try plist.write(to: manualBundle.appendingPathComponent("Contents/Info.plist"))
             let manual = CageAppUpdater(bundleURL: manualBundle, onChange: { _ in }, quit: {}, reconnect: {})
             for action in ["check", "install", "status"] {
-                try expect(manual.handle(action)["phase"] as? String == "manual", "Intel bundle uses independent package updates")
+                try expect(manual.handle(action)["phase"] as? String == "manual", "Intel test bundle uses independent package updates")
             }
-            try expect(!FileManager.default.fileExists(atPath: countFile.path), "Intel bundle launched the incompatible update channel")
+            try expect(!FileManager.default.fileExists(atPath: countFile.path), "Intel test bundle launched the public update channel")
         }
-        #endif
         var received: [String: Any] = [:]
         let limited = CageAppUpdater(bundleURL: probeBundle, onChange: { received = $0 }, quit: {}, reconnect: {})
         _ = limited.handle("check")

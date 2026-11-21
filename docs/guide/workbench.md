@@ -27,6 +27,23 @@ keywords: 项目 Claude Code 编辑器 code-server Git GitHub gh 提交 推送 �
 
 共享文件在环境内显示为当前用户所有，Git 可正常读取已打开项目的状态与历史。文件内容仍属于原来的主机目录，Git 元数据与项目一起共享，环境中的 Git 操作会直接更新主机仓库。授权目录内的隐藏文件、工具配置、Git 配置和钩子均按普通项目文件共享。Cage 不按文件名额外隐藏文件或禁止写入；云端共享的整目录只读授权仍然生效。
 
+### 从命令行在项目中运行
+
+通过 SSH 登录运行 Cage 的电脑等纯终端场景，可以在本机项目目录中直接使用 Cage 的命令行（各平台的位置见[让 Agent 配置 Cage](agent.md#agent-从哪里开始)，Linux 上为 `claude-cage`）：
+
+```sh
+cd ~/Projects/my-project/src
+cage run pwd          # 输出该目录在环境中的对应路径
+cage run --tty claude # Claude 从这里开始工作
+```
+
+- 当前目录位于已添加的项目内（包括子目录和多文件夹项目中的任一文件夹）时，命令在环境中的对应位置运行，并按需重新连接该项目。macOS 和 Linux 上环境路径与本机相同；Windows 的 `D:\Projects\demo` 在环境中为 `/d/Projects/demo`。
+- 其他情况——当前目录未共享、Cage 未打开或环境未就绪、项目正被其他操作占用、无法判断——命令照旧在环境目录中运行，并在标准错误输出一行说明；在终端里运行时还会提示如何共享当前目录。已有的脚本、定时任务和编辑器集成不受影响。
+- `--here` 要求在当前目录运行：未共享时在终端里先询问是否共享，确认后按与“添加本机项目”相同的规则校验并创建项目，再运行命令（主目录、Cage 配置、凭据目录等不允许共享的位置照常被拒绝）；输入不是终端、取消、共享失败、Cage 未打开或环境未就绪时报错且不运行。例如 `cage run --here --tty claude`。
+- `--workdir 目录` 明确指定环境中的绝对路径，优先于当前目录，不检查共享，例如 `cage run --workdir /tmp ls`。目录不存在时命令不运行。不能与 `--here` 同时使用。
+
+在对应项目目录中运行需要 Cage 已打开且环境就绪：项目共享由运行中的 Cage 维持。共享对环境中的所有程序生效，和在界面中添加项目相同。
+
 <figure class="guide-shot">
   <a href="../../www/public/docs/screenshots/first-start.jpg" target="_blank" rel="noopener"><img src="../../www/public/docs/screenshots/first-start.jpg" alt="工作台侧栏、默认项目与终端入口（环境未启动）" width="2560" height="1764" loading="lazy" decoding="async" /></a>
   <figcaption>工作台侧栏、默认项目与终端入口（环境未启动）。截图版本：0.1.6-alpha-preview（开发构建） · macOS 原生应用 · 2026-11-07。<a href="../../www/public/docs/screenshots/first-start.jpg" target="_blank" rel="noopener">查看原图（2560 × 1764） ↗</a></figcaption>
@@ -66,6 +83,22 @@ git push
 ```
 
 登录账户仍需拥有目标仓库的写入权限；组织 SSO、分支保护和工作流权限继续由 GitHub 管理。
+
+### 在本机和环境之间使用 git worktree
+
+`git worktree` 把仓库与额外工作区的位置以绝对路径写在两处：工作区里的 `.git` 文件，以及主仓库的 `.git/worktrees/<名称>/gitdir`。Cage 不修改这些文件，能否两边通用取决于本机与环境中的路径是否一致：
+
+- 工作区目录必须位于已共享的文件夹内：把工作区所在的上级目录加入项目，或把工作区目录本身加入同一项目。共享后再创建工作区；环境里原本就存在的同名目录会被共享内容遮住，其中的文件仍在环境磁盘上，不会出现在本机。
+- macOS 和 Linux：共享文件夹在环境中的路径与本机相同，在任一侧创建的工作区两边都能直接使用。
+- Windows：`D:\Projects\repo` 在环境中是 `/d/Projects/repo`。在环境中创建的工作区写的是 `/d/...`，Windows 的 Git 无法识别；在 Windows 上创建的写的是 `D:/...`，环境中的 Git 同样找不到，对方会把它列为 prunable（可清理）。
+
+Windows 上建议每个工作区只在创建它的一侧使用。确实需要两边切换时：
+
+1. 在创建工作区的一侧执行 `git worktree lock --reason "两边共用" <工作区路径>`。被锁定的工作区不会被 `git worktree prune` 或 `git gc` 的自动清理删除登记；未锁定时，另一侧的清理可能删掉它的登记信息（工作区文件本身保留，但需要重新关联）。
+2. 每次换到另一侧使用前，在主仓库中执行 `git worktree repair <工作区路径>`，把两处链接改写为当前这一侧的路径。换回来时在原来一侧再执行一次。
+3. 不要在另一侧对显示为 prunable 的工作区执行 `git worktree prune` 或 `git worktree remove`。
+
+Git 2.48 起可以用 `git worktree add --relative-paths` 或 `worktree.useRelativePaths=true` 写入相对路径，两边路径不同也能共用。但它会给仓库启用 `extensions.relativeWorktrees`，更早的 Git 会拒绝打开整个仓库；当前 Debian 13 环境的 Git 是 2.47，因此在本机开启这一选项后，环境里将无法使用该仓库。环境内的 Git 升级到 2.48 或更新之前，不要对需要在 Cage 中打开的仓库开启它。
 
 ## 新建 Claude 终端
 

@@ -167,7 +167,7 @@ func (s *Server) finishLocationProbe(cfg cage.Config, loc Location, probeErr err
 	if err != nil {
 		return err
 	}
-	if current.ProxyURL != cfg.ProxyURL || current.ProxyRevision != cfg.ProxyRevision || current.DNSURL != cfg.DNSURL {
+	if current.ProxyURL != cfg.ProxyURL || current.ProxyRevision != cfg.ProxyRevision || current.DNSURL != cfg.DNSURL || current.DNS != cfg.DNS {
 		return nil
 	}
 	observed := loc.exitLocation()
@@ -219,7 +219,7 @@ func (s *Server) publishReport(report cage.SafetyReport) {
 }
 
 func (s *Server) safetyCheck(w http.ResponseWriter, r *http.Request) {
-	s.launch(w, "safety", s.runSafetyCheck)
+	s.launchRequest(w, r, "safety", s.runSafetyCheck)
 }
 
 func (s *Server) pauseNetwork(w http.ResponseWriter, r *http.Request) {
@@ -541,11 +541,12 @@ func (s *Server) locationForIP(ctx context.Context, cfg cage.Config, ip string) 
 	if !ok && s.location != nil && s.location.IP == ip {
 		loc, ok = *s.location, true
 	}
+	options := s.preferences.locationOptions()
 	s.mu.Unlock()
 	if ok && time.Since(loc.CheckedAt) < time.Hour && loc.CountryCode != "" {
 		return loc, nil
 	}
-	loc, err := probeLocationForIP(ctx, cfg, ip)
+	loc, err := probeLocationForIP(ctx, cfg, ip, options)
 	if err != nil {
 		return Location{}, err
 	}
@@ -665,7 +666,10 @@ func (s *Server) runSafetyCheck() (returned error) {
 	}()
 	if cfg.ExitPolicy.NeedsBinding() {
 		s.setMessage("正在首次绑定此出口节点的 IP 或地区…")
-		loc, err := probeLocation(ctx, cfg)
+		s.mu.Lock()
+		options := s.preferences.locationOptions()
+		s.mu.Unlock()
+		loc, err := probeLocation(ctx, cfg, options)
 		if err != nil {
 			return err
 		}

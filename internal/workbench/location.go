@@ -8,8 +8,8 @@ import (
 	"github.com/sylvinus/agent-vm/internal/exitpolicy"
 )
 
-func lookupLocation(ctx context.Context, client *http.Client, address net.IP) (Location, error) {
-	loc, err := exitpolicy.Lookup(ctx, client, address)
+func lookupLocation(ctx context.Context, client *http.Client, address net.IP, options exitpolicy.LookupOptions) (Location, error) {
+	loc, err := exitpolicy.LookupWithOptions(ctx, client, address, options)
 	if err != nil {
 		return Location{}, err
 	}

@@ -21,11 +21,11 @@ export function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === '--allow-unsigned') { options.allowUnsigned = true; continue; }
-    if (!['--platform', '--version', '--destination'].includes(flag) || !args[i + 1] || args[i + 1].startsWith('--')) fail('invalid_input', 'Usage: agent-bootstrap.mjs plan|download [--version TAG] [--platform darwin-arm64|win32-amd64|linux-amd64] [--destination ABSOLUTE_DIRECTORY] [--allow-unsigned]');
+    if (!['--platform', '--version', '--destination'].includes(flag) || !args[i + 1] || args[i + 1].startsWith('--')) fail('invalid_input', 'Usage: agent-bootstrap.mjs plan|download [--version TAG] [--platform darwin-arm64|darwin-amd64|win32-amd64|linux-amd64] [--destination ABSOLUTE_DIRECTORY] [--allow-unsigned]');
     options[flag.slice(2)] = args[++i];
   }
   if (!['plan', 'download'].includes(options.action)) fail('invalid_input', 'Action must be plan or download.');
-  if (!['darwin-arm64', 'win32-amd64', 'linux-amd64'].includes(options.platform)) fail('unsupported_platform', 'No desktop package is selected for this platform. Read the platform guide.');
+  if (!['darwin-arm64', 'darwin-amd64', 'win32-amd64', 'linux-amd64'].includes(options.platform)) fail('unsupported_platform', 'No desktop package is selected for this platform. Read the platform guide.');
   if (options.version && !/^v?\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(options.version)) fail('invalid_input', 'Use an explicit release tag such as v0.1.6-alpha-preview.');
   if (options.version && !options.version.startsWith('v')) options.version = `v${options.version}`;
   if (options.action === 'download' && !isAbsolute(options.destination)) fail('invalid_input', 'download requires --destination with an absolute directory path.');
@@ -67,7 +67,7 @@ export function selectAsset(release, options) {
   const tag = release.tag_name;
   if (!/^v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(tag) || release.draft || (options.version && tag !== options.version)) fail('invalid_release', 'Release tag does not match the requested published release.');
   const version = tag.slice(1);
-  const suffix = { 'darwin-arm64': 'macos-arm64.dmg', 'linux-amd64': 'linux-amd64.deb', 'win32-amd64': 'windows-amd64-setup.exe' }[options.platform];
+  const suffix = { 'darwin-arm64': 'macos-arm64.dmg', 'darwin-amd64': 'macos-amd64.dmg', 'linux-amd64': 'linux-amd64.deb', 'win32-amd64': 'windows-amd64-setup.exe' }[options.platform];
   let asset = release.assets?.find(a => a.name === `Cage-${version}-${suffix}`);
   let unsigned = false;
   if (!asset && options.platform === 'win32-amd64') {
@@ -90,7 +90,7 @@ export function checksumFor(manifest, name) {
   return matches[0][1].toLowerCase();
 }
 
-const suffixes = { 'darwin-arm64': 'macos-arm64.dmg', 'linux-amd64': 'linux-amd64.deb', 'win32-amd64': 'windows-amd64-setup.exe' };
+const suffixes = { 'darwin-arm64': 'macos-arm64.dmg', 'darwin-amd64': 'macos-amd64.dmg', 'linux-amd64': 'linux-amd64.deb', 'win32-amd64': 'windows-amd64-setup.exe' };
 const downloadURL = (tag, name) => `https://github.com/${repo}/releases/download/${tag}/${name}`;
 
 // A published release's static files carry everything a plan needs: the
@@ -163,12 +163,12 @@ export async function makePlan(options, fetchImpl = fetch) {
       selected = await staticSelection(tag, options, fetchImpl);
     }
   }
-  const cli = { 'darwin-arm64': '/Applications/Cage.app/Contents/Resources/cage', 'linux-amd64': '/usr/bin/claude-cage', 'win32-amd64': '<install_directory>\\resources\\cage.exe' }[options.platform];
+  const cli = { 'darwin-arm64': '/Applications/Cage.app/Contents/Resources/cage', 'darwin-amd64': '/Applications/Cage.app/Contents/Resources/cage', 'linux-amd64': '/usr/bin/claude-cage', 'win32-amd64': '<install_directory>\\resources\\cage.exe' }[options.platform];
   const installation = {
     'darwin-arm64': { guide: 'https://claude-cage.com/docs/installation/', steps: ['Check codesign and spctl on the mounted Cage.app. Preserve macOS Gatekeeper checks.', 'For an update, save work and stop Cage through its existing UI before replacing app files.', 'Mount the verified DMG read-only with hdiutil attach -readonly -nobrowse. Copy Cage.app to /Applications using the existing installation guide; eject the mounted volume.', 'Run the installed CLI agent capabilities. If agent is unknown, this release predates Agent support; use its documented UI or an authorized newer build.'] },
     'linux-amd64': { guide: 'https://claude-cage.com/docs/installation/', argv: ['sudo', 'apt-get', 'install', '--', '<downloaded_absolute_path>'], steps: ['Save work and stop Cage before an update. Run the package manager in the user-approved privilege context.', 'Run /usr/bin/claude-cage agent capabilities. The name cage belongs to a different Linux program.'] },
     'win32-amd64': { guide: 'https://claude-cage.com/docs/installation/', argv: ['<downloaded_absolute_path>', '/S'], steps: ['Save work and stop Cage before an update. Inspect Get-AuthenticodeSignature on signed packages.', 'Run the installer in the user-approved context; system security prompts require the user.', 'The CLI is resources\\cage.exe in the install directory: D:\\Cage when a local fixed D: drive exists, otherwise $env:LOCALAPPDATA\\Programs\\Cage. Read InstallLocation under HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ClaudeCage for the actual one; then run agent capabilities.'] },
-  }[options.platform];
+  }[options.platform === 'darwin-amd64' ? 'darwin-arm64' : options.platform]; // Both Mac packages install the same way.
   return { protocol, status: 'planned', release: selected.tag, release_url: `https://github.com/${repo}/releases/tag/${selected.tag}`, platform: options.platform, asset: selected.asset, url: selected.url, size: selected.size, sha256: selected.sha256, unsigned: selected.unsigned, cli, installation, data_policy: 'Preserve ~/.claude-cage, user projects and persistent VM disks. Downloads and application files are separate from profile data.' };
 }
 

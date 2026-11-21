@@ -29,6 +29,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/lima-vm/lima/v2/pkg/fileutils"
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
 	"github.com/lima-vm/lima/v2/pkg/iso9660util"
 	"github.com/lima-vm/lima/v2/pkg/limatype"
 	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
@@ -1082,15 +1083,30 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 		args = append(args, "-device", "virtserialport,chardev=qga0,name="+filenames.VirtioPort)
 	}
 
-	if y.GuestIdentity != nil {
-		args = append(args, "-uuid", y.GuestIdentity.UUID)
-	}
+	args = append(args, guestIdentityArgs(y.GuestIdentity)...)
 
 	// QEMU process
 	args = append(args, "-name", "lima-"+cfg.Name)
 	args = append(args, "-pidfile", filepath.Join(cfg.InstanceDir, filenames.PIDFile(*y.VMType)))
 
 	return exe, args, nil
+}
+
+func guestIdentityArgs(identity *guestidentity.Identity) []string {
+	if identity == nil {
+		return nil
+	}
+	args := []string{"-uuid", identity.UUID}
+	if identity.SystemSerial != "" {
+		args = append(args, "-smbios", fmt.Sprintf("type=1,uuid=%s,serial=%s", identity.UUID, identity.SystemSerial))
+	}
+	if identity.BoardSerial != "" {
+		args = append(args, "-smbios", fmt.Sprintf("type=2,serial=%s", identity.BoardSerial))
+	}
+	if identity.ChassisSerial != "" {
+		args = append(args, "-smbios", fmt.Sprintf("type=3,serial=%s", identity.ChassisSerial))
+	}
+	return args
 }
 
 func FindVirtiofsd(ctx context.Context, qemuExe string) (string, error) {

@@ -118,8 +118,16 @@ for (const relative of guideFiles) {
 for (const code of codes) {
   const html = fs.readFileSync(path.join(dist, code === 'zh' ? '' : code, 'index.html'), 'utf8');
   assert.ok(html.includes('href="/docs/"'), `${code}: homepage needs a guide entry`);
+  assert.ok(html.includes('id="philosophy"'), `${code}: homepage needs the design philosophy section`);
+  assert.ok(html.includes('href="/plugins/"'), `${code}: homepage needs a plugin marketplace entry`);
+  assert.ok(html.includes('href="/docs/plugins/"'), `${code}: homepage needs a plugin guide entry`);
 }
-console.log(`Verified ${guideFiles.length} user guide pages, local links, anchors, search and homepage entries.`);
+const marketHTML = fs.readFileSync(path.join(dist, 'plugins/index.html'), 'utf8');
+assert.ok(marketHTML.includes('id="pm-grid"') && marketHTML.includes('id="pm-search"'), 'Plugin marketplace page lacks grid or search');
+assert.ok(marketHTML.includes('id="pm-dialog"') && marketHTML.includes('id="plugins-market-data"'), 'Plugin marketplace page lacks detail dialog or snapshot data');
+assert.ok(!marketHTML.includes('<select'), 'Plugin marketplace must not use system popup select');
+assert.ok([...marketHTML.matchAll(/class="pm-card"/g)].length >= 10, 'Plugin marketplace should pre-render catalog cards');
+console.log(`Verified ${guideFiles.length} user guide pages, plugin marketplace page, local links, anchors, search and homepage entries.`);
 
 const agentGuide = fs.readFileSync(path.join(dist, 'agent.md'), 'utf8');
 assert.equal(agentGuide, fs.readFileSync(path.join(dist, 'llms-full.txt'), 'utf8'), 'Agent text copies must share the same source');

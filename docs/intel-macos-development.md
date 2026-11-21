@@ -1,6 +1,6 @@
-# Intel Mac 开发构建
+# Intel Mac 构建与验证
 
-这是实验性的 Intel Mac 路线，公开发行版不包含 Intel 安装包，支持范围以发行说明为准。Intel Mac 上的环境同样是 Debian 13（x86_64），沿用其他平台的工作台；主机最低版本为 macOS 14。
+公开发行版提供 Intel Mac 安装包 `Cage-<版本>-macos-amd64.dmg`，与 Apple Silicon 一样经过 Developer ID 签名和公证，并支持应用内更新。Intel Mac 上的环境同样是 Debian 13（x86_64），沿用其他平台的工作台；主机最低版本为 macOS 14，并需要可用的硬件虚拟化（`sysctl kern.hv_support` 为 1）。本文说明源码构建、CI 与验收范围。
 
 ## 运行方式
 
@@ -22,6 +22,12 @@ bash scripts/build-app.sh --intel-macos-test
 
 上传前执行 Go、工作台、更新和账户检查，核对主程序与运行时的 x86_64 架构，并解压回验签名及可执行权限。GitHub 托管 runner 不启动嵌套虚拟机；环境首次安装和工作台验收仍需 Intel Mac 实机记录。
 
+## 正式发行
+
+发版流程（`release.yml`）在 `macos-15-intel` 上运行 `macos-intel-build.yml` 的 release 任务：从固定版本源码编译 QEMU 运行时（不读取缓存），以同一 Developer ID 证书签名并公证 App 与 DMG，产出 `Cage-<版本>-macos-amd64.dmg`。两个 macOS 安装包随附相同的 Mihomo，对应源码只由 Apple Silicon 任务发布一份。发布前要求 Apple Silicon、Intel、Windows、Linux 四个安装包全部通过校验；发布后官网构建会重新下载两个 DMG，逐个核对签名、公证、版本与架构。
+
+应用内更新按处理器选择安装包：Intel 版只接受 `macos-amd64.dmg`，某个版本没有 Intel 安装包时不会改用 Apple Silicon 安装包。`--intel-macos-test` 测试包使用独立的应用标识，不进入更新通道。
+
 ## 验证范围
 
 构建成功不代表工作台验收完成。提交贡献时分别记录以下证据及未验证的平台：
@@ -32,4 +38,4 @@ bash scripts/build-app.sh --intel-macos-test
 - 停止、冷启动、磁盘持久性，以及脱离源码目录运行安装包。
 - Apple Silicon 编译回归，以及共享代码的 Linux、Windows 检查。
 
-本路线目前没有通过所有受支持 Intel Mac 和 macOS 版本的硬件验收，不应据此推断官方 Claude 登录、业务会话或嵌套虚拟化已经通过测试。
+实机验收覆盖的机型与 macOS 版本以发行说明为准；CI 通过不代表所有 Intel Mac 和 macOS 版本都已在实机上验证。

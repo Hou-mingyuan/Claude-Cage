@@ -204,8 +204,9 @@ func FillDefault(ctx context.Context, y, d, o *limatype.LimaYAML, filePath strin
 		warn = false
 	}
 	if y.User.Comment == nil {
-		y.User.Comment = new(osutil.LimaUser(ctx, existingLimaVersion, warn, y.OS).Name)
-		warn = false
+		// The guest reads its account comment and cloud-init data; leave out
+		// the host account's full name unless a template sets one.
+		y.User.Comment = new("")
 	}
 	if y.User.Home == nil {
 		y.User.Home = new(osutil.LimaUser(ctx, existingLimaVersion, warn, y.OS).HomeDir)

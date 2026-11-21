@@ -21,7 +21,7 @@ const guides=guidePages.map(p=>({path:guideURL(p.slug),title:p.title,sections:p.
     <button class="new" id="new-chat"><SquarePen size={17}/>新对话 <Plus size={15}/></button>
     <div class="rail-label">历史对话</div>
     <nav id="history" aria-label="浏览器本地对话"></nav>
-    <footer class="rail-foot"><a href={base+'docs/'}><BookOpen size={17}/> 使用手册 <ArrowUpRight size={14}/></a><a href="https://github.com/Lee-xeo/Claude-Cage/issues" target="_blank" rel="noopener noreferrer"><CircleDot size={17}/> 项目 Issues <ArrowUpRight size={14}/></a></footer>
+    <footer class="rail-foot"><a href={base+'plugins/'}><Globe size={17}/> 插件市场 <ArrowUpRight size={14}/></a><a href={base+'docs/'}><BookOpen size={17}/> 使用手册 <ArrowUpRight size={14}/></a><a href="https://github.com/Lee-xeo/Claude-Cage/issues" target="_blank" rel="noopener noreferrer"><CircleDot size={17}/> 项目 Issues <ArrowUpRight size={14}/></a></footer>
   </aside>
   <button id="backdrop" class="backdrop" hidden aria-label="关闭会话导航"></button>
   <main class="chat" aria-label="Cage 助手">

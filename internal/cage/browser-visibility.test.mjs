@@ -45,7 +45,7 @@ test("a return target in another context is not treated as an opener", () => {
   assert.equal(targetAfterClose(targets, { targetId: "popup", openerId: "login", browserContextId: "private" }), "one");
 });
 
-function fixture() {
+function fixture(intermediateState = "normal") {
   const windows = new Map([[1, { windowState: "fullscreen", left: 0, top: 0, width: 1200, height: 800 }]]);
   const targets = new Map([["one", 1], ["two", 1]]);
   const calls = [];
@@ -59,8 +59,9 @@ function fixture() {
     if (method === "Browser.getWindowBounds") return { bounds: { ...windows.get(input.windowId) } };
     const current = windows.get(input.windowId);
     assert.ok(current);
-    if (input.bounds.windowState === "minimized") assert.equal(current.windowState, "normal");
+    if (input.bounds.windowState === "minimized") assert.equal(current.windowState, intermediateState);
     Object.assign(current, input.bounds);
+    if (input.bounds.windowState === "normal") current.windowState = intermediateState;
   };
   const visibility = new BrowserVisibility(cdp, () => [...targets.keys()], async () => !legacyViewer);
   return { visibility, windows, targets, calls, setLegacyViewer: value => { legacyViewer = value; } };
@@ -73,6 +74,15 @@ test("browser visibility restores fullscreen and processes shared windows once",
   assert.equal(f.calls.filter(call => call.method === "Browser.setWindowBounds").length, 2);
   await f.visibility.set(false);
   assert.equal(f.calls.filter(call => call.method === "Browser.setWindowBounds").length, 2);
+  await f.visibility.set(true);
+  assert.equal(f.windows.get(1).windowState, "fullscreen");
+  assert.equal(f.visibility.saved.size, 0);
+});
+
+test("browser visibility continues when Openbox maximizes the intermediate window", async () => {
+  const f = fixture("maximized");
+  await f.visibility.set(false);
+  assert.equal(f.windows.get(1).windowState, "minimized");
   await f.visibility.set(true);
   assert.equal(f.windows.get(1).windowState, "fullscreen");
   assert.equal(f.visibility.saved.size, 0);

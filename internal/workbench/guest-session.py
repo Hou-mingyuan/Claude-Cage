@@ -1,7 +1,9 @@
 """Run the workbench's control scripts over one SSH connection.
 
-Requests: "R <id> <length>\n" followed by the script, or "C <id>\n" to stop
-one. Replies: "D <id> <exit> <stdout length> <stderr length>\n" and both.
+Requests: "R <id> <length>\n" followed by the script, or
+"R <id> <length> <input length> <output limit>\n" followed by the script and
+its standard input, or "C <id>\n" to stop one. Replies:
+"D <id> <exit> <stdout length> <stderr length>\n" and both.
 """
 import os
 import signal
@@ -13,6 +15,9 @@ import threading
 OUTPUT_LIMIT = 64 * 1024 + 256
 ERROR_LIMIT = 4096
 SCRIPT_LIMIT = 1 << 20
+INPUT_LIMIT = 1 << 20
+# Above the largest caller limit (4 MiB), so that it can tell an oversized answer.
+OUTPUT_MAXIMUM = (4 << 20) + 256
 requests, replies = sys.stdin.buffer, sys.stdout.buffer
 writing = threading.Lock()
 running = {}
@@ -38,18 +43,33 @@ def keep(pipe, limit, exceeded=None):
             exceeded = None
 
 
-def run(ident, script):
+def feed(pipe, data):
+    try:
+        pipe.write(data)
+    except OSError:
+        pass
+    finally:
+        try:
+            pipe.close()
+        except OSError:
+            pass
+
+
+def run(ident, script, data=None, limit=OUTPUT_LIMIT):
     code, output, errors = 127, b'', []
     try:
-        child = subprocess.Popen(['/bin/bash', '--noprofile', '--norc', '-c', script], stdin=subprocess.DEVNULL,
+        child = subprocess.Popen(['/bin/bash', '--noprofile', '--norc', '-c', script],
+                                 stdin=subprocess.DEVNULL if data is None else subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     except OSError as error:
         errors.append(str(error).encode()[:ERROR_LIMIT])
     else:
         running[ident] = child
+        if data is not None:
+            threading.Thread(target=feed, args=(child.stdin, data), daemon=True).start()
         drain = threading.Thread(target=lambda: errors.append(keep(child.stderr, ERROR_LIMIT)), daemon=True)
         drain.start()
-        output = keep(child.stdout, OUTPUT_LIMIT, lambda: stop(child))
+        output = keep(child.stdout, limit, lambda: stop(child))
         code = child.wait()
         drain.join()
         running.pop(ident, None)
@@ -68,6 +88,13 @@ while True:
             if len(script) != int(fields[2]):
                 break
             threading.Thread(target=run, args=(int(fields[1]), script.decode()), daemon=True).start()
+        elif (len(fields) == 5 and fields[0] == b'R' and 0 < int(fields[2]) <= SCRIPT_LIMIT
+              and 0 <= int(fields[3]) <= INPUT_LIMIT and 0 < int(fields[4]) <= OUTPUT_MAXIMUM):
+            script = requests.read(int(fields[2]))
+            data = requests.read(int(fields[3]))
+            if len(script) != int(fields[2]) or len(data) != int(fields[3]):
+                break
+            threading.Thread(target=run, args=(int(fields[1]), script.decode(), data, int(fields[4])), daemon=True).start()
         elif len(fields) == 2 and fields[0] == b'C':
             child = running.get(int(fields[1]))
             if child:

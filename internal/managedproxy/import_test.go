@@ -16,7 +16,7 @@ func TestHysteria2SubscriptionAliasesPreserveTransportAndPin(t *testing.T) {
 	s, _ := Load(profile)
 	pin := strings.Repeat("ab", 32)
 	data := `proxies:
- - {name: ordinary, type: socks5, server: 127.0.0.1, port: 1080}
+ - {name: ordinary, type: socks5, server: 203.0.113.10, port: 1080}
  - {name: hopping, type: hysteria2, server: example.com, port: 35000, password: test-password, mport: 35000-39000, pinSHA256: "` + pin + `"}
 `
 	if err := s.Import("feedback", "", []byte(data), "feedback", 0, ""); err != nil {
@@ -49,7 +49,7 @@ func TestPartialSubscriptionImportReportsSkippedNodesAndDependencies(t *testing.
 	profile := t.TempDir()
 	s, _ := Load(profile)
 	data := `proxies:
- - {name: good, type: socks5, server: 127.0.0.1, port: 1080}
+ - {name: good, type: socks5, server: 203.0.113.10, port: 1080}
  - {name: unsupported, type: hysteria2, server: example.com, port: 443, password: secret-password, mport: secret-value}
  - {name: dependent, type: socks5, server: example.com, port: 1080, dialer-proxy: unsupported}
  - {name: unsafe, type: http, server: example.com, port: 80, ws-opts: {private-key: /private/secret-key}}
@@ -103,7 +103,7 @@ func TestHysteria2InvalidOrConflictingAliasesSkipOnlyThatNode(t *testing.T) {
 	} {
 		s, _ := Load(t.TempDir())
 		data := `proxies:
- - {name: good, type: http, server: 127.0.0.1, port: 8080}
+ - {name: good, type: http, server: 203.0.113.10, port: 8080}
  - {name: bad, type: hysteria2, server: example.com, port: 443, password: secret, ` + fields + `}
 `
 		if err := s.Import("test", "", []byte(data), "test", 0, ""); err != nil || s.Count() != 1 {
@@ -156,9 +156,9 @@ func TestRefreshRetainsSelectedExitAndTransitWhenSkipped(t *testing.T) {
 		for _, bad := range []string{"entry", "exit"} {
 			s, _ := Load(t.TempDir())
 			data := `proxies:
- - {name: entry, type: http, server: 127.0.0.1, port: 8080}
- - {name: exit, type: http, server: 127.0.0.1, port: 8081, dialer-proxy: entry}
- - {name: spare, type: http, server: 127.0.0.1, port: 8082}
+ - {name: entry, type: http, server: 203.0.113.10, port: 8080}
+ - {name: exit, type: http, server: 203.0.113.10, port: 8081, dialer-proxy: entry}
+ - {name: spare, type: http, server: 203.0.113.10, port: 8082}
 `
 			if err := s.Import("test", "https://example.com/sub", []byte(data), "test", 24, ""); err != nil {
 				t.Fatal(err)

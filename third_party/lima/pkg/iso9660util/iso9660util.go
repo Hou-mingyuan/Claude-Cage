@@ -76,6 +76,9 @@ func Write(isoPath, label string, layout []Entry, opts ...WriteOpt) error {
 	if err := fs.Finalize(finalizeOptions); err != nil {
 		return err
 	}
+	if err := normalizeTimestamps(isoFile); err != nil {
+		return err
+	}
 
 	return isoFile.Close()
 }

@@ -15,6 +15,7 @@ private var simulatorPreviewEnabled: Bool {
 struct ConnectedDevice: Identifiable {
     let id: String
     var name: String
+    let host: Host?
     let connection: CMConnection?
     let webView: WKWebView
 }
@@ -108,6 +109,8 @@ final class ConnectionModel: ObservableObject {
                     self.trusted = saved.host; self.pin = saved.host.pin; self.relay = saved.host.relay
                     self.imported = nil; self.invitation = nil; self.hasInvitation = false
                     self.hasSaved = true; self.needsTrust = false; self.verified = false
+                    let hostID = saved.host.relay + "|" + saved.host.pin
+                    if self.devices.contains(where: {$0.id == hostID}) {self.disconnectDevice(hostID)}
                     self.connect()
                 } catch { self.status = error.localizedDescription }
             }
@@ -195,7 +198,12 @@ final class ConnectionModel: ObservableObject {
                 }
                 self.connecting = false
                 switch result {
-                case .success(let session): self.status = ""; self.addDevice(session, host: host)
+                case .success(let session):
+                    self.status = ""
+                    if self.didBackground {
+                        self.linkQueue.async { session.suspend() }
+                    }
+                    self.addDevice(session, host: host)
                 case .failure(let error): self.status = error.localizedDescription
                 }
             }
@@ -237,7 +245,7 @@ final class ConnectionModel: ObservableObject {
         web.navigationDelegate = delegate
         // WKWebView holds its navigation delegate weakly.
         navigationDelegates[id] = delegate
-        devices.append(ConnectedDevice(id: id, name: "已连接电脑", connection: connection, webView: web))
+        devices.append(ConnectedDevice(id: id, name: "已连接电脑", host: host, connection: connection, webView: web))
         selectDevice(id)
         var launch = connection.launchURL
         if openArchivedAfterConnect {
@@ -282,12 +290,104 @@ final class ConnectionModel: ObservableObject {
     }
     func disconnect() {if let id = selectedDeviceID {disconnectDevice(id)}}
     func reconnect() {disconnect(); connect()}
+    func reconnectSaved() {
+        if let host = trusted {
+            let id = host.relay + "|" + host.pin
+            if devices.contains(where: {$0.id == id}) {disconnectDevice(id)}
+        }
+        connect()
+    }
+    private var didBackground = false
+    private var lifecycleGeneration = 0
+    private func connectSavedHost(_ host: Host) {
+        guard !connecting,
+              let directory = Bundle.main.url(forResource: "mobile-ui", withExtension: nil) else {
+            status = "设备连接已失效，请重新连接。"; return
+        }
+        connecting = true; generation += 1
+        let attempt = generation
+        status = "正在恢复与电脑的连接…"
+        linkQueue.async {
+            let result = Result {
+                guard let saved = try HostKeychain.read(host: host), saved.host == host else { throw InputError.unavailable }
+                return try CMConnection.connectSaved(relay: host.relay, lookup: saved.lookup, pin: host.pin, assets: directory.path)
+            }
+            DispatchQueue.main.async {
+                guard attempt == self.generation else {
+                    if case .success(let old) = result { DispatchQueue.global().async { old.close() } }
+                    return
+                }
+                self.connecting = false
+                switch result {
+                case .success(let session):
+                    self.status = ""
+                    if self.didBackground {
+                        self.linkQueue.async { session.suspend() }
+                    }
+                    self.addDevice(session, host: host)
+                case .failure(let error): self.status = error.localizedDescription
+                }
+            }
+        }
+    }
+    func handleBackground() {
+        didBackground = true
+        lifecycleGeneration += 1
+        let connections = devices.compactMap(\.connection)
+        guard !connections.isEmpty else {return}
+        var taskID = UIBackgroundTaskIdentifier.invalid
+        taskID = UIApplication.shared.beginBackgroundTask(withName: "CageMobile.suspend") {
+            if taskID != .invalid {
+                UIApplication.shared.endBackgroundTask(taskID)
+                taskID = .invalid
+            }
+        }
+        linkQueue.async {
+            for connection in connections {connection.suspend()}
+            DispatchQueue.main.async {
+                if taskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(taskID)
+                    taskID = .invalid
+                }
+            }
+        }
+    }
+    func handleForeground() {
+        guard didBackground else {return}
+        didBackground = false
+        lifecycleGeneration += 1
+        let lifecycle = lifecycleGeneration
+        let snapshot = devices
+        guard !snapshot.isEmpty else {return}
+        linkQueue.async {
+            for device in snapshot {
+                guard let connection = device.connection else {continue}
+                let ok = connection.resume()
+                DispatchQueue.main.async {
+                    guard self.lifecycleGeneration == lifecycle, !self.didBackground else {return}
+                    guard let current = self.devices.first(where: {$0.id == device.id}),
+                          current.connection === connection else {return}
+                    if ok {
+                        current.webView.evaluateJavaScript("window.dispatchEvent(new Event('online'))")
+                    } else {
+                        let wasSelected = (self.selectedDeviceID == device.id && self.showingWorkspace)
+                        self.disconnectDevice(device.id)
+                        if wasSelected, let host = device.host, (try? HostKeychain.read(host: host)) != nil {
+                            self.connectSavedHost(host)
+                        } else {
+                            self.status = "部分设备的连接已失效，请重新连接。"
+                        }
+                    }
+                }
+            }
+        }
+    }
     func startPreview() {
         #if targetEnvironment(simulator)
         for (id, name) in [("preview-mac", "我的电脑 · 模拟器预览"), ("preview-linux", "Linux 工作站 · 模拟器预览")] {
             if !devices.contains(where: {$0.id == id}) {
                 let preview = SimulatorWorkspacePreview.makeWebView(model: self, id: id)
-                devices.append(ConnectedDevice(id: id, name: name, connection: nil, webView: preview.web))
+                devices.append(ConnectedDevice(id: id, name: name, host: nil, connection: nil, webView: preview.web))
                 navigationDelegates[id] = preview.delegate
             }
         }
@@ -506,7 +606,7 @@ private struct ConnectionSheet: View {
                     } label: {ActionLabel(title: "扫码连接", symbol: "qrcode.viewfinder")}
                     Button {manual = true} label: {ActionLabel(title: "使用配对码", symbol: "key", primary: false)}
                     if model.hasSaved || model.hasInvitation {
-                        Button("重新连接", action: model.connect).frame(minHeight: 44).disabled(!model.canConnect)
+                        Button("重新连接", action: model.reconnectSaved).frame(minHeight: 44).disabled(!model.canConnect)
                     }
                     if !model.devices.isEmpty {
                         Divider().padding(.vertical, 8)
@@ -650,6 +750,7 @@ private struct SettingsScreen: View {
 
 @main
 struct CageMobileApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = ConnectionModel()
     @AppStorage("appearance-theme") private var theme = CageTheme.system
     @State private var showingSettings = false
@@ -679,6 +780,10 @@ struct CageMobileApp: App {
                 }
                 .onChange(of: model.relay) {model.verified = false}
                 .onChange(of: model.pin) {model.verified = false}
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .background {model.handleBackground()}
+                    else if phase == .active {model.handleForeground()}
+                }
         }
     }
     private var home: some View {

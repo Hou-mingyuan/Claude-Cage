@@ -35,6 +35,25 @@ func (t *monitorTiming) stage(name string) {
 	t.checkpoint = now
 }
 
+// Steady rounds repeat every few seconds. A round with one of these results
+// is recorded when the result changes, when it is slow, when the lease margin
+// is short, and otherwise once per monitorTimingQuietInterval with the number
+// of rounds left out. Every other result (failures, skips under a busy lock,
+// pauses) is always recorded.
+var monitorQuietResults = map[string]bool{"completed": true, "not_due": true, "renewed": true, "environment_not_ready": true, "job_running": true, "retry_not_due": true}
+
+const (
+	monitorTimingQuietInterval = 10 * time.Minute
+	monitorTimingSlow          = 2 * time.Second
+	monitorTimingShortLease    = 30 * time.Second
+)
+
+type monitorTimingLog struct {
+	result     string
+	recorded   time.Time
+	suppressed int
+}
+
 func (s *Server) recordMonitorTiming(kind string, timing *monitorTiming) {
 	if s.profile == "" {
 		return
@@ -48,8 +67,25 @@ func (s *Server) recordMonitorTiming(kind string, timing *monitorTiming) {
 		remainingStart = timing.until.Sub(timing.started).Milliseconds()
 		remainingEnd = timing.until.Sub(finished).Milliseconds()
 	}
+	duration := finished.Sub(timing.started)
+	quiet := monitorQuietResults[timing.result] && duration < monitorTimingSlow &&
+		(timing.until.IsZero() || timing.until.Sub(finished) >= monitorTimingShortLease)
+	s.monitorTimingMu.Lock()
+	if s.monitorTimingLogs == nil {
+		s.monitorTimingLogs = map[string]monitorTimingLog{}
+	}
+	last := s.monitorTimingLogs[kind]
+	if quiet && last.result == timing.result && finished.Sub(last.recorded) < monitorTimingQuietInterval && !last.recorded.After(finished) {
+		last.suppressed++
+		s.monitorTimingLogs[kind] = last
+		s.monitorTimingMu.Unlock()
+		return
+	}
+	suppressed := last.suppressed
+	s.monitorTimingLogs[kind] = monitorTimingLog{result: timing.result, recorded: finished}
+	s.monitorTimingMu.Unlock()
 	_ = diagnostics.New(s.profile).Record("info", "network-monitor", fmt.Sprintf(
-		"monitor=%s started=%s duration_ms=%d result=%s verified_age_ms=%d lease_known=%t lease_remaining_start_ms=%d lease_remaining_end_ms=%d %s",
-		kind, timing.started.UTC().Format(time.RFC3339Nano), finished.Sub(timing.started).Milliseconds(),
-		timing.result, age, !timing.until.IsZero(), remainingStart, remainingEnd, strings.Join(timing.stages, " ")))
+		"monitor=%s started=%s duration_ms=%d result=%s verified_age_ms=%d lease_known=%t lease_remaining_start_ms=%d lease_remaining_end_ms=%d unrecorded_steady_rounds=%d %s",
+		kind, timing.started.UTC().Format(time.RFC3339Nano), duration.Milliseconds(),
+		timing.result, age, !timing.until.IsZero(), remainingStart, remainingEnd, suppressed, strings.Join(timing.stages, " ")))
 }

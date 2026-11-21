@@ -206,3 +206,30 @@ test("independent desktop consumers retain distinct private window proofs", asyn
   await flush(); consumers.forEach(consumer => consumer.stop());
   assert.equal(registrations, 2); assert.equal(proofs.size, 2);
 });
+
+test("consumer uses long-poll wait parameter and backs off only when server returns immediately", async () => {
+  const delays = [], paths = [];
+  let clockMs = 1000;
+  let mode = "long-poll";
+  const scheduled = [];
+  const consumer = consumerForTest({
+    now: () => clockMs,
+    schedule: (cb, ms) => { delays.push(ms); scheduled.push(cb); return cb; },
+    cancel: cb => { const i = scheduled.indexOf(cb); if (i >= 0) scheduled.splice(i, 1); },
+    getContext: () => context, storage: storage(), reload: () => {}, nativeAvailable: () => true,
+    native: async () => ({ ok: true }),
+    api: async path => {
+      paths.push(path);
+      if (mode === "long-poll") clockMs += 25000;
+      else clockMs += 5;
+      return {};
+    },
+  });
+  consumer.start(); await flush();
+  assert.equal(paths[0], "/agent/native?consumer=window&wait=25");
+  assert.equal(delays[0], 0);
+  mode = "immediate";
+  scheduled.shift()?.(); await flush();
+  assert.equal(delays[1], 750);
+  consumer.stop();
+});

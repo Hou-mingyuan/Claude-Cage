@@ -44,3 +44,24 @@ func TestLocalCodexConversation(t *testing.T) {
 		t.Fatalf("follow-up matched=%t, error=%v", second == want[len(want)-4:], err)
 	}
 }
+
+func TestCodexAppServerArgsSelectDefaultPermissions(t *testing.T) {
+	for _, tc := range []struct {
+		computerUse bool
+		want        string
+	}{{false, `default_permissions="delegated"`}, {true, `sandbox_mode="workspace-write"`}} {
+		args := codexAppServerArgs(t.TempDir(), tc.computerUse)
+		found := false
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "-c" && args[i+1] == tc.want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("computerUse=%v: %q missing from %q", tc.computerUse, tc.want, args)
+		}
+		if n := len(args); n < 3 || strings.Join(args[n-3:], " ") != "app-server --listen stdio://" {
+			t.Fatalf("computerUse=%v: app-server must be the last command: %q", tc.computerUse, args)
+		}
+	}
+}

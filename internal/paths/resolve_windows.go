@@ -1,12 +1,15 @@
 package paths
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows"
 )
+
+var finalPathName = windows.GetFinalPathNameByHandle
 
 // Resolve follows directory junctions as well as symbolic links. EvalSymlinks
 // may leave an NTFS mount-point reparse record in its original DOS spelling.
@@ -35,9 +38,15 @@ func Resolve(path string) (string, error) {
 	defer windows.CloseHandle(h)
 	buf := make([]uint16, 512)
 	for {
-		n, err := windows.GetFinalPathNameByHandle(h, &buf[0], uint32(len(buf)), 0)
+		n, err := finalPathName(h, &buf[0], uint32(len(buf)), 0)
 		if err != nil {
-			return "", &os.PathError{Op: "resolve", Path: path, Err: err}
+			if !nameQueryUnsupported(err) {
+				return "", &os.PathError{Op: "resolve", Path: path, Err: err}
+			}
+			// Some third-party file system drivers (SFTP or cloud drives such as
+			// RaiDrive, RAM disks) open the directory but never implement the
+			// name query. Fall back to resolving it component by component.
+			return filepath.EvalSymlinks(abs)
 		}
 		if n >= uint32(len(buf)) {
 			buf = make([]uint16, n+1)
@@ -52,4 +61,8 @@ func Resolve(path string) (string, error) {
 		}
 		return result, nil
 	}
+}
+
+func nameQueryUnsupported(err error) bool {
+	return errors.Is(err, windows.ERROR_INVALID_FUNCTION) || errors.Is(err, windows.ERROR_NOT_SUPPORTED) || errors.Is(err, windows.ERROR_INVALID_PARAMETER)
 }

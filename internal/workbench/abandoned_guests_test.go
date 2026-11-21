@@ -1,8 +1,10 @@
 package workbench
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,7 +12,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/guestos"
+	"github.com/sylvinus/agent-vm/internal/guestprofile"
 	"github.com/sylvinus/agent-vm/internal/hostimage"
 )
 
@@ -284,5 +288,247 @@ func TestNewEnvironmentAcceptsOnlyDebian13(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.profile, "guest-install.json")); !os.IsNotExist(err) {
 		t.Fatal("a refused choice left an installation record", err)
+	}
+}
+
+// ubuntuEnvironmentForTest lays out what an earlier version left of an
+// environment created from Ubuntu, beside files that belong to no guest.
+// It returns the paths, relative to state, of the environment's own files.
+func ubuntuEnvironmentForTest(t *testing.T, s *Server, system string) []string {
+	t.Helper()
+	stateDir := filepath.Join(s.profile, "state")
+	if err := hostimage.Save(filepath.Join(stateDir, "guest-media"), ubuntuPlanForTest(s.profile, system)); err != nil {
+		t.Fatal(err)
+	}
+	instance := cage.InstanceName(s.profile, s.environmentDir())
+	owned := []string{
+		filepath.Join("guest-media", "host-system.yaml"),
+		filepath.Join("guest-media", system, "image.qcow2"),
+		filepath.Join("lima", "base", "diffdisk"),
+		filepath.Join("lima", instance, "diffdisk"),
+		filepath.Join("lima", instance, "lima.yaml"),
+		".agent-vm-base-version",
+		".agent-vm-base-built-by",
+		".agent-vm-version-" + instance,
+		".agent-vm-built-by-" + instance,
+		filepath.Join("file-mounts", instance, "gitconfig"),
+	}
+	for _, rel := range append(owned, filepath.Join("lima", "_config", "user"), filepath.Join("guest-media", "debian-13.txt"), "device-reset-last.json") {
+		path := filepath.Join(stateDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("content of "+rel), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := guestprofile.Create(s.profile, guestprofile.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	return append(owned, filepath.Join("guest-media", "host-system-source.json"))
+}
+
+func removedGuestFoldersForTest(t *testing.T, s *Server) []string {
+	t.Helper()
+	found, err := filepath.Glob(filepath.Join(s.profile, "state", removedGuestsDir, "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
+}
+
+// Only an explicit choice in the Cage window moves an Ubuntu environment:
+// every file keeps its content and its place relative to state, under
+// state/guests-removed, and Debian is then started in a fresh environment.
+func TestSettingAsideUbuntuEnvironmentMovesItUnchangedBeforeDebian(t *testing.T) {
+	s := testServer(t)
+	stateDir := filepath.Join(s.profile, "state")
+	owned := ubuntuEnvironmentForTest(t, s, "ubuntu-22.04")
+	before := profileFilesForTest(t, s.profile)
+	stopped, started := 0, 0
+	s.deviceReset = deviceResetHooks{
+		stopEnv:  func() error { stopped++; return nil },
+		startEnv: func(bool) error { started++; return nil },
+	}
+	var queried []string
+	s.abandonedVMState = func(_ context.Context, name string) (bool, error) {
+		queried = append(queried, name)
+		return false, nil
+	}
+	if got := s.abandonedEnvironmentSystem(); got != "ubuntu-22.04" {
+		t.Fatalf("Ubuntu environment not recognised: %q", got)
+	}
+
+	// The agent and other pages without the desktop's proof cannot do it.
+	r := httptest.NewRequest(http.MethodPost, s.origin+"/api/start", strings.NewReader(`{"set_aside_abandoned":true}`))
+	r.Header.Set("Origin", s.origin)
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: s.cookieName(), Value: s.session})
+	untrusted := httptest.NewRecorder()
+	s.handler().ServeHTTP(untrusted, r)
+	if untrusted.Code == http.StatusOK || s.jobs.snapshot().ID != "" {
+		t.Fatalf("set aside without the Cage window: %d %s", untrusted.Code, untrusted.Body.String())
+	}
+	for _, body := range []string{`{"set_aside_abandoned":true,"guest_system":"ubuntu-22.04"}`, `{"set_aside_abandoned":true,"guest_system":"debian-12"}`} {
+		if response := desktopRequestForTest(s, http.MethodPost, "/api/start", []byte(body)); response.Code != http.StatusConflict || s.jobs.snapshot().ID != "" {
+			t.Fatalf("%s was accepted: %d %s", body, response.Code, response.Body.String())
+		}
+	}
+	after := profileFilesForTest(t, s.profile)
+	for path, content := range before {
+		if after[path] != content {
+			t.Fatal("a refused request changed", path)
+		}
+	}
+
+	response := desktopRequestForTest(s, http.MethodPost, "/api/start", []byte(`{"set_aside_abandoned":true}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("set aside refused: %d %s", response.Code, response.Body.String())
+	}
+	if job := waitDeviceResetJob(t, s); job.Error != "" {
+		t.Fatalf("set aside failed: %s", job.Error)
+	}
+	if stopped != 1 || started != 1 || !slices.Contains(queried, "base") || len(queried) != 2 {
+		t.Fatalf("stop=%d start=%d queried=%v", stopped, started, queried)
+	}
+	folders := removedGuestFoldersForTest(t, s)
+	if len(folders) != 1 || !strings.HasPrefix(filepath.Base(folders[0]), "ubuntu-22.04-") {
+		t.Fatalf("not set aside in one folder: %v", folders)
+	}
+	for _, rel := range owned {
+		original := filepath.Join(stateDir, rel)
+		if _, err := os.Lstat(original); !os.IsNotExist(err) {
+			t.Fatal("left in place:", rel, err)
+		}
+		if data, err := os.ReadFile(filepath.Join(folders[0], rel)); err != nil || string(data) != before[original] {
+			t.Fatal("not moved unchanged:", rel, err)
+		}
+	}
+	for _, rel := range []string{filepath.Join("lima", "_config", "user"), filepath.Join("guest-media", "debian-13.txt"), "device-reset-last.json"} {
+		if data, err := os.ReadFile(filepath.Join(stateDir, rel)); err != nil || string(data) != "content of "+rel {
+			t.Fatal("moved a file of no guest:", rel, err)
+		}
+	}
+	profileFile := filepath.Join(s.profile, guestprofile.Filename)
+	if data, err := os.ReadFile(profileFile); err != nil || string(data) != before[profileFile] {
+		t.Fatal("the account settings did not stay for Debian", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(folders[0], "profile", guestprofile.Filename)); err != nil || string(data) != before[profileFile] {
+		t.Fatal("the account settings were not copied with the old environment", err)
+	}
+	var manifest removedGuestManifest
+	data, err := os.ReadFile(filepath.Join(folders[0], "manifest.json"))
+	if err != nil || json.Unmarshal(data, &manifest) != nil || manifest.System != "ubuntu-22.04" || len(manifest.Moved) == 0 {
+		t.Fatalf("manifest: %s %v", data, err)
+	}
+	if found := s.abandonedGuestList(); len(found) != 0 || s.abandonedEnvironmentSystem() != "" {
+		t.Fatalf("still reported after setting aside: %v", found)
+	}
+	if system, err := s.installedLinuxSystem(); err != nil || system != guestos.Debian13 {
+		t.Fatalf("next start does not create Debian: %q %v", system, err)
+	}
+	// Nothing is left to set aside.
+	if response := desktopRequestForTest(s, http.MethodPost, "/api/start", []byte(`{"set_aside_abandoned":true}`)); response.Code != http.StatusConflict {
+		t.Fatalf("set aside twice: %d %s", response.Code, response.Body.String())
+	}
+}
+
+// A machine of the old environment that still runs keeps everything where
+// it is.
+func TestSettingAsideRunningUbuntuEnvironmentChangesNothing(t *testing.T) {
+	s := testServer(t)
+	ubuntuEnvironmentForTest(t, s, "ubuntu-24.04")
+	before := profileFilesForTest(t, s.profile)
+	s.deviceReset = deviceResetHooks{
+		stopEnv:  func() error { return nil },
+		startEnv: func(bool) error { t.Error("started with the old environment in place"); return nil },
+	}
+	s.abandonedVMState = func(_ context.Context, name string) (bool, error) { return name == "base", nil }
+	if response := desktopRequestForTest(s, http.MethodPost, "/api/start", []byte(`{"set_aside_abandoned":true}`)); response.Code != http.StatusOK {
+		t.Fatalf("%d %s", response.Code, response.Body.String())
+	}
+	if job := waitDeviceResetJob(t, s); !strings.Contains(job.Error, "仍在运行") {
+		t.Fatalf("running machine not reported: %q", job.Error)
+	}
+	after := profileFilesForTest(t, s.profile)
+	// Every start records the network intent; nothing else is written.
+	delete(after, filepath.Join(s.profile, "network-intent.json"))
+	if len(after) != len(before) {
+		t.Fatalf("files changed: %d -> %d", len(before), len(after))
+	}
+	for path, content := range before {
+		if after[path] != content {
+			t.Fatal("changed", path)
+		}
+	}
+	if folders := removedGuestFoldersForTest(t, s); len(folders) != 0 {
+		t.Fatalf("left a folder: %v", folders)
+	}
+}
+
+// The programs started after the check, such as Debian's setup, take an
+// inherited LIMA_HOME for the user's own Lima home and refuse to run.
+func TestAbandonedVMCheckLeavesLimaHomeAlone(t *testing.T) {
+	s := testServer(t)
+	user := t.TempDir()
+	t.Setenv("LIMA_HOME", user)
+	if running, err := s.abandonedVMRunning(context.Background(), "base"); err != nil || running {
+		t.Fatal(running, err)
+	}
+	if got := os.Getenv("LIMA_HOME"); got != user {
+		t.Fatalf("LIMA_HOME left at %q", got)
+	}
+	os.Unsetenv("LIMA_HOME")
+	if running, err := s.abandonedVMRunning(context.Background(), "base"); err != nil || running {
+		t.Fatal(running, err)
+	}
+	if got, set := os.LookupEnv("LIMA_HOME"); set {
+		t.Fatalf("LIMA_HOME left at %q", got)
+	}
+}
+
+// An Ubuntu installation that already created its disk is set aside with
+// its record, which otherwise keeps every start refused.
+func TestSettingAsideStartedUbuntuInstallation(t *testing.T) {
+	s := testServer(t)
+	install := guestos.Installation{Version: 1, ID: uuid.New(), System: guestos.Ubuntu2204,
+		Source: ubuntuPlanForTest(s.profile, guestos.Ubuntu2204), SourceKind: guestos.LinuxImageSource}
+	if err := guestos.SaveInstallation(s.profile, install); err != nil {
+		t.Fatal(err)
+	}
+	record, err := os.ReadFile(filepath.Join(s.profile, "guest-install.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	disk := filepath.Join(s.profile, "state", "lima", "base-building", "diffdisk")
+	if err := os.MkdirAll(filepath.Dir(disk), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(disk, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.deviceReset = deviceResetHooks{stopEnv: func() error { return nil }, startEnv: func(bool) error { return nil }}
+	s.abandonedVMState = func(context.Context, string) (bool, error) { return false, nil }
+	if response := desktopRequestForTest(s, http.MethodPost, "/api/start", []byte(`{"set_aside_abandoned":true}`)); response.Code != http.StatusOK {
+		t.Fatalf("%d %s", response.Code, response.Body.String())
+	}
+	if job := waitDeviceResetJob(t, s); job.Error != "" {
+		t.Fatalf("set aside failed: %s", job.Error)
+	}
+	folders := removedGuestFoldersForTest(t, s)
+	if len(folders) != 1 {
+		t.Fatalf("folders: %v", folders)
+	}
+	if data, err := os.ReadFile(filepath.Join(folders[0], "lima", "base-building", "diffdisk")); err != nil || string(data) != "partial" {
+		t.Fatal("disk not moved", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(folders[0], "profile", "guest-install.json")); err != nil || string(data) != string(record) {
+		t.Fatal("record not kept with the environment", err)
+	}
+	if pending, err := guestos.LoadInstallation(s.profile); err != nil || pending != nil {
+		t.Fatal("record still pending", pending, err)
+	}
+	if found := s.abandonedGuestList(); len(found) != 0 {
+		t.Fatalf("still reported: %v", found)
 	}
 }

@@ -57,6 +57,14 @@ try {
 
     $downloads = Join-Path $root 'downloads'
     $script:downloadContent = 'truncated payload'
+    # Exercise the built-in download path offline: without Node on the lookup,
+    # Get-VerifiedDependency uses the Invoke-WebRequest stub below instead of
+    # fetch-build-artifact.mjs, whose behavior fetch-build-artifact.test.mjs covers.
+    function Get-BuildCommand {
+        param([string[]]$Names, [switch]$Optional)
+        if ($Names -contains 'node') { return $null }
+        throw "Unexpected build tool lookup in the dependency test: $($Names -join ', ')"
+    }
     function Invoke-WebRequest {
         param($Uri, $OutFile, $TimeoutSec, $MaximumRedirection)
         [IO.File]::WriteAllText($OutFile, $script:downloadContent)

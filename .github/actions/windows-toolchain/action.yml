@@ -6,6 +6,12 @@ inputs:
   corresponding-sources:
     description: Collect and verify the QEMU corresponding sources ('true' or 'false')
     default: 'false'
+  setup-caches:
+    description: >-
+      Restore and save the setup-go and setup-node caches ('true' or 'false').
+      Release jobs pass 'false' so their Go build cache and npm cache cannot
+      come from entries written by other branches or workflows.
+    default: 'true'
 runs:
   using: composite
   steps:
@@ -13,19 +19,20 @@ runs:
       with:
         # tools/tailnet requires the newer of the two Go versions.
         go-version-file: tools/tailnet/go.mod
+        cache: ${{ inputs.setup-caches == 'true' }}
         cache-dependency-path: |
           go.sum
           tools/tailnet/go.sum
     - uses: actions/setup-node@v4
       with:
         node-version: 24
-        cache: npm
+        cache: ${{ inputs.setup-caches == 'true' && 'npm' || '' }}
         cache-dependency-path: ui/package-lock.json
     - uses: actions/setup-dotnet@v4
       with:
         global-json-file: global.json
-    - uses: astral-sh/setup-uv@v10.3.3
-    - uses: msys2/setup-msys2@v2
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+    - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
       id: msys2
       with:
         msystem: UCRT64

@@ -58,29 +58,57 @@ func windowsPathWithin(dir string, roots []string) bool {
 	return false
 }
 
-// chooseWindowsSocketDir returns the first usable spelling. Each candidate is
-// a long path and, when it exists, the ASCII alias Windows gives it; an alias
-// must not escape the exclusion its long path is checked against.
-func chooseWindowsSocketDir(candidates []string, room int, excluded []string, ensure func(string) error, shortName func(string) (string, error)) (string, error) {
+// errSocketDirNotCreated is a lookup for a directory that is to be reached
+// through its 8.3 alias but does not exist yet: the core has not created it.
+var errSocketDirNotCreated = errors.New("socket directory not created yet")
+
+// windowsSocketFS is what chooseWindowsSocketDir needs to know about the
+// file systems holding the candidates.
+type windowsSocketFS struct {
+	// persistentACLs reports whether the volume holding a path keeps access
+	// control lists, so a directory there can be made private (exFAT and
+	// FAT32 cannot).
+	persistentACLs func(string) bool
+	exists         func(string) bool
+	mkdir          func(string) error
+	shortName      func(string) (string, error)
+}
+
+// chooseWindowsSocketDir picks the directory for a profile's sockets: the
+// first candidate on a volume with persistent ACLs whose spelling, or the
+// ASCII 8.3 alias Windows gives it, is usable. An alias must not escape the
+// exclusion its long path is checked against.
+//
+// The choice depends only on the paths and on properties of the volumes
+// holding them, never on whether making the directory private succeeded, so
+// the process that creates the directory and the processes that only look
+// it up always agree. Reading an alias needs the directory to exist: with
+// create it is made first, without it a lookup reports errSocketDirNotCreated
+// instead of moving on to a candidate the creating process would not use.
+func chooseWindowsSocketDir(candidates []string, room int, excluded []string, fs windowsSocketFS, create bool) (string, error) {
 	var reasons []string
 	for _, dir := range candidates {
 		problem := windowsSocketDirProblem(dir, room, excluded)
-		if problem == nil {
-			if err := ensure(dir); err != nil {
-				reasons = append(reasons, err.Error())
-				continue
-			}
-			return dir, nil
-		}
 		if strings.HasPrefix(dir, `\\`) || windowsPathWithin(dir, excluded) {
 			reasons = append(reasons, problem.Error())
 			continue
 		}
-		if err := ensure(dir); err != nil {
-			reasons = append(reasons, err.Error())
+		if !fs.persistentACLs(dir) {
+			reasons = append(reasons, "volume keeps no access control lists")
 			continue
 		}
-		short, err := shortName(dir)
+		if problem == nil {
+			return dir, nil
+		}
+		if !fs.exists(dir) {
+			if !create {
+				return "", errSocketDirNotCreated
+			}
+			if err := fs.mkdir(dir); err != nil {
+				return "", err
+			}
+		}
+		short, err := fs.shortName(dir)
 		if err == nil && windowsSocketDirProblem(short, room, excluded) == nil {
 			return short, nil
 		}

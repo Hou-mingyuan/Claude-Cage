@@ -1,9 +1,13 @@
 import importlib.util
 import io
 import json
+import multiprocessing
+import os
 from pathlib import Path
 import tarfile
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -170,6 +174,137 @@ class CacheOwnershipTests(unittest.TestCase):
         self.registry.save(record)
         self.registry.collect([], 'next-session')
         self.assertFalse(self.cache.exists())
+
+
+class BridgeEventLoopTests(unittest.TestCase):
+    def test_wait_timeout_avoids_50ms_polling_when_idle(self):
+        self.assertEqual(clipboard.bridge_wait_timeout(2, 2, True, False, 0.0, 10.0), 0.0)
+        self.assertEqual(clipboard.bridge_wait_timeout(2, 2, False, False, 0.0, 10.0), 10.0)
+        self.assertEqual(clipboard.bridge_wait_timeout(1, 2, False, False, 0.0, 10.0), 1.0)
+        self.assertAlmostEqual(clipboard.bridge_wait_timeout(2, 2, False, True, 10.4, 10.0), 0.4, places=3)
+
+    def test_event_driven_bridge_roundtrips_text_png_files_and_worker_eof(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = clipboard.CacheRegistry(root / 'receipts')
+            sample_dir = root / 'sample'
+            sample_dir.mkdir()
+            sample_file = sample_dir / 'hello.txt'
+            sample_file.write_bytes(b'clipboard file bytes')
+            sample_file_2 = sample_dir / 'guest.txt'
+            sample_file_2.write_bytes(b'guest clipboard file bytes')
+            registry.register([str(sample_file)], 'initial')
+
+            stdin_r, stdin_w = os.pipe()
+            stdout_r, stdout_w = os.pipe()
+            stdout_file = os.fdopen(stdout_w, 'w', buffering=1)
+            stdout_reader = os.fdopen(stdout_r, 'r', buffering=1)
+            worker_ends = {}
+            alive = {':77': True}
+            display_up = {':77': True}
+
+            class FakeProcess:
+                def __init__(self, name):
+                    self.name = name
+                def is_alive(self):
+                    return alive[self.name]
+                def join(self, timeout=None):
+                    pass
+                def terminate(self):
+                    alive[self.name] = False
+                def kill(self):
+                    alive[self.name] = False
+
+            def spawn(name, _user):
+                parent, child = multiprocessing.Pipe()
+                worker_ends[name] = child
+                return FakeProcess(name), parent
+
+            def next_output(timeout=1.0):
+                result = []
+                def _read():
+                    line = stdout_reader.readline()
+                    if line:
+                        result.append(json.loads(line))
+                t = threading.Thread(target=_read, daemon=True)
+                t.start()
+                t.join(timeout)
+                self.assertTrue(result, 'timed out waiting for bridge output')
+                return result[0]
+
+            thread = threading.Thread(
+                target=clipboard.bridge,
+                kwargs={
+                    'displays': ((':77', 'cage-browser'),),
+                    'stdin_fd': stdin_r,
+                    'stdout': stdout_file,
+                    'registry': registry,
+                    'spawn_worker': spawn,
+                    'display_exists': lambda name: display_up.get(name, False),
+                    'materialize': lambda paths, _user, _session: paths,
+                },
+                daemon=True,
+            )
+            thread.start()
+            try:
+                hello = next_output()
+                self.assertTrue(hello['hello']['available'])
+                child = worker_ends[':77']
+
+                # Text roundtrip: host -> worker -> ack, then worker -> host
+                t0 = time.monotonic()
+                os.write(stdin_w, (json.dumps({'text': 'host-text', 'serial': 1}) + '\n').encode())
+                msg = child.recv()
+                self.assertEqual(msg, {'text': 'host-text', 'serial': 1})
+                child.send({'ack': 1})
+                self.assertEqual(next_output(), {'ack': 1})
+                child.send({'text': 'guest-text'})
+                self.assertEqual(next_output(), {'text': 'guest-text'})
+                self.assertLess(time.monotonic() - t0, 0.5)
+
+                # Image (PNG) roundtrip
+                t0 = time.monotonic()
+                os.write(stdin_w, (json.dumps({'png': 'iVBORw0KGgo=', 'serial': 2}) + '\n').encode())
+                self.assertEqual(child.recv(), {'png': 'iVBORw0KGgo=', 'serial': 2})
+                child.send({'ack': 2})
+                self.assertEqual(next_output(), {'ack': 2})
+                child.send({'png': 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'})
+                self.assertEqual(next_output()['png'], 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7')
+                self.assertLess(time.monotonic() - t0, 0.5)
+
+                # File selection roundtrip
+                t0 = time.monotonic()
+                os.write(stdin_w, (json.dumps({'files': [str(sample_file)], 'serial': 3}) + '\n').encode())
+                self.assertTrue(child.poll(1.0))
+                self.assertEqual(child.recv(), {'files': [str(sample_file)], 'serial': 3})
+                child.send({'ack': 3})
+                self.assertEqual(next_output(), {'ack': 3})
+                child.send({'clipboard_files': []})
+                child.send({'files': [str(sample_file_2)], 'source': 'cage-browser'})
+                self.assertTrue(child.poll(1.0))
+                reseed = child.recv()
+                self.assertEqual(reseed['files'], [str(sample_file_2)])
+                child.send({'ack': reseed['serial']})
+                published = next_output()
+                self.assertEqual(published['files'], [str(sample_file_2)])
+                self.assertEqual(published['source'], 'cage')
+                self.assertLess(time.monotonic() - t0, 0.5)
+
+                # Worker pipe EOF wakes bridge immediately and announces unavailable
+                t0 = time.monotonic()
+                display_up[':77'] = False
+                alive[':77'] = False
+                child.close()
+                down = next_output()
+                self.assertFalse(down['hello']['available'])
+                self.assertLess(time.monotonic() - t0, 0.5)
+            finally:
+                os.close(stdin_w)
+                thread.join(timeout=2)
+                self.assertFalse(thread.is_alive())
+                os.close(stdin_r)
+                stdout_file.close()
+                stdout_reader.close()
 
 
 if __name__ == '__main__':

@@ -28,13 +28,24 @@ keywords: 云端 远程部署 VPS SSH 无KVM rootless 服务器 主机 指纹 �
 
 ## 从侧栏部署并连接
 
-1. 打开 Cage，进入左栏“SSH 主机”，点击加号填写名称、地址、端口、用户名和本机密钥文件或 SSH agent。自定义路径可在“云端安装路径”设置。
+1. 打开 Cage，进入左栏“SSH 主机”，点击加号填写名称、地址、端口、用户名和本机密钥文件或 SSH agent。自定义路径可在“云端安装路径”设置。使用 SSH agent 时见下文[指定 SSH agent](#指定-ssh-agent)。
 2. 点击“连接此主机”，将 SSH 主机指纹与服务器独立显示的记录核对。指纹变化时先核查原因，再继续。
 3. 首次使用空配置目录时，点击“部署并连接”。Cage 传输匹配的程序和脚本，在服务器准备独立引擎与持久环境。
 4. 已部署且就绪时直接进入；能确认归属的用户服务已停止时会尝试启动。安装中断后可用同一版本重试。
 5. 云端工作台打开后，创建或解锁服务器自己的 Cage 账户，再配置服务器的代理和项目。
 
 本机有任务时，连接卡片提供保留或停止本机环境的选项，停止前先保存内容。不要在未经备份的已有本机数据目录上首次部署云端实例。
+
+### 指定 SSH agent
+
+登录方式选“本机 SSH agent”时，“SSH agent 套接字”留空即沿用原有行为：macOS 和 Linux 使用启动 Cage 时的 `SSH_AUTH_SOCK`；Windows 先用 `SSH_AUTH_SOCK`，未设置时使用 Windows OpenSSH agent（`\\.\pipe\openssh-ssh-agent`）。
+
+密码管理器等程序自带 agent、而 `SSH_AUTH_SOCK` 指向另一个没有密钥的 agent 时（例如 macOS 默认的 launchd agent），在这一栏填写该程序给出的 agent 位置，与 SSH 配置中 `IdentityAgent` 的值相同，但要写成完整路径：
+
+- macOS 和 Linux：填写 Unix 套接字的绝对路径，不展开 `~` 和环境变量，长度不超过系统上限（macOS 103 字节，Linux 107 字节）。连接前核对它确实是套接字、属于当前用户，且组和其他用户没有写权限；可以是指向这样的套接字的符号链接。权限不符时按提示改为仅自己可读写（如 `chmod 600`）。
+- Windows：只接受本机命名管道，格式为 `\\.\pipe\名称`，不接受网络路径和其他文件路径。
+
+Cage 只连接你填写的位置，不读取 `~/.ssh/config`，也不运行 `ssh -G` 等命令推断 agent。连接失败时提示会区分三种情况：无法连接 agent 或指定位置不符合要求、agent 通信失败（未能读取密钥列表）、agent 中没有可用密钥。私钥始终留在 agent 内，Cage 不导出也不上传。
 
 <figure class="guide-shot">
   <a href="../../www/public/docs/screenshots/ssh-host-form.jpg" target="_blank" rel="noopener" aria-label="查看原图：远程主机地址、认证与私钥路径表单"><img src="../../www/public/docs/screenshots/ssh-host-form.jpg" alt="远程主机地址、认证与私钥路径表单" width="2560" height="1764" loading="lazy" decoding="async" /></a>

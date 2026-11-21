@@ -35,6 +35,24 @@ func TestReleaseSelectionPreservesChannelsAndNumericPrereleases(t *testing.T) {
 		t.Fatalf("downgrade: %#v %v", c, err)
 	}
 }
+// An Intel Mac takes only the amd64 package; a release that published no
+// Intel package is skipped rather than offering the Apple Silicon one.
+func TestIntelMacSelectsOnlyItsOwnPackage(t *testing.T) {
+	intel := func(v string) release {
+		r := fixtureRelease(v, false)
+		name := "Cage-" + v + "-macos-amd64.dmg"
+		r.Assets = append(r.Assets, asset{Name: name, URL: "https://github.com/" + repository + "/releases/download/v" + v + "/" + name, Size: 3, Digest: "sha256:" + strings.Repeat("b", 64), State: "uploaded"})
+		return r
+	}
+	c, err := catalog.Select([]release{intel("0.2.0"), fixtureRelease("0.3.0", false)}, "0.1.0", "darwin", "amd64")
+	if err != nil || c == nil || c.Version != "0.2.0" || c.Archive.Name != "Cage-0.2.0-macos-amd64.dmg" {
+		t.Fatalf("Intel Mac selected %#v: %v", c, err)
+	}
+	if c, err = catalog.Select([]release{intel("0.2.0")}, "0.1.0", "darwin", "arm64"); err != nil || c == nil || c.Archive.Name != "Cage-0.2.0-macos-arm64.dmg" {
+		t.Fatalf("Apple Silicon selected %#v: %v", c, err)
+	}
+}
+
 func TestRejectReleaseAssetOutsideRepositoryOrOversize(t *testing.T) {
 	for _, mutate := range []func(*release){
 		func(r *release) { r.Assets[0].URL = "https://evil.example/Cage.dmg" },

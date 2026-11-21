@@ -28,6 +28,7 @@ async function releaseNames() {
   return {
     version,
     mac: `Cage-${version}-macos-arm64.dmg`,
+    macIntel: `Cage-${version}-macos-amd64.dmg`,
     windows: `Cage-${version}-windows-amd64-setup.exe`,
     linux: `Cage-${version}-linux-amd64.deb`,
     linuxSource: linuxDependencies.mihomoSource.file,
@@ -107,6 +108,7 @@ export async function prepareReleaseAssets({ inputs, output }) {
   const names = await releaseNames();
   const all = new Map();
   const inputsToVerify = [];
+  let intelInputs = 0;
   for (const input of inputs) {
     const directory = resolve(input);
     const info = await lstat(directory);
@@ -117,16 +119,18 @@ export async function prepareReleaseAssets({ inputs, output }) {
     }
     const entries = await readManifest(directory);
     const mac = entries.has(names.mac);
+    const macIntel = entries.has(names.macIntel);
     const windows = entries.has(names.windows);
     const linux = entries.has(names.linux);
-    if (!mac && !windows && !linux) throw new Error(`No supported package name for VERSION ${names.version}: ${directory}`);
+    if (macIntel) intelInputs++;
+    if (!mac && !macIntel && !windows && !linux) throw new Error(`No supported package name for VERSION ${names.version}: ${directory}`);
     if (linux && !entries.has(names.linuxSource)) throw new Error(`Missing Linux Mihomo source in SHA256SUMS: ${directory}`);
     if (mac && !entries.has(names.macSource)) throw new Error(`Missing macOS Mihomo source in SHA256SUMS: ${directory}`);
     if (windows && (!entries.has(names.windowsSource) || ![...entries.keys()].some(name => isQemuArchive(name, names)))) {
       throw new Error(`Windows release requires its Mihomo and complete QEMU source archives in the same SHA256SUMS: ${directory}`);
     }
     for (const [name, digest] of entries) {
-      const installer = name === names.mac || name === names.windows || name === names.linux;
+      const installer = name === names.mac || name === names.macIntel || name === names.windows || name === names.linux;
       if (!installer && ![names.macSource, names.windowsSource, names.linuxSource, names.qemuSource, names.qemuKeymap, names.qemuChanges].includes(name) && !isQemuArchive(name, names)) {
         throw new Error(`Unsupported asset or version in SHA256SUMS: ${name}`);
       }
@@ -136,6 +140,10 @@ export async function prepareReleaseAssets({ inputs, output }) {
       all.set(name, digest);
     }
   }
+
+  // Both macOS packages bundle the same pinned Mihomo. The Intel output lists
+  // only its DMG; its source must arrive from the Apple Silicon output.
+  if (intelInputs && !all.has(names.macSource)) throw new Error('Intel macOS release requires the macOS Mihomo source from the Apple Silicon output');
 
   const staging = await mkdtemp(join(tmpdir(), 'cage-release-assets-'));
   const created = [];
@@ -176,7 +184,7 @@ async function main() {
     output: { type: 'string' }, help: { type: 'boolean', short: 'h' },
   } });
   if (values.help) {
-    console.log('Usage: node scripts/prepare-release-assets.mjs --output NEW_DIRECTORY PLATFORM_DIRECTORY [...]\nAccepts macOS, Windows and Linux release outputs with SHA256SUMS. Checks current VERSION, source archives and hashes; macOS/Windows signature verification belongs to their packagers. Linux packages use manual system installation. Never uploads or overwrites an existing output directory.');
+    console.log('Usage: node scripts/prepare-release-assets.mjs --output NEW_DIRECTORY PLATFORM_DIRECTORY [...]\nAccepts macOS (Apple Silicon and Intel), Windows and Linux release outputs with SHA256SUMS. Checks current VERSION, source archives and hashes; macOS/Windows signature verification belongs to their packagers. Linux packages use manual system installation. Never uploads or overwrites an existing output directory.');
     return;
   }
   const result = await prepareReleaseAssets({ inputs: positionals, output: values.output });

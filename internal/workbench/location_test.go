@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/exitpolicy"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 )
 
@@ -73,7 +74,7 @@ func TestLocationFallbackUsesMeasuredIP(t *testing.T) {
 					return nil, errors.New("unexpected host")
 				}
 			})}
-			loc, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8"))
+			loc, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8"), exitpolicy.LookupOptions{})
 			if err != nil || loc.IP != "8.8.8.8" || loc.CountryCode != "US" || loc.RegionCode != "CA" || loc.Timezone != "America/Los_Angeles" || loc.SuggestedLocale != "en_US.UTF-8" || loc.CheckedAt.IsZero() {
 				t.Fatalf("fallback location: %+v, %v", loc, err)
 			}
@@ -97,7 +98,7 @@ func TestLocationFallbackStaysOnConfiguredProxy(t *testing.T) {
 	defer proxy.Close()
 	cfg := cage.DefaultConfig()
 	cfg.ProxyURL = proxy.URL
-	if _, err := probeLocationForIP(context.Background(), cfg, "8.8.8.8"); err == nil {
+	if _, err := probeLocationForIP(context.Background(), cfg, "8.8.8.8", exitpolicy.LookupOptions{}); err == nil {
 		t.Fatal("rejected proxy requests produced a location")
 	}
 	for _, want := range wantTargets {
@@ -149,7 +150,7 @@ func TestLocationExtendedFallbacks(t *testing.T) {
 				}
 				return nil, errors.New("blocked")
 			})}
-			loc, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8"))
+			loc, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8"), exitpolicy.LookupOptions{})
 			if err != nil || loc.IP != "8.8.8.8" || loc.Country != "United States" || loc.CountryCode != "US" || loc.Timezone == "" {
 				t.Fatalf("%s lookup failed: %+v, err=%v", tc.name, loc, err)
 			}
@@ -164,7 +165,7 @@ func TestSuccessfulPrimaryLocationDoesNotQueryBackup(t *testing.T) {
 		}
 		return locationResponse(200, primaryLocationJSON), nil
 	})}
-	if _, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8")); err != nil {
+	if _, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8"), exitpolicy.LookupOptions{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -183,7 +184,7 @@ func TestLocationRejectsInvalidBackupAndKeepsErrorsPrivate(t *testing.T) {
 			}
 			return locationResponse(200, body), nil
 		})}
-		loc, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8"))
+		loc, err := lookupLocation(context.Background(), client, net.ParseIP("8.8.8.8"), exitpolicy.LookupOptions{})
 		if err == nil || loc != (Location{}) || strings.Contains(err.Error(), "private-secret") || !strings.Contains(err.Error(), "位置查询均失败") {
 			t.Fatalf("invalid backup accepted or error leaked: %+v, %v", loc, err)
 		}
@@ -199,7 +200,7 @@ func TestLocationCancellationStopsFallback(t *testing.T) {
 		cancel()
 		return nil, context.Canceled
 	})}
-	_, err := lookupLocation(ctx, client, net.ParseIP("8.8.8.8"))
+	_, err := lookupLocation(ctx, client, net.ParseIP("8.8.8.8"), exitpolicy.LookupOptions{})
 	if !errors.Is(err, context.Canceled) || calls != 1 {
 		t.Fatal("canceled lookup continued to fallback", calls, err)
 	}
@@ -225,7 +226,7 @@ func TestLocationProvidersLiveIntegration(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }}
 	t.Run("measured exit", func(t *testing.T) {
-		loc, err := probeLocation(context.Background(), cfg)
+		loc, err := probeLocation(context.Background(), cfg, exitpolicy.LookupOptions{})
 		if err != nil || loc.IP == "" || loc.Timezone == "" {
 			t.Fatal("measured-exit location lookup failed", err)
 		}
@@ -298,7 +299,7 @@ func TestLocationProvidersLiveIntegration(t *testing.T) {
 				}
 				return transport.RoundTrip(r)
 			})
-			if _, err := lookupLocation(context.Background(), &only, net.ParseIP("8.8.8.8")); err != nil {
+			if _, err := lookupLocation(context.Background(), &only, net.ParseIP("8.8.8.8"), exitpolicy.LookupOptions{}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -311,7 +312,7 @@ func TestLocationProvidersLiveIntegration(t *testing.T) {
 			}
 			return transport.RoundTrip(r)
 		})
-		if _, err := lookupLocation(context.Background(), &fallbackClient, net.ParseIP("8.8.8.8")); err != nil {
+		if _, err := lookupLocation(context.Background(), &fallbackClient, net.ParseIP("8.8.8.8"), exitpolicy.LookupOptions{}); err != nil {
 			t.Fatal("real backup through selected proxy failed", err)
 		}
 	})
@@ -388,5 +389,41 @@ func isolatedLocationProxy(t *testing.T, configPath, core string, cfg cage.Confi
 			t.Fatal("isolated proxy did not become ready")
 		case <-time.After(50 * time.Millisecond):
 		}
+	}
+}
+
+// ipinfo.io receives the exit IP only after the user opts in; the default
+// keeps the five providers the release has always used.
+func TestLocationIPInfoFallbackFollowsPreference(t *testing.T) {
+	defaults := []string{"ipwho.is:443", "api.ip.sb:443", "ipwhois.app:443", "get.geojs.io:443", "ipapi.co:443"}
+	for _, tc := range []struct {
+		name  string
+		prefs Preferences
+		want  []string
+	}{
+		{"default off", Preferences{}, defaults},
+		{"opted in", Preferences{LocationIPInfoFallback: true}, append(append([]string{}, defaults...), "ipinfo.io:443")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			targets := make(chan string, 8)
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				targets <- r.Host
+				w.WriteHeader(http.StatusBadGateway)
+			}))
+			defer proxy.Close()
+			cfg := cage.DefaultConfig()
+			cfg.ProxyURL = proxy.URL
+			if _, err := probeLocationForIP(context.Background(), cfg, "8.8.8.8", tc.prefs.locationOptions()); err == nil {
+				t.Fatal("rejected proxy requests produced a location")
+			}
+			close(targets)
+			var got []string
+			for target := range targets {
+				got = append(got, target)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("location targets = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

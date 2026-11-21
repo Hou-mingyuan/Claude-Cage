@@ -4,14 +4,27 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/sylvinus/agent-vm/internal/cage"
 )
+
+func TestCagePortEventsGoDirectlyToLog(t *testing.T) {
+	t.Setenv(cage.ConfigEnv, "config.json")
+	t.Setenv("AGENT_VM_NOTIFY", "1")
+	var log bytes.Buffer
+	if output := hostagentEventOutput(&log, "test"); output != &log {
+		t.Fatal("Cage hostagent output should go directly to the log")
+	}
+}
 
 // Events pass through as written; a forwarded port, or one refused because
 // the host uses it, is told, once each.
 func TestEventWatch(t *testing.T) {
 	var out bytes.Buffer
 	var told []string
-	e := newEventWatch(&out, "proj-1a2b3c4d")
+	t.Setenv(cage.ConfigEnv, "")
+	t.Setenv("AGENT_VM_NOTIFY", "")
+	e := hostagentEventOutput(&out, "proj-1a2b3c4d").(*eventWatch)
 	e.notify = func(title, msg string) { told = append(told, title+": "+msg) }
 	in := `{"status":{"running":true}}
 {"status":{"portForward":{"type":"forwarding","protocol":"tcp","guestAddr":"127.0.0.1:5173","hostAddr":"127.0.0.1:5173"}}}

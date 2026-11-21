@@ -18,11 +18,23 @@
 
 </div>
 
+## Falsafadda naqshadaynta
+
+1. **Claude laftiisu waa ammaan, laakiin galka shaqada (harness) iyo barnaamijyada la xiriira ma aha** — oo ay ku jiraan Claude Code, Claude Desktop, iyo iimayllada, boggaga webka iyo calaamadaha deegaanka ee biraawsarku helo.
+2. **Si ammaan ah loogu adeegsado awoodda Claude waxaa badanaa jira laba waddo: reverse proxy ama xakamaynta fog** — in Claude laga soo saaro server oo si toos ah loogu socodsiiyo kombiyuutarka martigeliyaha, ama in lagu meeleeyo deegaan go’doonsan oo uu si xakamaysan ugu maamulo martigeliyaha. Waxaan aaminsannahay in waddada labaad ay ka ammaan badan tahay kana waafaqsan tahay xeerarka.
+3. **Sidaa darteed fikradda asaasiga ah ee Cage waa in barnaamijyada Claude loo dhiso deegaan maxalli ah oo fudud oo go’doonsan, kadibna iyadoo loo marayo plugins MCP oo heer-caalami ah uu Claude si ammaan ah oo xakamaysan u isticmaalo kombiyuutarkaaga** — iyadoo leh oggolaansho cad iyo xaqiijinta isticmaalaha, kana ammaan badan SSH toos ah.
+
+Habkan Cage wuxuu hal mar ku xaqiijiyaa saddex yool:
+
+- **Xir qaybta khatarta ah, fur awoodda faa’iidada leh.** Marwo Claude waxay si nabad ah ugu fadhiisataa carsaanyadeeda yar gudaha Cage, gacanta ayayna u soo taagtaa si ay u qabato shaqada dibadda — iyadoon loo baahnayn in xafiis dhan dib loogu dhiso gudaha Cage.
+- **Iskaashi ka madax-bannaan bulshada open-source iyadoo loo marayo suuqa plugins-ka.** [Suuqa plugins-ka furan (cage-plugins)](https://github.com/Lee-xeo/cage-plugins), **plugin = MCP + fidinta**: MCP waxay bixisaa awoodda Claude, fidintuna waxay habaysaa Cage. Bulshadu waxay ku biirisaa qalabka iyo boggaga suuqa plugins-ka halkii ay buuxin lahayd liiska issues-ka Cage, kooxda Cage-na waxay diiradda saartaa xudunta barnaamijka.
+- **Waafaqsan xeerarka, ammaan, fudud, maxalli ah, qiimo jaban oo hal gujin diyaar ku ah.** Looma baahna in la dayactiro nidaamyo marti oo badan oo adag, looma walwalo in awoodda Claude xaddidanto, mana jiraan kharashyo cloud oo qaali ah ama halis xog — wax walba si qurux badan ayay kombiyuutarkaaga ugu shaqeeyaan.
+
 ## Waan ka daalnay Anthropic
 
-Isticmaalayaasha caadiga ah ee raba inay la hadlaan Claude, waanu ka daalnay habaynta tusaalooyinka VPS, sawirka faraha browserka, iyo hubinta deegaanka, anagoo ka walwalsanayn xayiraadaha akoonnada iyo khasaaraha maaliyadeed. Waxaan soo bandhigaynaa **Claude Cage** -**codsi desktop diyaar u ah in la isticmaalo: habayso wakiilkaaga shabakad oo maamul deegaankaaga go'doonsan, aagga wakhtiga, luqadda, iyo hubinta deegaanka ee hal meel ah.**
+Isticmaalayaasha caadiga ah ee raba inay la hadlaan Claude, waanu ka daalnay habaynta tusaalooyinka VPS, sawirka faraha browserka, iyo hubinta deegaanka, anagoo ka walwalsanayn xayiraadaha akoonnada iyo khasaaraha maaliyadeed. Waxaan soo bandhigaynaa **Claude Cage** — **codsi desktop diyaar u ah in la isticmaalo: habayso wakiilkaaga shabakadda oo maamul deegaankaaga go'doonsan ee fudud, aagga wakhtiga, luqadda, hubinta deegaanka iyo plugins-ka hal meel.**
 
-Claude Cage wuxuu terminalka, biraawsarka, tafatiraha iyo Claude Desktop-ka rasmiga ah ku mideeyaa hal goob shaqo oo go’doonsan. macOS, Windows iyo Linux dhammaantood waxay isticmaalaan isla deegaan yar oo Debian 13 ah. Wadaag mashaariicda aad doorato, shabakadda si gaar ah u maamul, serverkaaga SSH ku xir, hawlahana telefoonka ka sii wad. Astaamaha ugu waaweyn:
+Claude Cage wuxuu terminalka, biraawsarka, tafatiraha, Claude Desktop-ka rasmiga ah iyo suuqa plugins-ka ku mideeyaa hal goob shaqo oo go’doonsan. macOS, Windows iyo Linux dhammaantood waxay isticmaalaan isla deegaan fudud oo Debian 13 ah. Wadaag mashaariicda aad doorato, shabakadda si gaar ah u maamul, qalabka kombiyuutarka si ammaan ah ugu adeegso plugins, serverkaaga SSH ku xir, hawlahana telefoonka ka sii wad. Astaamaha ugu waaweyn:
 
 - Dejinta shabakada oo ka go'an martigeliyaha; Dariiqyada qafisku waxay maraa dhammaan taraafikada shabakada gudaha deegaankeeda iyada oo u sii marinaysa wakiilkeeda shabakadeeda
 - Dejinta faraha browserka ee ka go'doon martigeliyaha, oo ay ku jiraan aaga wakhtiga iyo luqadda, oo leh si toos ah ula mid ah goobta wakiilka shabakada
@@ -44,7 +56,8 @@ Claude Cage wuxuu terminalka, biraawsarka, tafatiraha iyo Claude Desktop-ka rasm
 ## Maxaad ku samayn kartaa Cage
 
 - **Ka shaqee hal daaqad.** Orod Claude Code gudaha terminalka, dib u eeg isbeddelada tifaftiraha, oo isticmaal browserka Cage si aad u aragto adeegyada oo aad u soo gasho.
-- **Hal deegaan dhammaan nidaamyada.** Cage wuxuu macOS, Windows iyo Linux ku isticmaalaa isla deegaanka Debian 13, oo leh isla qalabka iyo isla habka shaqada. [Deegaanka Debian](docs/guide/guest-systems.md)
+- **Fur dhammaan awoodaha adigoo adeegsanaya suuqa plugins-ka.** [Suuqa plugins-ka furan (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) ee «plugin = MCP + fidinta» wuxuu u ogolaadaa Claude inuu si ammaan ah oo la xakameeyo u adeegsado qalabka kombiyuutarkaaga (shaashadda iyo kiiboodhka/jiirka, faylasha Office, Blender, amarro) kuna daro boggag gaar ah Cage iyadoo leh oggolaansho cad iyo xaqiijinta nidaamka. [Hagaha plugins-ka](docs/guide/plugins.md) · [Tilmaanta horumarinta](docs/plugins.md)
+- **Hal deegaan oo fudud dhammaan nidaamyada.** Cage wuxuu macOS, Windows iyo Linux ku isticmaalaa isla deegaanka fudud ee Debian 13 isagoon u baahnayn nidaamyo marti oo badan oo adag, isla qalabka iyo isla habka shaqada. [Deegaanka Debian](docs/guide/guest-systems.md)
 - **Xakamee waxa aad wadaagto.** Kaliya goobta shaqada ee caadiga ah iyo galka mashruuca ee si cad loo furay ayaa la wadaagaa. Xaaladda soo galitaanka Claude ee martida loo yahay, boggaga browserka, iyo furayaasha SSH si toos ah looma soo dejiyo.
 - **Eeg heerka shabakadaada** Maaraynta wakiilnimada shabakada ee ku dhex jirta ayaa kuu ogolaanaysa inaad soo dejiso rukunsiyada, dooro meelaha dhamaadka, oo aad hubiso IP-ga ka baxa. Deegaanku internetka kuma xirmayo ilaa hubinnada muhiimka ahi ay si guul leh u gudbaan. Haddii wakiillada shabakadu maqan tahay, ma dhacayso xiriir toos ah.
 - **Sii wad marka xigta** Qalabka, faylalka, iyo xaaladda gelitaanku waxay ku sii jiraan saxanka casriga ah. Hawlaha asalka ahi waxay sii socon karaan markaad daaqadda xidhid.
@@ -52,7 +65,6 @@ Claude Cage wuxuu terminalka, biraawsarka, tafatiraha iyo Claude Desktop-ka rasm
 - **Telefoonka ka sii wad.** Android ama iPhone ku lammaani kombiyuutarka adigoo adeegsanaya QR ama koodhka lammaaninta. Sii wad isla wada sheekaysiyada Claude Code, dir farriimo, oggolow qalabka, isticmaalna biraawsarka fog ama daaqadda Claude Desktop ee kombiyuutarka.
 - **Cage ku socodsii daruurta.** SSH kaga xirmo Cage lagu rakibay VPS ku habboon oo Linux x86_64 ah, adigoon u baahnayn KVM. Xogta iyo halka shabakadu ka baxdo waxay ku yaallaan serverka.
 - **Ku xidh shabakad gaar ah.** Gudaha Cage ka gal Tailscale si martigeliyaha iyo deegaanku SSH ugu xidhmaan labada jiho. [Tailscale / SSH](docs/guide/tailscale.md)
-- **Qalabka martigeliyaha (tijaabo).** Si caadi ah waa damisan yahay. Marka la shido, Claude-ka ku jira deegaanka wuxuu amarro ka socodsiin karaa kombiyuutarkaaga gudaha galalka mashruuca ee la wadaago; wicitaan kasta waa in lagu xaqiijiyaa sanduuqa wada-hadalka nidaamka. [Plugins](docs/plugins.md)
 
 ## Bilaw degdeg ah
 
@@ -66,7 +78,7 @@ Waxa kaliya ee aad u baahan tahay waa barta ugu dambeysa ee wakiil shabakad la i
 
 ## Soo deji oo rakib
 
-Cage wuxuu taageeraa macOS, Windows iyo Linux: Apple Silicon oo leh macOS 14+, Windows 10 22H2 / 11 x64 iyo Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac, Windows ARM64 iyo Linux ARM64 weli lama taageero. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
+Cage wuxuu taageeraa macOS, Windows iyo Linux: Apple Silicon iyo Intel Mac oo leh macOS 14+, Windows 10 22H2 / 11 x64 iyo Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Windows ARM64 iyo Linux ARM64 weli lama taageero. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
 1. Soo dejiso abka: [macOS / Windows / Linux](https://claude-cage.com/so/#download).
 2. macOS: Fur xirmada rakibaadda oo jiid **Cage** galay **Codsiyada**; ka dibna ka bilow Applications. Windows: [Hagaha rakibidda](docs/windows.md#安装并开始工作) · Linux: [Hagaha rakibidda](docs/linux.md#安装并开始工作).

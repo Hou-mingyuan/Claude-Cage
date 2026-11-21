@@ -105,7 +105,7 @@ func (s *Server) applyResources(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, map[string]bool{"ok": true})
 		return
 	}
-	s.launch(w, "resources", func() error {
+	s.launchRequest(w, r, "resources", func() error {
 		allocation, err := cage.LoadResourceAllocation(s.configPath)
 		if err != nil {
 			return err
@@ -128,6 +128,13 @@ func (s *Server) applyResources(w http.ResponseWriter, r *http.Request) {
 type networkCheckError struct{ error }
 
 func (e networkCheckError) Unwrap() error { return e.error }
+
+// staticDraftPendingError reports a saved, not yet verified static IP
+// baseline. Unlike networkCheckError it does not imply a running guest: a
+// draft saved before the first start leaves the environment stopped.
+type staticDraftPendingError struct{ error }
+
+func (e staticDraftPendingError) Unwrap() error { return e.error }
 
 func (s *Server) checkNetworkIfWanted() error {
 	s.mu.Lock()

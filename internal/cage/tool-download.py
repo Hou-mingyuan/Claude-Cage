@@ -122,8 +122,9 @@ def parallel():
         canceled = threading.Event()
         cache_lock = threading.Lock()
 
-        def fetch(spec):
-            start, end, part = spec
+        def fetch_once(start, end, part):
+            # True: range complete. False: the server cannot serve this range.
+            # None: the connection failed or stalled; retrying resumes the range.
             saved = size(part)
             if saved > end - start + 1:
                 part.unlink()
@@ -169,7 +170,27 @@ def parallel():
                         with part.open('ab') as destination, incoming.open('rb') as source:
                             shutil.copyfileobj(source, destination)
                         incoming.unlink()
-            return valid and size(part) == end - start + 1
+                incoming.unlink(missing_ok=True)
+                response_headers.unlink(missing_ok=True)
+            if size(part) == end - start + 1:
+                return True
+            if canceled.is_set() or (response.get('status') and not valid):
+                return False
+            return None
+
+        def fetch(spec):
+            # Retry one slow or dropped range on a new connection, keeping its
+            # saved bytes, before giving up on parallel transfer for the file.
+            start, end, part = spec
+            for attempt in range(3):
+                if attempt:
+                    print(f'Retrying download range {start}-{end} ({attempt + 1}/3).', file=sys.stderr)
+                    if canceled.wait(attempt):
+                        return False
+                result = fetch_once(start, end, part)
+                if result is not None:
+                    return result
+            return False
 
         # Cancellation must join all workers before merging or returning. Threads
         # see the shared event and terminate curl; they cannot outlive the lock.

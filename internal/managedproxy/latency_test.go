@@ -20,6 +20,25 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// The transport fixtures exercise the bundled core against an in-process HTTP
+// server. Apply this replacement only to the isolated test process, after the
+// production importer and lifecycle checks have accepted the remote node.
+func attachLocalTestServer(t *testing.T, ctx context.Context, profile string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(Dir(profile), "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const server = "server: upstream.example.test"
+	if strings.Count(string(raw), server) != 1 {
+		t.Fatal("expected one upstream fixture")
+	}
+	payload := strings.Replace(string(raw), server, "server: 127.0.0.1", 1)
+	if err := API(ctx, profile, "PUT", "/configs", map[string]string{"payload": payload}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // This runs the bundled core against local servers. A slow CONNECT handshake
 // must affect elapsed time without inflating the displayed request latency.
 func TestCoreLatencyExcludesProxyHandshake(t *testing.T) {
@@ -71,7 +90,7 @@ func TestCoreLatencyExcludesProxyHandshake(t *testing.T) {
 	}
 	address := strings.TrimPrefix(upstream.URL, "http://")
 	_, port, _ := net.SplitHostPort(address)
-	if err := s.Import("local", "", []byte("proxies: [{name: local, type: http, server: 127.0.0.1, port: "+port+"}]"), "local", 0, ""); err != nil {
+	if err := s.Import("local", "", []byte("proxies: [{name: local, type: http, server: upstream.example.test, port: "+port+"}]"), "local", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	s.Selected, s.Port = s.Sources[0].Nodes[0].ID, 0
@@ -128,6 +147,7 @@ func TestCoreLatencyExcludesProxyHandshake(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
+	attachLocalTestServer(t, ctx, profile)
 	var result struct {
 		Delay int `json:"delay"`
 	}

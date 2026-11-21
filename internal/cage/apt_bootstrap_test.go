@@ -87,6 +87,46 @@ esac
 	}
 }
 
+func TestAPTBootstrapFinishesInterruptedPackageInstallation(t *testing.T) {
+	for _, mode := range []string{"interrupted", "clean", "repair-fails"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "os-release"), []byte("ID=debian\nVERSION_ID=13\n"), 0600)
+			os.MkdirAll(filepath.Join(dir, "updates"), 0700)
+			if mode != "clean" {
+				os.WriteFile(filepath.Join(dir, "updates", "0001"), nil, 0600)
+			}
+			commands := map[string]string{
+				"sudo":       "#!/bin/sh\nexec \"$@\"\n",
+				"dpkg-query": "#!/bin/sh\necho 3.0.4\n",
+				"dpkg": `#!/bin/sh
+case "$*" in
+ '--configure -a')
+  printf 'configure\n' >> "$FIXTURE/requests"
+  [ "$MODE" != repair-fails ] || exit 1
+  rm -f "$FIXTURE"/updates/*;;
+esac
+`,
+				"apt-get": "#!/bin/sh\nprintf 'apt-get %s\\n' \"$*\" >> \"$FIXTURE/requests\"\n",
+			}
+			for name, body := range commands {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			script := strings.ReplaceAll(APTBootstrapScript, ". /etc/os-release", ". \"$FIXTURE/os-release\"")
+			script = strings.ReplaceAll(script, "/var/lib/dpkg/updates", "$FIXTURE/updates")
+			cmd := exec.Command("sh", "-c", script+"\nprintf continued >> \"$FIXTURE/requests\"\n")
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE="+dir, "MODE="+mode, "TMPDIR="+dir)
+			out, err := cmd.CombinedOutput()
+			requests, _ := os.ReadFile(filepath.Join(dir, "requests"))
+			want := map[string]string{"interrupted": "configure\ncontinued", "clean": "continued", "repair-fails": "configure\n"}[mode]
+			if string(requests) != want || (err != nil) != (mode == "repair-fails") {
+				t.Fatalf("requests %q, err %v: %s", requests, err, out)
+			}
+		})
+	}
+}
 func TestGuestInstallEntrypointsCheckAPTFirst(t *testing.T) {
 	for name, script := range map[string]string{"lima": DebianPrepareScript, "services": GuestSetup, "start": DefaultConfig().StartScript(), "tools": ToolsUpdateScript()} {
 		gate := strings.Index(script, "CAGE_APT_BOOTSTRAP")

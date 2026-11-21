@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sylvinus/agent-vm/internal/durable"
 	"github.com/sylvinus/agent-vm/internal/paths"
 )
 
@@ -88,7 +89,7 @@ func (d Dir) Write(name string, data []byte) error {
 		return err
 	}
 	_, werr := tmp.Write(data)
-	if err := errors.Join(werr, tmp.Chmod(0o644), tmp.Close()); err != nil {
+	if err := errors.Join(werr, tmp.Sync(), tmp.Chmod(0o644), tmp.Close()); err != nil {
 		os.Remove(tmp.Name())
 		return err
 	}
@@ -96,7 +97,7 @@ func (d Dir) Write(name string, data []byte) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	return nil
+	return durable.SyncDir(filepath.Dir(d.Path(name)))
 }
 
 // ReadMarker is Read for a marker of vm.
@@ -105,6 +106,16 @@ func (d Dir) ReadMarker(kind, vm string) string {
 }
 
 var markers = []string{VersionOf, BuiltByOf, SSHFSOf, TermOf, FileMountsOf, MountsOf, CacheOf, ScratchOf, PolicyOf}
+
+// Owned names, relative to the folder, what it keeps of vm: its markers and
+// its staged single files.
+func Owned(vm string) []string {
+	names := make([]string, 0, len(markers)+1)
+	for _, kind := range markers {
+		names = append(names, kind+vm)
+	}
+	return append(names, filepath.Join("file-mounts", vm))
+}
 
 // Rename moves what is known of the VM from to its new name to: its
 // markers, and its staged single files (its shares are set again before it

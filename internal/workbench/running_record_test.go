@@ -59,3 +59,40 @@ func TestVMRecordWithReusedPIDIsNotRunning(t *testing.T) {
 		})
 	}
 }
+
+func TestUnreadableVMRecordNamesNoOwner(t *testing.T) {
+	s := testServer(t)
+	dir := filepath.Join(s.profile, "state", "lima", "interrupted")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, content := range []string{"", `{"pid":`} {
+		if err := os.WriteFile(filepath.Join(dir, "cage-running.json"), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if owners, err := controllerVMOwners(s.profile); err != nil || len(owners) != 0 {
+			t.Fatalf("record %q: owners = %v, %v", content, owners, err)
+		}
+		if controllerHasVM(s.profile) {
+			t.Fatalf("record %q reported a running environment", content)
+		}
+	}
+}
+
+// A complete record without a usable PID is refused rather than read as no
+// owner: only an empty or cut-off file comes from an interrupted write.
+func TestValidVMRecordWithoutPIDIsRefused(t *testing.T) {
+	s := testServer(t)
+	dir := filepath.Join(s.profile, "state", "lima", "damaged")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, content := range []string{`{"pid":0}`, `{"pid":-1,"started":"x"}`, `{}`, `{"pid":"12"}`} {
+		if err := os.WriteFile(filepath.Join(dir, "cage-running.json"), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if owners, err := controllerVMOwners(s.profile); err == nil {
+			t.Fatalf("record %q: owners = %v, want an error", content, owners)
+		}
+	}
+}

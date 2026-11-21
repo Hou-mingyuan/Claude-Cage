@@ -7,11 +7,16 @@ on:
   pull_request:
     branches: [main]
     types: [opened, reopened, synchronize, ready_for_review]
+  # Inert until a merge queue is enabled for main in branch protection. The
+  # queue then runs the same required check, Main PR CI, on its merge commit.
+  merge_group:
+    types: [checks_requested]
 permissions:
   contents: read
 concurrency:
-  group: main-pr-checks-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # Each merge queue entry has its own temporary ref; never cancel one.
+  group: main-pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -25,8 +30,8 @@ jobs:
           persist-credentials: false
       - id: scope
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           git diff --no-renames --name-only -z "$BASE...$HEAD" > "$RUNNER_TEMP/pr-files"
           platforms=false

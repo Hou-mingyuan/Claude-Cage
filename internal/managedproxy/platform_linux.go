@@ -48,6 +48,27 @@ func identifyLinuxCore(pid int) (linuxCoreRecord, error) {
 	return linuxCoreRecord{PID: pid, Executable: executable, Started: started, BootID: strings.TrimSpace(string(bootID))}, nil
 }
 
+// cmd.Start can return while /proc/PID/exe still names the parent's image, so
+// a record taken at once could pin the wrong executable and later refuse to
+// stop the core. Wait briefly until the new image is visible.
+func identifyStartedLinuxCore(pid int, core string) (linuxCoreRecord, error) {
+	want, err := filepath.EvalSymlinks(core)
+	if err != nil {
+		return linuxCoreRecord{}, err
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		record, err := identifyLinuxCore(pid)
+		if err != nil || record.Executable == want {
+			return record, err
+		}
+		if time.Now().After(deadline) {
+			return record, errors.New("代理进程未能按预期程序启动")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func linuxProcessStart(pid int) (uint64, error) {
 	stat, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
 	if err != nil {
@@ -207,7 +228,7 @@ func startLinuxCore(ctx context.Context, profile string, s Store) error {
 		_ = log.Close()
 		return err
 	}
-	record, err := identifyLinuxCore(cmd.Process.Pid)
+	record, err := identifyStartedLinuxCore(cmd.Process.Pid, core)
 	if err == nil {
 		var data []byte
 		data, err = json.Marshal(record)

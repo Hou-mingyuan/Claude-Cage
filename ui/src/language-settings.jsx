@@ -46,7 +46,7 @@ export function LanguageSettings({ compact = false }) {
     <>
       <label className={compact ? "startup-language" : undefined}>
         <span>{compact && <Globe2 size={15} aria-hidden="true" />} {t("界面语言")}</span>
-        <InlineSelect inline aria-label={t("界面语言")} value={language} displayLabel={systemName} onValueChange={choose} aria-busy={saving}>
+        <InlineSelect inline={!compact} aria-label={t("界面语言")} value={language} displayLabel={systemName} onValueChange={choose} aria-busy={saving}>
           <option value={systemLanguage}>{t("跟随系统")}</option>
           {languages.map(({ id, name }) => <option key={id} value={id} lang={id}>{name}</option>)}
         </InlineSelect>

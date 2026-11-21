@@ -38,6 +38,57 @@ func (s *Server) writeInitialization(r *http.Request, record initializationRecor
 	return writePrivate(filepath.Join(s.profile, "initialization.json"), record)
 }
 
+const desktopOnboardingLease = 15 * time.Second
+
+// touchDesktopOnboarding renews the lease from the onboarding screen's polls.
+// After an agent releases it, polling alone does not reclaim it; only a
+// desktop setup action (claimDesktopOnboarding) does.
+func (s *Server) touchDesktopOnboarding() {
+	s.mu.Lock()
+	if !s.desktopOnboardingReleased {
+		s.desktopOnboardingUntil = time.Now().Add(desktopOnboardingLease)
+	}
+	s.mu.Unlock()
+}
+
+func (s *Server) claimDesktopOnboarding() {
+	s.mu.Lock()
+	s.desktopOnboardingReleased = false
+	s.desktopOnboardingUntil = time.Now().Add(desktopOnboardingLease)
+	s.mu.Unlock()
+}
+
+// releaseDesktopOnboarding hands first-run setup to the agent without
+// quitting the window, which would also lock the account.
+func (s *Server) releaseDesktopOnboarding() {
+	s.mu.Lock()
+	s.desktopOnboardingReleased = true
+	s.desktopOnboardingUntil = time.Time{}
+	s.mu.Unlock()
+}
+
+func (s *Server) clearDesktopOnboarding() {
+	s.mu.Lock()
+	s.desktopOnboardingReleased = false
+	s.desktopOnboardingUntil = time.Time{}
+	s.mu.Unlock()
+}
+
+func (s *Server) desktopOnboardingLeaseActive() bool {
+	s.mu.Lock()
+	active := !s.desktopOnboardingUntil.IsZero() && time.Now().Before(s.desktopOnboardingUntil)
+	s.mu.Unlock()
+	return active
+}
+
+func (s *Server) desktopOnboardingActive() bool {
+	if !s.desktopOnboardingLeaseActive() {
+		return false
+	}
+	state, err := s.initializationState()
+	return err == nil && state.Required
+}
+
 type initializationRecord struct {
 	Version   int  `json:"version"`
 	Completed bool `json:"completed"`
@@ -45,10 +96,11 @@ type initializationRecord struct {
 }
 
 type initializationView struct {
-	Required bool `json:"required"`
-	Started  bool `json:"started"`
-	Tracked  bool `json:"tracked"`
-	Prepared bool `json:"prepared"`
+	Required      bool `json:"required"`
+	Started       bool `json:"started"`
+	Tracked       bool `json:"tracked"`
+	Prepared      bool `json:"prepared"`
+	DesktopActive bool `json:"desktop_active,omitempty"`
 }
 
 func (s *Server) initializationState() (initializationView, error) {
@@ -64,7 +116,8 @@ func (s *Server) initializationState() (initializationView, error) {
 		if _, err := guestos.LoadInstallation(s.profile); err != nil {
 			return initializationView{}, err
 		}
-		return initializationView{Required: !record.Completed, Started: record.Started, Tracked: true, Prepared: s.environmentPrepared()}, nil
+		required := !record.Completed
+		return initializationView{Required: required, Started: record.Started, Tracked: true, Prepared: s.environmentPrepared(), DesktopActive: required && s.desktopOnboardingLeaseActive()}, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return initializationView{}, err
@@ -75,7 +128,8 @@ func (s *Server) initializationState() (initializationView, error) {
 	if err != nil {
 		return initializationView{}, err
 	}
-	return initializationView{Required: pending != nil || !s.environmentPrepared(), Started: pending != nil}, nil
+	required := pending != nil || !s.environmentPrepared()
+	return initializationView{Required: required, Started: pending != nil, DesktopActive: required && s.desktopOnboardingLeaseActive()}, nil
 }
 
 func (s *Server) finishInitialization(r *http.Request) error {
@@ -100,6 +154,9 @@ func (s *Server) finishInitialization(r *http.Request) error {
 
 func (s *Server) initialization(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
+		if requestInitiator(r) == jobInitiatorSetup {
+			s.touchDesktopOnboarding()
+		}
 		state, err := s.initializationState()
 		if err != nil {
 			requestError(w, err)
@@ -155,13 +212,29 @@ func (s *Server) initialization(w http.ResponseWriter, r *http.Request) {
 	case "begin":
 		if state.Required {
 			err = s.writeInitialization(r, initializationRecord{Version: 1, Started: state.Started})
+			if err == nil && requestInitiator(r) != jobInitiatorAgent {
+				s.claimDesktopOnboarding()
+			}
 		}
 	case "install":
 		if state.Required {
 			err = s.writeInitialization(r, initializationRecord{Version: 1, Started: true})
+			if err == nil && requestInitiator(r) != jobInitiatorAgent {
+				s.claimDesktopOnboarding()
+			}
+		}
+	case "release":
+		if state.Required {
+			err = s.writeInitialization(r, initializationRecord{Version: 1, Started: state.Started})
+			if err == nil {
+				s.releaseDesktopOnboarding()
+			}
 		}
 	case "complete":
 		err = s.finishInitialization(r)
+		if err == nil {
+			s.clearDesktopOnboarding()
+		}
 	default:
 		err = errors.New("未知的初始化操作")
 	}

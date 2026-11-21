@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { stagePreview, mergeReleaseChecksums } from './publish-platform-preview.mjs';
+import { assertPublishableRun, compareWithMain, stagePreview, mergeReleaseChecksums } from './publish-platform-preview.mjs';
 const version = '0.1.1-alpha';
 const dependencies = { mihomoSource: { file: 'mihomo-v1.19.33-source.tar.gz' }, qemuSource: { file: 'qemu-' + 'a'.repeat(40) + '-source.tar' } };
 const hash = text => createHash('sha256').update(text).digest('hex');
@@ -62,4 +62,37 @@ test('consolidation preserves macOS checksums and rejects conflicting version as
   assert.throws(() => mergeReleaseChecksums({...release,draft:true}, original, files, '0.1.1-alpha'));
   assert.throws(() => mergeReleaseChecksums({...release,prerelease:false}, original, files, '0.1.1-alpha'));
   assert.throws(() => mergeReleaseChecksums(partial, original, new Map(), '0.1.1-alpha'));
+});
+
+test('only main CI or main merge queue runs of a commit on main can supply packages', () => {
+  const sha = 'a'.repeat(40);
+  const base = { conclusion: 'success', head_repository: { full_name: 'Lee-xeo/Claude-Cage' }, head_sha: sha };
+  const onMain = () => ({ status: 'ahead' });
+  for (const run of [
+    { ...base, path: '.github/workflows/ci.yml', event: 'push', head_branch: 'main' },
+    { ...base, path: '.github/workflows/ci.yml', event: 'workflow_dispatch', head_branch: 'main' },
+    { ...base, path: '.github/workflows/pr-checks.yml', event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-553-' + sha },
+  ]) assertPublishableRun(run, onMain);
+  for (const run of [
+    { ...base, path: '.github/workflows/ci.yml', event: 'workflow_dispatch', head_branch: 'feature' },
+    { ...base, path: '.github/workflows/pr-checks.yml', event: 'pull_request', head_branch: 'feature' },
+    { ...base, path: '.github/workflows/pr-checks.yml', event: 'merge_group', head_branch: 'gh-readonly-queue/other/pr-1' },
+    { ...base, path: '.github/workflows/ci.yml', event: 'push', head_branch: 'main', conclusion: 'failure' },
+    { ...base, path: '.github/workflows/ci.yml', event: 'push', head_branch: 'main', head_repository: { full_name: 'fork/Claude-Cage' } },
+  ]) assert.throws(() => assertPublishableRun(run, onMain));
+  // A queue entry that was removed before merging is not on main.
+  assert.throws(() => assertPublishableRun({ ...base, path: '.github/workflows/pr-checks.yml', event: 'merge_group',
+    head_branch: 'gh-readonly-queue/main/pr-1' }, () => ({ status: 'diverged' })), /not part of main/);
+});
+
+test('the comparison with main asks only for its status fields', () => {
+  const sha = 'a'.repeat(40);
+  const calls = [];
+  const result = compareWithMain(sha, (path, args) => { calls.push([path, args]); return { status: 'ahead', behind_by: 0 }; });
+  assert.deepEqual(result, { status: 'ahead', behind_by: 0 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], `compare/${sha}...main`);
+  const jq = calls[0][1].indexOf('--jq');
+  assert.ok(jq >= 0 && !/commits|files/.test(calls[0][1][jq + 1]), 'the full commit and file lists must not be fetched');
+  assert.throws(() => compareWithMain('main', () => ({})));
 });

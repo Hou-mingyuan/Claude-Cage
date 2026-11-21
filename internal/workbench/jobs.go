@@ -12,12 +12,20 @@ import (
 	"time"
 )
 
+const (
+	jobInitiatorHeader  = "X-Cage-Initiator"
+	jobInitiatorAgent   = "agent"
+	jobInitiatorDesktop = "desktop"
+	jobInitiatorSetup   = "setup"
+)
+
 type Job struct {
 	Canceled      bool           `json:"canceled,omitempty"`
 	SettingsSaved bool           `json:"settings_saved,omitempty"`
 	SetupProgress *SetupProgress `json:"setup_progress,omitempty"`
 	ID            string         `json:"id"`
 	Kind          string         `json:"kind"`
+	Initiator     string         `json:"initiator,omitempty"`
 	Running       bool           `json:"running"`
 	Message       string         `json:"message"`
 	Error         string         `json:"error,omitempty"`
@@ -27,6 +35,9 @@ type Job struct {
 	// SupersededBy names the job that replaced this one; a running job
 	// replaced by a stop is recorded as canceled.
 	SupersededBy string `json:"superseded_by,omitempty"`
+	// CanceledBy names the initiator ("agent", "desktop", "setup") that
+	// canceled or superseded this job.
+	CanceledBy string `json:"canceled_by,omitempty"`
 }
 
 var (
@@ -41,6 +52,7 @@ type jobManager struct {
 	state        Job
 	previous     Job
 	cancel       context.CancelFunc
+	cancelBy     string
 	active       *jobExecution
 	afterSuccess func() error
 	closed       bool
@@ -51,6 +63,10 @@ type jobManager struct {
 // afterSuccess may call this manager. afterSuccess must not acquire Server.mu:
 // submission can hold Server.mu while waiting for the manager's lock.
 func (m *jobManager) submit(operation sync.Locker, kind string, pauseVersion uint64, prepare func() error, afterSuccess func() error, run func() error) (Job, error) {
+	return m.submitWithInitiator(operation, kind, "", pauseVersion, prepare, afterSuccess, run)
+}
+
+func (m *jobManager) submitWithInitiator(operation sync.Locker, kind, initiator string, pauseVersion uint64, prepare func() error, afterSuccess func() error, run func() error) (Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -75,13 +91,20 @@ func (m *jobManager) submit(operation sync.Locker, kind string, pauseVersion uin
 		}
 	}
 	if m.cancel != nil {
+		if m.cancelBy == "" && initiator != "" {
+			m.cancelBy = initiator
+		}
 		m.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.afterSuccess = afterSuccess
 	previous := m.state
-	m.state = Job{ID: randomToken()[:12], Kind: kind, Running: true, Message: "正在准备…"}
+	if previous.Canceled && previous.CanceledBy == "" && m.cancelBy != "" {
+		previous.CanceledBy = m.cancelBy
+	}
+	m.cancelBy = ""
+	m.state = Job{ID: randomToken()[:12], Kind: kind, Initiator: initiator, Running: true, Message: "正在准备…"}
 	m.previous = supersededJob(previous, m.state)
 	execution := &jobExecution{owner: m, id: m.state.ID, ctx: ctx, pauseVersion: pauseVersion}
 	execution.log = diagnostics.NewStreamWithConsumer(diagnostics.Default(), "task/"+kind, "info", func(line string) {
@@ -113,7 +136,11 @@ func (m *jobManager) submit(operation sync.Locker, kind string, pauseVersion uin
 		}
 		return false
 	})
-	diagnostics.Log("info", "task", kind+" started")
+	if initiator != "" {
+		diagnostics.Log("info", "task", kind+" started ("+initiator+")")
+	} else {
+		diagnostics.Log("info", "task", kind+" started")
+	}
 	m.workers.Add(1)
 	go func() {
 		defer m.workers.Done()
@@ -165,15 +192,24 @@ func (m *jobManager) finishLocked(execution *jobExecution, err error) {
 		err = m.afterSuccess()
 	}
 	m.cancel, m.afterSuccess = nil, nil
+	cancelBy := m.cancelBy
+	m.cancelBy = ""
 	m.state.Running = false
 	switch {
 	case errors.Is(err, context.Canceled):
 		m.state.Canceled = true
+		if m.state.CanceledBy == "" && cancelBy != "" {
+			m.state.CanceledBy = cancelBy
+		}
 		m.state.Message = "已取消"
 		if m.state.SettingsSaved {
 			m.state.Message = "设置已保存，后续操作已取消"
 		}
-		diagnostics.Log("info", "task", m.state.Kind+" canceled")
+		if m.state.CanceledBy != "" {
+			diagnostics.Log("info", "task", m.state.Kind+" canceled ("+m.state.CanceledBy+")")
+		} else {
+			diagnostics.Log("info", "task", m.state.Kind+" canceled")
+		}
 	case err != nil:
 		m.state.Error = usererror.Display(jobName(m.state.Kind), err, "打开“操作详情”查看失败记录；仍无法处理时，"+failureHelp).Error()
 		var projectFailure *projectShareError
@@ -181,13 +217,20 @@ func (m *jobManager) finishLocked(execution *jobExecution, err error) {
 			m.state.Recovery = projectFailure.Recovery
 			m.state.Workspace = projectFailure.Path
 		}
+		var recoveryFailure *jobRecoveryError
+		if m.state.Recovery == "" && errors.As(err, &recoveryFailure) {
+			m.state.Recovery = recoveryFailure.Recovery
+		}
 		m.state.Message = jobName(m.state.Kind) + "失败"
 		var networkFailure networkCheckError
+		var draftPending staticDraftPendingError
 		if m.state.Kind == "start" && errors.As(err, &networkFailure) {
 			m.state.Message = "环境已启动，联网检查未通过"
 		} else if m.state.SettingsSaved {
 			m.state.Message = "设置已保存，等待环境恢复"
-			if errors.As(err, &networkFailure) {
+			if errors.As(err, &draftPending) {
+				m.state.Message = "已保存待验证的静态 IP，外网保持关闭"
+			} else if errors.As(err, &networkFailure) {
 				m.state.Message = "设置已保存，环境已启动，联网检查未通过"
 			}
 		}
@@ -200,7 +243,7 @@ func (m *jobManager) finishLocked(execution *jobExecution, err error) {
 
 func jobName(kind string) string {
 	names := map[string]string{
-		"start": "启动环境", "stop": "停止环境", "setup": "准备环境", "settings": "应用设置", "project": "连接项目目录", "storage": "迁移环境目录", "restore": "恢复配置", "resources": "应用资源配置", "safety": "检查联网条件", "network-recovery": "恢复联网", "proxy": "应用代理节点", "proxy-network": "恢复代理连接", "environment-update": "更新环境组件", "environment-tools": "更新环境工具", "claude-desktop-install": "安装 Claude Desktop", "claude-desktop-start": "打开 Claude Desktop", "claude-desktop-stop": "关闭 Claude Desktop",
+		"start": "启动环境", "stop": "停止环境", "setup": "准备环境", "settings": "应用设置", "project": "连接项目目录", "storage": "迁移环境目录", "restore": "恢复配置", "resources": "应用资源配置", "safety": "检查联网条件", "network-recovery": "恢复联网", "proxy": "应用代理节点", "proxy-network": "恢复代理连接", "environment-update": "更新环境组件", "environment-tools": "更新环境工具", "claude-desktop-install": "安装 Claude Desktop", "claude-desktop-start": "打开 Claude Desktop", "claude-desktop-stop": "关闭 Claude Desktop", "device-reset": "重置环境与换机", "device-reset-restore": "恢复旧环境",
 	}
 	if name := names[kind]; name != "" {
 		return name
@@ -219,11 +262,20 @@ func supersededJob(previous, next Job) Job {
 		previous.Running = false
 		previous.Canceled = true
 		previous.SetupProgress = nil
+		if previous.CanceledBy == "" && next.Initiator != "" {
+			previous.CanceledBy = next.Initiator
+		}
 		previous.Message = "已取消：已被" + jobName(next.Kind) + "替换"
 		if previous.SettingsSaved {
 			previous.Message = "设置已保存，后续操作已被" + jobName(next.Kind) + "取消"
 		}
-		diagnostics.Log("info", "task", previous.Kind+" canceled; superseded by "+next.Kind)
+		logMsg := previous.Kind + " canceled; superseded by " + next.Kind
+		if previous.CanceledBy != "" {
+			logMsg += " (" + previous.CanceledBy + ")"
+		}
+		diagnostics.Log("info", "task", logMsg)
+	} else if previous.Canceled && previous.CanceledBy == "" && next.Initiator != "" {
+		previous.CanceledBy = next.Initiator
 	}
 	return previous
 }
@@ -258,9 +310,16 @@ func (m *jobManager) execution() *jobExecution {
 }
 
 func (m *jobManager) cancelRunning() string {
+	return m.cancelRunningBy("")
+}
+
+func (m *jobManager) cancelRunningBy(source string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.state.Kind != "stop" && m.cancel != nil {
+		if source != "" && m.cancelBy == "" {
+			m.cancelBy = source
+		}
 		m.cancel()
 	}
 	if m.active != nil {
@@ -275,6 +334,9 @@ func (m *jobManager) close() {
 	m.mu.Lock()
 	m.closed = true
 	if m.cancel != nil {
+		if m.cancelBy == "" {
+			m.cancelBy = jobInitiatorDesktop
+		}
 		m.cancel()
 	}
 	m.mu.Unlock()

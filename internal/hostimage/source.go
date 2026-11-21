@@ -142,6 +142,10 @@ func (p Plan) RemainingBytes(cache string) int64 {
 
 const sourceRecord = "host-system-source.json"
 
+// ChoiceFiles names, in guest-media, the files of an environment's durable
+// image choice; the source record, which identifies the system, comes last.
+func ChoiceFiles() []string { return []string{"host-system.yaml", sourceRecord} }
+
 func Save(cache string, plan Plan) error {
 	if err := plan.Validate(); err != nil {
 		return err

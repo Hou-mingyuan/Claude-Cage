@@ -30,6 +30,17 @@ try {
   const privateCookie = (await list(first.id)).cookies.find(cookie => cookie.name === 'private');
   assert.equal('value' in privateCookie, false);
   assert.equal((await api('/cookies', { id: first.id, mode: 'details', scope: 'all', cookieKey: privateCookie.key })).value, 'private-value');
+  const added = { name: 'added', value: 'added-value', domain: 'localhost', path: '/', secure: false, httpOnly: false, sameSite: 'Lax' };
+  await api('/cookies', { id: second.id, mode: 'set', scope: 'site', cookie: added });
+  assert.match(await evaluate(second.id, 'document.cookie'), /added=added-value/);
+  assert.ok(!(await list(normal)).cookies.some(cookie => cookie.name === 'added'));
+  const addedKey = (await list(second.id)).cookies.find(cookie => cookie.name === 'added').key;
+  await api('/cookies', { id: second.id, mode: 'set', scope: 'site', cookieKey: addedKey, cookie: { ...added, name: 'edited', httpOnly: true } });
+  assert.doesNotMatch(await evaluate(second.id, 'document.cookie'), /added=|edited=/);
+  assert.equal((await list(second.id)).cookies.find(cookie => cookie.name === 'edited').httpOnly, true);
+  await assert.rejects(api('/cookies', { id: second.id, mode: 'set', scope: 'site', cookie: { ...added, domain: 'example.test' } }), /当前网站/);
+  await assert.rejects(api('/cookies', { id: second.id, mode: 'set', scope: 'site', cookie: { ...added, partitioned: true } }), /分区/);
+  checks.push('set adds and edits a cookie only in the tab\'s own private session and site');
   await api('/cookies', { id: second.id, mode: 'clear', scope: 'all' });
   assert.equal((await list(first.id)).total, 0);
   assert.equal((await list(normal)).total, 1);

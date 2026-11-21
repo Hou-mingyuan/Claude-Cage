@@ -50,15 +50,16 @@ cage proxy-stop    Stop Cage's core and close external networking
 cage setup         Build the isolated base VM through the specified proxy
 cage up            Start the shared Cage environment, editor and browser
                    --reset re-clones the VM; files and logins on its disk are lost
-                   --cpus N; --memory N or --ram N (GiB); --disk N (GiB)
-                   --ssh-port N (0 for automatic, otherwise 1024-65535)
 cage login         Start cage services, then Claude's login flow inside the VM
-                   Same VM options as up: --reset, --cpus N, --memory N or --ram N (GiB),
-                   --disk N (GiB), --ssh-port N (0 or 1024-65535)
                    --reset re-clones the VM; files and logins on its disk are lost
 cage access        Inspect legacy viewer credentials (diagnostics only)
 cage shell         Open a shell in the shared environment
-cage run COMMAND   Execute a command in the shared environment
+cage run COMMAND   Execute a command in the shared environment: from the current
+                   directory's place when it is in a shared project, otherwise
+                   from the environment directory (with a notice on stderr).
+                   --here requires the current directory (asks before sharing
+                   it on a terminal, fails otherwise); --workdir DIR runs from
+                   DIR in the environment
 cage claude        Run Claude Code in the shared environment
 cage stop          Stop the shared Cage environment and its proxy core
                    --keep-proxy keeps the core running for an environment restart
@@ -117,7 +118,7 @@ func run() int {
 		var err error
 		startArgs, err = cli.StartArgs(args[1:])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\nUsage: cage %s [--reset] [--cpus N] [--memory N | --ram N] [--disk N] [--ssh-port N]\n", err, args[0])
+			fmt.Fprintf(os.Stderr, "Error: %v\nUsage: cage %s [--reset]\n", err, args[0])
 			return 2
 		}
 	}
@@ -488,14 +489,10 @@ func run() int {
 		if err = host.EnsurePrivateDir(filepath.Dir(path)); err != nil {
 			return fail(err)
 		}
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if err != nil {
-			return fail(err)
+		data, err := json.MarshalIndent(cage.DefaultConfig(), "", "  ")
+		if err == nil {
+			err = host.CreatePrivateFile(path, append(data, '\n'))
 		}
-		enc := json.NewEncoder(f)
-		enc.SetIndent("", "  ")
-		err = enc.Encode(cage.DefaultConfig())
-		f.Close()
 		if err != nil {
 			return fail(err)
 		}
@@ -559,6 +556,13 @@ func run() int {
 			return fail(err)
 		}
 		return 0
+	}
+	if args[0] == "run" {
+		// Before the switch to the environment directory below.
+		here, hereErr := os.Getwd()
+		if args, err = followRunDirectory(path, args, here, hereErr, os.Stderr, terminalConfirm(os.Stdin, os.Stderr)); err != nil {
+			return fail(err)
+		}
 	}
 	if handled, err := containerOperation(path, args, cfg, keepProxy); handled {
 		if err != nil {
@@ -639,7 +643,7 @@ func run() int {
 		if result := cli.Main([]string{"run", "true"}, cli.Stdio()); result != 0 {
 			return result
 		}
-		if err := workbench.RunMaintenanceScript(context.Background(), path, cage.ToolsUpdateScript(), os.Stdout, os.Stderr); err != nil {
+		if err := workbench.RunMaintenanceScript(context.Background(), path, cage.ToolsUpdateScriptFor(os.Getenv(cage.InstallTLS12Env) == "1"), os.Stdout, os.Stderr); err != nil {
 			return fail(err)
 		}
 		return 0
@@ -659,7 +663,7 @@ func containerInstallScript(kind string) (string, error) {
 	case "services":
 		return cage.GuestSetup, nil
 	case "tools":
-		script := "set -e\nexport CLAUDE_CAGE=1\n" + cage.APTBootstrapScript + "\n" + cage.ToolInstallPrelude()
+		script := "set -e\nexport CLAUDE_CAGE=1\n" + cage.InstallTLS12Prelude(os.Getenv(cage.InstallTLS12Env) == "1") + cage.APTBootstrapScript + "\n" + cage.ToolInstallPrelude()
 		enabled := map[string]bool{"NODE": true, "PYTHON": true, "CHROMIUM": true, "GH": true, "CLAUDE": true, "CODE_SERVER": true}
 		for _, name := range []string{"PYTHON", "NODE", "RUBY", "RUST", "GOLANG", "DOCKER", "CHROMIUM", "GH", "CLAUDE", "OPENCODE", "CODEX", "VIBE", "PI", "CODE_SERVER", "CODE_CLAUDE", "CODE_OPENCODE", "CODE_CODEX", "CODE_VIBE", "MCP_CHROME", "MCP_PLAYWRIGHT"} {
 			value := "0"
@@ -804,7 +808,11 @@ func relay(configPath, kind string) int {
 			return fail(err)
 		}
 		profile := filepath.Dir(configPath)
-		cmd = exec.Command(core, "-d", managedproxy.Dir(profile), "-f", filepath.Join(managedproxy.Dir(profile), "config.yaml"))
+		runtimePath := filepath.Join(managedproxy.Dir(profile), "config.yaml")
+		if _, err := managedproxy.BoundInterface(runtimePath); err != nil {
+			return fail(err)
+		}
+		cmd = exec.Command(core, "-d", managedproxy.Dir(profile), "-f", runtimePath)
 		source = "proxy"
 	} else {
 		return 2

@@ -92,7 +92,9 @@ func packageInstallFailure(action string, cause error, log string) error {
 		patterns     []string
 		reason, next string
 	}{
+		{[]string{"dpkg was interrupted"}, "上次中断的软件安装未能自动补完，环境的软件包管理器仍停在未完成状态", "请重试一次；仍失败时在设置中导出诊断包。不要手动删除 dpkg 的状态或锁文件。"},
 		{[]string{"temporary failure resolving", "could not resolve", "name or service not known", "something wicked happened resolving", "no address associated with hostname"}, "APT 无法解析下载服务器域名", "请在网络与代理设置中检查所选节点和 DNS，再继续安装。"},
+		{[]string{"unexpected eof while reading", "error reading from server"}, "APT 下载连接提前中断", "请检查所选代理并重试安装，已下载的部分可以继续使用。"},
 		{[]string{"connection timed out", "timed out", "could not connect to", "unable to connect to", "connection failed", "connection refused"}, "APT 连接下载服务器失败或超时", "请检查所选代理是否可用，再继续安装。"},
 		{[]string{"proxy authentication required", "407 proxy"}, "代理服务器拒绝了当前登录凭据", "请在网络与代理设置中更新代理账号或订阅，再应用节点。"},
 		{[]string{aptNotFoundNeedle, "has no installation candidate"}, "软件源中找不到所需的软件包", "请确认软件源可访问且 apt update 已成功，再继续安装。"},

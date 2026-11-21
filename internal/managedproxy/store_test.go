@@ -104,8 +104,8 @@ external-controller: 0.0.0.0:9090
 tun: {enable: true}
 rules: [MATCH,DIRECT]
 proxies:
-  - {name: edge, type: socks5, server: 127.0.0.1, port: 1080, password: private-secret}
-  - {name: chained, type: http, server: 127.0.0.1, port: 8080, dialer-proxy: edge}
+  - {name: edge, type: socks5, server: 203.0.113.10, port: 1080, password: private-secret}
+  - {name: chained, type: http, server: 203.0.113.10, port: 8080, dialer-proxy: edge}
 `
 
 func TestImportCompilesOnlyOwnedNetworkBoundary(t *testing.T) {
@@ -303,5 +303,122 @@ func TestBootstrapDoesNotAllowPrivateDestinations(t *testing.T) {
 		if publicIP(netip.MustParseAddr(ip)) {
 			t.Fatal("infrastructure private destination allowed")
 		}
+	}
+}
+
+func TestRuntimeUsesConfiguredResolvers(t *testing.T) {
+	s, _ := Load(t.TempDir())
+	if err := s.Import("r", "", []byte(`proxies: [{name: a, type: socks5, server: node.example.com, port: 1080}]`), "r", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	s.Selected = s.Sources[0].Nodes[0].ID
+	runtime := func() map[string]any {
+		t.Helper()
+		b, err := s.Runtime(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config struct {
+			DNS map[string]any `yaml:"dns"`
+		}
+		if err := yaml.Unmarshal(b, &config); err != nil {
+			t.Fatal(err)
+		}
+		return config.DNS
+	}
+	dns := runtime()
+	if fmt.Sprint(dns["nameserver"]) != "[https://1.1.1.1/dns-query#"+Group+"]" || fmt.Sprint(dns["proxy-server-nameserver"]) != fmt.Sprint(BootstrapDNSURLs()) {
+		t.Fatalf("default resolvers changed: %v", dns)
+	}
+	s.GuestDNS = []string{"https://dns.example/dns-query", "https://8.8.8.8/dns-query"}
+	s.BootstrapDNS = []string{"https://223.5.5.5/dns-query"}
+	dns = runtime()
+	if fmt.Sprint(dns["nameserver"]) != "[https://dns.example/dns-query#"+Group+" https://8.8.8.8/dns-query#"+Group+"]" {
+		t.Fatalf("core nameserver ignores guest DNS settings: %v", dns["nameserver"])
+	}
+	if fmt.Sprint(dns["default-nameserver"]) != "[https://223.5.5.5/dns-query]" || fmt.Sprint(dns["proxy-server-nameserver"]) != "[https://223.5.5.5/dns-query]" {
+		t.Fatalf("node resolvers ignore settings: %v", dns)
+	}
+}
+
+func TestRuntimeEnablesTopLevelIPv6OnlyForIPv6LiteralNodes(t *testing.T) {
+	cases := []struct {
+		name     string
+		server   string
+		wantIPv6 bool
+	}{
+		{name: "domain", server: "node.example.com", wantIPv6: false},
+		{name: "ipv4", server: "203.0.113.10", wantIPv6: false},
+		{name: "ipv4-mapped-ipv6", server: "::ffff:203.0.113.10", wantIPv6: false},
+		{name: "ipv6-literal", server: "2001:db8::10", wantIPv6: true},
+		{name: "ipv6-bracketed", server: "[2001:db8::10]", wantIPv6: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := Load(t.TempDir())
+			raw := fmt.Sprintf("proxies: [{name: a, type: socks5, server: %q, port: 1080}]", tc.server)
+			if err := s.Import("r", "", []byte(raw), "r", 0, ""); err != nil {
+				t.Fatal(err)
+			}
+			s.Selected = s.Sources[0].Nodes[0].ID
+			b, err := s.Runtime(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cfg map[string]any
+			if err := yaml.Unmarshal(b, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := cfg["ipv6"].(bool); got != tc.wantIPv6 {
+				t.Fatalf("top-level ipv6=%v, want %v", got, tc.wantIPv6)
+			}
+			dnsCfg, _ := cfg["dns"].(map[string]any)
+			if dnsIPv6, _ := dnsCfg["ipv6"].(bool); dnsIPv6 {
+				t.Fatalf("dns.ipv6 must always stay false, got %v", dnsCfg["ipv6"])
+			}
+		})
+	}
+}
+
+// Top-level ipv6 is global to the core (domain-named nodes then resolve AAAA
+// and may dial over the host's IPv6), so only the selected route may turn it on.
+func TestRuntimeIPv6FollowsSelectedRouteOnly(t *testing.T) {
+	topIPv6 := func(t *testing.T, s Store) bool {
+		t.Helper()
+		b, err := s.Runtime(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg map[string]any
+		if err := yaml.Unmarshal(b, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := cfg["ipv6"].(bool)
+		return got
+	}
+	s, _ := Load(t.TempDir())
+	raw := `proxies: [{name: v4, type: socks5, server: node.example.com, port: 1080}, {name: v6, type: socks5, server: "2001:db8::10", port: 1080}, {name: via, type: socks5, server: 203.0.113.10, port: 1080, dialer-proxy: v6}]`
+	if err := s.Import("r", "", []byte(raw), "r", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]string{}
+	for _, n := range s.Sources[0].Nodes {
+		ids[n.Name] = n.ID
+	}
+	s.Selected = ids["v4"]
+	if topIPv6(t, s) {
+		t.Fatal("an unselected IPv6-literal node enabled IPv6 for the domain-named selected node")
+	}
+	s.Selected = ids["v6"]
+	if !topIPv6(t, s) {
+		t.Fatal("selected IPv6-literal node needs top-level ipv6")
+	}
+	s.Selected = ids["via"]
+	if !topIPv6(t, s) {
+		t.Fatal("an IPv6-literal hop on the selected route needs top-level ipv6")
+	}
+	s.Selected, s.Chain = ids["v4"], []string{ids["v4"]}
+	if topIPv6(t, s) {
+		t.Fatal("explicit chain without IPv6 literals must keep ipv6 off")
 	}
 }

@@ -121,10 +121,25 @@ type Reply struct {
 
 type performFunc func(context.Context, string, string, []byte) (*Reply, error)
 
+type transportError struct{ err error }
+
+func (e transportError) Error() string { return e.err.Error() }
+func (e transportError) Unwrap() error { return e.err }
+
+// IsTransportError reports whether err indicates a broken underlying transport
+// rather than an application-level rejection, unexpected status, or size limit.
+func IsTransportError(err error) bool {
+	var target transportError
+	return errors.As(err, &target)
+}
+
 func limited(r io.Reader, limit int64) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(r, limit+1))
-	if err != nil || int64(len(data)) > limit {
-		return nil, errors.New("payload exceeds limit or could not be read")
+	if err != nil {
+		return nil, transportError{errors.New("payload could not be read")}
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New("payload exceeds limit")
 	}
 	return data, nil
 }
@@ -188,7 +203,7 @@ func request(ctx context.Context, client http.RoundTripper, origin, method, path
 	}
 	res, err := client.RoundTrip(req)
 	if err != nil {
-		return nil, errors.New("mobile operation interrupted")
+		return nil, transportError{errors.New("mobile operation interrupted")}
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || (res.StatusCode >= 300 && res.StatusCode < 400) {

@@ -23,8 +23,15 @@ func TestAgentCLIProtocolAndInit(t *testing.T) {
 		}
 		return code, reply
 	}
-	if code, _ := run("capabilities"); code != 0 {
+	if code, reply := run("capabilities"); code != 0 {
 		t.Fatal(code)
+	} else {
+		raw, _ := json.Marshal(reply.Data)
+		for _, token := range []string{"initiator", "canceled_by", "desktop_active"} {
+			if !strings.Contains(string(raw), token) {
+				t.Fatalf("capabilities missing %q: %s", token, raw)
+			}
+		}
 	}
 	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
 		t.Fatal("discovery created profile")

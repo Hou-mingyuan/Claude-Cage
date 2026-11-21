@@ -237,3 +237,31 @@ func TestPhysicalInterfaceObservationIsDiscardedAfterNetworkChange(t *testing.T)
 		})
 	}
 }
+
+// markTestVMRunning records this test process as the local VM's owner.
+func markTestVMRunning(t *testing.T, s *Server) {
+	t.Helper()
+	if err := writePrivate(filepath.Join(s.instanceDir(), "cage-running.json"), map[string]int{"pid": os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+	if !s.vmRunning() {
+		t.Fatal("test VM record was not accepted")
+	}
+}
+
+// A stopped local VM sends no traffic through the proxy, and starting it
+// checks and rebinds the interface; the monitor does not read host routes.
+func TestStoppedVMSkipsPhysicalInterfaceProbe(t *testing.T) {
+	s := testServer(t)
+	previous := physicalProxyInterface
+	probes := 0
+	physicalProxyInterface = func(context.Context) (string, error) { probes++; return "en0", nil }
+	defer func() { physicalProxyInterface = previous }()
+	if observed := s.observeProxyInterface(context.Background()); probes != 0 || observed.configuration != "" {
+		t.Fatalf("stopped VM probed the host route: probes=%d observed=%+v", probes, observed)
+	}
+	markTestVMRunning(t, s)
+	if s.observeProxyInterface(context.Background()); probes != 1 {
+		t.Fatalf("running VM was not observed: probes=%d", probes)
+	}
+}

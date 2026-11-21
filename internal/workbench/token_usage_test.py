@@ -1,3 +1,4 @@
+import contextlib
 import datetime as dt
 import concurrent.futures
 import importlib.util
@@ -131,6 +132,46 @@ class UsageTests(unittest.TestCase):
             finally:
                 os.environ.pop("TZ", None)
                 time.tzset()
+
+    def test_daily_totals_are_reused_only_while_requests_and_timezone_are_unchanged(self):
+        self.write([self.row("first")])
+        first = self.collect()["days"]
+        database = self.root / "counters.sqlite3"
+        def grouped():
+            with contextlib.closing(sqlite3.connect(database)) as db, db:
+                cached = db.execute("SELECT value FROM summary WHERE key='daily'").fetchone()
+            return json.loads(cached[0])["key"]
+        key = grouped()
+        self.assertEqual(self.collect()["days"], first)
+        self.assertEqual(grouped(), key, "an unchanged scan advanced the revision")
+        self.write([self.row("first"), self.row("second")])
+        second = self.collect()["days"]
+        self.assertEqual(second[0]["requests"], 2)
+        self.assertNotEqual(grouped(), key)
+        # A writer that does not know about the cache (an older helper or a
+        # manual repair) still invalidates it through the table triggers.
+        with contextlib.closing(sqlite3.connect(database)) as db, db:
+            db.execute("UPDATE requests SET input=input+5")
+        self.assertEqual(self.collect(scan=False)["days"][0]["input_tokens"], second[0]["input_tokens"] + 10)
+        with contextlib.closing(sqlite3.connect(database)) as db, db:
+            db.execute("DELETE FROM requests WHERE id=(SELECT id FROM requests LIMIT 1)")
+        self.assertEqual(self.collect(scan=False)["days"][0]["requests"], 1)
+        if hasattr(time, "tzset"):
+            row = self.row("late")
+            row["timestamp"] = "2026-01-01T23:30:00Z"
+            self.write([row])
+            try:
+                with patch.dict(os.environ, {"TZ": "UTC"}):
+                    time.tzset()
+                    utc = self.collect()["days"]
+                with patch.dict(os.environ, {"TZ": "UTC-8"}):
+                    time.tzset()
+                    shifted = self.collect(scan=False)["days"]
+            finally:
+                time.tzset()
+            self.assertIn("2026-01-01", [day["date"] for day in utc])
+            self.assertIn("2026-01-02", [day["date"] for day in shifted])
+            self.assertNotEqual([day["date"] for day in shifted], [day["date"] for day in utc])
 
     def test_oversized_record_skipping_resumes_within_scan_budget(self):
         self.path.write_text("x" * 5000 + "\n" + json.dumps(self.row()) + "\n")

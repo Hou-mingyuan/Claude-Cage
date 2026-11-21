@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
+	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
 	"github.com/lima-vm/lima/v2/pkg/limayaml"
 	"github.com/lima-vm/lima/v2/pkg/yqutil"
 )
@@ -142,5 +144,52 @@ func TestLimaLegacyIdentityIsNotMigratedByEdit(t *testing.T) {
 	clone, err := l.inspect(ctx, "new")
 	if err != nil || clone.Config.GuestIdentity == nil {
 		t.Fatal("legacy template clone did not receive an identity")
+	}
+}
+
+func TestLimaRotateIdentity(t *testing.T) {
+	l := newTestLima(t)
+	ctx := t.Context()
+	none := []Mount{}
+	if err := l.Create(ctx, "rotate-me", "template:debian-13", Settings{Mounts: &none}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := l.inspect(ctx, "rotate-me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vzFile := filepath.Join(inst.Dir, filenames.VzIdentifier)
+	if err := os.WriteFile(vzFile, []byte("old-vz-id"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := l.CurrentIdentity(ctx, "rotate-me")
+	if err != nil || info.Identity == nil || !info.HasVZIdentifier {
+		t.Fatalf("CurrentIdentity = (%+v, %v)", info, err)
+	}
+	next, err := guestidentity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev, vzReset, err := l.RotateIdentity(ctx, "rotate-me", next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !vzReset {
+		t.Fatal("expected vz-identifier to be cleared")
+	}
+	if _, err := os.Stat(vzFile); !os.IsNotExist(err) {
+		t.Fatalf("vz-identifier still present: %v", err)
+	}
+	if !reflect.DeepEqual(prev, info.Identity) {
+		t.Fatalf("previous identity mismatch")
+	}
+	after, err := l.CurrentIdentity(ctx, "rotate-me")
+	if err != nil || !reflect.DeepEqual(after.Identity, next) || after.HasVZIdentifier {
+		t.Fatalf("after CurrentIdentity = (%+v, %v), want %+v", after, err, next)
+	}
+	invalid := *next
+	invalid.Hostname = "bad;host"
+	if _, _, err := l.RotateIdentity(ctx, "rotate-me", &invalid); err == nil {
+		t.Fatal("accepted invalid identity")
 	}
 }

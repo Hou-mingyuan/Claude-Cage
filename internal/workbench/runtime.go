@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,13 +18,20 @@ import (
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
+	"github.com/sylvinus/agent-vm/internal/exitpolicy"
 	"github.com/sylvinus/agent-vm/internal/guestos"
 	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/hostimage"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
+	"github.com/sylvinus/agent-vm/internal/vm"
 )
 
 var loadConfig = cage.Load
+
+// previousDNSFile keeps the DNS options of previous-profile.json, whose
+// configuration JSON does not carry them.
+const previousDNSFile = "previous-dns.json"
+
 var defaultConfig = cage.DefaultConfig
 
 type guestCredentials struct {
@@ -168,15 +176,17 @@ func (s *Server) attach() error {
 	credentials, manifest, err := parseGuestConnection(b)
 	s.mu.Lock()
 	s.guestManifest = manifest
-	s.guestUpdateRequired = errors.Is(err, errGuestUpdateRequired)
-	s.guestUpdateError = ""
+	message := ""
 	if err != nil {
 		s.ready = false
-		s.guestUpdateError = err.Error()
+		message = err.Error()
 	}
+	s.setGuestUpdateLocked(guestComponentsUnavailable(err), message)
 	s.mu.Unlock()
 	if err != nil {
-		if errors.Is(err, errGuestUpdateRequired) {
+		if errors.Is(err, errGuestRecoveryRequired) {
+			_ = s.closeProxyGate("环境组件清单缺失或上次更新中断，外网保持关闭")
+		} else if errors.Is(err, errGuestUpdateRequired) {
 			_ = s.closeProxyGate("环境组件需要更新，外网保持关闭")
 		}
 		return err
@@ -275,16 +285,20 @@ func (s *Server) runCage(args ...string) error {
 			cmd.Dir = s.profile
 		}
 	}
-	cmd.Env = append(os.Environ(), cage.ConfigEnv+"="+s.configPath)
+	cmd.Env = append(vm.ChildEnv(), cage.ConfigEnv+"="+s.configPath)
 	execution := s.jobs.execution()
 	if len(args) == 1 && args[0] == "setup" {
 		cmd.Env = append(cmd.Env, "CAGE_SETUP_PROGRESS=1")
 	}
 	s.mu.Lock()
 	mirror := s.preferences.DebianMirror
+	tls12Compat := s.preferences.InstallTLS12Compat
 	s.mu.Unlock()
 	if mirror != "" {
 		cmd.Env = append(cmd.Env, cage.DebianMirrorEnv+"="+mirror)
+	}
+	if tls12Compat {
+		cmd.Env = append(cmd.Env, cage.InstallTLS12Env+"=1")
 	}
 	cmd.Env = append(cmd.Env, cage.JobEnv+"="+execution.id)
 	cmd.Stdout, cmd.Stderr = execution, execution
@@ -360,6 +374,9 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 			_ = s.closeProxyGate(failure.Message)
 			return failure
 		}
+	} else if err := mountableEnvironmentDir(s.environmentDir()); err != nil {
+		// A container's share is sshfs over a quoted path, a VM's is Lima's.
+		return err
 	}
 	cfg, err := loadConfig(s.configPath)
 	if err != nil {
@@ -383,7 +400,10 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 			return e
 		}
 		bound, _ := managedproxy.BoundInterface(filepath.Join(managedproxy.Dir(s.profile), "config.yaml"))
-		if bound != name || !managedproxy.Running(s.operationContext(), s.profile, p) {
+		// DNS settings saved since the core started reach it here: the save
+		// already restarts the environment, so reloading the core now adds no
+		// further outage and its resolvers match guest DNS and the check.
+		if bound != name || proxyDNSOutdated(p, cfg) || !managedproxy.Running(s.operationContext(), s.profile, p) {
 			// Every core start changes the report generation, including recovery.
 			if e = s.activateProxy(p, cfg); e != nil {
 				return e
@@ -396,7 +416,7 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 	}
 
 	attachErr := s.attach()
-	if errors.Is(attachErr, errGuestUpdateRequired) {
+	if guestComponentsUnavailable(attachErr) {
 		return s.synchronizeEnvironment()
 	}
 	if attachErr == nil {
@@ -510,8 +530,7 @@ func (s *Server) stopEnvironment() (returned error) {
 	s.ready = false
 	s.credentials = guestCredentials{}
 	s.guestManifest = nil
-	s.guestUpdateRequired = false
-	s.guestUpdateError = ""
+	s.setGuestUpdateLocked(false, "")
 	s.safety.Error = ""
 	s.mu.Unlock()
 	s.terminals.closeAll()
@@ -529,7 +548,27 @@ func (s *Server) stopEnvironment() (returned error) {
 	}
 	return nil
 }
+
+// proxyDNSOutdated reports whether the core was configured with other DNS
+// endpoints than the saved settings (the environment's DoH list and the node
+// resolvers).
+func proxyDNSOutdated(p managedproxy.Store, cfg cage.Config) bool {
+	return !slices.Equal(p.CoreDNS(), cfg.DNSEndpoints()) || !slices.Equal(p.NodeResolvers(), cfg.BootstrapEndpoints())
+}
+
+type jobRecoveryError struct {
+	Recovery string
+	Err      error
+}
+
+func (e *jobRecoveryError) Error() string { return e.Err.Error() }
+func (e *jobRecoveryError) Unwrap() error { return e.Err }
+
 func (s *Server) apply(v savedProfile, validate bool) error {
+	return s.applyWithOptions(v, validate, false)
+}
+
+func (s *Server) applyWithOptions(v savedProfile, validate, saveStaticDraft bool) error {
 	old, err := loadConfig(s.configPath)
 	if err != nil {
 		return err
@@ -545,6 +584,7 @@ func (s *Server) apply(v savedProfile, validate bool) error {
 	wasReady := vmAlive(s.profile, s.environmentDir())
 	s.mu.Unlock()
 	changed := old != v.Config || oldPrefs.AutoTimezone != v.Preferences.AutoTimezone || oldPrefs.AutoLanguage != v.Preferences.AutoLanguage
+	var pendingStaticDraftErr error
 	if changed && validate && old.RequireManagedProxy(s.profile) == nil {
 		s.setMessage("正在验证新出口，现有环境保持运行…")
 		loc, e := probeEnvironmentLocation(s.operationContext(), v.Config, v.Preferences)
@@ -552,19 +592,47 @@ func (s *Server) apply(v savedProfile, validate bool) error {
 			return err
 		}
 		if e != nil {
-			if v.Preferences.AutoTimezone || v.Preferences.AutoLanguage || loc.IP == "" {
+			if loc.IP == "" {
+				manualStatic := v.Config.ExitPolicy.Mode == "static" && v.Config.ExitPolicy.IP != ""
+				staticChanged := v.Config.ExitPolicy.Mode == "static" && v.Config.ExitPolicy != old.ExitPolicy
+				staticAllowed := false
+				if manualStatic {
+					countryState, countryMsg := exitpolicy.CheckExitCountry(v.Config.ExitPolicy.IP, nil)
+					if countryState == cage.CheckFailed {
+						return errors.New("静态 IP 基准未保存：" + countryMsg)
+					}
+					staticAllowed = true
+				}
+				if saveStaticDraft && staticAllowed {
+					// Offline static draft never treats manual input as live
+					// observation evidence and never authorizes outbound traffic.
+					v.Config.Timezone, v.Config.Locale, v.Config.BrowserLanguage = old.Timezone, old.Locale, old.BrowserLanguage
+					pendingStaticDraftErr = e
+				} else {
+					if staticChanged {
+						errMsg := fmt.Errorf("静态 IP 基准未保存，原规则保持不变：%w", e)
+						if staticAllowed {
+							return &jobRecoveryError{Recovery: "static-ip-draft-available", Err: errMsg}
+						}
+						return errMsg
+					}
+					return e
+				}
+			} else if v.Preferences.AutoTimezone || v.Preferences.AutoLanguage {
 				return e
 			}
 		} else {
 			v.Config = autoRegionSettings(v.Config, v.Preferences, loc)
 		}
-		v.Config.ExitPolicy = v.Config.ExitPolicy.BindMissing(loc.exitLocation())
-		observed := loc.exitLocation()
-		if result, message := v.Config.ExitPolicy.Evaluate(loc.IP, &observed); result != cage.CheckPassed {
-			if result == cage.CheckUnknown && e != nil && !v.Preferences.AutoTimezone && !v.Preferences.AutoLanguage {
-				return errors.New("时区和语言已选择手动设置，但所有出口仍须确认国家或地区。请重试位置检测或切换节点；静态 IP 和不限地区不能跳过大陆出口检查，原配置保持不变")
+		if pendingStaticDraftErr == nil {
+			v.Config.ExitPolicy = v.Config.ExitPolicy.BindMissing(loc.exitLocation())
+			observed := loc.exitLocation()
+			if result, message := v.Config.ExitPolicy.Evaluate(loc.IP, &observed); result != cage.CheckPassed {
+				if result == cage.CheckUnknown && e != nil && !v.Preferences.AutoTimezone && !v.Preferences.AutoLanguage {
+					return errors.New("时区和语言已选择手动设置，但所有出口仍须确认国家或地区。请重试位置检测或切换节点；静态 IP 和不限地区不能跳过大陆出口检查，原配置保持不变")
+				}
+				return errors.New(message)
 			}
-			return errors.New(message)
 		}
 	}
 	if changed {
@@ -577,8 +645,14 @@ func (s *Server) apply(v savedProfile, validate bool) error {
 		if err = writePrivate(filepath.Join(s.profile, "previous-profile.json"), savedProfile{old, oldPrefs}); err != nil {
 			return err
 		}
+		if err = cage.SaveDNSOptionsFile(filepath.Join(s.profile, previousDNSFile), old.DNS); err != nil {
+			return err
+		}
 		if err = s.stopEnvironment(); err != nil {
 			return err
+		}
+		if pendingStaticDraftErr != nil {
+			_ = s.closeProxyGate("已保存待验证的静态 IP 基准，实时出口与完整检查通过前外网保持关闭")
 		}
 	}
 	// A project is a live directory grant in the same VM, never a lifecycle change.
@@ -604,11 +678,19 @@ func (s *Server) apply(v savedProfile, validate bool) error {
 	} else {
 		err = writePrivate(s.configPath, v.Config)
 	}
+	if err == nil {
+		// Older versions reject unknown configuration fields, so the extra
+		// resolvers live in their own file beside the configuration.
+		if err = cage.SaveDNSOptions(s.configPath, v.Config.DNS); err != nil {
+			_ = writePrivate(s.configPath, old)
+		}
+	}
 	if err != nil {
 		return err
 	}
 	if err = writePrivate(filepath.Join(s.profile, "workbench.json"), v.Preferences); err != nil {
 		_ = writePrivate(s.configPath, old)
+		_ = cage.SaveDNSOptions(s.configPath, old.DNS)
 		return err
 	}
 	loginPrefsCommitted = true
@@ -633,6 +715,9 @@ func (s *Server) apply(v savedProfile, validate bool) error {
 			}
 			return fmt.Errorf("设置已保存，环境尚未恢复就绪。请核对客机状态后重试启动：%w", err)
 		}
+	}
+	if pendingStaticDraftErr != nil {
+		return staticDraftPendingError{fmt.Errorf("已保存待验证的静态 IP 基准（%s），外网保持关闭。待代理恢复后请重新检测联网，实时出口、国家与隔离检查全部通过前不会放行外网：%w", v.Config.ExitPolicy.IP, pendingStaticDraftErr)}
 	}
 	return nil
 }

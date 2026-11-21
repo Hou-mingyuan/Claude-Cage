@@ -46,12 +46,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ !inputs.release }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ !inputs.release && 'npm' || '' }}
           cache-dependency-path: ui/package-lock.json
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Application version consistency
         run: |
           node scripts/check-version.mjs
@@ -63,7 +64,7 @@ jobs:
         run: |
           npm run --prefix ui lint
           npm test --prefix ui
-          node --test internal/cage/clipboard.test.cjs internal/cage/browser-audit.test.mjs internal/cage/browser-downloads.test.mjs internal/cage/browser-uploads.test.mjs internal/cage/browser-login.test.mjs internal/cage/browser-clipboard.test.mjs internal/cage/browser-visibility.test.mjs internal/cage/native-input.test.mjs internal/cage/display-density.test.mjs internal/cage/browser-wheel.test.mjs
+          node --test --test-timeout=300000 internal/cage/clipboard.test.cjs internal/cage/browser-audit.test.mjs internal/cage/browser-downloads.test.mjs internal/cage/browser-uploads.test.mjs internal/cage/browser-login.test.mjs internal/cage/browser-clipboard.test.mjs internal/cage/browser-visibility.test.mjs internal/cage/native-input.test.mjs internal/cage/display-density.test.mjs internal/cage/browser-wheel.test.mjs scripts/cleanup-apps.test.mjs
           uv run internal/cage/claude-account.test.py
           uv run internal/cage/display-governor.test.py
           uv run internal/cage/save-download.test.py
@@ -136,14 +137,14 @@ jobs:
           [[ "$BUILD_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$(git rev-parse HEAD)" == "$BUILD_REF" ]]
           [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]]
+      # A release build restores no cache another branch or workflow wrote.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
       - name: Build, sign, notarize and verify using a temporary keychain
         env:
           CAGE_MACOS_P12_BASE64: ${{ secrets.CAGE_MACOS_P12_BASE64 }}

@@ -5,9 +5,6 @@ package hostagent
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -35,12 +32,10 @@ func (a *HostAgent) startResourceManager(ctx context.Context) func() {
 	if !ok {
 		return func() {}
 	}
-	read := func(ctx context.Context, script string) ([]byte, error) {
-		return runResourceProbe(ctx, a.resourceProbeCommand(ctx, script))
-	}
-	stop := ManageResources(ctx, a.instDir, a.instConfig, balloon, read)
+	session := &resourceProbeSession{command: a.resourceProbeCommand}
+	stop := ManageResources(ctx, a.instDir, a.instConfig, balloon, session.read)
 	var once sync.Once
-	return func() { once.Do(stop) }
+	return func() { once.Do(func() { stop(); session.close() }) }
 }
 
 // Retain a bounded prefix while draining all stderr, so a noisy SSH process
@@ -53,31 +48,6 @@ func (b *resourceProbeStderr) Write(p []byte) (int, error) {
 		b.data = append(b.data, p[:min(remaining, n)]...)
 	}
 	return n, nil
-}
-
-func runResourceProbe(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
-	var stderr resourceProbeStderr
-	cmd.Stderr = &stderr
-	pipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("resource probe stdout: %w", err)
-	}
-	if err = cmd.Start(); err != nil {
-		return nil, fmt.Errorf("resource probe start: %w", err)
-	}
-	out, readErr := io.ReadAll(io.LimitReader(pipe, 16385))
-	if readErr != nil || len(out) > 16384 {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		if len(out) > 16384 {
-			return nil, errors.New("resource observation exceeded its limit")
-		}
-		return nil, fmt.Errorf("resource probe read: %w; stderr=%s", errors.Join(ctx.Err(), readErr), stderr.data)
-	}
-	if err = cmd.Wait(); err != nil {
-		return nil, fmt.Errorf("resource probe execution: %w; stderr=%s", errors.Join(ctx.Err(), err), stderr.data)
-	}
-	return out, nil
 }
 
 func (a *HostAgent) resourceProbeCommand(ctx context.Context, script string) *exec.Cmd {

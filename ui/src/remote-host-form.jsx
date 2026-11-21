@@ -125,6 +125,8 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
                   kind,
                   identity_file:
                     kind === "key_file" ? form.auth.identity_file || "" : "",
+                  agent_socket:
+                    kind === "agent" ? form.auth.agent_socket || "" : "",
                 })
               }
             >
@@ -154,6 +156,33 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
                 spellCheck="false"
               />
               <small>{tr("填写绝对路径。密钥留在本机，不上传到云端。")}</small>
+            </label>
+          )}
+          {form.auth.kind === "agent" && (
+            <label>
+              {tr("SSH agent 套接字（可选）")}
+              <input
+                aria-label={tr("SSH agent 套接字（可选）")}
+                value={form.auth.agent_socket || ""}
+                onChange={(event) =>
+                  update("auth", {
+                    ...form.auth,
+                    agent_socket: event.target.value,
+                  })
+                }
+                placeholder={
+                  platform === "windows"
+                    ? "\\\\.\\pipe\\openssh-ssh-agent"
+                    : tr("/Users/你的名字/.ssh/agent.sock")
+                }
+                autoComplete="off"
+                spellCheck="false"
+              />
+              <small>
+                {platform === "windows"
+                  ? tr("留空时使用 SSH_AUTH_SOCK 或 Windows OpenSSH agent。使用其他 agent 时，填写以 \\\\.\\pipe\\ 开头的命名管道。")
+                  : tr("留空时使用 SSH_AUTH_SOCK。密码管理器提供独立 agent 时，填写其套接字的绝对路径。Cage 不读取 SSH 配置文件。")}
+              </small>
             </label>
           )}
           <details>

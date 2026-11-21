@@ -117,6 +117,39 @@ def usage_record(row, cutoff, now):
     return digest(key), timestamp, model, counters, client
 
 
+def timezone_signature():
+    try:
+        zone = os.stat("/etc/localtime")
+        zone = [zone.st_ino, zone.st_mtime_ns, zone.st_size]
+    except OSError:
+        zone = None
+    return [list(time.tzname), time.timezone, time.altzone, time.daylight, os.environ.get("TZ", ""), zone]
+
+
+def daily_totals(db):
+    # Grouping a year of requests takes about a second. Reuse the totals while
+    # the requests revision and the local timezone are unchanged.
+    revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()
+    key = [revision[0] if revision else 0, timezone_signature()]
+    cached = db.execute("SELECT value FROM summary WHERE key='daily'").fetchone()
+    if cached:
+        try:
+            value = json.loads(cached[0])
+            if value.get("key") == key and isinstance(value.get("days"), list):
+                return value["days"]
+        except (ValueError, AttributeError):
+            pass
+    # SQLite localtime uses the runtime OS timezone on all three platforms,
+    # including Windows without a separate IANA timezone database.
+    daily = []
+    for row in db.execute("""SELECT date(stamp,'unixepoch','localtime'),model,source,client,
+            sum(input),sum(output),sum(read),sum(write),count(*)
+            FROM requests GROUP BY 1,2,3,4 ORDER BY 1,2,3,4"""):
+        daily.append(dict(zip(("date", "model", "source", "client", *FIELDS, "requests"), row)))
+    db.execute("INSERT OR REPLACE INTO summary VALUES ('daily', ?)", (json.dumps({"key": key, "days": daily}, separators=(",", ":")),))
+    return daily
+
+
 def collect(root, home, accounts, cutoff=0, scan=True):
     private_directory(root)
     database = root / "counters.sqlite3"
@@ -138,7 +171,15 @@ def collect(root, home, accounts, cutoff=0, scan=True):
                 modified INTEGER NOT NULL, size INTEGER NOT NULL, invalid INTEGER NOT NULL,
                 skipping INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS summary (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
+        # Every change to requests, by this or any other helper version,
+        # advances a revision, so the daily totals are recomputed only when
+        # the table changed. Additive: older helpers ignore both.
+        for event in ("INSERT", "UPDATE", "DELETE"):
+            db.execute(f"""CREATE TRIGGER IF NOT EXISTS requests_revision_{event.lower()} AFTER {event} ON requests
+                BEGIN INSERT INTO meta VALUES ('revision', 1) ON CONFLICT(key) DO UPDATE SET value=value+1; END""")
+        db.commit()
         # Serialize cutoff reads with every import, including old helper
         # processes which outlive their SSH/controller connection.
         db.execute("BEGIN IMMEDIATE")
@@ -228,19 +269,14 @@ def collect(root, home, accounts, cutoff=0, scan=True):
                                                (key, timestamp, model, source, *counters, client))
                                 except (ValueError, KeyError, TypeError, OverflowError):
                                     invalid += 1
-                            db.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?)",
-                                       (file_key, signature, offset, info.st_mtime_ns, info.st_size, invalid, int(skipping)))
+                            current = (signature, offset, info.st_mtime_ns, info.st_size, invalid, int(skipping))
+                            if saved != current:
+                                db.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?)", (file_key, *current))
                     except OSError:
                         pending = True
             db.execute("INSERT OR REPLACE INTO meta VALUES ('updated', ?)", (now,))
+        daily = daily_totals(db)
         db.commit()
-        # SQLite localtime uses the runtime OS timezone on all three platforms,
-        # including Windows without a separate IANA timezone database.
-        daily = []
-        for row in db.execute("""SELECT date(stamp,'unixepoch','localtime'),model,source,client,
-                sum(input),sum(output),sum(read),sum(write),count(*)
-                FROM requests GROUP BY 1,2,3,4 ORDER BY 1,2,3,4"""):
-            daily.append(dict(zip(("date", "model", "source", "client", *FIELDS, "requests"), row)))
         updated = db.execute("SELECT value FROM meta WHERE key='updated'").fetchone()
         invalid = db.execute("SELECT coalesce(sum(invalid),0) FROM files").fetchone()[0]
         return {"version": 1, "updated_at": int(updated[0]) if updated else 0,

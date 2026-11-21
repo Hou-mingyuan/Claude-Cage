@@ -139,3 +139,76 @@ func TestLocationRequestsDoNotSendProjectIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestLocationRejectsBogonResponse(t *testing.T) {
+	client := &http.Client{Transport: locationTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "ipapi.co" {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ip":"8.8.8.8","bogon":true,"country_code":"US","timezone":"America/Los_Angeles"}`))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	if _, err := Lookup(context.Background(), client, net.ParseIP("8.8.8.8")); err == nil {
+		t.Fatal("bogon response must be rejected")
+	}
+}
+
+// ipinfo.io is a third party the user must opt into. With the switch off
+// (the default) no request reaches it, matching the five-provider behavior.
+func TestLocationIPInfoFallbackIsOptIn(t *testing.T) {
+	const ipinfoBody = `{"ip":"8.8.8.8","country":"US","region":"California","city":"Mountain View","timezone":"America/Los_Angeles"}`
+	run := func(options LookupOptions) ([]string, Location, error) {
+		var hosts []string
+		client := &http.Client{Transport: locationTransport(func(r *http.Request) (*http.Response, error) {
+			hosts = append(hosts, r.URL.Host)
+			if r.URL.Host == "ipinfo.io" {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(ipinfoBody))}, nil
+			}
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader(""))}, nil
+		})}
+		loc, err := LookupWithOptions(context.Background(), client, net.ParseIP("8.8.8.8"), options)
+		return hosts, loc, err
+	}
+	defaults := []string{"ipwho.is", "api.ip.sb", "ipwhois.app", "get.geojs.io", "ipapi.co"}
+	for name, options := range map[string]LookupOptions{"zero options": {}, "explicit off": {IPInfoFallback: false}} {
+		hosts, loc, err := run(options)
+		if !slices.Equal(hosts, defaults) || err == nil || loc != (Location{}) || strings.Contains(err.Error(), "ipinfo") {
+			t.Fatalf("%s: hosts=%v location=%+v err=%v", name, hosts, loc, err)
+		}
+	}
+	var hosts []string
+	client := &http.Client{Transport: locationTransport(func(r *http.Request) (*http.Response, error) {
+		hosts = append(hosts, r.URL.Host)
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}
+	if _, err := Lookup(context.Background(), client, net.ParseIP("8.8.8.8")); err == nil || !slices.Equal(hosts, defaults) {
+		t.Fatalf("Lookup must keep the default providers: hosts=%v err=%v", hosts, err)
+	}
+
+	hosts, loc, err := run(LookupOptions{IPInfoFallback: true})
+	if err != nil || !slices.Equal(hosts, append(slices.Clone(defaults), "ipinfo.io")) {
+		t.Fatalf("opt-in fallback: hosts=%v err=%v", hosts, err)
+	}
+	// Country-level only: finer fields from another provider's spelling must
+	// never bind or fail a region or city rule.
+	if loc.CountryCode != "US" || loc.Country != "US" || loc.Region != "" || loc.RegionCode != "" || loc.City != "" || loc.Timezone != "America/Los_Angeles" {
+		t.Fatalf("opt-in fallback must keep only country-level fields: %+v", loc)
+	}
+}
+
+func TestLocationIPInfoFallbackCannotBindOrFailRegion(t *testing.T) {
+	loc := Location{IP: "8.8.8.8", CountryCode: "US"}
+	for _, scope := range []string{"region", "city"} {
+		unbound := Policy{Mode: "dynamic", Scope: scope}
+		bound := unbound.BindMissing(loc)
+		if bound.Region != "" || bound.City != "" {
+			t.Fatalf("%s: country-only location bound finer fields: %+v", scope, bound)
+		}
+		configured := Policy{Mode: "dynamic", Scope: scope, CountryCode: "US", Region: "California", City: "Mountain View"}
+		if state, _ := configured.Evaluate(loc.IP, &loc); state == Failed {
+			t.Fatalf("%s: country-only location must not be judged a violation", scope)
+		}
+	}
+	if state, _ := (Policy{Mode: "dynamic", Scope: "country", CountryCode: "US"}).Evaluate(loc.IP, &loc); state != Passed {
+		t.Fatal("country-level rule must pass with the fallback result")
+	}
+}

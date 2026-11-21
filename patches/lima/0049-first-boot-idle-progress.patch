@@ -1,0 +1,174 @@
+Count only boot progress against the first-boot idle timeout.
+
+The hostagent repeats its last status with every port forwarding and vsock
+event, so treating every event as progress kept the idle timeout from ever
+firing while cloud-init progress was missing. A wait that a deadline ends
+before cloud-init reports completion is now an error, not a ready VM.
+
+diff --git a/pkg/instance/start.go b/pkg/instance/start.go
+index 5a5c0b29..02d0c193 100644
+--- a/pkg/instance/start.go
++++ b/pkg/instance/start.go
+@@ -372,11 +372,13 @@ func waitHostAgentStart(_ context.Context, haPIDPath, haStderrPath string) error
+ func watchHostAgentEvents(ctx context.Context, inst *limatype.Instance, haStdoutPath, haStderrPath string, begin time.Time, showProgress bool) error {
+ 	ctx, cancel := context.WithTimeout(ctx, watchHostAgentTimeout(ctx))
+ 	defer cancel()
+-	// With an idle timeout, any hostagent event (including each cloud-init
+-	// output line in progress mode) postpones the deadline: a boot that keeps
+-	// making progress is not cut off, a stalled one still fails.
++	// With an idle timeout, boot progress (including each cloud-init output
++	// line in progress mode) postpones the deadline: a boot that keeps making
++	// progress is not cut off, a stalled one still fails. Periodic events, such
++	// as port forwarding, repeat the last status and are not progress.
+ 	ctx, touch, idleExpired := withIdleDeadline(ctx, watchHostAgentIdleTimeout(ctx))
+ 	defer touch(false)
++	var lastProgress string
+ 
+ 	var (
+ 		printedSSHLocalPort  bool
+@@ -386,7 +388,10 @@ func watchHostAgentEvents(ctx context.Context, inst *limatype.Instance, haStdout
+ 	)
+ 
+ 	onEvent := func(ev hostagentevents.Event) bool {
+-		touch(true)
++		if progress := bootProgress(ev.Status); progress != lastProgress {
++			lastProgress = progress
++			touch(true)
++		}
+ 		if !printedSSHLocalPort && ev.Status.SSHLocalPort != 0 {
+ 			logrus.Infof("SSH Local Port: %d", ev.Status.SSHLocalPort)
+ 			printedSSHLocalPort = true
+@@ -461,10 +466,25 @@ func watchHostAgentEvents(ctx context.Context, inst *limatype.Instance, haStdout
+ 		}
+ 		return errors.New("did not receive an event with the `running` status")
+ 	}
++	// Watch also returns when a deadline ends the wait for cloud-init. The VM
++	// runs, but its provisioning is not known to be complete.
++	if showProgress && !cloudInitCompleted {
++		if idleExpired() {
++			return fmt.Errorf("cloud-init did not report completion: no boot progress for %v (hint: see %#q)", watchHostAgentIdleTimeout(ctx), haStderrPath)
++		}
++		return fmt.Errorf("cloud-init did not report completion (hint: see %#q)", haStderrPath)
++	}
+ 
+ 	return nil
+ }
+ 
++// bootProgress identifies the boot state an event reports. Each status event
++// carries the latest cloud-init line and state, so an event that differs only
++// in port forwarding or vsock repeats the previous progress.
++func bootProgress(status hostagentevents.Status) string {
++	return fmt.Sprintf("%v|%v|%v|%q|%d|%+v", status.Running, status.Degraded, status.Exiting, status.Errors, status.SSHLocalPort, status.CloudInitProgress)
++}
++
+ // withIdleDeadline cancels ctx after idle passes without touch(true).
+ // touch(false) stops the timer. An idle of zero disables the deadline.
+ func withIdleDeadline(ctx context.Context, idle time.Duration) (context.Context, func(bool), func() bool) {
+diff --git a/pkg/instance/start_idle_test.go b/pkg/instance/start_idle_test.go
+index 9d40f972..bcc5fbdc 100644
+--- a/pkg/instance/start_idle_test.go
++++ b/pkg/instance/start_idle_test.go
+@@ -2,8 +2,15 @@ package instance
+ 
+ import (
+ 	"context"
++	"encoding/json"
++	"os"
++	"path/filepath"
++	"strings"
+ 	"testing"
+ 	"time"
++
++	hostagentevents "github.com/lima-vm/lima/v2/pkg/hostagent/events"
++	"github.com/lima-vm/lima/v2/pkg/limatype"
+ )
+ 
+ func TestWithIdleDeadlineExtendsOnProgress(t *testing.T) {
+@@ -57,3 +64,87 @@ func TestWatchHostAgentTimeoutsUseSeparateKeys(t *testing.T) {
+ 		t.Fatal("setting the overall timeout after the idle one lost a value")
+ 	}
+ }
++
++// Port forwarding and vsock events repeat the last boot status every few
++// seconds; only a change of that status, such as a new cloud-init line, is
++// progress that postpones the idle deadline (#632).
++func TestBootProgressIgnoresRepeatedStatus(t *testing.T) {
++	line := func(text string) *hostagentevents.CloudInitProgress {
++		return &hostagentevents.CloudInitProgress{Active: true, LogLine: text}
++	}
++	running := hostagentevents.Status{Running: true, SSHLocalPort: 60022, CloudInitProgress: line("Setting up git ...")}
++	heartbeat := running
++	heartbeat.PortForward = &hostagentevents.PortForwardEvent{}
++	heartbeat.Vsock = &hostagentevents.VsockEvent{}
++	if bootProgress(heartbeat) != bootProgress(running) {
++		t.Fatal("a port forwarding heartbeat counted as boot progress")
++	}
++	next := running
++	next.CloudInitProgress = line("Setting up curl ...")
++	completed := running
++	completed.CloudInitProgress = &hostagentevents.CloudInitProgress{Completed: true, LogLine: "Setting up git ..."}
++	for name, status := range map[string]hostagentevents.Status{
++		"new cloud-init line":  next,
++		"cloud-init completed": completed,
++		"degraded":             {Running: true, Degraded: true, SSHLocalPort: 60022, CloudInitProgress: running.CloudInitProgress},
++		"exiting":              {Exiting: true, SSHLocalPort: 60022, CloudInitProgress: running.CloudInitProgress},
++		"error":                {Running: true, SSHLocalPort: 60022, CloudInitProgress: running.CloudInitProgress, Errors: []string{"failed"}},
++		"ssh port":             {SSHLocalPort: 60022},
++	} {
++		if bootProgress(status) == bootProgress(running) {
++			t.Errorf("%s did not count as progress", name)
++		}
++	}
++}
++
++// writeHostAgentEvent appends one event as the hostagent writes ha.stdout.log.
++func writeHostAgentEvent(t *testing.T, path string, status hostagentevents.Status) {
++	t.Helper()
++	data, err := json.Marshal(hostagentevents.Event{Time: time.Now(), Status: status})
++	if err != nil {
++		t.Fatal(err)
++	}
++	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer f.Close()
++	if _, err := f.Write(append(data, '\n')); err != nil {
++		t.Fatal(err)
++	}
++}
++
++// A VM whose cloud-init progress stopped reaching the host keeps sending
++// port forwarding events. The wait must still end after the idle timeout
++// with an error, instead of lasting the overall timeout or reporting success.
++func TestWatchHostAgentEventsStallsDespiteHeartbeats(t *testing.T) {
++	dir := t.TempDir()
++	stdout, stderr := filepath.Join(dir, "ha.stdout.log"), filepath.Join(dir, "ha.stderr.log")
++	begin := time.Now().Add(-time.Second)
++	progress := &hostagentevents.CloudInitProgress{Active: true}
++	writeHostAgentEvent(t, stdout, hostagentevents.Status{SSHLocalPort: 60022})
++	writeHostAgentEvent(t, stdout, hostagentevents.Status{SSHLocalPort: 60022, CloudInitProgress: progress})
++	writeHostAgentEvent(t, stdout, hostagentevents.Status{Running: true, SSHLocalPort: 60022, CloudInitProgress: progress})
++	done := make(chan struct{})
++	defer close(done)
++	go func() {
++		for {
++			select {
++			case <-done:
++				return
++			case <-time.After(50 * time.Millisecond):
++				writeHostAgentEvent(t, stdout, hostagentevents.Status{Running: true, SSHLocalPort: 60022, CloudInitProgress: progress, PortForward: &hostagentevents.PortForwardEvent{}})
++			}
++		}
++	}()
++	ctx := WithWatchHostAgentIdleTimeout(WithWatchHostAgentTimeout(context.Background(), 30*time.Second), 400*time.Millisecond)
++	inst := &limatype.Instance{Config: &limatype.LimaYAML{}}
++	started := time.Now()
++	err := watchHostAgentEvents(ctx, inst, stdout, stderr, begin, true)
++	if err == nil || !strings.Contains(err.Error(), "no boot progress") {
++		t.Fatalf("stalled cloud-init progress ended with %v", err)
++	}
++	if elapsed := time.Since(started); elapsed > 10*time.Second {
++		t.Fatalf("heartbeats kept the wait alive for %v", elapsed)
++	}
++}

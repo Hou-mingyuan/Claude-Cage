@@ -2,9 +2,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
-  echo 'Build the guest image on x86_64 Linux.' >&2; exit 1;
-}
+# The Debian base is a multi-platform manifest and the shared tool installer
+# supports both architectures, so a native arm64 server can build its own image.
+case "$(uname -s)/$(uname -m)" in
+  Linux/x86_64|Linux/aarch64) ;;
+  *) echo 'Build the guest image on x86_64 or aarch64 Linux.' >&2; exit 1 ;;
+esac
 cage_binary="${CAGE_SERVER_BINARY:-$PWD/_output/bin/cage}"
 cage_engine="${CAGE_CONTAINER_ENGINE:-$HOME/.claude-cage/container-engine/tools/docker}"
 cage_socket="${DOCKER_HOST:-unix:///run/user/$(id -u)/cage-container-engine/docker.sock}"

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -50,5 +52,29 @@ func TestAccountRouteRequiresBothGateAndNodeEvidence(t *testing.T) {
 	reject()
 	if verified != 2 {
 		t.Fatal("unexpected verification count", verified)
+	}
+}
+
+func TestLocationLookupOptionsFollowWorkbenchPreference(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if LocationLookupOptions(configPath).IPInfoFallback {
+		t.Fatal("missing preferences must keep the ipinfo.io fallback off")
+	}
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{`{"reuse_claude_login":true}`, false},
+		{`{"location_ipinfo_fallback":false}`, false},
+		{`not json`, false},
+		{`{"location_ipinfo_fallback":true}`, true},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, "workbench.json"), []byte(tc.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := LocationLookupOptions(configPath).IPInfoFallback; got != tc.want {
+			t.Fatalf("%s: IPInfoFallback = %v, want %v", tc.body, got, tc.want)
+		}
 	}
 }

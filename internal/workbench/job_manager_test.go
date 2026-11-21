@@ -331,3 +331,72 @@ func TestJobManagerPreservesProjectRecovery(t *testing.T) {
 		t.Fatalf("stale recovery after retry: %+v", job)
 	}
 }
+
+func TestJobManagerRecordsInitiatorAndCancellationSource(t *testing.T) {
+	t.Run("superseded while running", func(t *testing.T) {
+		var manager jobManager
+		var operation sync.Mutex
+		defer manager.close()
+		started, canceled := make(chan struct{}), make(chan struct{})
+		first, err := manager.submitWithInitiator(&operation, "start", jobInitiatorAgent, 0, nil, nil, func() error {
+			close(started)
+			<-manager.execution().ctx.Done()
+			close(canceled)
+			return context.Canceled
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first.Initiator != jobInitiatorAgent {
+			t.Fatalf("expected agent initiator, got %+v", first)
+		}
+		awaitJobSignal(t, started)
+		stop, err := manager.submitWithInitiator(&operation, "stop", jobInitiatorDesktop, 0, nil, nil, func() error {
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		awaitJobSignal(t, canceled)
+		state := awaitJobIdle(t, &manager)
+		if state.ID != stop.ID || state.Initiator != jobInitiatorDesktop {
+			t.Fatalf("stop job lost initiator: %+v", state)
+		}
+		replaced, ok := manager.find(first.ID)
+		if !ok || replaced.Initiator != jobInitiatorAgent || !replaced.Canceled || replaced.CanceledBy != jobInitiatorDesktop || replaced.SupersededBy != stop.ID {
+			t.Fatalf("superseded job missing initiator or cancellation source: %+v %v", replaced, ok)
+		}
+	})
+
+	t.Run("canceled before stop submitted", func(t *testing.T) {
+		var manager jobManager
+		var operation sync.Mutex
+		defer manager.close()
+		started := make(chan struct{})
+		first, err := manager.submitWithInitiator(&operation, "start", jobInitiatorAgent, 0, nil, nil, func() error {
+			close(started)
+			<-manager.execution().ctx.Done()
+			return context.Canceled
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		awaitJobSignal(t, started)
+		manager.cancelRunningBy(jobInitiatorSetup)
+		canceledState := awaitJobIdle(t, &manager)
+		if !canceledState.Canceled || canceledState.CanceledBy != jobInitiatorSetup || canceledState.Initiator != jobInitiatorAgent {
+			t.Fatalf("fast-canceled job lost cancellation source: %+v", canceledState)
+		}
+		stop, err := manager.submitWithInitiator(&operation, "stop", jobInitiatorSetup, 0, nil, nil, func() error {
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		awaitJobIdle(t, &manager)
+		replaced, ok := manager.find(first.ID)
+		if !ok || !replaced.Canceled || replaced.CanceledBy != jobInitiatorSetup || replaced.SupersededBy != stop.ID {
+			t.Fatalf("replaced fast-canceled job lost metadata: %+v %v", replaced, ok)
+		}
+	})
+}

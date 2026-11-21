@@ -112,3 +112,73 @@ func TestBrowserCookieSelectionAcrossManyPages(t *testing.T) {
 		t.Fatalf("large selection: %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestBrowserCookieSetContract(t *testing.T) {
+	s := testServer(t)
+	s.ready = true
+	calls := 0
+	secret := "fixture-cookie-value"
+	s.browserControl = browserClientForTest(t, s, browserTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		var input browserInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Fatal(err)
+		}
+		cookie := input.Cookie
+		if r.URL.Path != "/cookies" || input.Mode != "set" || input.ID != "private-tab" || input.URL != "https://sub.example.test/" || cookie == nil ||
+			cookie.Name != "session" || cookie.Value != secret || cookie.Domain != ".example.test" || cookie.Path != "/app" ||
+			!cookie.Secure || !cookie.HTTPOnly || cookie.SameSite != "Lax" || cookie.Expires != 1893456000 || cookie.Partitioned {
+			t.Fatalf("cookie lost: %s %+v %+v", r.URL.Path, input, cookie)
+		}
+		if calls == 2 && input.CookieKey != strings.Repeat("c", 64) {
+			t.Fatalf("edited cookie target lost: %q", input.CookieKey)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"total":1}`)), Header: make(http.Header)}, nil
+	}))
+	valid := `{"name":"session","value":"` + secret + `","domain":".example.test","path":"/app","secure":true,"httpOnly":true,"sameSite":"Lax","expires":1893456000}`
+	for _, extra := range []string{"", `,"cookieKey":"` + strings.Repeat("c", 64) + `"`} {
+		response := request(s, "POST", "/api/browser/cookies", s.origin, `{"id":"private-tab","url":"https://sub.example.test/","mode":"set","scope":"site","cookie":`+valid+extra+`}`, true)
+		if response.Code != http.StatusOK {
+			t.Fatalf("set: %d %s", response.Code, response.Body.String())
+		}
+	}
+	for _, input := range []string{
+		`{"id":"tab","mode":"set","scope":"site"}`,
+		`{"id":"tab","mode":"list","scope":"site","cookie":` + valid + `}`,
+		`{"id":"tab","mode":"set","scope":"site","cookieKey":"bad","cookie":` + valid + `}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"","value":"` + secret + `","domain":"example.test","path":"/"}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a=b","value":"` + secret + `","domain":"example.test","path":"/"}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"` + secret + `;x","domain":"example.test","path":"/"}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"` + strings.Repeat("v", 4096) + `","domain":"example.test","path":"/"}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"` + secret + `","domain":"","path":"/"}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"` + secret + `","domain":"example.test","path":"app"}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"` + secret + `","domain":"example.test","path":"/","sameSite":"lax"}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"` + secret + `","domain":"example.test","path":"/","expires":-1}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"` + secret + `","domain":"example.test","path":"/","partitioned":true}}`,
+		`{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"` + secret + `","domain":"example.test","path":"/","priority":"High"}}`,
+	} {
+		response := request(s, "POST", "/api/browser/cookies", s.origin, input, true)
+		if response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), secret) {
+			t.Fatalf("invalid cookie accepted or echoed: %s: %d %s", input, response.Code, response.Body.String())
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("invalid cookie reached guest: calls = %d", calls)
+	}
+	response := request(s, "POST", "/api/browser/cookies", s.origin, `{"id":"tab","mode":"set","scope":"site","cookie":{"name":"a","value":"","domain":"example.test","path":"/","partitioned":true}}`, true)
+	if !strings.Contains(response.Body.String(), "分区") {
+		t.Fatalf("partitioned cookie refusal is not explicit: %s", response.Body.String())
+	}
+	for _, operation := range AgentOperations() {
+		if operation.Name == "browser.cookies" {
+			properties := operation.InputSchema["properties"].(map[string]any)["cookie"].(map[string]any)["properties"].(map[string]any)
+			for _, field := range []string{"name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires", "partitioned"} {
+				if properties[field] == nil {
+					t.Fatalf("agent cookie schema lacks %s", field)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("browser.cookies operation missing")
+}

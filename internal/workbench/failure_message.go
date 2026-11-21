@@ -29,12 +29,15 @@ func executionFailure(action string, err error, output string) error {
 		{[]string{"desktop file service state=failed"}, "Claude Desktop 的文件服务已经退出", "请从 Cage 重新打开 Claude Desktop；若应用反复退出，请在设置中查看资源用量并导出诊断包。"},
 		{[]string{"curl: (7)", "connection refused"}, "目标服务没有接受连接", "请确认环境及所选代理已启动；文件传递时请重新打开接收文件的应用，再重试。"},
 		{[]string{"no space left on device", "not enough space on the disk"}, "磁盘空间不足，无法继续写入", "请释放环境所在磁盘的空间后继续；不要删除 Cage 的个人数据目录。"},
+		{[]string{"dpkg was interrupted"}, "上次中断的软件安装未能自动补完，环境的软件包管理器仍停在未完成状态", "请重试一次；仍失败时在设置中导出诊断包。不要手动删除 dpkg 的状态或锁文件。"},
 		{[]string{"could not get lock", "unable to acquire the dpkg", "another process using it"}, "环境中已有另一个软件安装或更新进程", "请等待当前安装结束后再继续；不要手动删除安装锁文件。"},
 		{[]string{"temporary failure resolving", "could not resolve host", "curl: (6)", "something wicked happened resolving", "no address associated with hostname"}, "下载服务器的域名解析失败", "请在网络与代理设置中检查所选节点和 DNS，再继续安装。"},
 		{[]string{"curl: (28)", "connection timed out", "operation timed out"}, "下载或环境连接等待超时", "请检查所选代理是否可用，再继续；已保存的下载会尝试续传。"},
 		{[]string{"curl: (60)", "certificate verify failed", "certificate verification failed"}, "下载服务器的证书验证未通过", "请检查电脑时间和所选代理；仍失败时导出诊断包，不要关闭证书验证。"},
+		{[]string{"curl: (35)", "unexpected eof while reading", "ssl_error_syscall"}, "与下载服务器的 TLS 加密握手未能完成，连接被中途断开", "这通常发生在所选代理或出口与该服务器之间。请在网络与代理设置中换一个节点后重试；仍失败时，可在“设置 → 网络与代理”中开启“安装与工具下载兼容模式（限制 curl 最高使用 TLS 1.2）”再试。不要关闭证书验证。"},
 		{[]string{"407 proxy authentication", "proxy authentication required"}, "代理服务器拒绝了当前登录凭据", "请在网络与代理设置中更新代理账号或订阅，再应用节点。"},
 		{[]string{"permission denied", "access is denied"}, "系统拒绝访问安装所需的文件或程序", "请检查应用及环境目录的权限；若安全软件拦截了 Cage，请先核实其拦截记录。"},
+		{[]string{"which lima cannot mount"}, "目录路径含有空格，Lima 无法把它共享进环境", "操作详情中列出了这个目录；把它移到不含空格的路径后重试。若是 Cage 配置目录旁的内部传输目录，步骤见故障排查文档“用户目录含空格时环境无法启动”。"},
 		{[]string{"tried to start delayed item"}, "环境的软件包下载程序反复重试，未能完成安装", "请使用包含 APT 修复的 Cage 构建后继续安装；仍失败时导出诊断包。"},
 	} {
 		for _, pattern := range rule.patterns {

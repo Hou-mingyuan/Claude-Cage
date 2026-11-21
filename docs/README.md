@@ -1,16 +1,19 @@
 # Cage 文档入口
 
-首次使用 Cage，从安装与代理配置开始；已有环境遇到问题时，直接查故障恢复。公开安装包与版本验收范围见 [GitHub Releases](https://github.com/Lee-xeo/Claude-Cage/releases)，产品介绍见[项目主页](https://claude-cage.com/)。
+Cage 为 Claude 及相关程序提供轻量化的本地 Debian 13 隔离环境，并通过开放插件市场（**插件 = MCP + 扩展**）让 Claude 安全、受控地调用本机能力、定制工作台页面。首次使用 Cage，从安装与代理配置开始；已有环境遇到问题时，直接查故障恢复。公开安装包与版本验收范围见 [GitHub Releases](https://github.com/Lee-xeo/Claude-Cage/releases)，产品介绍见[项目主页](https://claude-cage.com/)。
 
 ## 使用与反馈
 
-面向日常使用的[官网使用文档](https://claude-cage.com/docs/)提供分类目录、全文搜索和章节链接。内容源位于 [guide/](guide/index.md)，包括多账号、浏览器、手机、云端、设置与排障；下表保留安装、平台说明与维护资料的直接入口。
+面向日常使用的[官网使用文档](https://claude-cage.com/docs/)提供分类目录、全文搜索和章节链接。内容源位于 [guide/](guide/index.md)，包括插件市场、多账号、浏览器、手机、云端、设置与排障；下表保留安装、插件、平台说明与维护资料的直接入口。
 
 | 你要做什么 | 从这里开始 |
 |---|---|
 | 让自己的 Agent 下载、安装、配置 Cage，跟踪任务并排查故障 | [Agent 使用指南](guide/agent.md) |
 | 选择 macOS、Windows、Linux 安装包，配置代理并打开第一个项目 | [开始使用](getting-started.md) |
 | 了解 Debian 环境的要求、空间占用与数据保留 | [Debian 环境](guide/guest-systems.md) |
+| 从插件市场安装插件、管理主机授权与权限边界 | [插件与插件市场](guide/plugins.md) |
+| 开发 MCP 工具或自定义页面插件，并了解清单与协议规范 | [插件开发规范](plugins.md) |
+| 向开放插件市场浏览或贡献社区插件 | [cage-plugins 插件市场](https://github.com/Lee-xeo/cage-plugins) |
 | 查看快捷键、文件保存、关闭与退出行为 | [日常使用](getting-started.md#日常使用) |
 | 在 Windows 上安装、使用和更新 | [Windows 支持](windows.md) |
 | 在 Linux 上安装、使用和更新 | [Linux 支持](linux.md) |

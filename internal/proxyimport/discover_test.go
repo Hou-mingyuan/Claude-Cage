@@ -45,7 +45,7 @@ items:
 `)
 	writeConfig(t, root, "profiles/active.yaml", testNode)
 	writeConfig(t, root, "profiles/script.js", `throw Error('must never execute')`)
-	loc := []Location{{"Clash Verge Rev", root, true}}
+	loc := []Location{{"Clash Verge Rev", root, Verge}}
 	configs := Scan(loc, []byte("session"))
 	if len(configs) != 2 || configs[0].Nodes != 2 || configs[0].Warning == "" || configs[0].Error != "" || !configs[0].Current || !configs[1].Refreshable {
 		t.Fatalf("unexpected metadata: %s", mustJSON(t, configs))
@@ -79,11 +79,72 @@ items:
 	}
 }
 
+func TestScanClashPartyRuntimeAndProfiles(t *testing.T) {
+	root := t.TempDir()
+	// The root config.yaml holds Clash Party app settings, not nodes.
+	writeConfig(t, root, "config.yaml", "appTheme: system\nproxies:\n  - {name: Settings, type: ss, server: settings.example, port: 1, cipher: aes-128-gcm, password: x}\n")
+	writeConfig(t, root, "work/config.yaml", testNode+`proxy-providers:
+  cached: {path: ./proxy_providers/list.yaml}
+mixed-port: 7890
+secret: private-controller-secret
+`)
+	writeConfig(t, root, "work/proxy_providers/list.yaml", `proxies:
+  - {name: Residential, type: socks5, server: residential.example, port: 1080, password: private-provider-password}
+`)
+	writeConfig(t, root, "profile.yaml", `current: 19a1b2c3d4e
+items:
+  - {id: 19a1b2c3d4e, name: My subscription, type: remote, url: 'https://subscription.example/private-subscription-token'}
+  - {id: 19a1b2c3d4f, name: Offline, type: local}
+  - {id: '../outside', type: local}
+  - {id: '..', type: local}
+  - {id: script, type: script}
+`)
+	writeConfig(t, root, "profiles/19a1b2c3d4e.yaml", testNode)
+	writeConfig(t, root, "profiles/19a1b2c3d4f.yaml", `proxies:
+  - {name: Offline, type: socks5, server: offline.example, port: 1080}
+`)
+	writeConfig(t, root, "profiles/script.yaml", testNode)
+	writeConfig(t, filepath.Dir(root), "outside.yaml", testNode)
+	configs := Scan([]Location{{"Clash Party", root, Party}}, []byte("session"))
+	if len(configs) != 3 {
+		t.Fatalf("unexpected configs: %s", mustJSON(t, configs))
+	}
+	byName := map[string]Config{}
+	for _, c := range configs {
+		if c.Error != "" || c.Client != "Clash Party" {
+			t.Fatalf("unexpected config: %s", mustJSON(t, c))
+		}
+		byName[c.Name] = c
+	}
+	runtime, active, offline := byName["当前生效配置"], byName["My subscription"], byName["Offline"]
+	if runtime.Nodes != 2 || !runtime.Current || runtime.Warning != "" || runtime.Refreshable {
+		t.Fatalf("runtime config: %s", mustJSON(t, runtime))
+	}
+	if strings.Contains(string(runtime.Data), "settings.example") || strings.Contains(string(runtime.Data), "mixed-port") || strings.Contains(string(runtime.Data), "private-controller-secret") {
+		t.Fatal("runtime import contains app settings")
+	}
+	if !strings.Contains(string(runtime.Data), "private-provider-password") {
+		t.Fatal("provider cache under work/ not read")
+	}
+	if active.Nodes != 1 || !active.Current || !active.Refreshable || active.URL != "https://subscription.example/private-subscription-token" {
+		t.Fatalf("active profile: %s", mustJSON(t, active))
+	}
+	if offline.Nodes != 1 || offline.Current || offline.Refreshable {
+		t.Fatalf("local profile: %s", mustJSON(t, offline))
+	}
+	view := mustJSON(t, configs)
+	for _, secret := range []string{root, "private-subscription-token", "private-provider-password", "private-controller-secret"} {
+		if strings.Contains(view, secret) {
+			t.Fatalf("display metadata leaked %s", secret)
+		}
+	}
+}
+
 func TestScanRejectsEscapesAndPreservesSSRFields(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	writeConfig(t, outside, "secret.yaml", testNode)
 	if err := os.Symlink(filepath.Join(outside, "secret.yaml"), filepath.Join(root, "escape.yaml")); err == nil {
-		entries := Scan([]Location{{"Mihomo", root, false}}, []byte("key"))
+		entries := Scan([]Location{{"Mihomo", root, Plain}}, []byte("key"))
 		if len(entries) != 1 || entries[0].Nodes != 0 || entries[0].Error == "" || len(entries[0].Data) != 0 {
 			t.Fatal("followed outside symlink")
 		}
@@ -92,7 +153,7 @@ func TestScanRejectsEscapesAndPreservesSSRFields(t *testing.T) {
 		t.Fatal("accepted parent traversal")
 	}
 	writeConfig(t, root, "gui-config.json", `{"localPort":8080,"configs":[{"server":"ssr.example","server_port":443,"password":"ssr-secret","method":"aes-256-cfb","protocol":"auth_aes128_md5","protocolparam":"user:secret","obfs":"tls1.2_ticket_auth","obfsparam":"cdn.example","remarks_base64":"U1NSIG5vZGU"}]}`)
-	entries := Scan([]Location{{"ShadowsocksR", root, false}}, []byte("key"))
+	entries := Scan([]Location{{"ShadowsocksR", root, Plain}}, []byte("key"))
 	var entry Config
 	for _, e := range entries {
 		if e.Name == "gui-config.json" {
@@ -110,7 +171,7 @@ func TestScanRejectsEscapesAndPreservesSSRFields(t *testing.T) {
 	if strings.Contains(string(entry.Data), "8080") {
 		t.Fatal("imported local listening port")
 	}
-	if _, _, err := nodeData(root, []byte(`{"server":"ss.example","server_port":443,"method":"aes-128-gcm","plugin":"unsupported-plugin"}`)); err == nil {
+	if _, _, err := nodeData(root, "", []byte(`{"server":"ss.example","server_port":443,"method":"aes-128-gcm","plugin":"unsupported-plugin"}`)); err == nil {
 		t.Fatal("silently dropped required plugin")
 	}
 }
@@ -135,16 +196,30 @@ func TestLocationsUsePlatformDataRoots(t *testing.T) {
 		found := false
 		for _, loc := range Locations(test.platform, "/home/person", "", "") {
 			if loc.Client == "Clash Neo" {
-				found = loc.Verge && loc.Directory == filepath.Join("/home/person", test.data, "io.github.clash-neo")
+				found = loc.Layout == Verge && loc.Directory == filepath.Join("/home/person", test.data, "io.github.clash-neo")
 			}
 		}
 		if !found {
 			t.Fatal("missing Clash Neo location on", test.platform)
 		}
 	}
+	for _, test := range []struct{ platform, dir string }{{"darwin", "Library/Application Support"}, {"windows", "AppData/Roaming"}, {"linux", ".config"}} {
+		found := false
+		for _, loc := range Locations(test.platform, "/home/person", "", "") {
+			if loc.Client == "Clash Party" {
+				found = loc.Layout == Party && loc.Directory == filepath.Join("/home/person", test.dir, "mihomo-party")
+			}
+		}
+		if !found {
+			t.Fatal("missing Clash Party location on", test.platform)
+		}
+	}
 	locations := Locations("linux", "/home/person", "/custom/data", "/custom/config")
 	for _, loc := range locations {
 		if loc.Client == "Clash Verge Rev" && loc.Directory != "/custom/data/io.github.clash-verge-rev.clash-verge-rev" {
+			t.Fatal(loc)
+		}
+		if loc.Client == "Clash Party" && loc.Directory != "/custom/config/mihomo-party" {
 			t.Fatal(loc)
 		}
 		if loc.Client == "Clash Verge" && loc.Directory != "/custom/config/clash-verge" {

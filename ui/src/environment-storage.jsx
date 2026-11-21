@@ -53,7 +53,7 @@ export function EnvironmentStorage({ status, onConfirm }) {
     setError("");
     try {
       const accepted = await api("/environment/storage", {
-        directory: path, previous: location.directory, migrate: location.has_environment,
+        directory: path, previous: location.directory, migrate: location.has_environment, missing: Boolean(location.missing),
       });
       setPending({ id: accepted.id, previousJob: job?.id, path });
     } catch (e) { setError(e.message); }
@@ -84,6 +84,7 @@ export function EnvironmentStorage({ status, onConfirm }) {
     <div className="setting-summary-row"><span>{tr("当前环境目录")}</span><strong>{location?.directory || tr("正在读取…")}</strong></div>
     {status.environment_identity_directory && status.environment_identity_directory !== status.environment_directory &&
       <p className="field-help">{tr("原工作目录中的文件保留在") + " "}<code>{status.environment_identity_directory}</code>{tr("。需要使用时可从工作台添加该文件夹；位于 Cage 私有配置目录中的项目需先移到配置目录之外。")}</p>}
+    {location?.missing && location.error && <p role="alert" className="error-message"><SafetyMessage message={location.error} /></p>}
     {location?.backup && <p className="field-help">{tr("迁移前的备份保存在") + " "}<code>{location.backup}</code>{tr("。确认新环境能正常启动、文件和登录状态齐全后，可自行清理备份。")}</p>}
     <label>{tr("新存储位置")}
       <input value={directory} onChange={(e) => { setDirectory(e.target.value); setError(""); }} spellCheck="false"

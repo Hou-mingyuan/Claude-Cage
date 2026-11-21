@@ -249,6 +249,27 @@ var DebianPrepareScript = DebianPrepareScriptFor("")
 // name.
 const DebianMirrorEnv = "CAGE_DEBIAN_MIRROR_ORDER"
 
+// InstallTLS12Env carries the user's explicit opt-in TLS 1.2 compatibility
+// switch to the host cage CLI. It stays on the host; when set to "1", setup
+// and tool-update subshells create a temporary CURL_HOME capped at TLS 1.2 so
+// curl avoids proxy egresses that drop TLS 1.3 ClientHello packets. It defaults
+// to off and never alters runtime browsing or API traffic.
+const InstallTLS12Env = "CAGE_INSTALL_TLS12_COMPAT"
+
+// InstallTLS12Prelude configures a temporary curl config capped at TLS 1.2 for
+// the current install or tool-update shell when enabled is true. When false
+// (the default), it emits nothing so TLS 1.3 stays active.
+func InstallTLS12Prelude(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return `_curl_compat_home="$(mktemp -d)"
+printf 'tls-max = "1.2"\n' > "$_curl_compat_home/.curlrc"
+export CURL_HOME="$_curl_compat_home"
+trap 'rm -rf "$_curl_compat_home"' EXIT
+`
+}
+
 // ValidDebianMirror reports whether preference names a Debian source policy:
 // "auto" (official first), "official" (pinned), or "nju" / "ustc" (that
 // domestic mirror first, the other next, the official source last).
@@ -324,8 +345,10 @@ func RequiredToolVersions() map[string]string {
 	return result
 }
 
-func ToolsUpdateScript() string {
-	return "set -euo pipefail\nexport PATH=\"$HOME/.local/bin:$PATH\"\n" + `
+func ToolsUpdateScript() string { return ToolsUpdateScriptFor(false) }
+
+func ToolsUpdateScriptFor(tls12Compat bool) string {
+	return "set -euo pipefail\nexport PATH=\"$HOME/.local/bin:$PATH\"\n" + InstallTLS12Prelude(tls12Compat) + `
 sudo env DEBIAN_FRONTEND=noninteractive dpkg --configure -a </dev/null
 ` + APTBootstrapScript + ToolInstallPrelude() + `
 sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get update </dev/null
@@ -351,19 +374,65 @@ func (c Config) StartScript() string {
 
 func (c Config) SetupScript() string { return c.GuestProfile.Linux(GuestSetup) }
 
+// clearAccountComment empties the work account's comment field. Environments
+// created by earlier versions copied the host account's full name into it.
+// Only the comment changes; the account, its groups and home stay as they are.
+const clearAccountComment = `account_name=$(id -un)
+if [ -n "$(getent passwd "$account_name" | cut -d: -f5)" ]; then sudo usermod -c '' "$account_name" || echo 'The account comment could not be cleared.' >&2; fi
+unset account_name
+`
+
 func componentStartScript() string {
-	return APTBootstrapScript + "\n" + claudeAccountScript() + browserServices() + "\nsudo tee /etc/claude-cage/editor-theme.json >/dev/null <<'CAGE_EDITOR_THEME'\n" + editorTheme + "\nCAGE_EDITOR_THEME\nif systemctl is-active --quiet cage-editor.service; then sudo systemctl stop cage-editor.service; fi\n" + guestStart
+	return clearAccountComment + APTBootstrapScript + "\n" + claudeAccountScript() + browserServices() + "\nsudo tee /etc/claude-cage/editor-theme.json >/dev/null <<'CAGE_EDITOR_THEME'\n" + editorTheme + "\nCAGE_EDITOR_THEME\nif systemctl is-active --quiet cage-editor.service; then sudo systemctl stop cage-editor.service; fi\n" + guestStart
 }
 
 func markGuestStart(body string) string {
 	manifest, _ := json.Marshal(RequiredGuestManifest())
-	return "set -euo pipefail\nsudo rm -f /etc/claude-cage/components.json\n(\n" + body + "\n)\nsudo python3 - <<'CAGE_COMPONENT_MANIFEST'\nfrom pathlib import Path\nimport os,tempfile\np=Path('/etc/claude-cage/components.json')\nfd,name=tempfile.mkstemp(prefix='.components-',dir=p.parent)\nwith os.fdopen(fd,'w') as f:\n f.write(" + fmt.Sprintf("%q", string(manifest)) + ")\n f.flush();os.fsync(f.fileno())\nos.chmod(name,0o644)\nos.replace(name,p)\nCAGE_COMPONENT_MANIFEST\n"
+	// Keep the last successful manifest, but invalidate it durably before any
+	// component changes. An interrupted start must be replayed, never accepted.
+	return `set -euo pipefail
+sudo python3 - <<'CAGE_COMPONENT_UPDATE'
+from pathlib import Path
+import os
+p=Path('/etc/claude-cage/components.updating')
+p.parent.mkdir(parents=True,exist_ok=True)
+with p.open('w') as f:
+ f.flush();os.fsync(f.fileno())
+fd=os.open(p.parent,os.O_RDONLY)
+try: os.fsync(fd)
+finally: os.close(fd)
+CAGE_COMPONENT_UPDATE
+(
+` + body + `
+)
+sudo python3 - <<'CAGE_COMPONENT_MANIFEST'
+from pathlib import Path
+import os,tempfile
+p=Path('/etc/claude-cage/components.json')
+directory=os.open(p.parent,os.O_RDONLY)
+name=None
+try:
+ fd,name=tempfile.mkstemp(prefix='.components-',dir=p.parent)
+ with os.fdopen(fd,'w') as f:
+  f.write(` + fmt.Sprintf("%q", string(manifest)) + `)
+  os.chmod(name,0o644)
+  f.flush();os.fsync(f.fileno())
+ os.replace(name,p)
+ os.fsync(directory)
+ p.with_suffix('.updating').unlink()
+ os.fsync(directory)
+finally:
+ if name is not None and os.path.exists(name): os.unlink(name)
+ os.close(directory)
+CAGE_COMPONENT_MANIFEST
+`
 }
 
 type GuestManifest struct {
 	Protocol   int    `json:"protocol"`
 	Revision   string `json:"revision"`
 	AppVersion string `json:"app_version"`
+	Updating   bool   `json:"updating,omitempty"`
 }
 
 var guestRevision = sync.OnceValue(func() string {
@@ -377,7 +446,7 @@ func RequiredGuestManifest() GuestManifest {
 
 func (m GuestManifest) Current() bool {
 	required := RequiredGuestManifest()
-	return m.Protocol == required.Protocol && m.Revision == required.Revision
+	return !m.Updating && m.Protocol == required.Protocol && m.Revision == required.Revision
 }
 
 func guestDiagnostics() string {

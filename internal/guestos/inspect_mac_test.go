@@ -12,7 +12,15 @@ func TestMacInspectionReportsDebianWorkbench(t *testing.T) {
 		t.Fatalf("Apple Silicon without hypervisor: %+v", missing)
 	}
 	intel := macInspection("amd64", true)
-	if intel.Guest != Debian13 || intel.WorkbenchSupport != "unsupported-host" || intel.HostCheckPassed {
-		t.Fatalf("Intel Mac: %+v", intel)
+	if intel.Guest != Debian13 || intel.WorkbenchSupport != "supported" || !intel.HostCheckPassed || intel.Detail == "" {
+		t.Fatalf("Intel Mac with hypervisor: %+v", intel)
+	}
+	intelMissing := macInspection("amd64", false)
+	if intelMissing.WorkbenchSupport != "supported" || intelMissing.HostCheckPassed || intelMissing.Detail == intel.Detail {
+		t.Fatalf("Intel Mac without hypervisor: %+v", intelMissing)
+	}
+	other := macInspection("386", true)
+	if other.WorkbenchSupport != "unsupported-host" || other.HostCheckPassed {
+		t.Fatalf("unknown Mac architecture: %+v", other)
 	}
 }

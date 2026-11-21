@@ -88,3 +88,79 @@ export function splitTab(layout, tabs, id, side) {
     .find(candidate => candidate !== id && tabs.some(tab => tab.id === candidate));
   return other ? { active: id, other, side } : layout;
 }
+
+export function sameState(a, b) {
+  if (Object.is(a, b)) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!sameState(a[i], b[i])) return false;
+    return true;
+  }
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !sameState(a[key], b[key])) return false;
+  }
+  return true;
+}
+
+export function mergeTabs(previous, incoming) {
+  const map = new Map(incoming.map((item) => [item.id, item]));
+  const seen = new Set();
+  const next = [];
+  let changed = false;
+  for (const item of previous) {
+    const updated = map.get(item.id);
+    if (!updated) {
+      changed = true;
+      continue;
+    }
+    seen.add(item.id);
+    if (sameState(item, updated)) next.push(item);
+    else {
+      changed = true;
+      next.push(updated);
+    }
+  }
+  for (const item of incoming) {
+    if (!seen.has(item.id)) {
+      changed = true;
+      next.push(item);
+    }
+  }
+  return changed ? next : previous;
+}
+
+export function mergeBrowserTabs(previous, browserTabs) {
+  const map = new Map(browserTabs.map((item) => [item.id, item]));
+  const seen = new Set();
+  const next = [];
+  let changed = false;
+  for (const item of previous) {
+    if (item.kind === "terminal") {
+      seen.add(item.id);
+      next.push(item);
+      continue;
+    }
+    const updated = map.get(item.id);
+    if (!updated) {
+      changed = true;
+      continue;
+    }
+    seen.add(item.id);
+    if (sameState(item, updated)) next.push(item);
+    else {
+      changed = true;
+      next.push(updated);
+    }
+  }
+  for (const item of browserTabs) {
+    if (!seen.has(item.id)) {
+      changed = true;
+      next.push(item);
+    }
+  }
+  return changed ? next : previous;
+}

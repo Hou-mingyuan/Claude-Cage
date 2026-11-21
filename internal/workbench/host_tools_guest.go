@@ -98,14 +98,17 @@ rm -rf "$dir"
 mv "$dir.new" "$dir"`
 
 // guestPluginRunScript runs the plugin's program in its folder. $1 is the
-// folder, the rest the program and its arguments. The program is taken from
-// the folder when it is there, as on this computer, and from PATH otherwise.
-// One still running from before, as when it does not stop when its input
-// closes, is ended first: it is known by the folder it runs in. The program
-// gets the environment of an ordinary session, not the variables the
-// environment's own services set for themselves.
+// folder, $2 is 1 when the program gets the variables of the user's
+// settings, the rest the program and its arguments. The program is taken
+// from the folder when it is there, as on this computer, and from PATH
+// otherwise. One still running from before, as when it does not stop when
+// its input closes, is ended first: it is known by the folder it runs in.
+// The program gets the environment of an ordinary session, not the
+// variables the environment's own services set for themselves. The file of
+// settings is read once and removed, so values stay only in the program.
 const guestPluginRunScript = `dir="$HOME/$1"
-shift
+settings=$2
+shift 2
 note="$dir.pid"
 if [ -f "$note" ]; then
   old=$(cat "$note")
@@ -116,15 +119,41 @@ echo $$ > "$note"
 program=$1
 shift
 case "$program" in /*) ;; *) [ -f "./$program" ] && program="./$program" ;; esac
-exec env -i HOME="$HOME" USER="$(id -un)" LOGNAME="$(id -un)" SHELL="${SHELL:-/bin/sh}" PATH="$PATH" LANG="${LANG:-C.UTF-8}" ${LC_ALL:+LC_ALL="$LC_ALL"} ${TZ:+TZ="$TZ"} "$program" "$@"`
+set -- "$program" "$@"
+if [ "$settings" = 1 ] && [ -f "$dir.env" ]; then . "$dir.env"; fi
+rm -f "$dir.env"
+exec env -i HOME="$HOME" USER="$(id -un)" LOGNAME="$(id -un)" SHELL="${SHELL:-/bin/sh}" PATH="$PATH" LANG="${LANG:-C.UTF-8}" ${LC_ALL:+LC_ALL="$LC_ALL"} ${TZ:+TZ="$TZ"} "$@"`
+
+// guestPluginSettingsScript writes, from its standard input, the file the
+// run script reads the settings from. Only the user can read it.
+const guestPluginSettingsScript = `umask 077
+mkdir -p "$(dirname "$HOME/$1")"
+cat > "$HOME/$1.env"`
+
+// guestPluginSettingsFile prepends the settings to the arguments of env, as
+// NAME=value words, so the run script needs no parsing of its own.
+func guestPluginSettingsFile(env []string) string {
+	line := "set --"
+	for _, entry := range env {
+		line += " " + shellQuote(entry)
+	}
+	return line + ` "$@"` + "\n"
+}
 
 // guestPluginCommand copies the plugin's files into the environment, unless
 // they are there already, and returns the command that runs its server
 // there, with its standard input and output carried over SSH.
 func (s *Server) guestPluginCommand(ctx context.Context, manifest hostbridge.Manifest, dir string) (*exec.Cmd, error) {
-	command := manifest.ServerCommand()
+	command, err := hostbridge.ExpandCommand(manifest.ServerCommand(), s.guestActiveProjectDir())
+	if err != nil {
+		return nil, err
+	}
 	if len(command) == 0 {
 		return nil, errors.New("the plugin has no MCP server")
+	}
+	env, err := s.pluginSettingsEnv(ctx, manifest)
+	if err != nil {
+		return nil, err
 	}
 	archive, digest, err := packPlugin(dir)
 	if err != nil {
@@ -141,7 +170,17 @@ func (s *Server) guestPluginCommand(ctx context.Context, manifest hostbridge.Man
 			return nil, fmt.Errorf("copying the plugin: %w: %s", err, strings.TrimSpace(string(output)))
 		}
 	}
-	line := "sh -c " + shellQuote(guestPluginRunScript) + " sh " + shellQuote(folder)
+	settings := "0"
+	if len(env) > 0 {
+		write := s.sshCommand(prepare, "-T", s.sshTarget(), "--", "sh -c "+shellQuote(guestPluginSettingsScript)+" sh "+shellQuote(folder))
+		// Values travel on standard input, never on a command line.
+		write.Stdin = strings.NewReader(guestPluginSettingsFile(env))
+		if output, err := write.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("writing the plugin's settings: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		settings = "1"
+	}
+	line := "sh -c " + shellQuote(guestPluginRunScript) + " sh " + shellQuote(folder) + " " + settings
 	for _, argument := range command {
 		line += " " + shellQuote(argument)
 	}

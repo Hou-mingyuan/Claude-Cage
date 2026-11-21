@@ -25,6 +25,9 @@ func (r *Runtime) ensureSSHKey() ([]byte, error) {
 		return nil, err
 	}
 	path := filepath.Join(r.InstanceDir(), "id_ed25519")
+	if err := removeEmptyRecord(path); err != nil {
+		return nil, err
+	}
 	if data, err := os.ReadFile(path); err == nil {
 		if err := host.CheckPrivateFile(path); err != nil {
 			return nil, err
@@ -45,15 +48,7 @@ func (r *Runtime) ensureSSHKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return nil, err
-	}
-	err = pem.Encode(file, block)
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
+	if err = host.CreatePrivateFile(path, pem.EncodeToMemory(block)); err != nil {
 		return nil, err
 	}
 	key, err := ssh.NewPublicKey(private.Public())
@@ -145,6 +140,9 @@ cat /etc/ssh/ssh_host_ed25519_key.pub
 	}
 	line := "cage-container-" + r.identity + " " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))) + "\n"
 	path := filepath.Join(r.InstanceDir(), "known_hosts")
+	if err := removeEmptyRecord(path); err != nil {
+		return err
+	}
 	if old, err := os.ReadFile(path); err == nil {
 		if err := host.CheckPrivateFile(path); err != nil {
 			return err
@@ -156,7 +154,25 @@ cat /etc/ssh/ssh_host_ed25519_key.pub
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.WriteFile(path, []byte(line), 0600)
+	return host.CreatePrivateFile(path, []byte(line))
+}
+
+// removeEmptyRecord drops a zero-length key or trust record. Earlier versions
+// created these files before writing them, so a crash could leave them empty;
+// an empty file holds no key and no trust, and would block every later start.
+// Any other content is kept and checked by the caller.
+func removeEmptyRecord(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode().IsRegular() && info.Size() == 0 {
+		return os.Remove(path)
+	}
+	return nil
 }
 
 func sshConfigValue(value string) (string, error) {

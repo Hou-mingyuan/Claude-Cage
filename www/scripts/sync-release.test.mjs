@@ -155,12 +155,12 @@ function androidFixture() {
 
 function versionedFixture(version, platforms) {
   const release = { tag_name: `v${version}`, prerelease: version.includes('-'), draft: false, assets: [] };
-  for (const suffix of ['macos-arm64.dmg', 'windows-amd64-setup.exe', 'linux-amd64.deb', 'android-arm64.apk'].filter((_, index) => platforms.includes(index))) {
+  for (const suffix of ['macos-arm64.dmg', 'windows-amd64-setup.exe', 'linux-amd64.deb', 'android-arm64.apk', 'macos-amd64.dmg'].filter((_, index) => platforms.includes(index))) {
     const name = `Cage-${version}-${suffix}`;
     release.assets.push({ name, state: 'uploaded', size: 100, digest: `sha256:${hash}`,
       browser_download_url: `https://github.com/Lee-xeo/Claude-Cage/releases/download/${release.tag_name}/${name}` });
   }
-  if (platforms.includes(0)) release.assets.push({ ...fixture().assets[2], browser_download_url: `https://github.com/Lee-xeo/Claude-Cage/releases/download/${release.tag_name}/mihomo-v1.19.33-source.tar.gz` });
+  if (platforms.includes(0) || platforms.includes(4)) release.assets.push({ ...fixture().assets[2], browser_download_url: `https://github.com/Lee-xeo/Claude-Cage/releases/download/${release.tag_name}/mihomo-v1.19.33-source.tar.gz` });
   return release;
 }
 
@@ -174,6 +174,16 @@ test('each platform retains its latest verified version and release notes indepe
     assert.equal(platforms[platform].releaseURL, `https://github.com/Lee-xeo/Claude-Cage/releases/tag/v${version}`);
     assert.ok(platforms[platform].downloadURL.includes(`/v${version}/Cage-${version}-`));
   }
+});
+
+test('the Intel Mac package is listed separately and older releases without it keep Apple Silicon', async () => {
+  const latest = versionedFixture('0.3.0', [0, 1, 2, 4]);
+  const platforms = await resolvePlatforms([latest, versionedFixture('0.2.9', [0, 1, 2])], async release => sums(release));
+  assert.equal(platforms.macosIntel.version, '0.3.0');
+  assert.ok(platforms.macosIntel.downloadURL.endsWith('/Cage-0.3.0-macos-amd64.dmg'));
+  assert.ok(platforms.macos.downloadURL.endsWith('/Cage-0.3.0-macos-arm64.dmg'));
+  const before = await resolvePlatforms([versionedFixture('0.2.9', [0, 1, 2])], async release => sums(release));
+  assert.equal(before.macosIntel, undefined);
 });
 
 test('new Android package replaces the fallback without relabeling other platforms', async () => {
@@ -359,6 +369,12 @@ test('macOS verification checks all owned archives without requiring other-platf
       assert.notEqual(run(invalid).status, 42);
       assert.ok(!existsSync(nativeReached), 'invalid macOS checksum reached native signature verification');
     }
+    // An Intel DMG beside it shares the Mihomo source; each DMG is checked.
+    const intel = 'Cage-0.2.0-macos-amd64.dmg';
+    writeFileSync(join(directory, intel), intel);
+    const both = valid + `${createHash('sha256').update(intel).digest('hex')}  ${intel}\n`;
+    assert.equal(run(both).status, 42, 'Intel DMG blocked macOS checksum verification');
+    assert.notEqual(run(valid).status, 42, 'an Intel DMG missing from SHA256SUMS reached native verification');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

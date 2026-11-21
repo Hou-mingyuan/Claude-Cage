@@ -43,9 +43,17 @@ func TestMaintenanceRequiresAuthenticationAndSoftwareSource(t *testing.T) {
 	server := httptest.NewServer(proxy)
 	defer server.Close()
 	defer proxy.close()
-	gate, err := cage.NewEgressGate(cage.DefaultConfig())
-	if err != nil {
+	s, gate := grantedToolUpdateServer(t)
+	_, _, recoveryErr := parseGuestConnection([]byte("{\"token\":\"fixture\"}\npassword\n{\"updating\":true}"))
+	if !errors.Is(recoveryErr, errGuestRecoveryRequired) || !guestComponentsUnavailable(recoveryErr) {
+		t.Fatal("interrupted start did not enter the component recovery path", recoveryErr)
+	}
+	if err := s.closeProxyGate(recoveryErr.Error()); err != nil {
 		t.Fatal(err)
+	}
+	if conn, err := gate.DialContext(context.Background(), "tcp", "example.com:443"); err == nil {
+		conn.Close()
+		t.Fatal("component recovery allowed agent traffic")
 	}
 	for _, test := range []struct {
 		target, method string
@@ -147,12 +155,35 @@ func TestMaintenanceScriptUsesPrivateTemporaryConfiguration(t *testing.T) {
 test "$http_proxy" = "$CAGE_INSTALL_PROXY"
 test "$(umask)" = 0022
 printf '%s' "$CAGE_APT_CONFIG"
-`, "fixture-token"))
+	`, "fixture-token", false))
 	output, err := command.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = os.Stat(string(output)); !os.IsNotExist(err) {
 		t.Fatal("maintenance credential was retained")
+	}
+}
+
+func TestContainerMaintenanceKeepsAPTArchivesOutsideDefaultCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the installer Bash script runs in the Linux guest, not the Windows host")
+	}
+	shell, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	command := exec.Command(shell, "-se")
+	command.Stdin = strings.NewReader(`sudo() {
+  test "$*" = "install -d -m 0755 /var/cache/apt/install-archives"
+}
+` + maintenanceScript(`sed -n '/^Dir::Cache::archives /p' "$CAGE_APT_CONFIG"
+`, "fixture-token", true))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run maintenance script: %v\n%s", err, output)
+	}
+	if got := strings.TrimSpace(string(output)); got != `Dir::Cache::archives "/var/cache/apt/install-archives";` {
+		t.Fatalf("unexpected managed APT archive directory: %q", got)
 	}
 }

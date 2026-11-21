@@ -40,6 +40,8 @@ func OpenSaved(relayOrigin, lookupToken, trustedHostPin string, device DeviceSig
 }
 
 func (c *Client) StartUI(directory string) (string, error) { return c.native.StartUI(directory) }
+func (c *Client) Suspend()                                 { c.native.Suspend() }
+func (c *Client) Resume() bool                             { return c.native.Resume() }
 func (c *Client) Close() error                             { return c.native.Close() }
 
 // ReportDevice is optional metadata for the desktop pairing card. An older host

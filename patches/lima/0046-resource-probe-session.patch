@@ -1,0 +1,392 @@
+Subject: [PATCH] Reuse one SSH session for resource probes
+
+diff --git a/pkg/hostagent/resources.go b/pkg/hostagent/resources.go
+index 1858e4cc..f6568b6f 100644
+--- a/pkg/hostagent/resources.go
++++ b/pkg/hostagent/resources.go
+@@ -5,9 +5,6 @@ package hostagent
+ 
+ import (
+ 	"context"
+-	"errors"
+-	"fmt"
+-	"io"
+ 	"os/exec"
+ 	"runtime"
+ 	"strconv"
+@@ -35,12 +32,10 @@ func (a *HostAgent) startResourceManager(ctx context.Context) func() {
+ 	if !ok {
+ 		return func() {}
+ 	}
+-	read := func(ctx context.Context, script string) ([]byte, error) {
+-		return runResourceProbe(ctx, a.resourceProbeCommand(ctx, script))
+-	}
+-	stop := ManageResources(ctx, a.instDir, a.instConfig, balloon, read)
++	session := &resourceProbeSession{command: a.resourceProbeCommand}
++	stop := ManageResources(ctx, a.instDir, a.instConfig, balloon, session.read)
+ 	var once sync.Once
+-	return func() { once.Do(stop) }
++	return func() { once.Do(func() { stop(); session.close() }) }
+ }
+ 
+ // Retain a bounded prefix while draining all stderr, so a noisy SSH process
+@@ -55,31 +50,6 @@ func (b *resourceProbeStderr) Write(p []byte) (int, error) {
+ 	return n, nil
+ }
+ 
+-func runResourceProbe(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
+-	var stderr resourceProbeStderr
+-	cmd.Stderr = &stderr
+-	pipe, err := cmd.StdoutPipe()
+-	if err != nil {
+-		return nil, fmt.Errorf("resource probe stdout: %w", err)
+-	}
+-	if err = cmd.Start(); err != nil {
+-		return nil, fmt.Errorf("resource probe start: %w", err)
+-	}
+-	out, readErr := io.ReadAll(io.LimitReader(pipe, 16385))
+-	if readErr != nil || len(out) > 16384 {
+-		_ = cmd.Process.Kill()
+-		_ = cmd.Wait()
+-		if len(out) > 16384 {
+-			return nil, errors.New("resource observation exceeded its limit")
+-		}
+-		return nil, fmt.Errorf("resource probe read: %w; stderr=%s", errors.Join(ctx.Err(), readErr), stderr.data)
+-	}
+-	if err = cmd.Wait(); err != nil {
+-		return nil, fmt.Errorf("resource probe execution: %w; stderr=%s", errors.Join(ctx.Err(), err), stderr.data)
+-	}
+-	return out, nil
+-}
+-
+ func (a *HostAgent) resourceProbeCommand(ctx context.Context, script string) *exec.Cmd {
+ 	args := a.sshConfig.Args()
+ 	if runtime.GOOS == "windows" {
+diff --git a/pkg/hostagent/resources_process_test.go b/pkg/hostagent/resources_process_test.go
+index ac30e7ba..94fe9e51 100644
+--- a/pkg/hostagent/resources_process_test.go
++++ b/pkg/hostagent/resources_process_test.go
+@@ -4,31 +4,39 @@
+ package hostagent
+ 
+ import (
++	"bufio"
+ 	"context"
+ 	"errors"
+ 	"fmt"
+ 	"os"
+ 	"os/exec"
++	"runtime"
+ 	"strings"
++	"sync/atomic"
+ 	"testing"
+ 	"time"
+ )
+ 
+ func TestResourceProbeProcess(t *testing.T) {
+ 	if mode := os.Getenv("CAGE_RESOURCE_PROBE_TEST"); mode != "" {
+-		switch mode {
+-		case "failure":
+-			fmt.Fprint(os.Stdout, "private-stdout")
+-			fmt.Fprint(os.Stderr, "getsockname failed: Not a socket\n"+strings.Repeat("x", 1<<20))
+-			os.Exit(7)
+-		case "timeout":
+-			time.Sleep(30 * time.Second)
+-		case "oversize":
+-			fmt.Fprint(os.Stdout, strings.Repeat("x", 16385))
+-		case "success":
+-			fmt.Fprint(os.Stdout, "metrics")
++		input := bufio.NewReader(os.Stdin)
++		for {
++			if _, err := input.ReadString('\n'); err != nil {
++				os.Exit(0)
++			}
++			switch mode {
++			case "failure":
++				fmt.Fprint(os.Stdout, "private-stdout")
++				fmt.Fprint(os.Stderr, "getsockname failed: Not a socket\n"+strings.Repeat("x", 1<<20))
++				os.Exit(7)
++			case "timeout":
++				time.Sleep(30 * time.Second)
++			case "oversize":
++				fmt.Fprint(os.Stdout, strings.Repeat("x", 16385)+"\n\x1e\n")
++			case "success":
++				fmt.Fprint(os.Stdout, "metrics\n\x1e\n")
++			}
+ 		}
+-		os.Exit(0)
+ 	}
+ 	exe, err := os.Executable()
+ 	if err != nil {
+@@ -36,42 +44,80 @@ func TestResourceProbeProcess(t *testing.T) {
+ 	}
+ 	for _, mode := range []string{"failure", "timeout", "oversize", "success", "start"} {
+ 		t.Run(mode, func(t *testing.T) {
+-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+-			defer cancel()
+-			if mode == "timeout" {
+-				ctx, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
+-				defer cancel()
+-			}
+-			cmd := exec.CommandContext(ctx, exe, "-test.run=^TestResourceProbeProcess$")
+-			cmd.Env = append(os.Environ(), "CAGE_RESOURCE_PROBE_TEST="+mode)
+-			cmd.WaitDelay = time.Second
+-			hideResourceProbe(cmd)
+-			if mode == "start" {
+-				cmd.Path = "missing-resource-probe-executable"
+-			}
+-			out, err := runResourceProbe(ctx, cmd)
+-			switch mode {
+-			case "success":
+-				if err != nil || string(out) != "metrics" {
+-					t.Fatalf("valid observation lost: %q %v", out, err)
+-				}
+-			case "failure":
+-				if err == nil || !strings.Contains(err.Error(), "Not a socket") || !strings.Contains(err.Error(), "exit status 7") || len(err.Error()) > 4300 || strings.Contains(err.Error(), "private-stdout") {
+-					t.Fatalf("missing or unbounded execution diagnostic: %v", err)
+-				}
+-			case "timeout":
+-				if !errors.Is(err, context.DeadlineExceeded) {
+-					t.Fatalf("timeout cause lost: %v", err)
++			var starts atomic.Int32
++			session := &resourceProbeSession{command: func(ctx context.Context, _ string) *exec.Cmd {
++				starts.Add(1)
++				cmd := exec.CommandContext(ctx, exe, "-test.run=^TestResourceProbeProcess$")
++				cmd.Env = append(os.Environ(), "CAGE_RESOURCE_PROBE_TEST="+mode)
++				cmd.WaitDelay = time.Second
++				hideResourceProbe(cmd)
++				if mode == "start" {
++					cmd.Path = "missing-resource-probe-executable"
+ 				}
+-			case "oversize":
+-				if err == nil || !strings.Contains(err.Error(), "exceeded") {
+-					t.Fatalf("oversized stdout accepted: %v", err)
++				return cmd
++			}}
++			defer session.close()
++			read := func() ([]byte, error) {
++				timeout := 5 * time.Second
++				if mode == "timeout" {
++					timeout = 100 * time.Millisecond
+ 				}
+-			case "start":
+-				if err == nil || !strings.Contains(err.Error(), "probe start") {
+-					t.Fatalf("start failure lost: %v", err)
++				ctx, cancel := context.WithTimeout(context.Background(), timeout)
++				defer cancel()
++				return session.read(ctx, "probe")
++			}
++			for round := 0; round < 3; round++ {
++				out, err := read()
++				switch mode {
++				case "success":
++					if err != nil || string(out) != "metrics\n" {
++						t.Fatalf("valid observation lost: %q %v", out, err)
++					}
++				case "failure":
++					if err == nil || !strings.Contains(err.Error(), "Not a socket") || len(err.Error()) > 4300 || strings.Contains(err.Error(), "private-stdout") {
++						t.Fatalf("missing or unbounded execution diagnostic: %v", err)
++					}
++				case "timeout":
++					if !errors.Is(err, context.DeadlineExceeded) {
++						t.Fatalf("timeout cause lost: %v", err)
++					}
++				case "oversize":
++					if err == nil || !strings.Contains(err.Error(), "exceeded") {
++						t.Fatalf("oversized stdout accepted: %v", err)
++					}
++				case "start":
++					if err == nil || !strings.Contains(err.Error(), "probe start") {
++						t.Fatalf("start failure lost: %v", err)
++					}
+ 				}
+ 			}
++			// Healthy observations share one session; every failure reopens it.
++			want := int32(3)
++			if mode == "success" {
++				want = 1
++			}
++			if got := starts.Load(); got != want {
++				t.Fatalf("sessions opened: got %d, want %d", got, want)
++			}
+ 		})
+ 	}
+ }
++
++func TestResourceProbeLoopRunsScriptPerRequest(t *testing.T) {
++	if runtime.GOOS == "windows" {
++		t.Skip("the loop runs in the Linux guest's POSIX shell")
++	}
++	session := &resourceProbeSession{command: func(ctx context.Context, remote string) *exec.Cmd {
++		return exec.CommandContext(ctx, "/bin/sh", "-c", remote)
++	}}
++	defer session.close()
++	script := "LC_ALL=C; export LC_ALL\nprintf 'quote %s\\n' \"'it'\"\ncat /missing-probe-file 2>/dev/null\necho n=$((${n:-0}+1))"
++	for round := 0; round < 2; round++ {
++		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++		out, err := session.read(ctx, script)
++		cancel()
++		if err != nil || string(out) != "quote 'it'\nn=1\n" {
++			t.Fatalf("round %d: %q %v", round, out, err)
++		}
++	}
++}
+diff --git a/pkg/hostagent/resources_session.go b/pkg/hostagent/resources_session.go
+new file mode 100644
+index 00000000..9cc700ed
+--- /dev/null
++++ b/pkg/hostagent/resources_session.go
+@@ -0,0 +1,153 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package hostagent
++
++import (
++	"bufio"
++	"context"
++	"errors"
++	"fmt"
++	"io"
++	"os/exec"
++	"strings"
++	"sync"
++)
++
++// resourceProbeEnd ends each observation on the shared probe connection.
++const resourceProbeEnd = "\x1e"
++
++// resourceProbeSession keeps one SSH session open for periodic guest
++// observations. A new session per probe costs a connection (or a mux channel),
++// the user's shell startup files and several processes every two seconds. The
++// guest loop runs the script once per request line; any failure or timeout
++// closes the session, and the next request opens a fresh one, so a stalled
++// guest is observed exactly as with one session per probe.
++type resourceProbeSession struct {
++	command func(context.Context, string) *exec.Cmd
++
++	mu      sync.Mutex
++	script  string
++	cmd     *exec.Cmd
++	cancel  context.CancelFunc
++	stdin   io.WriteCloser
++	replies chan resourceProbeReply
++	stderr  *resourceProbeStderr
++}
++
++type resourceProbeReply struct {
++	data []byte
++	err  error
++}
++
++func resourceProbeLoop(script string) string {
++	inner := "while IFS= read -r _; do\n" + script + "\nprintf '\\036\\n'\ndone"
++	return "exec /bin/sh -c '" + strings.ReplaceAll(inner, "'", `'\''`) + "'"
++}
++
++func (s *resourceProbeSession) read(ctx context.Context, script string) ([]byte, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	if s.cmd == nil || s.script != script {
++		s.closeLocked()
++		if err := s.startLocked(script); err != nil {
++			return nil, err
++		}
++	}
++	if _, err := io.WriteString(s.stdin, "\n"); err != nil {
++		stderr := s.closeLocked()
++		return nil, fmt.Errorf("resource probe request: %w; stderr=%s", err, stderr)
++	}
++	select {
++	case reply := <-s.replies:
++		if reply.err != nil {
++			stderr := s.closeLocked()
++			if strings.Contains(reply.err.Error(), "exceeded") {
++				return nil, reply.err
++			}
++			return nil, fmt.Errorf("%w; stderr=%s", reply.err, stderr)
++		}
++		return reply.data, nil
++	case <-ctx.Done():
++		stderr := s.closeLocked()
++		return nil, fmt.Errorf("resource probe read: %w; stderr=%s", ctx.Err(), stderr)
++	}
++}
++
++func (s *resourceProbeSession) startLocked(script string) error {
++	ctx, cancel := context.WithCancel(context.Background())
++	cmd := s.command(ctx, resourceProbeLoop(script))
++	stderr := &resourceProbeStderr{}
++	cmd.Stderr = stderr
++	stdout, err := cmd.StdoutPipe()
++	if err != nil {
++		cancel()
++		return fmt.Errorf("resource probe stdout: %w", err)
++	}
++	stdin, err := cmd.StdinPipe()
++	if err != nil {
++		cancel()
++		return fmt.Errorf("resource probe stdin: %w", err)
++	}
++	if err = cmd.Start(); err != nil {
++		cancel()
++		return fmt.Errorf("resource probe start: %w", err)
++	}
++	replies := make(chan resourceProbeReply, 1)
++	go readResourceProbeReplies(ctx, stdout, replies)
++	s.script, s.cmd, s.cancel, s.stdin, s.replies, s.stderr = script, cmd, cancel, stdin, replies, stderr
++	return nil
++}
++
++// readResourceProbeReplies splits the stream at the end marker. Each
++// observation is bounded like the output of a separate probe process.
++func readResourceProbeReplies(ctx context.Context, stdout io.Reader, replies chan<- resourceProbeReply) {
++	output := bufio.NewReaderSize(stdout, 4096)
++	var data []byte
++	send := func(reply resourceProbeReply) bool {
++		select {
++		case replies <- reply:
++			return true
++		case <-ctx.Done():
++			return false
++		}
++	}
++	for {
++		line, err := output.ReadSlice('\n')
++		if err == nil && string(line) == resourceProbeEnd+"\n" {
++			if !send(resourceProbeReply{data: data}) {
++				return
++			}
++			data = nil
++			continue
++		}
++		data = append(data, line...)
++		if len(data) > 16384 {
++			send(resourceProbeReply{err: errors.New("resource observation exceeded its limit")})
++			return
++		}
++		if err != nil && !errors.Is(err, bufio.ErrBufferFull) {
++			send(resourceProbeReply{err: fmt.Errorf("resource probe ended: %w", err)})
++			return
++		}
++	}
++}
++
++// closeLocked ends the session and returns its bounded stderr.
++func (s *resourceProbeSession) closeLocked() string {
++	if s.cmd == nil {
++		return ""
++	}
++	_ = s.stdin.Close()
++	s.cancel()
++	_ = s.cmd.Wait()
++	stderr := string(s.stderr.data)
++	s.cmd, s.cancel, s.stdin, s.replies, s.stderr, s.script = nil, nil, nil, nil, nil, ""
++	return stderr
++}
++
++func (s *resourceProbeSession) close() {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	s.closeLocked()
++}

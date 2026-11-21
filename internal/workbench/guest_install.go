@@ -149,7 +149,7 @@ func (s *Server) beginGuestInstall(w http.ResponseWriter, r *http.Request, in gu
 		requestError(w, err)
 		return
 	}
-	s.launch(w, "guest-install", func() error {
+	s.launchRequest(w, r, "guest-install", func() error {
 		s.jobs.execution().setSetupProgress(&SetupProgress{Phase: "image", System: install.System, Label: "正在准备 " + guestProgressName(install.System) + " 安装材料"})
 		cfg, err := loadConfig(s.configPath)
 		if err != nil {

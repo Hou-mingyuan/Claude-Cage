@@ -41,17 +41,27 @@ func parseNodes(data []byte, sourceID string) ([]Node, []NodeIssue, error) {
 		Groups    []map[string]any `yaml:"proxy-groups"`
 		Providers yaml.Node        `yaml:"proxy-providers"`
 	}
-	if yaml.Unmarshal(data, &input) != nil {
-		return nil, nil, errors.New("无法读取 YAML，请导入 Clash/Mihomo 节点订阅或配置；暂不支持 Base64 列表或分享链接")
+	yamlErr := yaml.Unmarshal(data, &input)
+	var proxies []map[string]any
+	var presetReasons []string
+	if yamlErr == nil {
+		proxies = input.Proxies
+		if len(proxies) == 0 {
+			proxies = input.Payload
+		}
+		inline, inlineReasons := inlineProviderNodes(&input.Providers)
+		presetReasons = make([]string, len(proxies), len(proxies)+len(inline))
+		proxies = append(proxies, inline...)
+		presetReasons = append(presetReasons, inlineReasons...)
 	}
-	proxies := input.Proxies
 	if len(proxies) == 0 {
-		proxies = input.Payload
+		// Share-link lists, plain or Base64, are a YAML scalar or an error.
+		if links, reasons, ok := shareLinkNodes(data); ok {
+			proxies, presetReasons, input.Groups = links, reasons, nil
+		} else if yamlErr != nil {
+			return nil, nil, errors.New("无法读取订阅内容：需要 Clash/Mihomo YAML、分享链接列表或其 Base64 编码")
+		}
 	}
-	inline, inlineReasons := inlineProviderNodes(&input.Providers)
-	presetReasons := make([]string, len(proxies), len(proxies)+len(inline))
-	proxies = append(proxies, inline...)
-	presetReasons = append(presetReasons, inlineReasons...)
 	if len(proxies) == 0 || len(proxies) > 3000 {
 		return nil, nil, errors.New("配置需要包含 1–3000 个 proxies 节点；仅含远程 provider 的配置请改为导入节点订阅链接")
 	}
@@ -68,6 +78,8 @@ func parseNodes(data []byte, sourceID string) ([]Node, []NodeIssue, error) {
 		name, _ := p["name"].(string)
 		counts[name]++
 	}
+	local := newLocalServers()
+	localCount := 0
 	issues := make([]NodeIssue, len(proxies))
 	names := map[string]string{}
 	indexes := map[string]int{}
@@ -96,6 +108,9 @@ func parseNodes(data []byte, sourceID string) ([]Node, []NodeIssue, error) {
 			issue.Reason = "节点协议暂不支持"
 		case server == "" || len(server) > 253:
 			issue.Reason = "节点服务器缺失或过长"
+		case local.contains(server):
+			localCount++
+			issue.Reason = ErrLocalProxyNode.Error()
 		default:
 			if err := normalizeWebSocket(p); err != nil {
 				issue.Reason = err.Error()
@@ -175,6 +190,9 @@ func parseNodes(data []byte, sourceID string) ([]Node, []NodeIssue, error) {
 		}
 	}
 	if len(out) == 0 {
+		if localCount == len(proxies) {
+			return nil, skipped, ErrLocalProxyNode
+		}
 		var details []string
 		for _, issue := range skipped[:min(3, len(skipped))] {
 			details = append(details, fmt.Sprintf("第 %d 个节点 %q：%s", issue.Index, issue.Name, issue.Reason))

@@ -107,7 +107,7 @@ func TestSSHPrivateKeyFilesAndLocalOptionsAreRejected(t *testing.T) {
 	} {
 		s, _ := Load(t.TempDir())
 		data := `proxies:
- - {name: good, type: http, server: 127.0.0.1, port: 8080}
+ - {name: good, type: http, server: 203.0.113.10, port: 8080}
  - {name: bad, type: ssh, server: 203.0.113.10, port: 22, username: root, ` + fields + `}
 `
 		if err := s.Import("test", "", []byte(data), "test", 0, ""); err != nil || s.Count() != 1 {

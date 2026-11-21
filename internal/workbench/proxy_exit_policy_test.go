@@ -13,7 +13,7 @@ func TestProxySelectionKeepsExitBindingsWithTheirNodes(t *testing.T) {
 	s := testServer(t)
 	p, _ := managedproxy.Load(s.profile)
 	first := p.Selected
-	if err := p.Import("other", "", []byte(`proxies: [{name: other, type: socks5, server: 127.0.0.1, port: 2}]`), "other", 0, ""); err != nil {
+	if err := p.Import("other", "", []byte(`proxies: [{name: other, type: socks5, server: 192.0.2.1, port: 2}]`), "other", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	second := p.Sources[1].Nodes[0].ID

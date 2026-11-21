@@ -34,6 +34,9 @@ function InitializationFrame({ children }) {
   </main>;
 }
 
+const setupApi = (path, body, method, headers = {}, options) =>
+  api(path, body, method, { "X-Cage-Initiator": "setup", ...headers }, options);
+
 export function InitializationGate({ children }) {
   const tr = useTranslation();
   const [state, setState] = useState(null);
@@ -45,8 +48,8 @@ export function InitializationGate({ children }) {
     let live = true;
     setError("");
     (async () => {
-      const next = await api("/environment/initialization");
-      if (next.required && !next.tracked && !next.started) await api("/environment/initialization", { action: "begin" });
+      const next = await setupApi("/environment/initialization");
+      if (next.required && !next.tracked && !next.started) await setupApi("/environment/initialization", { action: "begin" });
       if (live) setState(next);
     })().catch(error => { if (live) setError(error.message); });
     return () => { live = false; };
@@ -100,12 +103,12 @@ function Initialization({ initial, onComplete }) {
       clearTimeout(timer);
       polling = true;
       try {
-        const next = await api("/status");
+        const next = await setupApi("/status");
         if (!alive.current) return;
         setStatus(next);
         const results = await Promise.allSettled([
-          api("/proxy"),
-          account?.guest_system ? Promise.resolve(null) : api("/environment/guest-systems"),
+          setupApi("/proxy"),
+          account?.guest_system ? Promise.resolve(null) : setupApi("/environment/guest-systems"),
         ]);
         if (!alive.current) return;
         // A successful status read does not mean the related configuration
@@ -159,7 +162,7 @@ function Initialization({ initial, onComplete }) {
     await run(async () => {
       setMeasuring(checkMirrors && typeof mirrorChoice !== "string");
       let outcome;
-      try { outcome = await beginInstall(api, { mirrorChoice: typeof mirrorChoice === "string" ? mirrorChoice : "", checkMirrors, startOptions: startOptions() }); }
+      try { outcome = await beginInstall(setupApi, { mirrorChoice: typeof mirrorChoice === "string" ? mirrorChoice : "", checkMirrors, startOptions: startOptions() }); }
       finally { if (alive.current) setMeasuring(false); }
       if (!alive.current) return;
       if (outcome.mirrors) { setMirrors(outcome.mirrors); setMirrorChoice(outcome.mirrors.preference); setStep("install"); return; }
@@ -171,12 +174,12 @@ function Initialization({ initial, onComplete }) {
   }
   async function stop() {
     if (!await confirm({ title: "停止当前安装？", body: "安装进度、已下载文件和虚拟磁盘会保留。你可以在此界面继续安装。", confirm: "停止安装" })) return;
-    await run(async () => { const accepted = await api("/stop", {}); setStatus(current => ({ ...current, job: { ...accepted, running: true } })); });
+    await run(async () => { const accepted = await setupApi("/stop", {}); setStatus(current => ({ ...current, job: { ...accepted, running: true } })); });
   }
   async function waitForJob(accepted, kind) {
     if (!accepted.id) throw new Error(tr("操作未返回任务编号，请核对状态后重试。"));
     while (alive.current) {
-      const next = await api("/status");
+      const next = await setupApi("/status");
       if (!alive.current) break;
       setStatus(next);
       const current = next.job;
@@ -193,15 +196,15 @@ function Initialization({ initial, onComplete }) {
     await run(async () => {
       const running = status.vm_running;
       if (!await confirm({ title: running ? tr("重启环境并重新检测？") : tr("启动环境并重新检测？"), body: tr("请先保存文件。当前终端会话会结束，浏览器登录和项目文件会保留。重新检测通过前，外网保持关闭。"), confirm: running ? tr("重启并检查") : tr("启动并检测") })) return;
-      const current = await api("/status");
+      const current = await setupApi("/status");
       if (!alive.current) return;
       if (current.job?.running) throw new Error(tr("其他操作仍在进行，请等待完成后重试。"));
       if (current.vm_running) {
-        const stopped = await waitForJob(await api("/stop", {}), "stop");
+        const stopped = await waitForJob(await setupApi("/stop", {}), "stop");
         if (stopped.vm_running) throw new Error(tr("环境尚未停止，请核对状态后重试。"));
       }
       if (!alive.current) return;
-      const accepted = await api("/start", startOptions());
+      const accepted = await setupApi("/start", startOptions());
       if (!accepted.id) throw new Error(tr("启动请求未返回任务编号，请核对状态后重试。"));
       setStatus(current => ({ ...current, job: { ...accepted, running: true, kind: "start", message: accepted.message || tr("正在启动并检查环境…") } }));
     });
@@ -210,7 +213,7 @@ function Initialization({ initial, onComplete }) {
     await run(async () => {
       setEntering(true);
       try {
-        await api("/environment/initialization", { action: "complete" });
+        await setupApi("/environment/initialization", { action: "complete" });
         await refresh();
         if (alive.current) onComplete();
       } finally {
@@ -220,7 +223,7 @@ function Initialization({ initial, onComplete }) {
   }
   async function checkNetwork() {
     await run(async () => {
-      const accepted = await api("/safety/check", {});
+      const accepted = await setupApi("/safety/check", {});
       setStatus(current => ({ ...current, job: { ...accepted, running: true, kind: "safety", message: tr("正在检查代理出口和环境隔离…") } }));
     });
   }
@@ -233,17 +236,17 @@ function Initialization({ initial, onComplete }) {
     await run(async () => {
       const directory = storage.directory.trim();
       if (directory !== storage.location.directory) {
-        const accepted = await api("/environment/storage", { directory, previous: storage.location.directory, migrate: false });
+        const accepted = await setupApi("/environment/storage", { directory, previous: storage.location.directory, migrate: false });
         let job;
         do {
           await new Promise(resolve => setTimeout(resolve, 300));
           if (!alive.current) return;
-          const next = await api("/status");
+          const next = await setupApi("/status");
           setStatus(next); job = next.job;
           if (job.id !== accepted.id) throw new Error("存储操作状态已变化，请核对目录后重试。");
         } while (job.running);
         if (job.error) throw new Error(job.error);
-        const location = await api("/environment/storage");
+        const location = await setupApi("/environment/storage");
         if (location.directory !== directory) throw new Error("存储目录尚未保存，请重新选择后重试。");
         setStorage({ location, directory: location.directory });
       }
@@ -260,7 +263,7 @@ function Initialization({ initial, onComplete }) {
   return <InitializationFrame>
     <section className="initialization-content">
       <ol className="initialization-steps" aria-label={tr("初始化步骤")}>{steps.map(([key, label], position) => <li key={key} aria-current={step === key ? "step" : undefined}><span>{position < index ? <Check size={14} /> : position + 1}</span>{tr(label)}</li>)}</ol>
-      <div className="initialization-title"><h1>{tr(title)}</h1><p>{step === "system" ? tr("Cage 会在这台电脑里创建一套独立的 Debian 系统，供终端、浏览器和编辑器使用。不需要更换磁盘时，可以保留默认存储位置。") : step === "proxy" ? tr("先导入已有的代理配置。下方会自动查找本机代理软件，无需自己找文件；也可以添加订阅或节点。导入后选择出口，点击「应用代理」，再开始安装。") : showReady ? tr("系统、开发组件和网络检查均已完成，可以进入工作台开始使用。") : networkPending ? tr("系统已经装好，无需重新安装。按下方指引完成检查，就能进入工作台。") : tr("Cage 会自动下载系统、安装工具，再引导你完成授权。需要你操作时会显示具体步骤；中断后可以继续原任务。")}</p></div>
+      <div className="initialization-title"><h1>{tr(title)}</h1><p>{step === "system" ? tr("Cage 会在这台电脑里创建一套独立的 Debian 系统，供终端、浏览器和编辑器使用。不需要更换磁盘时，可以保留默认存储位置。") : step === "proxy" ? tr("导入具体节点。使用代理链时，在 Cage 中依次选择中转和最终出口。") : showReady ? tr("系统、开发组件和网络检查均已完成，可以进入工作台开始使用。") : networkPending ? tr("系统已经装好，无需重新安装。按下方指引完成检查，就能进入工作台。") : tr("Cage 会自动下载系统、安装工具，再引导你完成授权。需要你操作时会显示具体步骤；中断后可以继续原任务。")}</p></div>
       {connectionError && <div className="initialization-notice" role="alert"><SafetyMessage message={connectionError} /><button onClick={() => pollNow.current?.()}>{tr("重新连接")}</button></div>}
       {!status ? <p role="status"><LoaderCircle size={18} className="spin" />{tr("正在读取安装状态…")}</p> : <>
         <div className="initialization-stage" key={step}>

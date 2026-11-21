@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/exitpolicy"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 )
 
@@ -22,7 +23,7 @@ func testServer(t *testing.T) *Server {
 	c := cage.DefaultConfig()
 	p, _ := managedproxy.Load(profile)
 	p.Auth = strings.Repeat("secret", 8)
-	if err := p.Import("test", "", []byte(`proxies: [{name: qa, type: socks5, server: 127.0.0.1, port: 1}]`), "source", 0, ""); err != nil {
+	if err := p.Import("test", "", []byte(`proxies: [{name: qa, type: socks5, server: 192.0.2.1, port: 1}]`), "source", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	p.Selected = p.Sources[0].Nodes[0].ID
@@ -147,7 +148,7 @@ func TestSettingsPreserveSecretsAndRejectHostSharing(t *testing.T) {
 	workspace := t.TempDir()
 	link := filepath.Join(workspace, "private-link")
 	if e = os.Symlink(s.profile, link); e != nil {
-		t.Fatal(e)
+		t.Skip("symlink unavailable, the link to the profile was not checked: " + e.Error())
 	}
 	input.Workspace = link
 	if _, _, e = proposedSettings(input, old, s.profile); e == nil {
@@ -241,7 +242,7 @@ func TestDisplayPreferenceAppliesAtNextLaunch(t *testing.T) {
 func TestLocationProbeHasNoDirectFallback(t *testing.T) {
 	c := cage.DefaultConfig()
 	c.ProxyURL = "socks5://127.0.0.1:1"
-	if _, e := probeLocation(context.Background(), c); e == nil {
+	if _, e := probeLocation(context.Background(), c, exitpolicy.LookupOptions{}); e == nil {
 		t.Fatal("location probe bypassed unavailable proxy")
 	}
 }
@@ -254,7 +255,7 @@ func TestLocationLiveIntegration(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	loc, e := probeLocation(context.Background(), c)
+	loc, e := probeLocation(context.Background(), c, exitpolicy.LookupOptions{})
 	if e != nil {
 		t.Fatal(e)
 	}

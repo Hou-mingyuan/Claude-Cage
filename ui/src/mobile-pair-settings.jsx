@@ -11,6 +11,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
   const [paired, setPaired] = useState(false);
   const [device, setDevice] = useState(null);
   const [power, setPower] = useState(null);
+  const [mobileAccessBlocked, setMobileAccessBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const statusRevision = useRef(0);
@@ -24,6 +25,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
         setPaired(state.paired);
         setDevice(state.paired ? state.device ?? null : null);
         setPower(state.paired ? state.keep_awake ?? null : null);
+        setMobileAccessBlocked(Boolean(state.mobile_access_blocked));
         if (state.paired) setCode(null);
         else if (code && Date.now() >= Date.parse(code.expires)) {
           setCode(null);
@@ -103,9 +105,16 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
                 <strong>{device.model}</strong>
                 <span>{device.platform === "ios" ? "iOS" : "Android"}</span>
               </>
+            ) : mobileAccessBlocked ? (
+              <span>{tr("当前账户模式暂不支持手机访问，请在「设置 → 账户」设置密码或开启「记住登录」后重新连接。")}</span>
             ) : (
               <span>{tr("型号待获取，请更新手机端 Cage 后重新连接。")}</span>
             )}
+          </p>
+        )}
+        {mobileAccessBlocked && (
+          <p role="alert">
+            {tr("当前电脑处于免密码本机工作区或未开启「记住登录」，手机连接后会无法访问。请在「设置 → 账户」设置账户密码或开启「记住登录」。")}
           </p>
         )}
         {paired ? (

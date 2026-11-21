@@ -1,0 +1,184 @@
+diff --git a/pkg/driver/qemu/qemu.go b/pkg/driver/qemu/qemu.go
+index e48c77c4..e1b3d76b 100644
+--- a/pkg/driver/qemu/qemu.go
++++ b/pkg/driver/qemu/qemu.go
+@@ -29,6 +29,7 @@ import (
+ 	"github.com/sirupsen/logrus"
+ 
+ 	"github.com/lima-vm/lima/v2/pkg/fileutils"
++	"github.com/lima-vm/lima/v2/pkg/guestidentity"
+ 	"github.com/lima-vm/lima/v2/pkg/iso9660util"
+ 	"github.com/lima-vm/lima/v2/pkg/limatype"
+ 	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
+@@ -1082,9 +1083,7 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
+ 		args = append(args, "-device", "virtserialport,chardev=qga0,name="+filenames.VirtioPort)
+ 	}
+ 
+-	if y.GuestIdentity != nil {
+-		args = append(args, "-uuid", y.GuestIdentity.UUID)
+-	}
++	args = append(args, guestIdentityArgs(y.GuestIdentity)...)
+ 
+ 	// QEMU process
+ 	args = append(args, "-name", "lima-"+cfg.Name)
+@@ -1093,6 +1092,23 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
+ 	return exe, args, nil
+ }
+ 
++func guestIdentityArgs(identity *guestidentity.Identity) []string {
++	if identity == nil {
++		return nil
++	}
++	args := []string{"-uuid", identity.UUID}
++	if identity.SystemSerial != "" {
++		args = append(args, "-smbios", fmt.Sprintf("type=1,uuid=%s,serial=%s", identity.UUID, identity.SystemSerial))
++	}
++	if identity.BoardSerial != "" {
++		args = append(args, "-smbios", fmt.Sprintf("type=2,serial=%s", identity.BoardSerial))
++	}
++	if identity.ChassisSerial != "" {
++		args = append(args, "-smbios", fmt.Sprintf("type=3,serial=%s", identity.ChassisSerial))
++	}
++	return args
++}
++
+ func FindVirtiofsd(ctx context.Context, qemuExe string) (string, error) {
+ 	type vhostUserBackend struct {
+ 		BackendType string `json:"type"`
+diff --git a/pkg/driver/qemu/smbios_test.go b/pkg/driver/qemu/smbios_test.go
+new file mode 100644
+index 00000000..59a6c973
+--- /dev/null
++++ b/pkg/driver/qemu/smbios_test.go
+@@ -0,0 +1,35 @@
++// SPDX-License-Identifier: Apache-2.0
++package qemu
++
++import (
++	"slices"
++	"testing"
++
++	"github.com/lima-vm/lima/v2/pkg/guestidentity"
++)
++
++func TestGuestIdentityArgs(t *testing.T) {
++	if got := guestIdentityArgs(nil); got != nil {
++		t.Fatalf("nil identity produced %v", got)
++	}
++	legacy := &guestidentity.Identity{UUID: "12345678-1234-4123-8123-123456789abc"}
++	wantLegacy := []string{"-uuid", legacy.UUID}
++	if got := guestIdentityArgs(legacy); !slices.Equal(got, wantLegacy) {
++		t.Fatalf("legacy identity args = %v, want %v", got, wantLegacy)
++	}
++	full := &guestidentity.Identity{
++		UUID:          "12345678-1234-4123-8123-123456789abc",
++		SystemSerial:  "A1B2C3D4E5F6",
++		BoardSerial:   "G7H8J9K0L1M2",
++		ChassisSerial: "N3P4Q5R6S7T8",
++	}
++	wantFull := []string{
++		"-uuid", full.UUID,
++		"-smbios", "type=1,uuid=" + full.UUID + ",serial=" + full.SystemSerial,
++		"-smbios", "type=2,serial=" + full.BoardSerial,
++		"-smbios", "type=3,serial=" + full.ChassisSerial,
++	}
++	if got := guestIdentityArgs(full); !slices.Equal(got, wantFull) {
++		t.Fatalf("full identity args = %v, want %v", got, wantFull)
++	}
++}
+diff --git a/pkg/guestidentity/identity.go b/pkg/guestidentity/identity.go
+index bb41f1ca..9483ce26 100644
+--- a/pkg/guestidentity/identity.go
++++ b/pkg/guestidentity/identity.go
+@@ -19,9 +19,12 @@ type Identity struct {
+ 	UUID              string `json:"uuid" yaml:"uuid"`
+ 	MACAddress        string `json:"macAddress" yaml:"macAddress"`
+ 	GatewayMACAddress string `json:"gatewayMacAddress" yaml:"gatewayMacAddress"`
++	SystemSerial      string `json:"systemSerial,omitempty" yaml:"systemSerial,omitempty"`
++	BoardSerial       string `json:"boardSerial,omitempty" yaml:"boardSerial,omitempty"`
++	ChassisSerial     string `json:"chassisSerial,omitempty" yaml:"chassisSerial,omitempty"`
+ }
+ 
+-// New uses independent random bytes for the hostname, UUID and both MACs.
++// New uses independent random bytes for the hostname, UUID, MACs and hardware serials.
+ // Persist its result at creation; reconnecting must reuse the saved identity.
+ func New() (*Identity, error) { return generate(rand.Reader) }
+ 
+@@ -45,15 +48,29 @@ func generate(random io.Reader) (*Identity, error) {
+ 		b[27] ^= 1
+ 		gateway = mac(b[22:28])
+ 	}
++	systemSerial, err := randomHostnameSuffix(random, 12)
++	if err != nil {
++		return nil, err
++	}
++	boardSerial, err := randomHostnameSuffix(random, 12)
++	if err != nil {
++		return nil, err
++	}
++	chassisSerial, err := randomHostnameSuffix(random, 12)
++	if err != nil {
++		return nil, err
++	}
+ 	return &Identity{
+ 		Hostname:   hostname,
+ 		UUID:       fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:16]),
+ 		MACAddress: guest, GatewayMACAddress: gateway,
++		SystemSerial: systemSerial, BoardSerial: boardSerial, ChassisSerial: chassisSerial,
+ 	}, nil
+ }
+ 
+ var hostnamePattern = regexp.MustCompile(`^[A-Za-z](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?$`)
+ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
++var serialPattern = regexp.MustCompile(`^[A-Z0-9]{8,24}$`)
+ 
+ func (i *Identity) Validate() error {
+ 	if i == nil || !hostnamePattern.MatchString(i.Hostname) || !uuidPattern.MatchString(i.UUID) {
+@@ -68,6 +85,11 @@ func (i *Identity) Validate() error {
+ 	if i.MACAddress == i.GatewayMACAddress {
+ 		return errors.New("guest and gateway MAC must differ")
+ 	}
++	for _, serial := range []string{i.SystemSerial, i.BoardSerial, i.ChassisSerial} {
++		if serial != "" && !serialPattern.MatchString(serial) {
++			return errors.New("invalid guest hardware serial")
++		}
++	}
+ 	return nil
+ }
+ 
+diff --git a/pkg/guestidentity/identity_test.go b/pkg/guestidentity/identity_test.go
+index 11a219b8..2b3301cd 100644
+--- a/pkg/guestidentity/identity_test.go
++++ b/pkg/guestidentity/identity_test.go
+@@ -39,6 +39,9 @@ func TestNewIndependentIdentities(t *testing.T) {
+ 		if len(identity.MachineID()) != 32 {
+ 			t.Fatal("invalid systemd machine ID")
+ 		}
++		if len(identity.SystemSerial) != 12 || len(identity.BoardSerial) != 12 || len(identity.ChassisSerial) != 12 {
++			t.Fatal("missing hardware serials")
++		}
+ 		data, err := json.Marshal(identity)
+ 		if err != nil {
+ 			t.Fatal(err)
+@@ -53,9 +56,9 @@ func TestNewIndependentIdentities(t *testing.T) {
+ func TestRandomnessFailureAndMACCollision(t *testing.T) {
+ 	// Check every truncation of a deterministic valid generation, including
+ 	// failures after the hostname has already consumed its random bytes.
+-	random := bytes.NewReader(make([]byte, 128))
++	random := bytes.NewReader(make([]byte, 256))
+ 	identity, err := generate(random)
+-	consumed := 128 - random.Len()
++	consumed := 256 - random.Len()
+ 	for size := range consumed {
+ 		if _, err := generate(bytes.NewReader(make([]byte, size))); !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+ 			t.Fatalf("accepted short random input of %d bytes: %v", size, err)
+@@ -81,6 +84,9 @@ func TestValidateRejectsUnsafeIdentity(t *testing.T) {
+ 		func(i *Identity) { i.MACAddress = "01:00:00:00:00:00" },
+ 		func(i *Identity) { i.MACAddress = "00:00:00:00:00:00" },
+ 		func(i *Identity) { i.GatewayMACAddress = i.MACAddress },
++		func(i *Identity) { i.SystemSerial = "BAD,COMMA" },
++		func(i *Identity) { i.BoardSerial = "SHORT" },
++		func(i *Identity) { i.ChassisSerial = "lower1234567" },
+ 	} {
+ 		broken := *identity
+ 		mutate(&broken)

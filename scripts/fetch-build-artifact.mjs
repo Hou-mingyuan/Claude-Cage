@@ -1,15 +1,32 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isMainModule } from "./is-main-module.mjs";
 
-export async function sha256(file) {
-  const hash = createHash("sha256");
+export async function digest(file, algorithm = "sha256") {
+  const hash = createHash(algorithm);
   for await (const chunk of createReadStream(file)) hash.update(chunk);
   return hash.digest("hex");
+}
+
+export const sha256 = file => digest(file, "sha256");
+
+// A pinned digest names its algorithm by length: SHA-256 or SHA-512.
+function pinnedDigest(expected) {
+  if (/^[a-f0-9]{64}$/i.test(expected)) return { algorithm: "sha256", checksum: expected.toLowerCase() };
+  if (/^[a-f0-9]{128}$/i.test(expected)) return { algorithm: "sha512", checksum: expected.toLowerCase() };
+  return null;
+}
+
+// Windows may put MSYS2's curl first on PATH during QEMU builds; use the
+// system curl.exe, which takes native paths.
+function curlCommand() {
+  if (process.platform !== "win32") return "curl";
+  const system = join(process.env.SystemRoot || "C:\\Windows", "System32", "curl.exe");
+  return existsSync(system) ? system : "curl.exe";
 }
 
 async function size(file) {
@@ -17,9 +34,15 @@ async function size(file) {
   catch (error) { if (error.code !== "ENOENT") throw error; return null; }
 }
 
+// curl --fail exits 22 on HTTP >= 400. Client errors other than timeouts and
+// rate limits name a request the server will keep refusing.
+function permanentHTTPFailure(code, http) {
+  return code === 22 && /^4\d\d$/.test(http) && !["408", "425", "429"].includes(http);
+}
+
 function curl(url, file, resume) {
   return new Promise((done, reject) => {
-    const child = spawn(process.platform === "win32" ? "curl.exe" : "curl", [
+    const child = spawn(curlCommand(), [
       "--disable", "--fail", "--location", "--max-redirs", "5",
       "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "20",
       "--speed-limit", "1", "--speed-time", "45",
@@ -35,14 +58,17 @@ function curl(url, file, resume) {
 
 // Restarting curl ourselves keeps the partial bytes between attempts.
 // Each caller owns its partial file; no unfinished download is a cache hit.
-export async function fetchBuildArtifact(url, expected, destination, transfer = curl) {
-  if (new URL(url).protocol !== "https:" || !/^[a-f0-9]{64}$/i.test(expected)) {
-    throw new Error("Build downloads require HTTPS and a pinned SHA-256.");
+// An attempt that added bytes does not use up a retry, so a slow link that
+// keeps progressing converges; four attempts in a row without progress fail.
+export async function fetchBuildArtifact(url, expected, destination, transfer = curl, { maxTransfers = 64 } = {}) {
+  const pinned = pinnedDigest(expected);
+  if (new URL(url).protocol !== "https:" || !pinned) {
+    throw new Error("Build downloads require HTTPS and a pinned SHA-256 or SHA-512.");
   }
+  const { algorithm, checksum } = pinned;
   const name = basename(destination);
-  const checksum = expected.toLowerCase();
   if (await size(destination) !== null) {
-    if (await sha256(destination) !== checksum) {
+    if (await digest(destination, algorithm) !== checksum) {
       throw new Error(`Build artifact checksum mismatch: ${name}. Remove the invalid cached file and retry.`);
     }
     return destination;
@@ -51,11 +77,16 @@ export async function fetchBuildArtifact(url, expected, destination, transfer = 
   const stage = await mkdtemp(join(dirname(destination), ".cage-download-"));
   const part = join(stage, name + ".part");
   try {
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      const resume = (await size(part) ?? 0) > 0;
+    for (let attempt = 1, transfers = 1; attempt <= 4 && transfers <= maxTransfers; attempt++, transfers++) {
+      const before = await size(part) ?? 0;
+      const resume = before > 0;
       const { code, http } = await transfer(url, part, resume);
+      if (permanentHTTPFailure(code, http) && !(resume && http === "416")) {
+        // A missing or forbidden object does not appear on retry.
+        throw new Error(`Could not download ${name} (curl exit ${code}, HTTP ${http}).`);
+      }
       if (code === 0 || (resume && http === "416")) {
-        if (await size(part) !== null && await sha256(part) === checksum) {
+        if (await size(part) !== null && await digest(part, algorithm) === checksum) {
           await rename(part, destination);
           return destination;
         }
@@ -65,17 +96,21 @@ export async function fetchBuildArtifact(url, expected, destination, transfer = 
       } else if (attempt < 4 && resume && (code === 33 || code === 36)) {
         // Some proxies or origins do not support Range.
         await rm(part, { force: true });
-      } else if (attempt === 4) {
-        throw new Error(`Could not download ${name} (curl exit ${code}, HTTP ${http}).`);
+      } else {
+        const kept = await size(part) ?? 0;
+        if (transfers === maxTransfers || (attempt === 4 && kept <= before)) {
+          throw new Error(`Could not download ${name} (curl exit ${code}, HTTP ${http}).`);
+        }
+        if (kept > before) attempt = 0; // The next resume starts a fresh retry count.
       }
-      console.warn(`Retrying download of ${name} (${attempt + 1}/4).`);
-      await delay(attempt * 500);
+      console.warn(`Retrying download of ${name} (${(await size(part) ?? 0)} bytes kept).`);
+      await delay(Math.max(attempt, 1) * 500);
     }
     throw new Error(`Could not download ${name}.`);
   } finally { await rm(stage, { recursive: true, force: true }); }
 }
 
 if (isMainModule(import.meta.url)) {
-  if (process.argv.length !== 5) throw new Error("Usage: fetch-build-artifact.mjs URL SHA256 FILE");
+  if (process.argv.length !== 5) throw new Error("Usage: fetch-build-artifact.mjs URL SHA256|SHA512 FILE");
   await fetchBuildArtifact(...process.argv.slice(2));
 }

@@ -25,7 +25,11 @@ var _ = ginkgo.Describe("dns add test", func() {
 	var server *Server
 
 	ginkgo.BeforeEach(func() {
-		server, _ = New(nil, nil, []types.Zone{})
+		server, _ = NewWithUpstreamResolver(nil, nil, []types.Zone{}, &mockdns.Resolver{
+			Zones: map[string]mockdns.Zone{
+				"upstream.example.": {A: []string{"192.0.2.10", "192.0.2.20"}},
+			},
+		})
 	})
 
 	ginkgo.It("should add dns zone with ip", func() {
@@ -199,7 +203,7 @@ var _ = ginkgo.Describe("dns add test", func() {
 		}))
 	})
 
-	ginkgo.It("Should pass DNS requests to default system DNS server", func() {
+	ginkgo.It("Should pass DNS requests to the configured upstream resolver", func() {
 		m := &dns.Msg{
 			MsgHdr: dns.MsgHdr{
 				Authoritative:     false,
@@ -212,15 +216,20 @@ var _ = ginkgo.Describe("dns add test", func() {
 		}
 
 		m.Question[0] = dns.Question{
-			Name:   "redhat.com.",
+			Name:   "upstream.example.",
 			Qtype:  1,
 			Qclass: 1,
 		}
 
 		server.handler.addAnswers(m)
 
-		gomega.Expect(m.Answer[0].Header().Name).To(gomega.Equal("redhat.com."))
-		gomega.Expect(m.Answer[0].String()).To(gomega.SatisfyAny(gomega.ContainSubstring("34.235.198.240"), gomega.ContainSubstring("52.200.142.250")))
+		gomega.Expect(m.Answer).To(gomega.HaveLen(2))
+		addresses := make([]string, 0, len(m.Answer))
+		for _, answer := range m.Answer {
+			gomega.Expect(answer.Header().Name).To(gomega.Equal("upstream.example."))
+			addresses = append(addresses, answer.(*dns.A).A.String())
+		}
+		gomega.Expect(addresses).To(gomega.ConsistOf("192.0.2.10", "192.0.2.20"))
 	})
 
 })
@@ -323,8 +332,8 @@ func TestDNS(t *testing.T) {
 
 	upstream := &mockdns.Resolver{
 		Zones: map[string]mockdns.Zone{
-			"redhat.com.": {
-				A: []string{"52.200.142.250", "34.235.198.240"},
+			"upstream.example.": {
+				A: []string{"192.0.2.10", "192.0.2.20"},
 			},
 		},
 	}
@@ -346,22 +355,16 @@ func TestDNS(t *testing.T) {
 			return d.DialContext(ctx, network, nameserver)
 		},
 	}
-	redhatdotcom := ARecord{
-		name:        "redhat.com",
-		expectedIPs: []string{"52.200.142.250"},
+	record := ARecord{
+		name:        "upstream.example",
+		expectedIPs: []string{"192.0.2.10", "192.0.2.20"},
 	}
-	record := redhatdotcom
 	{
 		log.Infof("looking up %s", record.name)
 		ipGvisor, err := r.LookupHost(context.Background(), record.name)
 		require.NoError(t, err)
-		require.Subset(t, ipGvisor, record.expectedIPs)
+		require.ElementsMatch(t, record.expectedIPs, ipGvisor)
 		log.Infof("ip gvisor: %+v", ipGvisor)
-
-		ipGo, err := net.LookupHost(record.name)
-		require.NoError(t, err)
-		log.Infof("ip go: %+v", ipGo)
-		require.Subset(t, ipGvisor, ipGo)
 	}
 }
 

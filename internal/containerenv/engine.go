@@ -41,6 +41,7 @@ type Inspection struct {
 
 type engineContainer struct {
 	ID    string `json:"Id"`
+	Name  string `json:"Name"`
 	Image string `json:"Image"`
 	State struct {
 		Running bool
@@ -121,28 +122,45 @@ func (w *limitedWriter) Write(data []byte) (int, error) {
 }
 
 func (r *Runtime) inspectContainer(ctx context.Context) (*engineContainer, error) {
-	// Query only this exact managed name. An empty result is absence, while
-	// engine/permission failures remain errors rather than triggering creation.
+	// Query containers matching this profile label, ignoring explicit device-reset
+	// archives (<name>-archive-<id>). An empty result is absence, while engine or
+	// permission failures remain errors rather than triggering creation.
 	data, err := r.output(ctx, "container", "ls", "--all", "--filter", "label="+profileLabel+"="+r.identity, "--format", "{{.ID}}")
 	if err != nil {
 		return nil, err
 	}
-	id := strings.TrimSpace(string(data))
-	if id == "" {
+	ids := strings.Fields(string(data))
+	if len(ids) == 0 {
 		return nil, nil
 	}
-	if strings.ContainsAny(id, " \r\n\t") {
-		return nil, errors.New("容器标识不唯一")
-	}
-	data, err = r.output(ctx, "container", "inspect", id)
+	inspectArgs := append([]string{"container", "inspect"}, ids...)
+	data, err = r.output(ctx, inspectArgs...)
 	if err != nil {
 		return nil, err
 	}
 	var found []engineContainer
-	if json.Unmarshal(data, &found) != nil || len(found) != 1 || found[0].Config.Labels[profileLabel] != r.identity {
+	if json.Unmarshal(data, &found) != nil || len(found) == 0 {
 		return nil, errors.New("容器身份与当前 Cage 配置不匹配")
 	}
-	return &found[0], nil
+	archivePrefix := r.Name() + "-archive-"
+	var active []engineContainer
+	for _, entry := range found {
+		if entry.Config.Labels[profileLabel] != r.identity {
+			return nil, errors.New("容器身份与当前 Cage 配置不匹配")
+		}
+		trimmed := strings.TrimPrefix(entry.Name, "/")
+		if strings.HasPrefix(trimmed, archivePrefix) {
+			continue
+		}
+		active = append(active, entry)
+	}
+	if len(active) == 0 {
+		return nil, nil
+	}
+	if len(active) > 1 {
+		return nil, errors.New("容器标识不唯一")
+	}
+	return &active[0], nil
 }
 
 func (r *Runtime) State(ctx context.Context) (State, error) {

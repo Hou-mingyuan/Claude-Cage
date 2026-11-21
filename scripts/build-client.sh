@@ -21,6 +21,11 @@ suffix="${stage##*.stage.}"
 destination="$output_root/build-$(date +%Y%m%d-%H%M%S)-$suffix"
 [[ ! -e "$destination" ]] || { echo 'Client output already exists; no files were replaced.' >&2; exit 1; }
 
+if [[ "$platform" == macos ]]; then
+  source scripts/macos-build-env.sh
+  macos_prepare_caches
+  macos_check_toolchain
+fi
 if [[ "$skip_ui" == false ]]; then
   [[ -d ui/node_modules ]] || npm --prefix ui ci --no-audit --no-fund
   npm --prefix ui run build
@@ -39,14 +44,14 @@ mkdir -p "$stage/result"
 if [[ "$platform" == macos ]]; then
   bundle="$stage/result/Cage Client.app"
   mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
-  xcrun swiftc -O -target "$(uname -m)-apple-macosx14.0" -parse-as-library \
+  xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -O -target "$(uname -m)-apple-macosx14.0" -parse-as-library \
     -framework Cocoa -framework WebKit -framework Security -framework LocalAuthentication -framework UserNotifications \
     desktop/Cage.swift desktop/InterfaceLanguage.swift desktop/MacKeyboard.swift desktop/NativeInput.swift desktop/Updates.swift desktop/AccountDevice.swift \
     -o "$bundle/Contents/MacOS/Cage"
   node scripts/bundle-cloud-kit.mjs "$bundle/Contents/Resources"
   cp "$stage/cage" "$bundle/Contents/Resources/cage"
   node scripts/collect-app-licenses.mjs "$bundle/Contents/Resources/licenses"
-  xcrun swift desktop/Icon.swift logo.png "$stage/Cage.iconset"
+  xcrun swift ${swift_flags[@]+"${swift_flags[@]}"} desktop/Icon.swift logo.png "$stage/Cage.iconset"
   iconutil -c icns "$stage/Cage.iconset" -o "$bundle/Contents/Resources/Cage.icns"
   cat > "$bundle/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -69,6 +74,7 @@ if [[ "$platform" == macos ]]; then
 PLIST
   # An ad-hoc development signature makes the local build runnable. No release
   # certificate, notarization, installer, or installed app is touched.
+  macos_clear_bundle_attributes "$bundle"
   codesign --force --sign - "$bundle/Contents/Resources/cage"
   codesign --force --sign - "$bundle/Contents/MacOS/Cage"
   codesign --force --sign - "$bundle"

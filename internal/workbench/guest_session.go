@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
@@ -24,7 +25,14 @@ const (
 	guestSessionIdle    = 30 * time.Second
 	guestSessionRetry   = 30 * time.Second
 	guestSessionStartup = 5 * time.Second
+	// guestSessionTimeouts consecutive timed-out requests, with no reply in
+	// between, mark the transport as stalled: the connection is closed and
+	// callers use connections of their own until guestSessionRetry passes.
+	guestSessionTimeouts = 2
 )
+
+// guestSessionOutputMaximum matches OUTPUT_MAXIMUM in guest-session.py.
+const guestSessionOutputMaximum = (4 << 20) + 256
 
 var errGuestSessionEnded = errors.New("guest control session ended")
 
@@ -52,6 +60,8 @@ type guestSessionConn struct {
 	waiting map[uint64]chan guestSessionReply
 	next    uint64
 	ended   chan struct{}
+	// timeouts counts requests that timed out since the last reply.
+	timeouts atomic.Int32
 }
 
 func (c *guestSessionConn) close() { c.cancel(); _ = c.stdin.Close() }
@@ -82,13 +92,14 @@ func (c *guestSessionConn) receive(output *bufio.Reader, done func()) {
 		code, codeErr := strconv.Atoi(fields[2])
 		outSize, outErr := strconv.Atoi(fields[3])
 		errSize, errErr := strconv.Atoi(fields[4])
-		if idErr != nil || codeErr != nil || outErr != nil || errErr != nil || outSize < 0 || outSize > 1<<20 || errSize < 0 || errSize > 1<<16 {
+		if idErr != nil || codeErr != nil || outErr != nil || errErr != nil || outSize < 0 || outSize > guestSessionOutputMaximum || errSize < 0 || errSize > 1<<16 {
 			return
 		}
 		data := make([]byte, outSize+errSize)
 		if _, err = io.ReadFull(output, data); err != nil {
 			return
 		}
+		c.timeouts.Store(0)
 		c.mu.Lock()
 		waiter := c.waiting[id]
 		delete(c.waiting, id)
@@ -155,6 +166,22 @@ func openGuestSession(parent context.Context, command func(context.Context) *exe
 // run sends one script. sent reports whether the guest may have started it:
 // when false, the caller can safely use a connection of its own instead.
 func (g *guestSession) run(ctx context.Context, lifetime context.Context, command func(context.Context) *exec.Cmd, script string) (reply guestSessionReply, sent bool, err error) {
+	return g.runInput(ctx, lifetime, command, script, nil, 0)
+}
+
+// runInput also passes standard input; a positive limit replaces the
+// default 64 KiB output bound (the guest stops a script that exceeds it).
+func (g *guestSession) runInput(ctx context.Context, lifetime context.Context, command func(context.Context) *exec.Cmd, script string, input []byte, limit int) (reply guestSessionReply, sent bool, err error) {
+	header := ""
+	if input != nil || limit > 0 {
+		if limit <= 0 {
+			limit = (64 << 10) + 256
+		}
+		if limit > guestSessionOutputMaximum || len(input) > 1<<20 {
+			return reply, false, errors.New("guest control request exceeded its limit")
+		}
+		header = fmt.Sprintf(" %d %d", len(input), limit)
+	}
 	g.mu.Lock()
 	conn := g.conn
 	if conn == nil || !conn.alive() {
@@ -182,7 +209,7 @@ func (g *guestSession) run(ctx context.Context, lifetime context.Context, comman
 	defer g.release(conn)
 	forget := func() { conn.mu.Lock(); delete(conn.waiting, id); conn.mu.Unlock() }
 	conn.writing.Lock()
-	_, err = io.WriteString(conn.stdin, fmt.Sprintf("R %d %d\n%s", id, len(script), script))
+	_, err = io.WriteString(conn.stdin, fmt.Sprintf("R %d %d%s\n%s%s", id, len(script), header, script, input))
 	conn.writing.Unlock()
 	if err != nil {
 		// A partial request never runs: the server needs its full length.
@@ -195,14 +222,36 @@ func (g *guestSession) run(ctx context.Context, lifetime context.Context, comman
 		return reply, true, nil
 	case <-ctx.Done():
 		forget()
-		conn.writing.Lock()
-		_, _ = io.WriteString(conn.stdin, fmt.Sprintf("C %d\n", id))
-		conn.writing.Unlock()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && conn.timeouts.Add(1) >= guestSessionTimeouts {
+			// A half-dead transport would make every later request wait for
+			// its full timeout. Drop it; callers fall back to SSH of their own.
+			g.abandon(conn)
+			return reply, true, ctx.Err()
+		}
+		// The cancel write must not hold up the caller when the transport
+		// stops reading; closing the connection ends a blocked write.
+		go func() {
+			conn.writing.Lock()
+			defer conn.writing.Unlock()
+			_, _ = io.WriteString(conn.stdin, fmt.Sprintf("C %d\n", id))
+		}()
 		return reply, true, ctx.Err()
 	case <-conn.ended:
 		forget()
 		return reply, true, errGuestSessionEnded
 	}
+}
+
+// abandon closes a stalled connection and holds off reopening it, so the
+// callers use connections of their own meanwhile.
+func (g *guestSession) abandon(conn *guestSessionConn) {
+	g.mu.Lock()
+	if g.conn == conn {
+		g.conn = nil
+		g.retryAt = time.Now().Add(guestSessionRetry)
+	}
+	g.mu.Unlock()
+	conn.close()
 }
 
 func (g *guestSession) release(conn *guestSessionConn) {

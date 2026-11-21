@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/host"
+	"github.com/sylvinus/agent-vm/internal/vm"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -536,7 +537,7 @@ func startControllerExecutable(configPath, exe string, extraEnv ...string) error
 	return startDetached(func() *exec.Cmd {
 		cmd := exec.Command(exe, "log-relay", "controller")
 		cmd.Dir = profile
-		cmd.Env = append(os.Environ(), cage.ConfigEnv+"="+configPath)
+		cmd.Env = append(vm.ChildEnv(), cage.ConfigEnv+"="+configPath)
 		cmd.Env = append(cmd.Env, extraEnv...)
 		return cmd
 	})

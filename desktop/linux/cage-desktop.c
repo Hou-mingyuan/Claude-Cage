@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <math.h>
 #include "native-input.h"
+#include "media-plugins.h"
 
 #ifndef CAGE_VERSION
 #define CAGE_VERSION "development"
@@ -32,7 +33,7 @@ typedef struct {
     int port, result;
     guint backend_commands;
     gboolean bootstrapping, needs_update, ready, picker_open, smoke_started, smoke_finishing, navigation_failed;
-    gboolean initial_dark;
+    gboolean initial_dark, media_plugins_isolated, dmabuf_default_set, software_fallback;
 } Cage;
 static Cage app;
 typedef struct { GPtrArray *paths; gint64 expires; } FileSelection;
@@ -124,9 +125,18 @@ static void diagnostic_sent(GObject *source, GAsyncResult *result, gpointer data
     (void)data;
     g_subprocess_communicate_utf8_finish(G_SUBPROCESS(source), result, NULL, NULL, NULL);
 }
+static void sanitize_child_media_env(GSubprocessLauncher *launcher) {
+    if (app.media_plugins_isolated) {
+        g_subprocess_launcher_unsetenv(launcher, "GST_PLUGIN_SYSTEM_PATH_1_0");
+        g_subprocess_launcher_unsetenv(launcher, "GST_REGISTRY_1_0");
+    }
+    if (app.dmabuf_default_set)
+        g_subprocess_launcher_unsetenv(launcher, "WEBKIT_DISABLE_DMABUF_RENDERER");
+}
 static void diagnostic_event(const char *message) {
     if (!app.backend || !app.profile) return;
     GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_SILENCE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+    sanitize_child_media_env(launcher);
     g_subprocess_launcher_setenv(launcher, "CLAUDE_CAGE_CONFIG", app.profile, TRUE);
     GSubprocess *process = g_subprocess_launcher_spawn(launcher, NULL, app.backend, "diagnostic-event", NULL);
     g_object_unref(launcher);
@@ -216,6 +226,7 @@ static void command_finished(GObject *source, GAsyncResult *result, gpointer dat
 static Command *backend_arguments_limited(const char *const *args, guint seconds, gsize output_limit, BackendCallback callback, gpointer data) {
     GError *error = NULL;
     GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+    sanitize_child_media_env(launcher);
     g_subprocess_launcher_setenv(launcher, "CLAUDE_CAGE_CONFIG", app.profile, TRUE);
     if (g_strcmp0(args[1], "desktop") == 0) {
         char owner[32];
@@ -576,6 +587,7 @@ static void update_check_finished(GObject *source, GAsyncResult *result, gpointe
 static void update_check(WebKitScriptMessageReply *reply, JSCContext *context) {
     const char *args[] = {app.backend, "app-update", "check", NULL};
     GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+    sanitize_child_media_env(launcher);
     g_subprocess_launcher_setenv(launcher, "CLAUDE_CAGE_CONFIG", app.profile, TRUE);
     GSubprocess *process = update_checking ? NULL : g_subprocess_launcher_spawnv(launcher, args, NULL);
     g_object_unref(launcher);
@@ -1091,8 +1103,16 @@ static gboolean bridge_received(WebKitUserContentManager *manager, JSCValue *val
         if (!uri) reply_error(reply, "未知的项目页面");
         else {
             GError *error = NULL;
-            if (g_app_info_launch_default_for_uri(uri, NULL, &error)) reply_json(reply, context, "true");
+            GAppLaunchContext *launch_context = g_app_launch_context_new();
+            if (app.media_plugins_isolated) {
+                g_app_launch_context_unsetenv(launch_context, "GST_PLUGIN_SYSTEM_PATH_1_0");
+                g_app_launch_context_unsetenv(launch_context, "GST_REGISTRY_1_0");
+            }
+            if (app.dmabuf_default_set)
+                g_app_launch_context_unsetenv(launch_context, "WEBKIT_DISABLE_DMABUF_RENDERER");
+            if (g_app_info_launch_default_for_uri(uri, launch_context, &error)) reply_json(reply, context, "true");
             else { reply_error(reply, "无法打开项目页面，请检查默认浏览器"); g_clear_error(&error); }
+            g_object_unref(launch_context);
         }
     } else if (!strcmp(name, "appUpdate")) {
         const char *operation = text_member(request, "operation");
@@ -1470,8 +1490,32 @@ static gboolean load_failed(WebKitWebView *web, WebKitLoadEvent event, const cha
     g_free(message); g_free(code);
     return TRUE;
 }
+static gboolean retry_software_fallback(gpointer data) {
+    (void)data;
+    bootstrap(NULL);
+    return G_SOURCE_REMOVE;
+}
 static void process_terminated(WebKitWebView *web, WebKitWebProcessTerminationReason reason, gpointer data) {
-    (void)web; (void)reason; (void)data;
+    (void)data;
+    const char *kind = reason == WEBKIT_WEB_PROCESS_CRASHED ? "crashed"
+        : reason == WEBKIT_WEB_PROCESS_EXCEEDED_MEMORY_LIMIT ? "exceeded-memory"
+        : "terminated-by-api";
+    char *detail = g_strdup_printf(
+        "WebKitWebProcess terminated (reason=%s, webkit=%u.%u.%u, media_isolated=%d, software_fallback=%d)",
+        kind, webkit_get_major_version(), webkit_get_minor_version(), webkit_get_micro_version(),
+        app.media_plugins_isolated ? 1 : 0, app.software_fallback ? 1 : 0);
+    diagnostic_event(detail);
+    g_free(detail);
+    if (reason == WEBKIT_WEB_PROCESS_CRASHED && !app.software_fallback) {
+        app.software_fallback = TRUE;
+        WebKitSettings *web_settings = webkit_web_view_get_settings(web);
+        webkit_settings_set_hardware_acceleration_policy(web_settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER);
+        webkit_settings_set_enable_media(web_settings, FALSE);
+        if (!app.ready) {
+            g_idle_add(retry_software_fallback, NULL);
+            return;
+        }
+    }
     show_error("工作台显示进程已退出。后台任务保留，可重试连接。");
 }
 static void menu_action(GSimpleAction *simple, GVariant *parameter, gpointer data) {
@@ -1562,6 +1606,14 @@ static void create_window(void) {
     WebKitWebContext *context = webkit_web_context_new_with_website_data_manager(storage);
     g_object_unref(storage);
     webkit_web_context_set_sandbox_enabled(context, TRUE);
+    if (app.media_plugins_isolated) {
+        char *gst_root = g_build_filename(app.web_cache, "gstreamer", NULL);
+        char *gst_plugins = g_build_filename(gst_root, "plugins", NULL);
+        webkit_web_context_add_path_to_sandbox(context, gst_root, FALSE);
+        webkit_web_context_add_path_to_sandbox(context, gst_plugins, TRUE);
+        g_free(gst_plugins);
+        g_free(gst_root);
+    }
     webkit_website_data_manager_set_network_proxy_settings(webkit_web_context_get_website_data_manager(context), WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, NULL);
     g_signal_connect(context, "download-started", G_CALLBACK(deny_download), NULL);
     app.content = webkit_user_content_manager_new();
@@ -1574,6 +1626,11 @@ static void create_window(void) {
     webkit_settings_set_enable_developer_extras(web_settings, FALSE);
     webkit_settings_set_javascript_can_open_windows_automatically(web_settings, FALSE);
     webkit_settings_set_enable_write_console_messages_to_stdout(web_settings, FALSE);
+    webkit_settings_set_enable_webgl(web_settings, FALSE);
+    webkit_settings_set_enable_media_stream(web_settings, FALSE);
+#if WEBKIT_CHECK_VERSION(2, 38, 0)
+    webkit_settings_set_enable_webrtc(web_settings, FALSE);
+#endif
     g_signal_connect(app.web, "decide-policy", G_CALLBACK(decide_policy), NULL);
     g_signal_connect(app.web, "permission-request", G_CALLBACK(deny_permission), NULL);
     g_signal_connect(app.web, "run-file-chooser", G_CALLBACK(workbench_file_chooser), NULL);
@@ -1665,6 +1722,8 @@ int main(int argc, char **argv) {
         g_printerr("无法创建 Cage 私有界面数据目录，请检查配置目录的所有者、权限或符号链接。\n");
         return 1;
     }
+    app.media_plugins_isolated = media_plugins_isolate(app.web_cache, media_plugins_system_dirs);
+    app.dmabuf_default_set = media_plugins_disable_dmabuf_default("");
     char *hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256, app.profile, -1);
     char *id = g_strdup_printf("app.cage.desktop.p%.24s", hash);
     app.application = gtk_application_new(id, G_APPLICATION_FLAGS_NONE);

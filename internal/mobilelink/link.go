@@ -252,7 +252,7 @@ func ConnectClient(ctx context.Context, base, roomID, clientToken string, identi
 	if err != nil {
 		return nil, errors.New("paired host authentication failed")
 	}
-	transport := &http2.Transport{MaxHeaderListSize: 16 << 10, ReadIdleTimeout: 15 * time.Second, PingTimeout: 8 * time.Second}
+	transport := &http2.Transport{MaxHeaderListSize: 16 << 10, ReadIdleTimeout: 20 * time.Second, PingTimeout: 15 * time.Second}
 	session, err := transport.NewClientConn(conn)
 	if err != nil {
 		conn.NetConn().Close()

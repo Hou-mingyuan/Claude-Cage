@@ -1,11 +1,13 @@
 ---
 title: 从这里开始
-description: 在统一工作台使用 Claude，找到安装、项目、手机连接与云端部署指南。
+description: 了解 Cage 的设计理念，在轻量化本地隔离工作台使用 Claude，并通过开放插件市场按需扩展本机与环境能力。
 group: 开始使用
 order: 0
-keywords: 概览 功能 导航 入门 版本 环境 Debian
+keywords: 概览 功能 导航 入门 版本 环境 Debian 设计理念 插件 插件市场 MCP
 ---
-Cage 在电脑上运行一个独立的 Debian 13 环境，把终端、浏览器、编辑器和官方 Claude Desktop 放进同一个工作台。macOS、Windows 和 Linux 上使用的是同一个环境。项目按需共享，网络独立管理，工具与登录资料随环境保留。
+Cage 的设计理念很简单：**Claude 本身是安全的，但它的运行外壳（harness）及相关程序不是**——包括 Claude Code、Claude Desktop，以及浏览器里接触到的邮件与网页。因此，Cage 为 Claude 及相关程序在电脑上打造一个轻量化的本地 Debian 13 隔离环境，把终端、浏览器、编辑器、官方 Claude Desktop 和开放插件市场放进同一个工作台，再通过标准 **MCP 插件** 让 Claude 安全、受控地使用本机能力（比直接暴露 SSH 更安全）。
+
+macOS、Windows 和 Linux 上统一运行同一个轻量化 Debian 13 环境，不再需要维护复杂的多系统客机。项目按需共享，网络独立管理，工具与登录资料随环境保留；通过开放的[插件市场](plugins.md)（**插件 = MCP + 扩展**），既能把危险部分关起来，也能把本机与社区能力优雅地接给 Claude。
 
 你可以在自己的电脑上工作，也可以通过 SSH 连接自己的 Linux 服务器。离开电脑后，用手机接续同一份 Claude Code 会话、处理工具审批，或操作电脑上的浏览器与 Claude Desktop。
 
@@ -23,7 +25,8 @@ Cage 在电脑上运行一个独立的 Debian 13 环境，把终端、浏览器�
 1. 阅读[安装与首次启动](installation.md)，安装适合电脑的 Cage，选择环境的存储位置。
 2. 在[网络与代理](network.md)中导入自己的节点，应用代理后启动环境，等待关键检查通过。
 3. 按[项目、终端与文件](workbench.md)打开一个项目，在 Cage 内完成 Claude Code 授权，发出第一条消息。
-4. 有多个 Claude 订阅时，继续配置[多账号与额度](accounts.md)。希望离开电脑后继续处理任务，可查看[手机连接与远程会话](mobile.md)。
+4. 需要让 Claude 使用本机桌面、文档、本地软件，或为工作台增加扩展页面时，打开侧栏的[插件与插件市场](plugins.md)。
+5. 有多个 Claude 订阅时，继续配置[多账号与额度](accounts.md)。希望离开电脑后继续处理任务，可查看[手机连接与远程会话](mobile.md)。
 
 ## 按你想做的事查找
 
@@ -37,6 +40,7 @@ Cage 在电脑上运行一个独立的 Debian 13 环境，把终端、浏览器�
 | 添加多个订阅、查看额度、分配或接续会话 | [多账号与额度](accounts.md) |
 | 收藏网页、无痕浏览、清理 Cookie、安装扩展 | [浏览器与网站数据](browser.md) |
 | 在 Cage 内使用 Claude Desktop | [Claude Desktop](desktop.md) |
+| 从插件市场安装 MCP 与扩展插件、管理主机授权 | [插件与插件市场](plugins.md) |
 | 扫码配对手机、审批工具、使用手机远程浏览器 | [手机连接与远程会话](mobile.md) |
 | 部署到无 KVM 的 VPS、连接服务器和管理远端项目 | [云端部署与 SSH](cloud.md) |
 | 在 Cage 登录私网，从本机与环境双向使用 SSH | [Tailscale 与 SSH 私网](tailscale.md) |

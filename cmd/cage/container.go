@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/cli"
 	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 	"github.com/sylvinus/agent-vm/internal/workbench"
@@ -131,7 +132,7 @@ func containerOperation(configPath string, args []string, cfg cage.Config, keepP
 		fmt.Println("Cage 容器服务已启动；工作台完成网络检查后才会放行外网。")
 		return true, nil
 	case "update-tools":
-		return true, workbench.RunMaintenanceScript(ctx, configPath, cage.ToolsUpdateScript(), os.Stdout, os.Stderr)
+		return true, workbench.RunMaintenanceScript(ctx, configPath, cage.ToolsUpdateScriptFor(os.Getenv(cage.InstallTLS12Env) == "1"), os.Stdout, os.Stderr)
 	case "login":
 		return true, workbench.RunEnvironmentCommand(ctx, configPath, []string{"claude", "auth", "login"}, os.Stdin, os.Stdout, os.Stderr, true)
 	case "shell":
@@ -139,10 +140,20 @@ func containerOperation(configPath string, args []string, cfg cage.Config, keepP
 	case "claude":
 		return true, workbench.RunEnvironmentCommand(ctx, configPath, append([]string{"claude"}, args[1:]...), os.Stdin, os.Stdout, os.Stderr, true)
 	case "run":
-		if len(args) < 2 {
+		workdir, tty, vmOptions, command, err := cli.SplitRun(args[1:])
+		if err != nil {
+			return true, err
+		}
+		if vmOptions {
+			return true, errors.New("容器工作环境不接受虚拟机选项")
+		}
+		if len(command) == 0 {
 			return true, errors.New("cage run 需要指定命令")
 		}
-		return true, workbench.RunEnvironmentCommand(ctx, configPath, args[1:], os.Stdin, os.Stdout, os.Stderr, false)
+		if workdir == "" {
+			return true, workbench.RunEnvironmentCommand(ctx, configPath, command, os.Stdin, os.Stdout, os.Stderr, tty)
+		}
+		return true, workbench.RunEnvironmentCommandIn(ctx, configPath, workdir, command, os.Stdin, os.Stdout, os.Stderr, tty)
 	}
 	return true, nil
 }

@@ -28,12 +28,19 @@ static CageProxy cageResolveArray(CFArrayRef proxies, CFURLRef target, int allow
     CFStringRef type = CFDictionaryGetValue(proxy, kCFProxyTypeKey);
     if (!type) return result;
     if (CFEqual(type, kCFProxyTypeNone)) { result.failed = 0; return result; }
-    if (allowPAC && CFEqual(type, kCFProxyTypeAutoConfigurationURL)) {
-        CFURLRef pac = CFDictionaryGetValue(proxy, kCFProxyAutoConfigurationURLKey);
-        if (!pac) return result;
+    if (allowPAC && (CFEqual(type, kCFProxyTypeAutoConfigurationURL) || CFEqual(type, kCFProxyTypeAutoConfigurationJavaScript))) {
         CFTypeRef answer = NULL;
         CFStreamClientContext context = {0, &answer, NULL, NULL, NULL};
-        CFRunLoopSourceRef source = CFNetworkExecuteProxyAutoConfigurationURL(pac, target, cagePACCallback, &context);
+        CFRunLoopSourceRef source = NULL;
+        if (CFEqual(type, kCFProxyTypeAutoConfigurationURL)) {
+            CFURLRef pac = CFDictionaryGetValue(proxy, kCFProxyAutoConfigurationURLKey);
+            if (!pac || CFGetTypeID(pac) != CFURLGetTypeID()) return result;
+            source = CFNetworkExecuteProxyAutoConfigurationURL(pac, target, cagePACCallback, &context);
+        } else {
+            CFStringRef script = CFDictionaryGetValue(proxy, kCFProxyAutoConfigurationJavaScriptKey);
+            if (!script || CFGetTypeID(script) != CFStringGetTypeID()) return result;
+            source = CFNetworkExecuteProxyAutoConfigurationScript(script, target, cagePACCallback, &context);
+        }
         if (source) {
             CFStringRef mode = CFSTR("CageImageProxy");
             CFRunLoopAddSource(CFRunLoopGetCurrent(), source, mode);

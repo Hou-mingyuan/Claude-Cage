@@ -96,22 +96,27 @@ func (p claudeScheduling) valid() bool {
 }
 
 type claudeAccountManager struct {
-	usageProbe     func(context.Context, string, string) (claudeGuestSnapshot, error)
-	usageActive    map[string]*claudeUsageCall
-	panelRunning   bool
-	panelUntil     time.Time
-	defaultGate    chan struct{}
-	loginNotice    string
-	defaultChecked time.Time
-	defaultReading claudeGuestSnapshot
-	defaultError   error
-	probe          func(context.Context, string) (claudeGuestSnapshot, error)
-	recoverLogin   func(context.Context, string, string, string) (claudeGuestSnapshot, error)
-	mu             sync.Mutex
-	lastPick       string
-	recent         map[string]claudeProjectPick
-	refreshing     map[string]*claudeRefresh
-	attempted      map[string]time.Time
+	usageProbe      func(context.Context, string, string) (claudeGuestSnapshot, error)
+	usageActive     map[string]*claudeUsageCall
+	panelRunning    bool
+	panelUntil      time.Time
+	defaultGate     chan struct{}
+	loginNotice     string
+	defaultChecked  time.Time
+	defaultReading  claudeGuestSnapshot
+	defaultError    error
+	probe           func(context.Context, string) (claudeGuestSnapshot, error)
+	recoverLogin    func(context.Context, string, string, string) (claudeGuestSnapshot, error)
+	mu              sync.Mutex
+	lastPick        string
+	recent          map[string]claudeProjectPick
+	refreshing      map[string]*claudeRefresh
+	attempted       map[string]time.Time
+	noticeProbe     func(context.Context, []string) (map[string][]claudeAccountNotice, error)
+	notices         map[string][]claudeAccountNotice
+	noticesKey      string
+	noticesAt       time.Time
+	noticesFetching bool
 }
 
 type claudeRefresh struct {

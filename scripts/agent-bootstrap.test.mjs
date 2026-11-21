@@ -11,21 +11,22 @@ const prefix = `https://github.com/Lee-xeo/Claude-Cage/releases/download/${tag}/
 const data = Buffer.from('fake package fixture');
 const hash = createHash('sha256').update(data).digest('hex');
 function release(platform) {
-  const suffix = { 'darwin-arm64': 'macos-arm64.dmg', 'linux-amd64': 'linux-amd64.deb', 'win32-amd64': 'windows-amd64-setup-unsigned.exe' }[platform];
+  const suffix = { 'darwin-arm64': 'macos-arm64.dmg', 'darwin-amd64': 'macos-amd64.dmg', 'linux-amd64': 'linux-amd64.deb', 'win32-amd64': 'windows-amd64-setup-unsigned.exe' }[platform];
   const name = `Cage-${tag.slice(1)}-${suffix}`;
   return { tag_name: tag, assets: [{ name, size: data.length, browser_download_url: prefix + name }, { name: 'SHA256SUMS', browser_download_url: prefix + 'SHA256SUMS' }] };
 }
 
 test('select only exact platform artifacts and explicit unsigned consent', () => {
-  for (const platform of ['darwin-arm64', 'linux-amd64', 'win32-amd64']) {
+  for (const platform of ['darwin-arm64', 'darwin-amd64', 'linux-amd64', 'win32-amd64']) {
     const options = parseArgs(['plan', '--platform', platform, '--version', tag, '--allow-unsigned']);
     const selected = selectAsset(release(platform), options);
     assert.equal(selected.unsigned, platform === 'win32-amd64');
     assert.equal(selected.tag, tag);
   }
   assert.throws(() => selectAsset(release('win32-amd64'), { platform: 'win32-amd64' }), { code: 'unsigned_package_requires_consent' });
-  assert.throws(() => parseArgs(['download', '--destination', 'relative']), { code: 'invalid_input' });
-  assert.throws(() => parseArgs(['--version', '../../bad']), { code: 'invalid_input' });
+  // Name a supported platform so the result does not depend on the test host.
+  assert.throws(() => parseArgs(['download', '--platform', 'linux-amd64', '--destination', 'relative']), { code: 'invalid_input' });
+  assert.throws(() => parseArgs(['--platform', 'linux-amd64', '--version', '../../bad']), { code: 'invalid_input' });
   const wrong = release('linux-amd64'); wrong.assets[0].browser_download_url = 'https://example.org/package';
   assert.throws(() => selectAsset(wrong, { platform: 'linux-amd64' }), { code: 'invalid_release' });
 });

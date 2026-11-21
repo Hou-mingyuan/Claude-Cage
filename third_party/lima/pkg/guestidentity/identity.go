@@ -19,9 +19,12 @@ type Identity struct {
 	UUID              string `json:"uuid" yaml:"uuid"`
 	MACAddress        string `json:"macAddress" yaml:"macAddress"`
 	GatewayMACAddress string `json:"gatewayMacAddress" yaml:"gatewayMacAddress"`
+	SystemSerial      string `json:"systemSerial,omitempty" yaml:"systemSerial,omitempty"`
+	BoardSerial       string `json:"boardSerial,omitempty" yaml:"boardSerial,omitempty"`
+	ChassisSerial     string `json:"chassisSerial,omitempty" yaml:"chassisSerial,omitempty"`
 }
 
-// New uses independent random bytes for the hostname, UUID and both MACs.
+// New uses independent random bytes for the hostname, UUID, MACs and hardware serials.
 // Persist its result at creation; reconnecting must reuse the saved identity.
 func New() (*Identity, error) { return generate(rand.Reader) }
 
@@ -45,15 +48,29 @@ func generate(random io.Reader) (*Identity, error) {
 		b[27] ^= 1
 		gateway = mac(b[22:28])
 	}
+	systemSerial, err := randomHostnameSuffix(random, 12)
+	if err != nil {
+		return nil, err
+	}
+	boardSerial, err := randomHostnameSuffix(random, 12)
+	if err != nil {
+		return nil, err
+	}
+	chassisSerial, err := randomHostnameSuffix(random, 12)
+	if err != nil {
+		return nil, err
+	}
 	return &Identity{
 		Hostname:   hostname,
 		UUID:       fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:16]),
 		MACAddress: guest, GatewayMACAddress: gateway,
+		SystemSerial: systemSerial, BoardSerial: boardSerial, ChassisSerial: chassisSerial,
 	}, nil
 }
 
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?$`)
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+var serialPattern = regexp.MustCompile(`^[A-Z0-9]{8,24}$`)
 
 func (i *Identity) Validate() error {
 	if i == nil || !hostnamePattern.MatchString(i.Hostname) || !uuidPattern.MatchString(i.UUID) {
@@ -67,6 +84,11 @@ func (i *Identity) Validate() error {
 	}
 	if i.MACAddress == i.GatewayMACAddress {
 		return errors.New("guest and gateway MAC must differ")
+	}
+	for _, serial := range []string{i.SystemSerial, i.BoardSerial, i.ChassisSerial} {
+		if serial != "" && !serialPattern.MatchString(serial) {
+			return errors.New("invalid guest hardware serial")
+		}
 	}
 	return nil
 }

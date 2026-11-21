@@ -12,6 +12,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	"image/png"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,18 +175,70 @@ func (a *localAccount) viewFor(desktop bool) accountView {
 	return v
 }
 
+type accountAccessState int
+
+const (
+	accountAccessGranted accountAccessState = iota
+	accountAccessLocked
+	accountAccessDesktopOnly
+)
+
 func (a *localAccount) access() (context.Context, bool) { return a.accessFor(true, false) }
 
 func (a *localAccount) accessFor(desktop, pairedPhone bool) (context.Context, bool) {
+	epoch, state := a.accessStateFor(desktop, pairedPhone)
+	return epoch, state == accountAccessGranted
+}
+
+func (a *localAccount) accessStateFor(desktop, pairedPhone bool) (context.Context, accountAccessState) {
 	if a == nil {
-		return nil, false
+		return nil, accountAccessLocked
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if len(a.key) != 32 {
+		return a.epoch, accountAccessLocked
+	}
 	// Remember me also unlocks the enrolled phone's mobile routes. Legacy
 	// passwordless workspaces keep their local desktop-only access.
 	rememberedPhone := pairedPhone && a.record != nil && a.record.TrustedUnlock != nil
-	return a.epoch, len(a.key) == 32 && (!a.trustedSession || desktop || rememberedPhone)
+	if !a.trustedSession || desktop || rememberedPhone {
+		return a.epoch, accountAccessGranted
+	}
+	if pairedPhone && a.trustedSession && a.record != nil && (a.record.TrustedDevice != "" || a.record.TrustedUnlock == nil) {
+		return a.epoch, accountAccessDesktopOnly
+	}
+	return a.epoch, accountAccessLocked
+}
+
+func (a *localAccount) exists() bool {
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.record != nil
+}
+
+// markMissingAccount lets a client tell a first run from a locked account:
+// both answer 423, but only an existing account can be unlocked.
+func (a *localAccount) markMissingAccount(w http.ResponseWriter) {
+	if !a.exists() {
+		w.Header().Set("X-Cage-Recovery", accountMissingRecovery)
+	}
+}
+
+func (a *localAccount) desktopOnlyMobileMessage() string {
+	if a == nil {
+		return "Cage 已锁定，请先登录"
+	}
+	a.mu.Lock()
+	trustedLocal := a.record != nil && a.record.TrustedDevice != ""
+	a.mu.Unlock()
+	if trustedLocal {
+		return "当前电脑处于免密码本机工作区，暂不支持手机访问。请在电脑的「设置 → 账户」设置账户密码（并可开启「记住登录」），然后点击重新读取。"
+	}
+	return "当前电脑未开启「记住登录」，暂不支持手机访问。请在电脑的「设置 → 账户」开启「记住登录」或用密码重新登录，然后点击重新读取。"
 }
 
 func (a *localAccount) setKey(key []byte) {

@@ -18,11 +18,23 @@
 
 </div>
 
+## Philosophie de conception
+
+1. **Claude lui-même est sûr, mais son harnais (harness) et ses programmes associés ne le sont pas** : cela inclut Claude Code, Claude Desktop, ainsi que les e-mails, pages web et signaux environnementaux reçus dans le navigateur.
+2. **Pour utiliser les capacités de Claude en toute sécurité, deux approches existent généralement : le proxy inverse ou le contrôle à distance** — soit sortir Claude d’un serveur pour l’exécuter directement sur l’hôte, soit le déployer dans un environnement isolé qui pilote l’hôte de façon contrôlée. Nous pensons que la seconde approche est plus sûre et plus conforme.
+3. **L’idée centrale de Cage consiste donc à fournir un environnement local léger et isolé aux programmes Claude, puis à utiliser des plugins MCP standard pour permettre à Claude d’accéder à votre ordinateur de manière sûre et contrôlée** — avec des permissions explicites et une confirmation utilisateur, plus sûr qu’un accès SSH direct.
+
+Cage atteint ainsi trois objectifs simultanément :
+
+- **Enfermer ce qui est risqué, libérer ce qui est utile.** Mademoiselle Claude reste confortablement dans sa cage, assise sur son petit crabe, et tend simplement la main pour accomplir le travail extérieur — sans avoir besoin de reconstruire tout un bureau à l’intérieur de Cage.
+- **Collaborer de façon découplée avec la communauté open source via le marché de plugins.** Dans notre [marché de plugins ouvert (cage-plugins)](https://github.com/Lee-xeo/cage-plugins), **plugin = MCP + extension** : MCP apporte des capacités à Claude et l’extension personnalise Cage. La communauté enrichit le marché de plugins sans encombrer les issues du dépôt principal, tandis que l’équipe Cage se concentre sur le cœur du produit.
+- **Conforme, sûr, léger, local, économique et prêt à l’emploi en un clic.** Plus besoin de maintenir des systèmes invités complexes, de craindre que Claude soit bridé, ni de payer des coûts cloud élevés ou de compromettre vos données : tout fonctionne localement avec élégance.
+
 ## Assez d’Anthropic
 
-En tant qu'utilisateurs ordinaires qui souhaitent simplement parler et collaborer avec Claude, nous en avons assez de configurer des instances VPS, des profils d'empreintes digitales de navigateur et des contrôles d'environnement, tout en nous inquiétant des interdictions de compte et des pertes financières. Nous présentons **Claude Cage** — **une application de bureau prête à l'emploi : configurez votre propre proxy réseau et gérez votre environnement isolé, votre fuseau horaire, votre langue et vos contrôles d'environnement en un seul endroit.**
+En tant qu'utilisateurs ordinaires qui souhaitent simplement parler et collaborer avec Claude, nous en avons assez de configurer des instances VPS, des profils d'empreintes digitales de navigateur et des contrôles d'environnement, tout en nous inquiétant des interdictions de compte et des pertes financières. Nous présentons **Claude Cage** — **une application de bureau prête à l'emploi : configurez votre propre proxy réseau et gérez votre environnement isolé léger, votre fuseau horaire, votre langue, vos contrôles d'environnement et vos plugins en un seul endroit.**
 
-Claude Cage réunit terminal, navigateur, éditeur et Claude Desktop officiel dans un même espace de travail isolé. Sous macOS, Windows et Linux, il utilise le même environnement Debian 13 léger. Partagez les projets de votre choix, gérez le réseau séparément, connectez votre serveur par SSH et poursuivez vos tâches depuis votre téléphone. Ses principales fonctions :
+Claude Cage réunit terminal, navigateur, éditeur, Claude Desktop officiel et marché de plugins dans un même espace de travail isolé. Sous macOS, Windows et Linux, il utilise le même environnement Debian 13 léger. Partagez les projets de votre choix, gérez le réseau séparément, appelez des outils locaux en toute sécurité via des plugins, connectez votre serveur par SSH et poursuivez vos tâches depuis votre téléphone. Ses principales fonctions :
 
 - Paramètres réseau isolés de l'hôte ; Cage achemine tout le trafic réseau à l'intérieur de son environnement via son propre proxy réseau
 - Paramètres d'empreinte digitale du navigateur isolés de l'hôte, y compris le fuseau horaire et la langue, avec synchronisation automatique avec l'emplacement IP du proxy réseau
@@ -44,7 +56,8 @@ Claude Cage réunit terminal, navigateur, éditeur et Claude Desktop officiel da
 ## Ce que vous pouvez faire avec Cage
 
 - **Travaillez dans une seule fenêtre.** Exécutez Claude Code dans le terminal, examinez les modifications dans l'éditeur et utilisez le navigateur Cage pour prévisualiser les services et vous connecter.
-- **Un même environnement sur toutes les plateformes.** Cage utilise le même environnement Debian 13 sous macOS, Windows et Linux, avec les mêmes outils et le même fonctionnement. [Environnement Debian](docs/guide/guest-systems.md)
+- **Débloquez toutes les capacités avec le marché de plugins.** Le [marché de plugins ouvert (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) suit la formule « plugin = MCP + extension » : Claude peut utiliser en toute sécurité et sous contrôle les outils de votre ordinateur (écran et clavier/souris, documents Office, Blender, commandes) et ajouter des vues isolées à Cage avec permissions déclarées et confirmation système. [Guide des plugins](docs/guide/plugins.md) · [Spécification](docs/plugins.md)
+- **Un même environnement léger sur toutes les plateformes.** Cage utilise le même environnement Debian 13 léger sous macOS, Windows et Linux, sans maintenir plusieurs systèmes invités complexes, avec les mêmes outils et le même fonctionnement. [Environnement Debian](docs/guide/guest-systems.md)
 - **Contrôlez ce que vous partagez.** Seuls l'espace de travail par défaut et les dossiers de projet explicitement ouverts sont partagés. L'état de connexion Claude de l'hôte, les profils de navigateur et les clés SSH ne sont pas importés automatiquement.
 - **Consultez l'état de votre réseau.** La gestion intégrée du proxy réseau vous permet d'importer des abonnements, de sélectionner des points de terminaison et de vérifier l'adresse IP de sortie. L'environnement reste hors ligne jusqu'à ce que les vérifications critiques soient réussies. Si le proxy réseau n'est pas disponible, il n'est pas possible de recourir à une connexion directe.
 - **Continuez la prochaine fois.** Les outils, les fichiers et l'état de connexion persistent sur le disque virtuel. Les tâches en arrière-plan peuvent continuer à s'exécuter lorsque vous fermez la fenêtre.
@@ -52,7 +65,6 @@ Claude Cage réunit terminal, navigateur, éditeur et Claude Desktop officiel da
 - **Poursuivez depuis votre téléphone.** Associez Android ou iPhone à l’ordinateur par QR code ou code d’association. Retrouvez les mêmes conversations Claude Code, envoyez des messages, approuvez les outils et utilisez le navigateur distant ou la fenêtre Claude Desktop de l’ordinateur.
 - **Exécutez Cage dans le cloud.** Connectez-vous par SSH à Cage déployé sur un VPS Linux x86_64 compatible, sans KVM. Les données et la sortie réseau restent sur le serveur.
 - **Connectez-vous par un réseau privé.** Connectez Tailscale dans Cage pour accéder par SSH à l’hôte et à l’environnement dans les deux sens. [Tailscale / SSH](docs/guide/tailscale.md)
-- **Outils de l’hôte (expérimental).** Désactivés par défaut. Une fois activés, Claude dans l’environnement peut exécuter des commandes sur votre ordinateur dans les dossiers de projet partagés ; chaque appel doit être confirmé dans une boîte de dialogue du système. [Plugins](docs/plugins.md)
 
 ## Démarrage rapide
 
@@ -66,7 +78,7 @@ Tout ce dont vous avez besoin est un point de terminaison proxy réseau fiable. 
 
 ## Téléchargement et installation
 
-Cage prend en charge macOS, Windows et Linux : Apple Silicon avec macOS 14+, Windows 10 22H2 / 11 x64 et Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Intel Mac, Windows ARM64 et Linux ARM64 ne sont pas encore pris en charge. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
+Cage prend en charge macOS, Windows et Linux : Apple Silicon et Intel Mac avec macOS 14+, Windows 10 22H2 / 11 x64 et Debian 12 / Ubuntu 22.04 / 24.04 x86_64. Windows ARM64 et Linux ARM64 ne sont pas encore pris en charge. [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md).
 
 1. Télécharger l’application: [macOS / Windows / Linux](https://claude-cage.com/fr/#download).
 2. macOS: Ouvrez le package d'installation et faites glisser **Cage** dans **Applications**; puis lancez-le depuis Applications. Windows: [Guide d’installation](docs/windows.md#安装并开始工作) · Linux: [Guide d’installation](docs/linux.md#安装并开始工作).

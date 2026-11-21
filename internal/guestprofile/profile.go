@@ -322,3 +322,106 @@ func Create(directory string, o Options) (*Profile, error) {
 	}
 	return p, nil
 }
+
+// Replace atomically writes a validated profile during an explicit device reset
+// or archive rollback. Ordinary installation continues to use Create.
+func Replace(directory string, p *Profile) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if err := host.EnsurePrivateDir(directory); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(directory, ".guest-profile-*")
+	if err != nil {
+		return err
+	}
+	tempPath := f.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err = host.ProtectFile(tempPath); err == nil {
+		_, err = f.Write(append(b, '\n'))
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, filepath.Join(directory, Filename)); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+// RotateInPlace generates fresh mutable device attributes (hostname, audio
+// model/name, virtual display/browser dimensions, control extension path/ID)
+// while preserving Linux account names, home directories and GPU backend so
+// existing file ownership and systemd units remain valid. For legacy
+// environments without a saved guest-profile.json it returns (nil, nil).
+func RotateInPlace(saved *Profile, overrides Options) (*Profile, error) {
+	if saved == nil {
+		return nil, nil
+	}
+	base := Options{
+		Username:        saved.Username,
+		WorkHome:        saved.WorkHome,
+		BrowserUsername: saved.BrowserUsername,
+		BrowserHome:     saved.BrowserHome,
+		GPUBackend:      saved.GPUBackend,
+		WebGL:           saved.WebGL,
+		Canvas:          saved.Canvas,
+		GraphicsBackend: saved.GraphicsBackend,
+	}
+	if overrides.Hostname != "" {
+		base.Hostname = overrides.Hostname
+	}
+	if overrides.DisplayWidth != 0 || overrides.DisplayHeight != 0 {
+		base.DisplayWidth = overrides.DisplayWidth
+		base.DisplayHeight = overrides.DisplayHeight
+	}
+	if overrides.BrowserWidth != 0 || overrides.BrowserHeight != 0 {
+		base.BrowserWidth = overrides.BrowserWidth
+		base.BrowserHeight = overrides.BrowserHeight
+	}
+	if overrides.ExtensionName != "" {
+		base.ExtensionName = overrides.ExtensionName
+	}
+	if overrides.WebGL != "" {
+		base.WebGL = overrides.WebGL
+	}
+	if overrides.Canvas != "" {
+		base.Canvas = overrides.Canvas
+	}
+	if overrides.GraphicsBackend != "" {
+		base.GraphicsBackend = overrides.GraphicsBackend
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		next, err := New(base)
+		if err != nil {
+			return nil, err
+		}
+		if saved == nil {
+			return next, nil
+		}
+		sameHost := overrides.Hostname == "" && next.Hostname == saved.Hostname
+		sameAudio := next.AudioName == saved.AudioName
+		sameSuffix := next.ExtensionSuffix == saved.ExtensionSuffix
+		if !sameHost && !sameAudio && !sameSuffix {
+			return next, nil
+		}
+	}
+	return New(base)
+}

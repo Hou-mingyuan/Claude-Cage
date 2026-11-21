@@ -21,15 +21,21 @@ type claudeDetected struct {
 	UsageChecking  bool         `json:"usage_checking,omitempty"`
 }
 
+// The panel adds runtime-only fields to the saved account entries.
+type claudePanelAccount struct {
+	claudeAccount
+	Notices []claudeAccountNotice `json:"notices,omitempty"`
+}
+
 type claudePanel struct {
-	Scheduling             claudeScheduling `json:"scheduling"`
-	UsagePanelRunning      bool             `json:"usage_panel_running"`
-	UsageUnavailableReason string           `json:"usage_unavailable_reason,omitempty"`
-	Accounts               []claudeAccount  `json:"accounts"`
-	Detected               *claudeDetected  `json:"detected,omitempty"`
-	DetectionStatus        string           `json:"detection_status"`
-	DetectionError         string           `json:"detection_error,omitempty"`
-	LoginNotice            string           `json:"login_notice,omitempty"`
+	Scheduling             claudeScheduling     `json:"scheduling"`
+	UsagePanelRunning      bool                 `json:"usage_panel_running"`
+	UsageUnavailableReason string               `json:"usage_unavailable_reason,omitempty"`
+	Accounts               []claudePanelAccount `json:"accounts"`
+	Detected               *claudeDetected      `json:"detected,omitempty"`
+	DetectionStatus        string               `json:"detection_status"`
+	DetectionError         string               `json:"detection_error,omitempty"`
+	LoginNotice            string               `json:"login_notice,omitempty"`
 }
 
 func (s *Server) probeClaude(ctx context.Context, guestID string) (claudeGuestSnapshot, error) {
@@ -171,6 +177,10 @@ func (s *Server) claudePanelView(ctx context.Context) (claudePanel, claudeAccoun
 	if err != nil {
 		return view, list, err
 	}
+	var notices map[string][]claudeAccountNotice
+	if ready && !update {
+		notices = s.claudeAccountNotices(ctx, list.Accounts)
+	}
 	if ready && !update && list.PendingLogin != "" && !s.claudeLoginActive(list.PendingLogin) {
 		_ = s.recoverClaudePending(ctx, list.PendingLogin, false)
 	}
@@ -180,12 +190,14 @@ func (s *Server) claudePanelView(ctx context.Context) (claudePanel, claudeAccoun
 	if err != nil {
 		return view, list, err
 	}
-	view.Accounts, view.LoginNotice = list.Accounts, m.loginNotice
+	view.Accounts, view.LoginNotice = make([]claudePanelAccount, len(list.Accounts)), m.loginNotice
 	view.Scheduling = list.Scheduling
 	view.UsagePanelRunning = m.panelRunning
 	for i := range view.Accounts {
+		view.Accounts[i].claudeAccount = list.Accounts[i]
 		a := &view.Accounts[i]
 		a.UsageChecking = m.usageActive[claudeIdentityHash(a.Email, a.Organization)] != nil
+		a.Notices = notices[a.guestID()]
 	}
 	return view, list, nil
 }

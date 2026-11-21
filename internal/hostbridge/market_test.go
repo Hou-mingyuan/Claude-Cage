@@ -238,3 +238,40 @@ func TestMarketShowsOnlyWellFormedSources(t *testing.T) {
 		}
 	}
 }
+
+func TestMarketOptionalRuntimeAndPlatforms(t *testing.T) {
+	good := packTar(t, tarFile{name: "notes/plugin.json", body: marketManifest})
+	market, client := serveMarket(t, nil, func(base string) []MarketEntry {
+		unix := entryFor(base, "notes-1.2.0.tar.gz", good)
+		unix.Platforms = []string{"darwin", "linux"}
+		unix.Runtime = "python3"
+		win := entryFor(base, "notes-1.2.0.tar.gz", good)
+		win.Platforms = []string{"windows"}
+		win.Target = "win32-x64"
+		win.Runtime = "powershell"
+		bad := entryFor(base, "notes-1.2.0.tar.gz", good)
+		bad.Name = "bad-rt"
+		bad.Runtime = "python3; rm -rf /"
+		return []MarketEntry{unix, win, bad}
+	})
+	entries, err := market.Fetch(context.Background(), client)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("entries %+v: %v", entries, err)
+	}
+	for _, entry := range entries {
+		switch entry.Name {
+		case "notes":
+			if entry.Runtime == "" {
+				t.Errorf("notes runtime was dropped")
+			}
+			wantPlatforms := []string{"darwin", "windows", "linux"}
+			if strings.Join(entry.AllPlatforms, ",") != strings.Join(wantPlatforms, ",") {
+				t.Errorf("notes AllPlatforms %v, want %v", entry.AllPlatforms, wantPlatforms)
+			}
+		case "bad-rt":
+			if entry.Runtime != "" {
+				t.Errorf("malformed runtime kept: %q", entry.Runtime)
+			}
+		}
+	}
+}

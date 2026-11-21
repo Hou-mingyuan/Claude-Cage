@@ -349,6 +349,58 @@ test("a failing guest clipboard reconnects with backoff that resets after a succ
   assert.equal(clipboardReconnectDelay(100), 30000);
 });
 
+test("hidden window pauses host clipboard polling but keeps guest push and syncs immediately when shown", async t => {
+  let revision = 1, content = { text: "initial" }, revisionReads = 0;
+  const sent = [], writes = [];
+  const socket = {
+    readyState: 1,
+    send: text => {
+      const value = JSON.parse(text);
+      sent.push(Object.fromEntries(Object.entries(value).filter(([k]) => k !== "serial")));
+      queueMicrotask(() => socket.onmessage({ data: JSON.stringify({ ack: value.serial }) }));
+    },
+    close() { this.readyState = 3; this.onclose?.(); },
+  };
+  const controller = shareClipboard({
+    connect: () => socket,
+    interval: 20,
+    isVisible: () => false,
+    onStatus: () => {},
+    setActive: () => {},
+    native: async (action, value) => {
+      if (action === "clipboardRevision") { revisionReads++; return revision; }
+      if (action === "clipboardSyncRead") return { ...content, revision };
+      if (action === "clipboardSyncWrite") {
+        content = { ...value }; delete content.revision;
+        writes.push(content);
+        return { revision: ++revision };
+      }
+    },
+  });
+  t.after(() => controller.dispose());
+  socket.onopen();
+  socket.onmessage({ data: JSON.stringify({ hello: { version: 1, os: "linux", session: "s1", formats: ["text", "png", "files"], available: true } }) });
+  await settle(); await settle();
+  const afterHelloReads = revisionReads;
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(revisionReads, afterHelloReads, "polling must stay paused while window is hidden");
+  // Guest -> host push still works while hidden.
+  socket.onmessage({ data: JSON.stringify({ text: "from guest while hidden" }) });
+  await settle(); await settle();
+  assert.deepEqual(writes, [{ text: "from guest while hidden" }]);
+  // Host copy while hidden syncs immediately when window becomes visible.
+  content = { text: "host copied while hidden" };
+  revision++;
+  controller.setVisible(true);
+  await settle(); await settle();
+  assert.deepEqual(sent.at(-1), { text: "host copied while hidden" });
+  // Hiding again stops polling again.
+  controller.setVisible(false);
+  const afterHideReads = revisionReads;
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(revisionReads, afterHideReads, "polling must stop again after hiding");
+});
+
 test("host files wait for an explicit paste instead of being read by background polling or a new GUI session", async () => {
   const f = fixture({ deferFiles: true, initial: { files: "host selection" } });
   try {

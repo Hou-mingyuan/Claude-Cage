@@ -226,7 +226,7 @@ func (s *Server) mobileSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var notice string
-	if err := s.discoverTerminalConversations(r.Context(), paths); err != nil {
+	if err := s.discoverTerminalConversationsCached(r.Context(), paths); err != nil {
 		notice = err.Error()
 	} else {
 		sessions, err = s.mobileCLI.summaries(s.profile, granted, archived)

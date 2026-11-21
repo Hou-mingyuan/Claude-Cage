@@ -1,0 +1,317 @@
+From: Cage maintainers
+Subject: [PATCH] store: ignore Windows PID files whose PIDs were reused
+
+Compare process creation time with the PID file's write time, allowing for
+FAT timestamp rounding. Fall back to a system process snapshot when handle
+queries fail, including for inaccessible processes. Keep markers when the
+creation time cannot be established, and leave stale files to the next writer.
+Release process handles and log ignored or exited PID files. Cover reused
+PIDs, live owners without boot markers, and snapshot creation times in tests.
+
+diff --git a/pkg/store/instance.go b/pkg/store/instance.go
+index 72be9a0..1eb9ecc 100644
+--- a/pkg/store/instance.go
++++ b/pkg/store/instance.go
+@@ -198,8 +198,8 @@ func inspectStatusWithPIDFiles(instDir string, inst *limatype.Instance, y *limat
+ }
+ 
+ // ReadPIDFile returns 0 if the PID file does not exist, was written during a previous boot
+-// of the host, or the process has already terminated (in which case the PID file will be
+-// removed).
++// of the host, the PID was verifiably reused, or the process has already terminated
++// (in which case the PID file will be removed).
+ func ReadPIDFile(path string) (int, error) {
+ 	// The boot is checked before the PID is read, so that a PID file of a previous boot is
+ 	// never trusted, not even when another process refreshes the marker in between.
+@@ -213,23 +213,42 @@ func ReadPIDFile(path string) (int, error) {
+ 		logrus.Debugf("Ignoring PID file %#q left behind by a previous boot", path)
+ 		return 0, nil
+ 	}
+-	b, err := os.ReadFile(path)
++	f, err := os.Open(path)
+ 	if err != nil {
+ 		if errors.Is(err, os.ErrNotExist) {
+ 			return 0, nil
+ 		}
+ 		return 0, err
+ 	}
++	b, err := io.ReadAll(f)
++	if err != nil {
++		_ = f.Close()
++		return 0, err
++	}
++	info, err := f.Stat()
++	_ = f.Close()
++	if err != nil {
++		return 0, err
++	}
+ 	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+ 	if err != nil {
+ 		return 0, err
+ 	}
++	if processStartedAfter(pid, info.ModTime()) {
++		// Leave removal to the next writer, as for a previous-boot marker.
++		logrus.Warnf("Ignoring stale PID file %#q: PID %d now belongs to a newer process", path, pid)
++		return 0, nil
++	}
+ 	proc, err := os.FindProcess(pid)
++	if err == nil {
++		defer proc.Release()
++	}
+ 	if runtime.GOOS == "windows" {
+ 		// On Windows, os.FindProcess will fail if the process does not exist.
+ 		// It succeeds for an exited process that another handle keeps open.
+ 		if err == nil {
+ 			if processExited(pid) {
++				logrus.Warnf("Removing stale PID file %#q: process %d has exited", path, pid)
+ 				_ = os.Remove(path)
+ 				return 0, nil
+ 			}
+@@ -238,6 +257,7 @@ func ReadPIDFile(path string) (int, error) {
+ 		var errno syscall.Errno
+ 		const ErrorInvalidParameter syscall.Errno = 0x57
+ 		if errors.As(err, &errno) && errno == ErrorInvalidParameter {
++			logrus.Warnf("Removing stale PID file %#q: process %d has exited", path, pid)
+ 			_ = os.Remove(path)
+ 			return 0, nil
+ 		}
+@@ -248,6 +268,7 @@ func ReadPIDFile(path string) (int, error) {
+ 	err = proc.Signal(syscall.Signal(0))
+ 	if err != nil {
+ 		if errors.Is(err, os.ErrProcessDone) {
++			logrus.Warnf("Removing stale PID file %#q: process %d has exited", path, pid)
+ 			_ = os.Remove(path)
+ 			return 0, nil
+ 		}
+diff --git a/pkg/store/pidfile_test.go b/pkg/store/pidfile_test.go
+index b8c9a49..c6a5683 100644
+--- a/pkg/store/pidfile_test.go
++++ b/pkg/store/pidfile_test.go
+@@ -93,8 +93,7 @@ func TestReadPIDFileCorruptedFromPreviousBoot(t *testing.T) {
+ }
+ 
+ func TestReadPIDFileWithoutBootSessionMarker(t *testing.T) {
+-	// PID files written by an older version of Lima have no marker, and are handled as
+-	// before: only the liveness of the process matters.
++	// A live owner whose process predates the PID file is retained without a marker.
+ 	fakeBootSessionID(t, "boot-1", nil)
+ 	dir := t.TempDir()
+ 	path := filepath.Join(dir, filenames.HostAgentPID)
+diff --git a/pkg/store/process_others.go b/pkg/store/process_others.go
+index 650342d..0ca7d87 100644
+--- a/pkg/store/process_others.go
++++ b/pkg/store/process_others.go
+@@ -5,5 +5,9 @@
+ 
+ package store
+ 
++import "time"
++
++func processStartedAfter(int, time.Time) bool { return false }
++
+ // processExited is only needed on Windows; elsewhere signal 0 answers it.
+ func processExited(int) bool { return false }
+diff --git a/pkg/store/process_windows.go b/pkg/store/process_windows.go
+index 1a532c6..2987dbc 100644
+--- a/pkg/store/process_windows.go
++++ b/pkg/store/process_windows.go
+@@ -3,7 +3,63 @@
+ 
+ package store
+ 
+-import "golang.org/x/sys/windows"
++import (
++	"time"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++// FAT-family file systems round write times down by up to two seconds, which
++// would otherwise make a live owner look newer than its own PID file.
++const pidFileTimeSlack = 2 * time.Second
++
++// A process created after the PID file was written cannot be its owner. This
++// also covers old PID files without a boot marker (Windows has no boot ID).
++// Query failures retain the marker: they do not prove that its owner is gone.
++func processStartedAfter(pid int, modified time.Time) bool {
++	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
++	if err == nil {
++		defer windows.CloseHandle(handle)
++		var created, exited, kernel, user windows.Filetime
++		if windows.GetProcessTimes(handle, &created, &exited, &kernel, &user) == nil {
++			return created.Nanoseconds() > modified.Add(pidFileTimeSlack).UnixNano()
++		}
++	}
++	// The snapshot includes processes whose handles we cannot open.
++	created, ok := processCreationTimeFromSnapshot(pid)
++	return ok && created > modified.Add(pidFileTimeSlack).UnixNano()
++}
++
++func processCreationTimeFromSnapshot(pid int) (int64, bool) {
++	size := uint32(64 * 1024)
++	for range 8 {
++		buf := make([]byte, size)
++		var length uint32
++		err := windows.NtQuerySystemInformation(windows.SystemProcessInformation, unsafe.Pointer(&buf[0]), size, &length)
++		if err == windows.STATUS_INFO_LENGTH_MISMATCH {
++			size = max(size*2, length)
++			continue
++		}
++		if err != nil || length > uint32(len(buf)) {
++			return 0, false
++		}
++		buf = buf[:length]
++		for len(buf) >= int(unsafe.Sizeof(windows.SYSTEM_PROCESS_INFORMATION{})) {
++			info := (*windows.SYSTEM_PROCESS_INFORMATION)(unsafe.Pointer(&buf[0]))
++			if info.UniqueProcessID == uintptr(pid) {
++				created := windows.Filetime{LowDateTime: uint32(info.CreateTime), HighDateTime: uint32(info.CreateTime >> 32)}
++				return created.Nanoseconds(), true
++			}
++			if info.NextEntryOffset == 0 || info.NextEntryOffset > uint32(len(buf)) {
++				break
++			}
++			buf = buf[info.NextEntryOffset:]
++		}
++		return 0, false
++	}
++	return 0, false
++}
+ 
+ // processExited reports whether pid names a process that has already exited.
+ // Windows keeps an exited process openable while any handle to it remains, so
+diff --git a/pkg/store/process_windows_test.go b/pkg/store/process_windows_test.go
+new file mode 100644
+index 0000000..67ffb53
+--- /dev/null
++++ b/pkg/store/process_windows_test.go
+@@ -0,0 +1,129 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package store
++
++import (
++	"fmt"
++	"io"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++	"time"
++
++	"golang.org/x/sys/windows"
++
++	"github.com/lima-vm/lima/v2/pkg/osutil"
++)
++
++func TestProcessCreationTimeFromSnapshot(t *testing.T) {
++	if os.Getenv("LIMA_TEST_PROCESS_CREATION_TIME_CHILD") == "1" {
++		if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
++			t.Fatal(err)
++		}
++		return
++	}
++	cmd := exec.Command(os.Args[0], "-test.run=^TestProcessCreationTimeFromSnapshot$")
++	cmd.Env = append(os.Environ(), "LIMA_TEST_PROCESS_CREATION_TIME_CHILD=1")
++	stdin, err := cmd.StdinPipe()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := cmd.Start(); err != nil {
++		_ = stdin.Close()
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		_ = stdin.Close()
++		if err := cmd.Wait(); err != nil {
++			t.Error(err)
++		}
++	})
++	for _, tc := range []struct {
++		name string
++		pid  int
++	}{
++		{"current", os.Getpid()},
++		{"child", cmd.Process.Pid},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(tc.pid))
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer windows.CloseHandle(handle)
++			var created, exited, kernel, user windows.Filetime
++			if err := windows.GetProcessTimes(handle, &created, &exited, &kernel, &user); err != nil {
++				t.Fatal(err)
++			}
++			got, ok := processCreationTimeFromSnapshot(tc.pid)
++			if !ok || got != created.Nanoseconds() {
++				t.Fatalf("snapshot creation time = %d, %v; GetProcessTimes = %d", got, ok, created.Nanoseconds())
++			}
++		})
++	}
++	if created, ok := processCreationTimeFromSnapshot(-1); ok {
++		t.Fatalf("nonexistent PID found: %d", created)
++	}
++}
++
++func TestReadPIDFileRejectsReusedWindowsPID(t *testing.T) {
++	for _, boot := range []string{"missing", "unsupported", "current"} {
++		t.Run(boot, func(t *testing.T) {
++			original := bootSessionID
++			bootSessionID = func() (string, error) { return "boot-1", nil }
++			if boot == "unsupported" {
++				bootSessionID = func() (string, error) { return "", osutil.ErrBootSessionNotSupported }
++			}
++			t.Cleanup(func() { bootSessionID = original })
++			dir := t.TempDir()
++			if boot == "current" {
++				if err := writeBootSessionMarker(dir, "boot-1"); err != nil {
++					t.Fatal(err)
++				}
++			}
++			for _, name := range []string{"ha.pid", "qemu.pid"} {
++				path := filepath.Join(dir, name)
++				if err := os.WriteFile(path, fmt.Appendf(nil, "%d\n", os.Getpid()), 0o644); err != nil {
++					t.Fatal(err)
++				}
++				// Model a file left by an earlier owner of this still-live PID.
++				old := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
++				if err := os.Chtimes(path, old, old); err != nil {
++					t.Fatal(err)
++				}
++				if pid, err := ReadPIDFile(path); err != nil || pid != 0 {
++					t.Fatalf("reused PID accepted: %d, %v", pid, err)
++				}
++				if _, err := os.Stat(path); err != nil || processExited(os.Getpid()) {
++					t.Fatal("reader removed the marker or signaled its new owner", err)
++				}
++				// The next startup replaces the stale file with its real owner.
++				if err := WritePIDFile(path, os.Getpid()); err != nil {
++					t.Fatal(err)
++				}
++				if pid, err := ReadPIDFile(path); err != nil || pid != os.Getpid() {
++					t.Fatalf("live owner treated as stale: %d, %v", pid, err)
++				}
++			}
++		})
++	}
++}
++
++func TestReadPIDFileRemovesExitedWindowsProcess(t *testing.T) {
++	cmd := exec.Command(os.Args[0], "-test.run=^$")
++	if err := cmd.Run(); err != nil {
++		t.Fatal(err)
++	}
++	path := filepath.Join(t.TempDir(), "ha.pid")
++	if err := os.WriteFile(path, fmt.Appendf(nil, "%d\n", cmd.Process.Pid), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	if pid, err := ReadPIDFile(path); err != nil || pid != 0 {
++		t.Fatalf("exited process accepted: %d, %v", pid, err)
++	}
++	if _, err := os.Stat(path); !os.IsNotExist(err) {
++		t.Fatal("dead process marker not removed", err)
++	}
++}

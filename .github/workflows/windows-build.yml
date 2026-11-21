@@ -97,6 +97,7 @@ jobs:
       - uses: ./.github/actions/windows-toolchain
         with:
           corresponding-sources: true
+          setup-caches: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

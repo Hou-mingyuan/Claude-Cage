@@ -91,6 +91,14 @@ jobs:
       ref: ${{ needs.prepare.outputs.commit_sha }}
       release: true
       artifact_name: release-macos
+  macos-intel:
+    needs: prepare
+    uses: ./.github/workflows/macos-intel-build.yml
+    secrets: inherit
+    with:
+      ref: ${{ needs.prepare.outputs.commit_sha }}
+      release: true
+      artifact_name: release-macos-intel
   windows:
     needs: prepare
     uses: ./.github/workflows/windows-build.yml
@@ -107,7 +115,7 @@ jobs:
       release: true
       artifact_name: release-linux
   publish:
-    needs: [prepare, macos, windows, linux]
+    needs: [prepare, macos, macos-intel, windows, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -128,6 +136,10 @@ jobs:
         with:
           name: release-macos
           path: _output/release-artifacts/macos
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-macos-intel
+          path: _output/release-artifacts/macos-intel
       - uses: actions/download-artifact@v4
         with:
           name: release-windows

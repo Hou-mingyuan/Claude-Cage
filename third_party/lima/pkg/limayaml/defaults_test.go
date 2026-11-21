@@ -152,7 +152,7 @@ func TestFillDefault(t *testing.T) {
 		Plain:                new(false),
 		User: limatype.User{
 			Name:             new(user.Username),
-			Comment:          new(user.Name),
+			Comment:          new(""),
 			Home:             new(user.HomeDir),
 			Shell:            new("/bin/bash"),
 			UID:              new(uint32(uid)),

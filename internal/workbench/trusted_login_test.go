@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -286,5 +287,72 @@ func TestTrustedLocalDesktopEntryAndWorkload(t *testing.T) {
 	w = request(gateway, "POST", "/api/client/trusted-login", gateway.origin, string(body), true)
 	if w.Code != http.StatusOK || !workload.account.viewFor(true).Unlocked || workload.account.viewFor(false).Unlocked {
 		t.Fatalf("password account did not resume privately after reload: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLegacyPasswordlessWorkspaceReturnsActionableMobileState(t *testing.T) {
+	s := testServer(t)
+	a, err := loadLocalAccount(s.profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.account = a
+	devices := t.TempDir()
+	if err = a.trustedLogin("create", "", devices); err != nil {
+		t.Fatal(err)
+	}
+	proof := randomToken()
+	s.phones.mu.Lock()
+	s.phones.record = &phoneRecord{Lookup: "lookup"}
+	s.phones.roomProof = proof
+	s.phones.roomCtx = context.Background()
+	s.phones.mu.Unlock()
+
+	if _, state := a.accessStateFor(false, true); state != accountAccessDesktopOnly {
+		t.Fatalf("expected desktop-only state for legacy passwordless workspace, got %v", state)
+	}
+	if _, allowed := a.accessFor(false, true); allowed {
+		t.Fatal("legacy passwordless workspace must not grant phone access")
+	}
+
+	got := phoneRequestForTest(t, s, "GET", "/api/mobile/cli/projects", "", proof)
+	if got.Code != http.StatusLocked || got.Header().Get("X-Cage-Recovery") != "desktop-account-mobile-access" || !strings.Contains(got.Body.String(), "免密码本机工作区") || !strings.Contains(got.Body.String(), "设置账户密码") {
+		t.Fatalf("expected actionable legacy workspace prompt, got %d header=%q body=%q", got.Code, got.Header().Get("X-Cage-Recovery"), got.Body.String())
+	}
+
+	pairStatus := desktopRequestForTest(s, "GET", "/api/mobile-pair", nil)
+	if pairStatus.Code != http.StatusOK || !strings.Contains(pairStatus.Body.String(), `"mobile_access_blocked":true`) {
+		t.Fatalf("expected desktop mobile-pair status to flag blocked mobile access: %d %s", pairStatus.Code, pairStatus.Body.String())
+	}
+
+	// Setting a password and enabling remember-me enables phone access on resumed sessions.
+	if err = a.trustedLogin("protect", "first-password", devices); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.trustedLogin("enable", "first-password", devices); err != nil {
+		t.Fatal(err)
+	}
+	a.lock()
+	if err = a.trustedLogin("resume", "", devices); err != nil {
+		t.Fatal(err)
+	}
+	if _, state := a.accessStateFor(false, true); state != accountAccessGranted {
+		t.Fatalf("expected granted phone access with remember-me enabled, got %v", state)
+	}
+
+	// Turning off remember-me during a resumed trusted session switches to actionable desktop-only prompt.
+	if err = a.trustedLogin("disable", "", devices); err != nil {
+		t.Fatal(err)
+	}
+	got = phoneRequestForTest(t, s, "GET", "/api/mobile/cli/projects", "", proof)
+	if got.Code != http.StatusLocked || got.Header().Get("X-Cage-Recovery") != "desktop-account-mobile-access" || !strings.Contains(got.Body.String(), "记住登录") {
+		t.Fatalf("expected remember-me prompt, got %d header=%q body=%q", got.Code, got.Header().Get("X-Cage-Recovery"), got.Body.String())
+	}
+
+	// Truly locked account reports normal locked state without recovery header.
+	a.lock()
+	got = phoneRequestForTest(t, s, "GET", "/api/mobile/cli/projects", "", proof)
+	if got.Code != http.StatusLocked || got.Header().Get("X-Cage-Recovery") != "" || !strings.Contains(got.Body.String(), "Cage 已锁定") {
+		t.Fatalf("expected normal locked response, got %d header=%q body=%q", got.Code, got.Header().Get("X-Cage-Recovery"), got.Body.String())
 	}
 }

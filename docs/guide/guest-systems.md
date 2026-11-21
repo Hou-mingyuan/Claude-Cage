@@ -7,15 +7,16 @@ keywords: 环境 系统 Debian 13 Linux 虚拟机 镜像 磁盘 空间 主机名
 ---
 ## 一个环境，三个平台
 
-Cage 在电脑上运行一台小型的 Debian 13 虚拟机，官方 Claude Code 和 Claude Desktop 都在这个环境里运行。macOS、Windows 和 Linux 上的 Cage 使用同一个环境，终端、浏览器、编辑器和 Claude Desktop 的操作方式一致，无需选择系统。
+Cage 在电脑上运行一台轻量化的 Debian 13 虚拟机，官方 Claude Code 和 Claude Desktop 都在这个环境里运行。macOS、Windows 和 Linux 上的 Cage 统一使用同一个环境，不再维护复杂的多系统客机；需要本机桌面、文档或软件能力时，直接通过[插件与插件市场](plugins.md)按 MCP 受控调用即可。终端、浏览器、编辑器和 Claude Desktop 的操作方式三端一致，无需选择系统。
 
 | 你的电脑 | 环境架构 | 需要的虚拟化能力 |
 | --- | --- | --- |
 | Apple Silicon Mac，macOS 14+ | Debian 13 ARM64 | 系统自带，无需额外设置 |
+| Intel Mac，macOS 14+ | Debian 13 x86_64 | 系统硬件虚拟化可用（终端运行 `sysctl kern.hv_support` 显示 1）；使用随附的 QEMU 与 Hypervisor.framework |
 | Windows 10 22H2 / 11 x64 | Debian 13 x86_64 | BIOS/UEFI 虚拟化与“Windows 虚拟机监控程序平台” |
 | Debian 12、Ubuntu 22.04 / 24.04 x86_64 | Debian 13 x86_64 | KVM，以及当前用户对 `/dev/kvm` 的读写权限 |
 
-Intel Mac、Windows ARM64 和 Linux ARM64 暂不支持。Windows 家庭版同样可用：在“启用或关闭 Windows 功能”中勾选“Windows 虚拟机监控程序平台”并重启即可；“虚拟机平台”“适用于 Linux 的 Windows 子系统”和 Hyper-V 都不是 Cage 的要求。各平台的安装步骤见[安装与首次启动](installation.md)。
+Windows ARM64 和 Linux ARM64 暂不支持。Windows 家庭版同样可用：在“启用或关闭 Windows 功能”中勾选“Windows 虚拟机监控程序平台”并重启即可；“虚拟机平台”“适用于 Linux 的 Windows 子系统”和 Hyper-V 都不是 Cage 的要求。各平台的安装步骤见[安装与首次启动](installation.md)。
 
 ## 环境里有什么
 
@@ -23,7 +24,7 @@ Intel Mac、Windows ARM64 和 Linux ARM64 暂不支持。Windows 家庭版同样
 - **浏览器。** Chromium 运行在环境内，用于登录、授权和预览开发服务，见[浏览器与网站数据](browser.md)。
 - **编辑器。** code-server 在工作台标签页中打开项目文件。
 - **Claude Desktop。** 需要时在工作台安装官方 Linux 版，见[Claude Desktop](desktop.md)。需要额外虚拟机的 Cowork 暂不支持。
-- **主机工具（实验性）。** 让环境里的 Claude 在已共享的项目目录中调用电脑上的命令，每次调用都由系统对话框确认，能力以插件形式提供。此功能默认关闭，见[插件说明](https://github.com/Lee-xeo/Claude-Cage/blob/main/docs/plugins.md)。
+- **插件与插件市场。** 通过侧栏「插件」打开开放插件市场（`cage-plugins`），按需安装主机或环境内插件（**插件 = MCP + 扩展**），让环境里的 Claude 安全、受控地调用本机能力（如屏幕键鼠、Office 文档、Blender、命令执行等），或为工作台增加自定义沙箱页面。主机插件默认受权限声明与确认弹窗保护，见[插件与插件市场](plugins.md)与[插件开发规范](https://github.com/Lee-xeo/Claude-Cage/blob/main/docs/plugins.md)。
 
 环境只有一个。所有项目共用其中的系统、工具、账户和文件系统，切换项目不会创建另一台虚拟机。
 
@@ -68,13 +69,15 @@ Debian 13 基础镜像约 320–325 MiB，按处理器架构下载一份。虚�
 
 ## 早期版本创建的其他系统
 
-早期版本可以创建 macOS、Windows 11 或 Ubuntu 环境。当前版本不再启动这些系统，统一使用 Debian 13 环境：
+早期版本曾支持创建 macOS、Windows 11 或 Ubuntu 环境。随着 Cage 确立「轻量化本地隔离环境 + 开放插件市场（MCP + 扩展）」的路线，当前版本不再维护复杂的多系统客机，统一使用 Debian 13 环境，需要本机软件与桌面能力时直接通过[插件与插件市场](plugins.md)安全桥接：
 
 - Cage 账户、代理、收藏、设置和已添加的项目继续使用，共享项目的文件一直保存在主机上，不受影响。
 - 旧系统的虚拟磁盘、安装介质和配置文件留在原配置目录与环境存储位置，Cage 不读取、不修改，也不删除它们。工作台首页会提示这些数据仍在磁盘上。
 - 首次启动时创建新的 Debian 环境。只保存在旧系统磁盘里的文件、工具和登录状态不会进入新环境，需要在新环境中重新登录 Claude。
 
-确认旧系统里没有需要保留的文件后，可以自行删除这些数据以释放空间；删除前请先备份。
+旧 Ubuntu 环境与 Debian 环境共用同一个环境存储位置，Cage 不会自动挪动它，因此启动时会提示 Ubuntu 客机已不再支持。在工作台首页的提示中点击“保留旧 Ubuntu 环境并新建 Debian”并确认后，Cage 先停止旧环境，把它的虚拟磁盘、安装镜像和系统选择记录按原有目录结构移到 Cage 配置目录下的 `state/guests-removed/ubuntu-<版本>-<时间>` 文件夹（环境存储放在其他磁盘时，该文件夹也在那块磁盘上；只移动，不复制、不删除，并附 `manifest.json` 列出移动的文件），再下载并创建 Debian 环境。环境内的账户名、主机名等创建配置沿用原设置。任一文件移动失败时，已移动的文件会放回原处，旧环境保持原样。
+
+确认旧系统里没有需要保留的文件后，可以自行删除这些数据（包括 `state/guests-removed` 中的文件夹）以释放空间；删除前请先备份。
 
 ## 云端和手机如何配合
 

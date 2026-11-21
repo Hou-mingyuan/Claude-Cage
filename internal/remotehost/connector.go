@@ -92,17 +92,34 @@ func ValidateManifest(m ServerManifest) error {
 
 func authentication(ctx context.Context, p HostProfile, secrets ConnectSecrets) (ssh.AuthMethod, func(), error) {
 	if p.Auth.Kind == "agent" {
-		conn, err := dialAgent(ctx)
+		conn, err := dialAgent(ctx, p.Auth.AgentSocket)
 		if err != nil {
+			var invalid *Error
+			if errors.As(err, &invalid) {
+				return nil, nil, err
+			}
+			if p.Auth.AgentSocket != "" {
+				return nil, nil, failure("agent_unavailable", "无法连接指定的 SSH agent 套接字，请确认对应程序正在运行")
+			}
 			return nil, nil, failure("agent_unavailable", "无法连接本机 SSH agent，请启动 agent 或选择密钥文件")
 		}
 		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 		signers, err := agent.NewClient(conn).Signers()
-		if err != nil || len(signers) == 0 {
+		if err != nil {
 			stop()
 			conn.Close()
-			return nil, nil, failure("agent_unavailable", "SSH agent 中没有可用密钥")
+			// A protocol or listing failure is not an empty agent: report it
+			// separately so the user checks the agent instead of adding keys.
+			return nil, nil, failure("agent_error", "SSH agent 通信失败，无法读取密钥列表")
+		}
+		if len(signers) == 0 {
+			stop()
+			conn.Close()
+			if p.Auth.AgentSocket == "" {
+				return nil, nil, failure("agent_empty", "SSH agent 中没有可用密钥。请在 agent 中添加密钥，或在主机设置中指定密码管理器的 agent 套接字")
+			}
+			return nil, nil, failure("agent_empty", "指定的 SSH agent 中没有可用密钥")
 		}
 		return ssh.PublicKeys(signers...), func() { stop(); conn.Close() }, nil
 	}

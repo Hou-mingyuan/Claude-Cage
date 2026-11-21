@@ -50,7 +50,11 @@ test('signing retries only declared server errors without output and remains bou
   assert.equal(await readFile(outputPath, 'utf8'), 'candidate output');
 });
 
-test('a real JVM receives quoted Unicode arguments, no secrets in process arguments, and OTP through stdin', async t => {
+// CI installs a JDK and must run this test; local machines without one skip it.
+const javac = spawnSync('javac', ['-version'], { stdio: 'ignore' }).status === 0;
+const needsJDK = !javac && !process.env.CI && 'javac is not installed (CI always runs this test)';
+
+test('a real JVM receives quoted Unicode arguments, no secrets in process arguments, and OTP through stdin', { skip: needsJDK }, async t => {
   const temp = await mkdtemp(join(tmpdir(), 'cage-esigner-test-'));
   t.after(() => rm(temp, { recursive: true, force: true }));
   const source = join(temp, 'Signer.java');

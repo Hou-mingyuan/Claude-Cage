@@ -39,11 +39,11 @@ sudo tee /etc/fonts/conf.d/71-english-cjk-fallback.conf >/dev/null <<'FONTCONFIG
 FONTCONFIG
 mkdir -p "$HOME/.config/claude-cage"
 chmod 700 "$HOME/.config/claude-cage"
-if [ ! -s "$HOME/.config/claude-cage/code-server.yaml" ]; then
-  (umask 077; printf 'auth: password\npassword: %s\ncert: false\n' "$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')" > "$HOME/.config/claude-cage/code-server.yaml")
+if ! grep -qE '^password:[[:space:]]*[^[:space:]]+' "$HOME/.config/claude-cage/code-server.yaml" 2>/dev/null; then
+  (umask 077; tmp=$(mktemp "$HOME/.config/claude-cage/.code-server.yaml.XXXXXX"); printf 'auth: password\npassword: %s\ncert: false\n' "$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')" > "$tmp"; sync "$tmp" 2>/dev/null || true; mv -f "$tmp" "$HOME/.config/claude-cage/code-server.yaml"; sync "$HOME/.config/claude-cage" 2>/dev/null || true)
 fi
 if [ ! -s "$HOME/.config/claude-cage/browser-password" ]; then
-  (umask 077; od -An -N4 -tx1 /dev/urandom | tr -d ' \n' > "$HOME/.config/claude-cage/browser-password")
+  (umask 077; tmp=$(mktemp "$HOME/.config/claude-cage/.browser-password.XXXXXX"); od -An -N4 -tx1 /dev/urandom | tr -d ' \n' > "$tmp"; sync "$tmp" 2>/dev/null || true; mv -f "$tmp" "$HOME/.config/claude-cage/browser-password"; sync "$HOME/.config/claude-cage" 2>/dev/null || true)
 fi
 sudo install -d -o cage-browser -g cage-browser -m 0700 /home/cage-browser/.vnc
 cat "$HOME/.config/claude-cage/browser-password" | sudo -u cage-browser sh -c 'umask 077; tigervncpasswd -f > "$HOME/.vnc/passwd"'
@@ -60,36 +60,95 @@ if ! dpkg-query -W -f='${Status}' chromium-l10n 2>/dev/null | grep -qx 'install 
 fi
 # Publish per-VM control credentials for the browser process and SSH owner only.
 sudo env CAGE_DISPLAY_SCALE="${CAGE_DISPLAY_SCALE:-2}" CAGE_WORKSPACE="$PWD" CAGE_USER_HOME="$HOME" python3 - <<'PYCONTROL'
-import json, os, secrets, grp
+import json, os, secrets, grp, tempfile
 from pathlib import Path
+def atomic_write(target, text, mode, gid=None):
+    fd, name = tempfile.mkstemp(prefix='.' + target.name + '-', dir=target.parent)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(name, mode)
+        if gid is not None:
+            os.chown(name, 0, gid)
+        os.replace(name, target)
+        # Flush the rename too, or a power loss can bring the old file back.
+        directory = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except Exception:
+        try:
+            os.unlink(name)
+        except OSError:
+            pass
+        raise
 p=Path('/etc/claude-cage/browser-control.json')
-d=json.loads(p.read_text()) if p.exists() else {'token':secrets.token_hex(32)}
+try:
+    loaded = json.loads(p.read_text()) if p.exists() else {}
+    d = loaded if isinstance(loaded, dict) else {}
+except (OSError, ValueError):
+    d = {}
+if not isinstance(d.get('token'), str) or not d['token']:
+    d['token'] = secrets.token_hex(32)
 scale = 1.5 if os.environ['CAGE_DISPLAY_SCALE'] == '1.5' else 2
 d['display_scale'] = scale
 # With a settings manager each viewer chooses the density of its own screen.
 d['dynamic_scale'] = os.path.exists('/usr/bin/xsettingsd')
 scale_file = Path('/etc/claude-cage/display-scale')
-scale_file.write_text(str(scale) + '\n')
-scale_file.chmod(0o644)
+atomic_write(scale_file, str(scale) + '\n', 0o644)
 d['workspace']=os.environ['CAGE_WORKSPACE']
 yaml=Path(os.environ['CAGE_USER_HOME']) / '.config/claude-cage/code-server.yaml'
 d['editorPassword']=next(line.split(':',1)[1].strip() for line in yaml.read_text().splitlines() if line.startswith('password:'))
-p.write_text(json.dumps(d))
-p.chmod(0o640)
-os.chown(p,0,grp.getgrnam('cage-browser').gr_gid)
+atomic_write(p, json.dumps(d), 0o640, grp.getgrnam('cage-browser').gr_gid)
 PYCONTROL
 sudo -u cage-browser env CAGE_LANGUAGE="$CAGE_LANGUAGE" python3 - <<'PYCODE'
 import json, os
 from pathlib import Path
 p = Path.home() / "profile/Default/Preferences"
+import tempfile
 p.parent.mkdir(parents=True, exist_ok=True)
-d = json.loads(p.read_text()) if p.exists() else {}
-d.setdefault("intl", {})["accept_languages"] = os.environ["CAGE_LANGUAGE"]
+try:
+    loaded = json.loads(p.read_text()) if p.exists() else {}
+except (OSError, ValueError):
+    loaded = None
+d = loaded if isinstance(loaded, dict) else {}
+if p.exists() and not isinstance(loaded, dict) and p.stat().st_size > 0:
+    # Keep a damaged file beside the new one instead of losing its settings.
+    import time
+    backup = p.with_name("%s.corrupt-%s-%d" % (p.name, time.strftime("%Y%m%d%H%M%S"), os.getpid()))
+    os.replace(p, backup)
+if not isinstance(d.get("intl"), dict):
+    d["intl"] = {}
+d["intl"]["accept_languages"] = os.environ["CAGE_LANGUAGE"]
 d["intl"]["selected_languages"] = os.environ["CAGE_LANGUAGE"]
-d.setdefault("translate", {})["enabled"] = False
+if not isinstance(d.get("translate"), dict):
+    d["translate"] = {}
+d["translate"]["enabled"] = False
 d["credentials_enable_service"] = False
-d.setdefault("profile", {})["password_manager_enabled"] = False
-p.write_text(json.dumps(d))
+if not isinstance(d.get("profile"), dict):
+    d["profile"] = {}
+d["profile"]["password_manager_enabled"] = False
+fd, name = tempfile.mkstemp(prefix=".Preferences-", dir=p.parent)
+try:
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(d))
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(name, p)
+    directory = os.open(p.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+except Exception:
+    try:
+        os.unlink(name)
+    except OSError:
+        pass
+    raise
 PYCODE
 sudo systemctl reset-failed cage-display cage-window-manager cage-browser cage-webvnc 2>/dev/null || true
 sudo systemctl reset-failed cage-display-governor 2>/dev/null || true
@@ -104,7 +163,7 @@ if not p.exists():
     shutil.copyfile('/etc/claude-cage/editor-theme.json', p)
 PYEDITOR
 # Systemd owns the editor independently of the SSH session and restarts crashes.
-(umask 077; printf '%s' "$PWD" > "$HOME/.config/claude-cage/editor-workspace")
+(umask 077; tmp=$(mktemp "$HOME/.config/claude-cage/.editor-workspace.XXXXXX"); printf '%s' "$PWD" > "$tmp"; sync "$tmp" 2>/dev/null || true; mv -f "$tmp" "$HOME/.config/claude-cage/editor-workspace"; sync "$HOME/.config/claude-cage" 2>/dev/null || true)
 if ! systemctl is-active --quiet cage-editor.service; then
   sudo /usr/local/bin/cage-editor-migrate
   sudo systemctl start cage-editor.service

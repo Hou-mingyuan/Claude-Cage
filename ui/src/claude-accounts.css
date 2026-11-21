@@ -241,6 +241,7 @@
 .claude-profile-actions .quiet-button { gap: 4px; }
 .claude-quota-age { margin-left: auto; display: flex; flex-wrap: wrap; gap: 2px 8px; font-variant-numeric: tabular-nums; }
 .claude-profile .field-help { margin: 7px 0; }
+.claude-profile-notice { overflow-wrap: anywhere; }
 .claude-profile-empty { text-align: center; border: 1px dashed var(--line); border-radius: 12px; padding: 28px 10px; }
 .claude-profile-empty img { width: 42px; }
 .claude-profile-empty p { margin: 6px 0; font-weight: 550; }

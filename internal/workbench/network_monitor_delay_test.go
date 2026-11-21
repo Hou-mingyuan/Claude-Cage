@@ -14,6 +14,7 @@ func TestNetworkMonitorWaitsAfterSlowPhysicalProbe(t *testing.T) {
 		t.Run(probeDuration.String(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				s := testServer(t)
+				markTestVMRunning(t, s)
 				previous := physicalProxyInterface
 				defer func() { physicalProxyInterface = previous }()
 				var mu sync.Mutex

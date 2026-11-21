@@ -149,6 +149,38 @@ func (s *Server) fileTargetReady(target, id string) bool {
 	return target == "browser" || target == "desktop"
 }
 
+// projectReadCheck makes the shared folder answer one request that no cache
+// can serve: the lookup of a name that does not exist. A stalled SSHFS
+// transport can still return cached attributes and directory listings.
+const projectReadCheck = `import os, sys
+try:
+    os.lstat(os.path.join(sys.argv[1], "." + os.urandom(8).hex()))
+except FileNotFoundError:
+    pass
+`
+
+var errProjectUnreadable = errors.New("项目文件夹暂时无法读取，请检查共享连接后重试。持续失败时，请保存工作后重启环境")
+
+// checkProjectReadable bounds the check, so a stalled share fails this
+// handoff within seconds instead of blocking the Claude Desktop file service.
+// It leaves the transport and mount in place for writes still in progress.
+func (s *Server) checkProjectReadable(ctx context.Context, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, projectReadTimeout+2*time.Second)
+	defer cancel()
+	if _, err := s.guest(ctx, projectReadCommand(path, projectReadTimeout)); err != nil {
+		return errProjectUnreadable
+	}
+	return nil
+}
+
+const projectReadTimeout = 3 * time.Second
+
+func projectReadCommand(path string, limit time.Duration) string {
+	check := "mountpoint -q -- " + shellescape.Quote(path) + " && exec /usr/bin/python3 -I -c " + shellescape.Quote(projectReadCheck) + " " + shellescape.Quote(path)
+	seconds := strconv.FormatFloat(limit.Seconds(), 'f', -1, 64)
+	return "exec timeout --kill-after=1s " + seconds + "s /bin/sh -c " + shellescape.Quote(check)
+}
+
 func (s *Server) fileInputAction(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Target    string  `json:"target"`
@@ -209,7 +241,16 @@ func (s *Server) fileInputAction(w http.ResponseWriter, r *http.Request) {
 			requestError(w, err)
 			return
 		}
-		body, _ = json.Marshal(map[string]string{"id": input.ID, "path": guestPath(workspace)})
+		path := guestPath(workspace)
+		// The environment folder is a local guest directory; client mounts
+		// keep their own liveness checks.
+		if workspace != s.environmentDir() && !isClientMountPath(workspace) {
+			if err := s.checkProjectReadable(ctx, path); err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+		}
+		body, _ = json.Marshal(map[string]string{"id": input.ID, "path": path})
 	}
 	if input.Target == "terminal" {
 		jsonReply(w, map[string]any{"ok": true, "id": input.ID})

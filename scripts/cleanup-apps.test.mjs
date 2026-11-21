@@ -8,6 +8,7 @@ import {
   rm,
   copyFile,
   chmod,
+  open,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,37 +17,74 @@ import { execFileSync, spawn } from "node:child_process";
 import { cleanupApps } from "./cleanup-apps.mjs";
 
 const cageID = "io.github.lee-xeo.claude-cage";
-test("cleanup preserves a Cage executable still in use", { skip: process.platform !== "darwin" }, async () => {
+const exited = (child) => child.exitCode !== null || child.signalCode !== null;
+async function stop(child) {
+  // An exit that already happened never emits again; waiting for it would hang.
+  if (!child || exited(child)) return;
+  await new Promise((resolve) => { child.once("exit", resolve); child.kill("SIGTERM"); });
+}
+
+test("cleanup preserves a Cage executable still in use", { skip: process.platform !== "darwin", timeout: 180_000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cage-cleanup-running-"));
   let child;
   try {
     const latest = await app(path.join(directory, "new.app"));
-    const running = await app(path.join(directory, "running.app"));
+    // A re-signed copy of a system binary such as /bin/sleep is arm64e and may
+    // be killed at exec on Apple silicon; the running Node binary is known to run.
+    const running = await app(path.join(directory, "running.app"), cageID, process.execPath);
     const executable = path.join(running, "Contents/MacOS/Cage");
-    child = spawn(executable, ["30"], { stdio: "ignore" });
-    await new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    child = spawn(executable, ["-e", "process.stdout.write('ready\\n'); setInterval(() => {}, 1000)"], { stdio: ["ignore", "pipe", "ignore"] });
+    await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code, signal) => reject(new Error(`The stand-in App exited before it started (${signal || code}).`)));
+      child.stdout.once("data", resolve);
+    });
     const skipped = [];
     assert.deepEqual(await cleanupApps({ keep: [latest], roots: [directory], onInUse: (bundle) => skipped.push(bundle) }), []);
     assert.deepEqual(skipped, [running]);
     await access(executable);
-    await new Promise((resolve) => { child.once("exit", resolve); child.kill("SIGTERM"); });
+    assert.ok(!exited(child), "the stand-in App must still run while cleanup decides");
+    await stop(child);
     child = null;
     assert.deepEqual(await cleanupApps({ keep: [latest], roots: [directory] }), [running]);
   } finally {
-    if (child && child.exitCode === null) await new Promise((resolve) => { child.once("exit", resolve); child.kill("SIGTERM"); });
+    await stop(child);
     await rm(directory, { recursive: true, force: true });
   }
 });
-async function app(directory, id = cageID) {
+async function app(directory, id = cageID, executable = "/bin/sleep") {
   await mkdir(path.join(directory, "Contents/MacOS"), { recursive: true });
   await writeFile(
     path.join(directory, "Contents/Info.plist"),
     `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${id}</string><key>CFBundleExecutable</key><string>Cage</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`,
   );
-  await copyFile('/bin/sleep', path.join(directory, 'Contents/MacOS/Cage'));
+  await copyFile(executable, path.join(directory, 'Contents/MacOS/Cage'));
   execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', directory], { stdio: 'ignore' });
   return directory;
 }
+
+test("cleanup removes an App whose executable is only open for reading", { skip: process.platform !== "darwin" }, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cage-cleanup-readonly-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const latest = await app(path.join(directory, "new.app"));
+  const old = await app(path.join(directory, "old.app"));
+  const handle = await open(path.join(old, "Contents/MacOS/Cage"), "r");
+  t.after(() => handle.close());
+  const skipped = [];
+  assert.deepEqual(await cleanupApps({ keep: [latest], roots: [directory], onInUse: (bundle) => skipped.push(bundle) }), [old]);
+  assert.deepEqual(skipped, []);
+});
+
+test("cleanup reports a retained App once when roots overlap", { skip: process.platform !== "darwin" }, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cage-cleanup-overlap-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const latest = await app(path.join(directory, "new.app"));
+  const modified = await app(path.join(directory, "old.app"));
+  await writeFile(path.join(modified, "Contents/notes.txt"), "user work");
+  const retained = [];
+  assert.deepEqual(await cleanupApps({ keep: [latest], roots: [modified, directory], onModified: (value) => retained.push(value) }), []);
+  assert.deepEqual(retained, [modified]);
+});
 
 test('cleanup retains project files added to a previously signed app', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cage-cleanup-modified-'));

@@ -26,15 +26,20 @@ func TestSubcommandHelpDoesNotRunTheCommand(t *testing.T) {
 	}
 }
 
-func TestStartHelpDocumentsVMOptions(t *testing.T) {
+func TestStartHelpDocumentsReset(t *testing.T) {
 	for _, command := range []string{"up", "login"} {
 		text, ok := subcommandHelp([]string{command, "--help"})
 		if !ok {
 			t.Fatalf("no help for %s", command)
 		}
-		for _, want := range []string{"--reset", "--cpus", "--memory", "--ram", "--disk", "--ssh-port", "disk", "lost"} {
+		for _, want := range []string{"--reset", "disk", "lost"} {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s help lacks %q: %s", command, want, text)
+			}
+		}
+		for _, unwanted := range []string{"--cpus", "--memory", "--ram", "--ssh-port"} {
+			if strings.Contains(text, unwanted) {
+				t.Errorf("%s help offers %q, which Cage does not apply: %s", command, unwanted, text)
 			}
 		}
 	}

@@ -39,6 +39,9 @@ func TestNewIndependentIdentities(t *testing.T) {
 		if len(identity.MachineID()) != 32 {
 			t.Fatal("invalid systemd machine ID")
 		}
+		if len(identity.SystemSerial) != 12 || len(identity.BoardSerial) != 12 || len(identity.ChassisSerial) != 12 {
+			t.Fatal("missing hardware serials")
+		}
 		data, err := json.Marshal(identity)
 		if err != nil {
 			t.Fatal(err)
@@ -53,9 +56,9 @@ func TestNewIndependentIdentities(t *testing.T) {
 func TestRandomnessFailureAndMACCollision(t *testing.T) {
 	// Check every truncation of a deterministic valid generation, including
 	// failures after the hostname has already consumed its random bytes.
-	random := bytes.NewReader(make([]byte, 128))
+	random := bytes.NewReader(make([]byte, 256))
 	identity, err := generate(random)
-	consumed := 128 - random.Len()
+	consumed := 256 - random.Len()
 	for size := range consumed {
 		if _, err := generate(bytes.NewReader(make([]byte, size))); !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 			t.Fatalf("accepted short random input of %d bytes: %v", size, err)
@@ -81,6 +84,9 @@ func TestValidateRejectsUnsafeIdentity(t *testing.T) {
 		func(i *Identity) { i.MACAddress = "01:00:00:00:00:00" },
 		func(i *Identity) { i.MACAddress = "00:00:00:00:00:00" },
 		func(i *Identity) { i.GatewayMACAddress = i.MACAddress },
+		func(i *Identity) { i.SystemSerial = "BAD,COMMA" },
+		func(i *Identity) { i.BoardSerial = "SHORT" },
+		func(i *Identity) { i.ChassisSerial = "lower1234567" },
 	} {
 		broken := *identity
 		mutate(&broken)

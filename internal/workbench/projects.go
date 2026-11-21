@@ -111,6 +111,10 @@ func (s *Server) openProject(w http.ResponseWriter, r *http.Request) {
 		s.preferences.Workspace = workspace
 		s.mu.Unlock()
 	}
+	if input.Activate {
+		// Only plugins taking ${PROJECT_DIR}, in the background.
+		s.restartProjectPlugins()
+	}
 	jsonReply(w, map[string]string{"workspace": workspace})
 }
 

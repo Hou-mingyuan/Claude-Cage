@@ -1,0 +1,19 @@
+Read the cloud-init journal with sudo.
+
+The guest user is not in the adm or systemd-journal group, so an unprivileged
+journalctl shows no cloud-init-main.service entries and the first boot waits
+for a completion event that never arrives. The fallback already uses sudo.
+
+diff --git a/pkg/hostagent/hostagent.go b/pkg/hostagent/hostagent.go
+index c3b7de41..74711994 100644
+--- a/pkg/hostagent/hostagent.go
++++ b/pkg/hostagent/hostagent.go
+@@ -1183,7 +1183,7 @@ func (a *HostAgent) watchCloudInitProgress(ctx context.Context) {
+ 		sshAddress,
+ 		"sh", "-c",
+ 		`"if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled -q cloud-init-main.service; then
+-			journalctl -u cloud-init-main.service -b -S @0 -o cat -f
++			sudo journalctl -u cloud-init-main.service -b -S @0 -o cat -f
+ 		else
+ 			sudo tail -n +$(sudo awk '
+ 				BEGIN{b=1; e=1}

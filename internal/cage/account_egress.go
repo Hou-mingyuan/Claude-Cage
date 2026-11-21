@@ -35,7 +35,7 @@ type nodeListeners struct {
 	gate            *EgressGate
 	routes          map[string]*nodeListener
 	closed          bool
-	verify          func(context.Context, *Egress, Config, string) error
+	verify          func(context.Context, *Egress, Config, string, exitpolicy.LookupOptions) error
 }
 type nodeListener struct {
 	server   *http.Server
@@ -98,7 +98,7 @@ func (m *nodeListeners) prepare(id string) error {
 	}
 	life, stop := context.WithCancel(context.Background())
 	route := &nodeHandler{parent: m.gate, raw: raw, fingerprint: fingerprint, life: life, verify: func(ctx context.Context) error {
-		return m.verify(ctx, raw, cfg, filepath.Join(managedproxy.Dir(profile), "account-policy", id+".json"))
+		return m.verify(ctx, raw, cfg, filepath.Join(managedproxy.Dir(profile), "account-policy", id+".json"), LocationLookupOptions(m.configPath))
 	}}
 	server := &http.Server{Handler: route, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 20 * time.Second, MaxHeaderBytes: 4096}
 	if m.routes == nil {
@@ -140,7 +140,22 @@ func (m *nodeListeners) close() {
 
 // Verify the actual outbound independently of the environment's selected node.
 // Persist a first-use anchor only after the exit/country evidence passes.
-func verifyNodeExit(ctx context.Context, raw *Egress, cfg Config, file string) error {
+// LocationLookupOptions reads the user's opt-in location fallbacks from the
+// workbench preferences beside configPath at each check, so a change in
+// settings reaches per-account node checks without restarting the gate. A
+// missing or unreadable file keeps the default providers only.
+func LocationLookupOptions(configPath string) exitpolicy.LookupOptions {
+	var prefs struct {
+		IPInfoFallback bool `json:"location_ipinfo_fallback"`
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(configPath), "workbench.json"))
+	if err != nil || len(data) > 1<<20 || json.Unmarshal(data, &prefs) != nil {
+		return exitpolicy.LookupOptions{}
+	}
+	return exitpolicy.LookupOptions{IPInfoFallback: prefs.IPInfoFallback}
+}
+
+func verifyNodeExit(ctx context.Context, raw *Egress, cfg Config, file string, options exitpolicy.LookupOptions) error {
 	ip, err := probeExitIP(ctx, raw)
 	if err != nil {
 		return err
@@ -148,7 +163,7 @@ func verifyNodeExit(ctx context.Context, raw *Egress, cfg Config, file string) e
 	transport := &http.Transport{DialContext: raw.DialContext, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }}
-	loc, err := exitpolicy.Lookup(ctx, client, net.ParseIP(ip))
+	loc, err := exitpolicy.LookupWithOptions(ctx, client, net.ParseIP(ip), options)
 	if err != nil {
 		return err
 	}

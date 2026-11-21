@@ -79,7 +79,7 @@ func (s *Server) accountDesktop(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, map[string]string{"password": string(b)})
 		return
 	}
-	s.launch(w, "desktop-instance-"+action, func() error {
+	s.launchRequest(w, r, "desktop-instance-"+action, func() error {
 		// Reload inside the job's operation lock. A draft can be removed or
 		// its dedicated-network selection can change between admission and execution.
 		s.claudeAccounts.mu.Lock()

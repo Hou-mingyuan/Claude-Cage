@@ -359,3 +359,49 @@ func waitDERP(t *testing.T, ctx context.Context, s *tsnet.Server) {
 		}
 	}
 }
+
+func TestNodeHostnameHasNoProductPrefixForNewIdentities(t *testing.T) {
+	host, _ := os.Hostname()
+	want := strings.TrimPrefix(strings.TrimSpace(host), "cage-")
+	if want == "" {
+		want = "linux"
+	}
+	fresh := t.TempDir()
+	for range 2 {
+		got, err := nodeHostname(fresh)
+		if err != nil || got != want {
+			t.Fatalf("new identity hostname = %q, %v; want %q", got, err, want)
+		}
+		// The identity now exists; it must keep the plain name.
+		if err := os.WriteFile(filepath.Join(fresh, "tailscaled.state"), []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy := t.TempDir()
+	if err := os.WriteFile(filepath.Join(legacy, "tailscaled.state"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := nodeHostname(legacy); err != nil || got != "cage-"+want {
+		t.Fatalf("existing identity hostname = %q, %v; want the original cage-%s", got, err, want)
+	}
+}
+
+func TestCustomControlServerDisablesLogUpload(t *testing.T) {
+	envknob.SetenvForTest(t, "TS_NO_LOGS_NO_SUPPORT", "")
+	saved := userNoLogs
+	t.Cleanup(func() { userNoLogs = saved })
+	userNoLogs = ""
+	configureLogUpload("https://headscale.example.com")
+	if !envknob.NoLogsNoSupport() {
+		t.Fatal("a self-hosted control server must not upload logs to Tailscale")
+	}
+	configureLogUpload("")
+	if envknob.NoLogsNoSupport() {
+		t.Fatal("the official service keeps its default log behavior")
+	}
+	userNoLogs = "true"
+	configureLogUpload("")
+	if !envknob.NoLogsNoSupport() {
+		t.Fatal("the user's own TS_NO_LOGS_NO_SUPPORT must be kept")
+	}
+}

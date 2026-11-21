@@ -109,3 +109,52 @@ func TestConcurrentCreateUsesOneCompleteProfile(t *testing.T) {
 		}
 	}
 }
+
+func TestRotateInPlaceAndReplace(t *testing.T) {
+	dir := t.TempDir()
+	if got, err := RotateInPlace(nil, Options{}); err != nil || got != nil {
+		t.Fatalf("legacy rotate returned (%v, %v), want (nil, nil)", got, err)
+	}
+	original, err := Create(dir, Options{
+		Username:        "alex42",
+		WorkHome:        "/home/alex_work",
+		BrowserUsername: "robin19",
+		BrowserHome:     "/home/robin_web",
+		GPUBackend:      "default",
+		WebGL:           "native",
+		Canvas:          "native",
+		GraphicsBackend: "auto",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := RotateInPlace(original, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.Username != original.Username || rotated.WorkHome != original.WorkHome ||
+		rotated.BrowserUsername != original.BrowserUsername || rotated.BrowserHome != original.BrowserHome ||
+		rotated.GPUBackend != original.GPUBackend {
+		t.Fatalf("RotateInPlace altered immutable accounts/homes: got %+v, original %+v", rotated, original)
+	}
+	if rotated.Hostname == original.Hostname || rotated.AudioName == original.AudioName || rotated.ExtensionSuffix == original.ExtensionSuffix {
+		t.Fatalf("RotateInPlace failed to rotate device fields: got %+v, original %+v", rotated, original)
+	}
+	if err := Replace(dir, rotated); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *loaded != *rotated {
+		t.Fatalf("loaded profile = %+v, want %+v", loaded, rotated)
+	}
+	if err := Replace(dir, &Profile{Version: 99}); err == nil {
+		t.Fatal("Replace accepted invalid profile")
+	}
+	stillLoaded, err := Load(dir)
+	if err != nil || *stillLoaded != *rotated {
+		t.Fatalf("failed Replace corrupted saved profile: %+v, %v", stillLoaded, err)
+	}
+}

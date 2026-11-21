@@ -130,15 +130,7 @@ func startCodexConversationMode(ctx context.Context, bin, project string, comput
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	if computerUse {
-		// The bundled desktop runtime requires the standard Codex workspace sandbox.
-		args = append(args, "-c", "sandbox_workspace_write.network_access=false", "-c", "features.exec_permission_approvals=true", "-c", "sandbox_workspace_write.writable_roots=["+strconv.Quote(filepath.Join(dir, "build"))+"]")
-	} else {
-		args = append(args, "-c", "permissions.delegated.network.enabled=false", "-c", `shell_environment_policy.inherit="none"`)
-	}
-	args = append(args,
-		"-c", "features.hooks=false", "-c", "features.plugins="+strconv.FormatBool(computerUse), "-c", "features.memories=false", "-c", "features.apps=false",
-		"-c", `web_search="disabled"`, "app-server", "--listen", "stdio://")
+	args = append(args, codexAppServerArgs(dir, computerUse)...)
 	cmd := exec.CommandContext(life, bin, args...)
 	cmd.Dir = dir
 	cmd.Env = hostbridge.WithoutAppEnv(os.Environ())
@@ -321,4 +313,20 @@ func (c *codexConversation) ask(text string) (string, error) {
 			return answer, nil
 		}
 	}
+}
+
+// Codex refuses to start once a [permissions] profile is defined unless the
+// configuration also selects a default; a user config with only sandbox_mode
+// hides this. Each mode therefore names its own default explicitly.
+func codexAppServerArgs(dir string, computerUse bool) []string {
+	var args []string
+	if computerUse {
+		// The bundled desktop runtime requires the standard Codex workspace sandbox.
+		args = append(args, "-c", `sandbox_mode="workspace-write"`, "-c", "sandbox_workspace_write.network_access=false", "-c", "features.exec_permission_approvals=true", "-c", "sandbox_workspace_write.writable_roots=["+strconv.Quote(filepath.Join(dir, "build"))+"]")
+	} else {
+		args = append(args, "-c", `default_permissions="delegated"`, "-c", "permissions.delegated.network.enabled=false", "-c", `shell_environment_policy.inherit="none"`)
+	}
+	return append(args,
+		"-c", "features.hooks=false", "-c", "features.plugins="+strconv.FormatBool(computerUse), "-c", "features.memories=false", "-c", "features.apps=false",
+		"-c", `web_search="disabled"`, "app-server", "--listen", "stdio://")
 }

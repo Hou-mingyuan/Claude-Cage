@@ -66,7 +66,7 @@ func TestWindowsEventWatchFlush(t *testing.T) {
 	// Let the real tailer return to waiting at EOF before the measured write.
 	time.Sleep(200 * time.Millisecond)
 	counted := &countedSyncFile{File: file}
-	writer := &syncWriter{w: newEventWatch(counted, "synthetic-test")}
+	writer := &syncWriter{w: &eventWatch{w: counted}}
 	start := time.Now()
 	_, err = fmt.Fprintf(writer, "{\"time\":%q,\"status\":{\"running\":true}}\n", time.Now().Format(time.RFC3339Nano))
 	if err != nil {

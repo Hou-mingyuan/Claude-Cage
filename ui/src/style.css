@@ -982,10 +982,28 @@ button.large {
 .check-line {
   display: flex;
   align-items: center;
-  gap: 7px;
+  min-block-size: 44px;
+  box-sizing: border-box;
+  padding-block: 6px;
+  gap: 10px;
   font-size: 0.7857rem;
   color: var(--ink);
   margin: -3px 0 18px;
+  cursor: var(--control-cursor);
+}
+.check-line > input:is([type="checkbox"], [type="radio"]):not([role="switch"]) {
+  inline-size: 22px;
+  block-size: 22px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.check-line > input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.check-line:has(> input:disabled) {
+  cursor: default;
 }
 .settings-content input[type="checkbox"],
 .settings-content input[type="radio"] {
@@ -2880,6 +2898,16 @@ html[dir="rtl"] .browser-header-cell { direction: rtl; }
 .cookie-confirm { margin-top: 8px; padding: 8px; background: var(--hover); flex-wrap: wrap; }
 .cookie-confirm > span { flex: 1 1 240px; }
 .cookie-error { color: var(--danger, #b42318); margin: 8px 0; }
+.cookie-editor { display: grid; gap: 6px; margin-top: 8px; padding: 8px; background: var(--hover); }
+.cookie-editor > label { display: grid; gap: 3px; }
+.cookie-editor textarea { resize: vertical; font-family: inherit; }
+.cookie-editor .cookie-secret { -webkit-text-security: disc; }
+.cookie-editor-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.cookie-editor-row > label:not(.cookie-check), .cookie-editor-row > span { display: inline-flex; align-items: center; gap: 6px; }
+.cookie-editor-row > button { padding: 6px 10px; }
+.cookie-editor .cookie-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.cookie-editor .cookie-check > input { width: 16px; height: 16px; padding: 0; margin: 0; accent-color: var(--accent); }
+.cookie-editor-note { color: var(--muted); margin: 0; }
 .browser-more-menu .vault-browser {
   border-top: 1px solid var(--line);
   padding: 2px 0 0;

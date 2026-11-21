@@ -1,0 +1,29 @@
+diff --git a/pkg/limayaml/defaults.go b/pkg/limayaml/defaults.go
+index 1984575b..47a6a90c 100644
+--- a/pkg/limayaml/defaults.go
++++ b/pkg/limayaml/defaults.go
+@@ -204,8 +204,9 @@ func FillDefault(ctx context.Context, y, d, o *limatype.LimaYAML, filePath strin
+ 		warn = false
+ 	}
+ 	if y.User.Comment == nil {
+-		y.User.Comment = new(osutil.LimaUser(ctx, existingLimaVersion, warn, y.OS).Name)
+-		warn = false
++		// The guest reads its account comment and cloud-init data; leave out
++		// the host account's full name unless a template sets one.
++		y.User.Comment = new("")
+ 	}
+ 	if y.User.Home == nil {
+ 		y.User.Home = new(osutil.LimaUser(ctx, existingLimaVersion, warn, y.OS).HomeDir)
+diff --git a/pkg/limayaml/defaults_test.go b/pkg/limayaml/defaults_test.go
+index e6666be8..ff51a03d 100644
+--- a/pkg/limayaml/defaults_test.go
++++ b/pkg/limayaml/defaults_test.go
+@@ -152,7 +152,7 @@ func TestFillDefault(t *testing.T) {
+ 		Plain:                new(false),
+ 		User: limatype.User{
+ 			Name:             new(user.Username),
+-			Comment:          new(user.Name),
++			Comment:          new(""),
+ 			Home:             new(user.HomeDir),
+ 			Shell:            new("/bin/bash"),
+ 			UID:              new(uint32(uid)),

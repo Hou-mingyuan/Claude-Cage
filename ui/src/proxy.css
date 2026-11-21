@@ -718,3 +718,13 @@
     transition: none;
   }
 }
+.proxy-node-edit {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.proxy-node-edit > button {
+  justify-self: start;
+}

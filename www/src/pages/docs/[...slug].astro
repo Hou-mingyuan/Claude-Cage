@@ -33,21 +33,21 @@ const canonical = new URL(guideURL(page.slug), Astro.site);
   <a class="skip-link" href="#article">跳到正文</a>
   <header class="nav wrap guide-header">
     <a class="brand" href={base}><img src={`${base}cage-icon.png`} width="36" height="36" alt="" /><span>Claude Cage</span></a>
-    <nav aria-label="网站导航"><a href={base+"ask/"}>使用答疑</a><a href={base}>官网首页</a><a href={guideURL('index')} aria-current="page">使用文档</a><a class="nav-download" href={`${base}#download`}>下载应用 ↓</a></nav>
+    <nav aria-label="网站导航"><a href={base+"ask/"}>使用答疑</a><a href={`${base}plugins/`}>插件市场</a><a href={base}>官网首页</a><a href={guideURL('index')} aria-current="page">使用文档</a><a class="nav-download" href={`${base}#download`}>下载应用 ↓</a></nav>
   </header>
   <div class="guide-shell wrap">
     <aside class="guide-sidebar" aria-label="文档导航">
       <a class="guide-home" href={guideURL('index')}>使用文档</a>
       <div class="guide-search" hidden>
         <label for="guide-search">搜索文档</label>
-        <div class="search-field"><span aria-hidden="true">⌕</span><input id="guide-search" type="search" placeholder="试试：多账号、手机、断网" autocomplete="off" aria-controls="search-results" /><button type="button" id="clear-search" aria-label="清空搜索" hidden>×</button></div>
+        <div class="search-field"><span aria-hidden="true">⌕</span><input id="guide-search" type="search" placeholder="试试：插件、多账号、手机、断网" autocomplete="off" aria-controls="search-results" /><button type="button" id="clear-search" aria-label="清空搜索" hidden>×</button></div>
       </div>
       <details class="guide-mobile-menu">
         <summary>浏览文档目录 <span aria-hidden="true">⌄</span></summary>
         <nav aria-label="手机文档目录">{guideGroups.map(group => <section><h2>{group}</h2>{guidePages.filter(item => item.group === group).map(item => <a href={guideURL(item.slug)} aria-current={item.slug === page.slug ? 'page' : undefined}>{item.title}</a>)}</section>)}</nav>
       </details>
       <nav class="guide-desktop-menu" aria-label="全部章节">{guideGroups.map(group => <section><h2>{group}</h2>{guidePages.filter(item => item.group === group).map(item => <a href={guideURL(item.slug)} aria-current={item.slug === page.slug ? 'page' : undefined}>{item.title}</a>)}</section>)}</nav>
-      <p class="guide-sidebar-note">选择熟悉的系统，在同一个工作台里开发。<br />本机、云端与手机各有指南。</p>
+      <p class="guide-sidebar-note">轻量化本地隔离环境，插件市场按需扩展。<br />本机、云端与手机各有指南。</p>
     </aside>
     <main id="article" class="guide-main" tabindex="-1">
       <section id="search-results" class="guide-results" aria-labelledby="search-title" hidden><div class="search-heading"><h2 id="search-title">搜索结果</h2><button id="close-search" type="button">返回正文</button></div><p id="search-status" role="status" aria-live="polite"></p><ul id="search-list"></ul></section>

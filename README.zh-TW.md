@@ -18,11 +18,23 @@
 
 </div>
 
+## 設計理念
+
+1. **Claude 本身是安全的，但它的執行外殼（harness）及相關程式不是**——包括 Claude Code、Claude Desktop，以及瀏覽器裡接觸到的郵件、網頁與環境訊號。
+2. **想要在確保安全的前提下使用 Claude 的能力，通常有兩條路線：反向代理，或者遠端控制**——要麼把 Claude 從遠端伺服器拉出來直接跑在主機上，要麼把 Claude 部署在受控環境裡，由它遠端操作主機。我們認為後者更安全，也更合規。
+3. **因此，Cage 的核心思想是：為 Claude 及相關程式打造一個輕量化的本機隔離環境，再透過標準 MCP 外掛，讓 Claude 安全、受控地使用本機能力**——每一次越出環境的呼叫都有明確的權限邊界與使用者確認，比直接暴露 SSH 更安全。
+
+這樣一來，Cage 同時實現了三個目標：
+
+- **把危險的部分關起來，把有用的能力放出來。** Claude 大小姐安心待在 Cage 裡，坐在她的小螃蟹上，只需把手伸出來處理外面的工作——不必在 Cage 裡重新搭一整間辦公室。
+- **透過外掛市場，與開源社群解耦協作。** 我們開放了[外掛市場（cage-plugins）](https://github.com/Lee-xeo/cage-plugins)：**外掛 = MCP + 擴充**，分別對應「給 Claude 的能力」與「Cage 工作臺的客製化」。開源社群可以在外掛市場持續貢獻工具、桌面控制與工作流擴充，而不必擠進 Cage 主倉庫的 Issue 列表；Cage 核心維護團隊也能更聚焦於隔離環境、網路與工作臺本身的打磨。
+- **合規、安全、輕量化、本機、低成本，一鍵安裝、一鍵配置、開箱即用。** 我們不再需要維護複雜臃腫的多系統客機，不再擔心 Claude 的能力被困在孤島裡，也無需承擔高昂的雲端成本或資料安全隱憂——在自己電腦上就能優雅地實現這一切。
+
 ## 受夠了 Anthropic
 
-作為一個只是想和 Claude 對話與合作的正常使用者，受夠了折騰各種 VPS，指紋瀏覽器，環境檢測，面對封號的擔驚受怕和財產損失。我們提出 **Claude Cage** 專案：**一個開箱即用的桌面程式，配置好自己的網路代理，集中管理隔離環境、時區語言和環境檢查。**
+作為一個只是想和 Claude 對話與合作的正常使用者，受夠了折騰各種 VPS，指紋瀏覽器，環境檢測，面對封號的擔驚受怕和財產損失。我們提出 **Claude Cage** 專案：**一個開箱即用的桌面程式，配置好自己的網路代理，集中管理輕量化隔離環境、時區語言、環境檢查與外掛能力。**
 
-Claude Cage 在一個小型的 Debian 13 環境裡執行官方 Claude Code 和 Claude Desktop，macOS、Windows 和 Linux 上都是同一個環境。終端、瀏覽器、編輯器和官方 Claude Desktop 集中在同一個工作臺，專案按需共享，網路獨立管理；還能連接自己的伺服器，或用手機接續電腦上的工作。主要功能包括：
+Claude Cage 在一個小型的 Debian 13 環境裡執行官方 Claude Code 和 Claude Desktop，macOS、Windows 和 Linux 上都是同一個環境。終端、瀏覽器、編輯器、官方 Claude Desktop 與外掛市場集中在同一個工作臺，專案按需共享，網路獨立管理；既可以透過外掛安全呼叫本機能力，也能連接自己的伺服器，或用手機接續電腦上的工作。主要功能包括：
 
 - 和主機隔離的網路設定，Cage 自己接管和代理內部的所有網路流量
 - 和主機隔離的指紋設定，包括時區、語言等，支援自動與代理 IP 同步
@@ -44,7 +56,8 @@ Claude Cage 在一個小型的 Debian 13 環境裡執行官方 Claude Code 和 C
 ## 你可以用它做什麼
 
 - **在一個視窗裡完成工作。** 用終端執行 Claude Code，用編輯器檢視改動，用 Cage 瀏覽器預覽服務和完成登入。
-- **三個平台，同一個環境。** macOS、Windows 和 Linux 上的 Cage 都使用同一個 Debian 13 環境，工具與操作方式一致。 [Debian 環境](docs/guide/guest-systems.md)
+- **透過外掛市場解鎖全部能力。** 內建開放的[外掛市場（cage-plugins）](https://github.com/Lee-xeo/cage-plugins)，外掛 = MCP + 擴充：既能讓環境裡的 Claude 透過標準 MCP 安全、受控地使用本機能力（如桌面鍵鼠控制、Office 文件、Blender、命令列工具等），也能透過沙箱頁面客製化 Cage 工作臺。主機外掛預設受權限宣告與確認對話框保護。 [外掛與市場](docs/guide/plugins.md) · [開發規範](docs/plugins.md)
+- **三個平台，同一個輕量化環境。** macOS、Windows 和 Linux 上的 Cage 都執行同一個輕量化 Debian 13 環境，無需維護複雜的多系統客機，工具與操作方式一致。 [Debian 環境](docs/guide/guest-systems.md)
 - **控制共享範圍。** 只共享預設工作區和明確開啟的專案資料夾；主機的 Claude 登入、瀏覽器配置和 SSH 金鑰不會自動匯入。
 - **看清網路狀態。** 內建代理管理支援匯入訂閱、選擇節點和檢查出口。關鍵檢查未透過時，環境保持離線；代理不可用時沒有直連回退。
 - **下次繼續使用。** 工具、檔案和登入狀態儲存在虛擬磁碟裡，關閉視窗可以保留後臺任務。
@@ -52,7 +65,6 @@ Claude Cage 在一個小型的 Debian 13 環境裡執行官方 Claude Code 和 C
 - **用手機接續工作。** Android / iPhone 透過 QR Code 或配對碼連接電腦，接續同一份 Claude Code 對話、傳送訊息和處理工具審批，也可操作遠端瀏覽器和電腦上的 Claude Desktop。
 - **在雲端執行環境。** 透過 SSH 連接部署在符合條件的 Linux x86_64 VPS 上的 Cage，無需 KVM；資料與網路出口位於伺服器。
 - **透過私網連接。** 在 Cage 內登入 Tailscale，讓本機與環境透過 SSH 雙向連接。 [Tailscale / SSH](docs/guide/tailscale.md)
-- **讓 Claude 使用電腦上的工具（實驗性）。** 預設關閉。開啟後，環境裡的 Claude 可以在已共享的專案目錄中執行電腦上的命令，每次呼叫都需在系統對話框中確認。 [外掛](docs/plugins.md)
 
 ## 快速開始
 
@@ -66,7 +78,7 @@ Claude Cage 在一個小型的 Debian 13 環境裡執行官方 Claude Code 和 C
 
 ## 下載與安裝
 
-Cage 支援 macOS、Windows 和 Linux：macOS 14+ 的 Apple Silicon Mac、Windows 10 22H2 / 11 x64，以及 Debian 12 / Ubuntu 22.04 / 24.04 x86_64。 Intel Mac、Windows ARM64 和 Linux ARM64 尚不受支援。 [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md)。
+Cage 支援 macOS、Windows 和 Linux：macOS 14+ 的 Apple Silicon Mac 與 Intel Mac、Windows 10 22H2 / 11 x64，以及 Debian 12 / Ubuntu 22.04 / 24.04 x86_64。Windows ARM64 和 Linux ARM64 尚不受支援。 [macOS](docs/getting-started.md) · [Windows](docs/windows.md) · [Linux](docs/linux.md)。
 
 1. 開啟[專案主頁](https://claude-cage.com/zh-TW/#download)，點選「下載應用程式」並選擇平台。
 2. macOS：開啟安裝包，將 **Cage** 拖入 **Applications（應用程式）**，再從“應用程式”啟動。Windows：[安裝說明](docs/windows.md#安装并开始工作) · Linux：[安裝說明](docs/linux.md#安装并开始工作)。

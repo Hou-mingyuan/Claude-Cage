@@ -67,15 +67,17 @@ jobs:
             echo 'Release candidates require an explicitly dispatched release workflow.' >&2
             exit 1
           fi
+      # Release candidates restore no cache another branch or workflow wrote.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: ${{ !inputs.release }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ !inputs.release && 'npm' || '' }}
           cache-dependency-path: ui/package-lock.json
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Build Linux application and package
         run: |
           node scripts/check-version.mjs
@@ -83,7 +85,9 @@ jobs:
           bash scripts/package-linux.sh --skip-build
           npm test --prefix ui
           npm run --prefix ui lint
-          node --test internal/cage/browser-clipboard.test.mjs internal/cage/browser-visibility.test.mjs internal/cage/native-input.test.mjs internal/cage/display-density.test.mjs internal/cage/browser-wheel.test.mjs
+          node --test internal/cage/browser-clipboard.test.mjs internal/cage/browser-visibility.test.mjs internal/cage/native-input.test.mjs internal/cage/display-density.test.mjs internal/cage/browser-wheel.test.mjs internal/cage/browser-extensions.test.mjs
+          cc -std=c11 -Wall -Wextra -Werror -o "$RUNNER_TEMP/media-plugins-test" desktop/linux/media-plugins-test.c
+          (cd "$RUNNER_TEMP" && ./media-plugins-test)
       - name: Linux executable tests as an ordinary user
         env:
           UV_CACHE_DIR: /home/cage/.cache/uv
@@ -99,6 +103,7 @@ jobs:
           runuser -u cage -- uv run --no-project --python 3.11 internal/cage/desktop-downloads.test.py
           runuser -u cage -- uv run --no-project --python 3.11 internal/cage/desktop-history.test.py
           runuser -u cage -- uv run --no-project --python 3.11 internal/cage/display-governor.test.py
+          runuser -u cage -- uv run --no-project --python 3.11 internal/cage/shared-clipboard.test.py
           runuser -u cage -- uv run --no-project --python 3.11 internal/workbench/cache_maintenance_test.py
       - name: Install, render native workbench, reinstall and remove
         run: |

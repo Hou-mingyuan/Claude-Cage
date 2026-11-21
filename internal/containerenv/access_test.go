@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,5 +147,57 @@ func TestAccountSetupWaitsForColdStartedSSHService(t *testing.T) {
 				t.Fatalf("readiness wait made %d probes", len(data))
 			}
 		})
+	}
+}
+
+func TestInterruptedKeyAndTrustRecordsRecover(t *testing.T) {
+	r := newRuntime(t.TempDir(), fixtureConfig())
+	if err := os.MkdirAll(r.InstanceDir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(r.InstanceDir(), "id_ed25519")
+	// Earlier versions created the key file before writing it.
+	if err := os.WriteFile(key, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	public, err := r.ensureSSHKey()
+	if err != nil || len(public) == 0 {
+		t.Fatal("empty key file blocked access:", err)
+	}
+	again, err := r.ensureSSHKey()
+	if err != nil || string(again) != string(public) {
+		t.Fatal("key changed on the next start", err)
+	}
+	// Anything else stays in place and is reported, never replaced.
+	if err := os.WriteFile(key, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ncut"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ensureSSHKey(); err == nil {
+		t.Fatal("damaged key accepted")
+	}
+	if b, _ := os.ReadFile(key); !strings.HasSuffix(string(b), "cut") {
+		t.Fatal("damaged key was overwritten")
+	}
+	trust := filepath.Join(r.InstanceDir(), "known_hosts")
+	if err := os.WriteFile(trust, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeEmptyRecord(trust); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(trust); !os.IsNotExist(err) {
+		t.Fatal("empty trust record kept", err)
+	}
+	if err := os.WriteFile(trust, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeEmptyRecord(trust); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(trust); string(b) != "x" {
+		t.Fatal("non-empty trust record removed")
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(r.InstanceDir(), ".*.tmp-*")); len(leftovers) != 0 {
+		t.Fatal(leftovers)
 	}
 }

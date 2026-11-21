@@ -96,7 +96,7 @@ export async function executeAgentNative(item, { native, getContext, storage }) 
   return result === undefined ? null : result;
 }
 
-export function createAgentNativeConsumer({ api, native, nativeAvailable, getContext, storage, reload, getOrigin = () => globalThis.location?.origin, schedule = setTimeout, cancel = clearTimeout, interval = 750, onError = () => {} }) {
+export function createAgentNativeConsumer({ api, native, nativeAvailable, getContext, storage, reload, getOrigin = () => globalThis.location?.origin, schedule = setTimeout, cancel = clearTimeout, interval = 750, waitSeconds = 25, now = Date.now, onError = () => {} }) {
   let stopped = true;
   let timer;
   let running = false;
@@ -115,12 +115,16 @@ export function createAgentNativeConsumer({ api, native, nativeAvailable, getCon
     if (stopped || running) return;
     if (!nativeAvailable()) { timer = schedule(poll, interval); return; }
     running = true;
+    let nextDelay = interval;
     try {
       if (!proof) await registerWindow();
       if (!completion) {
         if (stopped) return;
-        const item = await api("/agent/native?consumer=window", undefined, undefined, { "X-Cage-Agent-Window": proof });
+        const started = now();
+        const path = waitSeconds > 0 ? `/agent/native?consumer=window&wait=${waitSeconds}` : "/agent/native?consumer=window";
+        const item = await api(path, undefined, undefined, { "X-Cage-Agent-Window": proof });
         if (item?.id) {
+          nextDelay = 0;
           if (stopped) {
             completion = { id: item.id, body: { error: "桌面窗口已关闭，原生操作未执行。" } };
           } else {
@@ -131,6 +135,8 @@ export function createAgentNativeConsumer({ api, native, nativeAvailable, getCon
               completion = { id: item.id, body: { error: error?.message || "原生操作未完成，请核对当前窗口。" } };
             }
           }
+        } else if (waitSeconds > 0 && now() - started >= 1000) {
+          nextDelay = 0;
         }
       }
       if (completion) {
@@ -143,10 +149,11 @@ export function createAgentNativeConsumer({ api, native, nativeAvailable, getCon
       // Only a completion receipt is retried. An accepted native action is
       // never re-executed after a lost connection or lost response.
       if (error?.status === 401 || error?.status === 403) proof = undefined;
+      nextDelay = interval;
       onError(error);
     } finally {
       running = false;
-      if (!stopped) timer = schedule(poll, interval);
+      if (!stopped) timer = schedule(poll, nextDelay);
     }
   };
   return {

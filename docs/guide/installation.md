@@ -11,7 +11,7 @@ keywords: 下载 安装 环境 macOS Windows Linux Debian Apple Silicon WHPX KVM
 
 | 平台 | 要求与安装方式 |
 | --- | --- |
-| macOS | Apple Silicon、macOS 14+。打开 `.dmg`，将 Cage 拖入“应用程序”，再从那里启动。Intel Mac 暂不支持。 |
+| macOS | Apple Silicon 或 Intel 处理器、macOS 14+。按芯片下载 `macos-arm64` 或 `macos-amd64` 的 `.dmg`，将 Cage 拖入“应用程序”，再从那里启动。 |
 | Windows | Windows 10 22H2 / 11、x64。运行 `.exe` 安装器，启用“Windows 虚拟机监控程序平台”，并在系统要求时重启。未签名预览包会明确标注。 |
 | Linux | Debian 12 / Ubuntu 22.04 / 24.04、x86_64。需要 KVM 与当前用户的访问权限。执行 `sudo apt install ./Cage-<版本>-linux-amd64.deb` 补齐应用依赖，再从应用菜单打开。 |
 

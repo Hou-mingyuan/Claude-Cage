@@ -13,6 +13,7 @@ import {
   Pin,
   PinOff,
   TerminalSquare,
+  UsersRound,
   X,
 } from "lucide-react";
 import { dropAfter, tabName } from "./workspace-state.mjs";
@@ -61,6 +62,7 @@ export function WorkspaceTabs({
   splitDrag,
   openingSession,
   sessionOpenError,
+  onSessionAccount,
 }) {
   const tr = useTranslation();
   const [menu, setMenu] = useState(null);
@@ -429,6 +431,9 @@ export function WorkspaceTabs({
                 </button>
               ) : (
                 <div className="terminal-row-actions" role="group" aria-label={tr("{0} 的操作", (title))}>
+                  {tab.historySession && !runningElsewhere && onSessionAccount && tab.historySession.account_id && (
+                    <TerminalAction label={tr("用其他账号继续")} icon={UsersRound} disabled={busy || opening} onClick={() => onSessionAccount(tab.historySession)} />
+                  )}
                   <TerminalAction label={saved[tab.id]?.pinned ? tr("取消置顶") : tr("置顶")}
                     icon={saved[tab.id]?.pinned ? PinOff : Pin} disabled={busy} onClick={() => onPin(tab.id)} />
                   <TerminalAction label={tr("重命名")} icon={Pencil} disabled={busy} onClick={() => onRename(tab)} />

@@ -11,6 +11,7 @@ import (
 func TestCreateProjectDuringSlowPhysicalInterfaceProbe(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s, folder, _ := groupFixture(t)
+		markTestVMRunning(t, s)
 		s.safety.VerifiedAt = time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
 		const probeDuration = 24 * time.Second

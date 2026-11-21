@@ -1,0 +1,157 @@
+diff --git a/pkg/hostagent/hostagent.go b/pkg/hostagent/hostagent.go
+index b53dceb..c3b7de4 100644
+--- a/pkg/hostagent/hostagent.go
++++ b/pkg/hostagent/hostagent.go
+@@ -678,7 +678,9 @@ ln -sf "${SSH_AUTH_SOCK}" /run/host-services/ssh-auth.sock`
+ 		if a.showProgress {
+ 			cloudInitDone := make(chan struct{})
+ 			go func() {
+-				timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
++				// Progress mode follows a first boot that may download packages
++				// for a long time; the caller's idle timeout detects a stall.
++				timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+ 				defer cancel()
+ 
+ 				a.watchCloudInitProgress(timeoutCtx)
+diff --git a/pkg/instance/start.go b/pkg/instance/start.go
+index 10b4d2f..5a5c0b2 100644
+--- a/pkg/instance/start.go
++++ b/pkg/instance/start.go
+@@ -372,6 +372,11 @@ func waitHostAgentStart(_ context.Context, haPIDPath, haStderrPath string) error
+ func watchHostAgentEvents(ctx context.Context, inst *limatype.Instance, haStdoutPath, haStderrPath string, begin time.Time, showProgress bool) error {
+ 	ctx, cancel := context.WithTimeout(ctx, watchHostAgentTimeout(ctx))
+ 	defer cancel()
++	// With an idle timeout, any hostagent event (including each cloud-init
++	// output line in progress mode) postpones the deadline: a boot that keeps
++	// making progress is not cut off, a stalled one still fails.
++	ctx, touch, idleExpired := withIdleDeadline(ctx, watchHostAgentIdleTimeout(ctx))
++	defer touch(false)
+ 
+ 	var (
+ 		printedSSHLocalPort  bool
+@@ -381,6 +386,7 @@ func watchHostAgentEvents(ctx context.Context, inst *limatype.Instance, haStdout
+ 	)
+ 
+ 	onEvent := func(ev hostagentevents.Event) bool {
++		touch(true)
+ 		if !printedSSHLocalPort && ev.Status.SSHLocalPort != 0 {
+ 			logrus.Infof("SSH Local Port: %d", ev.Status.SSHLocalPort)
+ 			printedSSHLocalPort = true
+@@ -450,12 +456,52 @@ func watchHostAgentEvents(ctx context.Context, inst *limatype.Instance, haStdout
+ 	}
+ 
+ 	if !receivedRunningEvent {
++		if idleExpired() {
++			return fmt.Errorf("did not receive an event with the `running` status: no boot progress for %v", watchHostAgentIdleTimeout(ctx))
++		}
+ 		return errors.New("did not receive an event with the `running` status")
+ 	}
+ 
+ 	return nil
+ }
+ 
++// withIdleDeadline cancels ctx after idle passes without touch(true).
++// touch(false) stops the timer. An idle of zero disables the deadline.
++func withIdleDeadline(ctx context.Context, idle time.Duration) (context.Context, func(bool), func() bool) {
++	if idle <= 0 {
++		return ctx, func(bool) {}, func() bool { return false }
++	}
++	ctx, cancel := context.WithCancelCause(ctx)
++	errIdle := errors.New("no hostagent progress")
++	timer := time.AfterFunc(idle, func() { cancel(errIdle) })
++	touch := func(alive bool) {
++		if alive {
++			timer.Reset(idle)
++			return
++		}
++		timer.Stop()
++		cancel(nil)
++	}
++	return ctx, touch, func() bool { return errors.Is(context.Cause(ctx), errIdle) }
++}
++
++// A defined type, not an alias of struct{}: watchHostAgentEventsTimeoutKey
++// and launchingShellKey are aliases of struct{}, and an alias here would make
++// the idle timeout replace the overall one stored under the same key.
++type watchHostAgentIdleTimeoutKey struct{}
++
++// WithWatchHostAgentIdleTimeout makes watchHostAgentEvents fail only after
++// idle passes without any hostagent event, within the overall timeout set by
++// WithWatchHostAgentTimeout.
++func WithWatchHostAgentIdleTimeout(ctx context.Context, idle time.Duration) context.Context {
++	return context.WithValue(ctx, watchHostAgentIdleTimeoutKey{}, idle)
++}
++
++func watchHostAgentIdleTimeout(ctx context.Context) time.Duration {
++	idle, _ := ctx.Value(watchHostAgentIdleTimeoutKey{}).(time.Duration)
++	return idle
++}
++
+ type watchHostAgentEventsTimeoutKey = struct{}
+ 
+ // WithWatchHostAgentTimeout sets the value of the timeout to use for
+diff --git a/pkg/instance/start_idle_test.go b/pkg/instance/start_idle_test.go
+new file mode 100644
+index 0000000..9d40f97
+--- /dev/null
++++ b/pkg/instance/start_idle_test.go
+@@ -0,0 +1,59 @@
++package instance
++
++import (
++	"context"
++	"testing"
++	"time"
++)
++
++func TestWithIdleDeadlineExtendsOnProgress(t *testing.T) {
++	ctx, touch, expired := withIdleDeadline(context.Background(), 80*time.Millisecond)
++	for range 5 {
++		time.Sleep(40 * time.Millisecond)
++		touch(true)
++	}
++	if ctx.Err() != nil || expired() {
++		t.Fatal("progress did not postpone the idle deadline")
++	}
++	select {
++	case <-ctx.Done():
++	case <-time.After(time.Second):
++		t.Fatal("idle deadline never fired")
++	}
++	if !expired() {
++		t.Fatal("idle expiry not reported")
++	}
++	touch(false)
++}
++
++func TestWithIdleDeadlineKeepsParentAndStop(t *testing.T) {
++	parent, cancel := context.WithCancel(context.Background())
++	ctx, touch, expired := withIdleDeadline(parent, time.Hour)
++	cancel()
++	<-ctx.Done()
++	if expired() {
++		t.Fatal("parent cancellation reported as idle")
++	}
++	touch(false)
++	ctx, touch, expired = withIdleDeadline(context.Background(), 0)
++	touch(true)
++	if ctx.Err() != nil || expired() {
++		t.Fatal("zero idle must disable the deadline")
++	}
++}
++
++func TestWatchHostAgentTimeoutsUseSeparateKeys(t *testing.T) {
++	ctx := WithWatchHostAgentTimeout(context.Background(), 2*time.Hour)
++	ctx = WithWatchHostAgentIdleTimeout(ctx, 10*time.Minute)
++	if got := watchHostAgentTimeout(ctx); got != 2*time.Hour {
++		t.Fatalf("overall timeout = %v, want 2h: the idle timeout replaced it", got)
++	}
++	if got := watchHostAgentIdleTimeout(ctx); got != 10*time.Minute {
++		t.Fatalf("idle timeout = %v, want 10m", got)
++	}
++	ctx = WithWatchHostAgentIdleTimeout(WithWatchHostAgentTimeout(context.Background(), time.Hour), time.Minute)
++	ctx = WithWatchHostAgentTimeout(ctx, 3*time.Hour)
++	if watchHostAgentIdleTimeout(ctx) != time.Minute || watchHostAgentTimeout(ctx) != 3*time.Hour {
++		t.Fatal("setting the overall timeout after the idle one lost a value")
++	}
++}

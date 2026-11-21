@@ -15,7 +15,8 @@ Commands:
                      command via login zsh and exit.
   run <cmd> [args]   Run a command in the VM (no shell: for pipes/redirects
                      use 'shell -c "..."' instead; pass --tty for TUIs like
-                     opencode, vibe, htop, etc.)
+                     opencode, vibe, htop, etc.; --workdir DIR runs it
+                     from DIR, an absolute directory in the VM)
   code               Serve VS Code (code-server) from the VM, at
                      http://<vm-name>.localhost:<port>/, until Ctrl-C. The
                      address and the password, made in each VM, are

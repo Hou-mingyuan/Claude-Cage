@@ -6,7 +6,7 @@ const { chromium } = require(process.env.CAGE_PLAYWRIGHT_MODULE || 'playwright')
 const origin = process.env.CAGE_SITE_URL || 'http://127.0.0.1:4833/';
 const output = process.env.CAGE_SITE_REPORT || '_output/platform-publication/site';
 const release = JSON.parse(await readFile(new URL('../src/data/release.json', import.meta.url), 'utf8'));
-const expected = Object.fromEntries(Object.entries({ macOS: 'macos', Windows: 'windows', Linux: 'linux', Android: 'android' })
+const expected = Object.fromEntries(Object.entries({ macOS: 'macos', 'macOS Intel': 'macosIntel', Windows: 'windows', Linux: 'linux', Android: 'android' })
   .filter(([, key]) => release.platforms[key]).map(([name, key]) => [name, release.platforms[key]]));
 for (const platform of ['macOS', 'Windows', 'Linux']) assert.ok(expected[platform], `${platform} must have a verified public installer`);
 await mkdir(output, { recursive: true });

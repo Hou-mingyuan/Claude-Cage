@@ -24,6 +24,85 @@ type Contributes struct {
 	MCPServers  []MCPServer  `json:"mcpServers,omitempty"`
 	Views       []View       `json:"views,omitempty"`
 	URIHandlers []URIHandler `json:"uriHandlers,omitempty"`
+	Settings    []Setting    `json:"settings,omitempty"`
+}
+
+// Setting is a value the user enters for the plugin, such as an address or
+// an access token. Its program receives it in the environment variable Env.
+type Setting struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	// Type is one of SettingTypes.
+	Type     string `json:"type"`
+	Env      string `json:"env"`
+	Required bool   `json:"required,omitempty"`
+	// Default is used while the user has entered nothing. Not for secrets.
+	Default string `json:"default,omitempty"`
+	// Choices are the values a choice may take.
+	Choices []string `json:"choices,omitempty"`
+}
+
+// Types of setting. A secret is stored encrypted and never shown again.
+const (
+	SettingString  = "string"
+	SettingSecret  = "secret"
+	SettingBoolean = "boolean"
+	SettingChoice  = "choice"
+)
+
+// SettingTypes are the values a setting's type may take.
+var SettingTypes = []string{SettingString, SettingSecret, SettingBoolean, SettingChoice}
+
+// SettingValueLimit is the longest value a setting may hold.
+const SettingValueLimit = 8192
+
+// ValidSettingValue reports whether value can be given to a program in an
+// environment variable: not too long, and without NUL or line breaks.
+func ValidSettingValue(value string) bool {
+	return len(value) <= SettingValueLimit && !strings.ContainsAny(value, "\x00\r\n")
+}
+
+// settingsSince is the first application version that reads settings; older
+// ones reject a manifest that has them.
+var settingsSince = [3]int{0, 2, 0}
+
+var settingEnv = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
+
+// reservedEnv are variables the application sets for every program itself.
+var reservedEnv = []string{"HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "LC_ALL", "TZ"}
+
+func (s Setting) check() error {
+	switch {
+	case !validID(s.ID):
+		return fmt.Errorf("settings: id %q is not valid", s.ID)
+	case s.Title == "" || len(s.Title) > 80:
+		return fmt.Errorf("settings %s: title is missing or too long", s.ID)
+	case len(s.Description) > 500:
+		return fmt.Errorf("settings %s: description is too long", s.ID)
+	case !slices.Contains(SettingTypes, s.Type):
+		return fmt.Errorf("settings %s: type must be string, secret, boolean or choice", s.ID)
+	case !settingEnv.MatchString(s.Env) || slices.Contains(reservedEnv, s.Env) || strings.HasPrefix(s.Env, "LD_") || strings.HasPrefix(s.Env, "DYLD_"):
+		return fmt.Errorf("settings %s: env %q must be uppercase letters, digits and underscores, and not one the application sets", s.ID, s.Env)
+	case !ValidSettingValue(s.Default):
+		return fmt.Errorf("settings %s: default is too long or has a line break", s.ID)
+	case s.Type == SettingSecret && s.Default != "":
+		return fmt.Errorf("settings %s: a secret has no default", s.ID)
+	case s.Type == SettingBoolean && s.Default != "" && s.Default != "true" && s.Default != "false":
+		return fmt.Errorf("settings %s: the default of a boolean is true or false", s.ID)
+	case s.Type != SettingChoice && len(s.Choices) > 0:
+		return fmt.Errorf("settings %s: choices are for type choice", s.ID)
+	case s.Type == SettingChoice && (len(s.Choices) == 0 || len(s.Choices) > 20):
+		return fmt.Errorf("settings %s: a choice needs one to twenty choices", s.ID)
+	case s.Type == SettingChoice && s.Default != "" && !slices.Contains(s.Choices, s.Default):
+		return fmt.Errorf("settings %s: default is not one of choices", s.ID)
+	}
+	for i, choice := range s.Choices {
+		if choice == "" || len(choice) > 80 || !ValidSettingValue(choice) || slices.Contains(s.Choices[:i], choice) {
+			return fmt.Errorf("settings %s: choice %q is empty, too long or repeated", s.ID, choice)
+		}
+	}
+	return nil
 }
 
 // MCPServer is a program that speaks MCP on its standard input and output.
@@ -226,6 +305,24 @@ func (m *Manifest) check() error {
 		}
 		schemes = append(schemes, handler.Scheme)
 	}
+	if len(m.Contributes.Settings) > 0 {
+		if floor, ok := engineFloor(m.Engines.Cage); !ok || slices.Compare(floor[:], settingsSince[:]) < 0 {
+			return fmt.Errorf("settings need engines.cage of at least %d.%d.%d", settingsSince[0], settingsSince[1], settingsSince[2])
+		}
+		if len(m.Contributes.Settings) > 20 {
+			return fmt.Errorf("at most twenty settings")
+		}
+	}
+	var settings, envs []string
+	for _, setting := range m.Contributes.Settings {
+		if err := setting.check(); err != nil {
+			return err
+		}
+		if slices.Contains(settings, setting.ID) || slices.Contains(envs, setting.Env) {
+			return fmt.Errorf("settings %s: id or env is repeated", setting.ID)
+		}
+		settings, envs = append(settings, setting.ID), append(envs, setting.Env)
+	}
 	for _, event := range m.ActivationEvents {
 		kind, id, _ := strings.Cut(event, ":")
 		if !(event == "onStartupFinished" || kind == "onView" && slices.Contains(views, id) || kind == "onUri" && slices.Contains(schemes, id)) {
@@ -243,6 +340,19 @@ func (m Manifest) EngineSatisfied(version string) bool {
 		return true
 	}
 	return engineSatisfied(m.Engines.Cage, version)
+}
+
+// engineFloor is the lowest version an engines range accepts.
+func engineFloor(spec string) ([3]int, bool) {
+	var floor [3]int
+	match := engineRange.FindStringSubmatch(spec)
+	if match == nil {
+		return floor, false
+	}
+	for i := range floor {
+		floor[i], _ = strconv.Atoi(match[i+2])
+	}
+	return floor, true
 }
 
 func engineSatisfied(spec, version string) bool {

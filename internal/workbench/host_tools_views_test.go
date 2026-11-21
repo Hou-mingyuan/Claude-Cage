@@ -31,9 +31,7 @@ func TestPluginViewFilesAreServedConfined(t *testing.T) {
 	write("view/index.html", "<p>page</p>")
 	write("view/app.js", "1")
 	write("secret.txt", "outside the page's folder")
-	if err := os.Symlink(filepath.Join(dir, "secret.txt"), filepath.Join(dir, "view", "link.js")); err != nil {
-		t.Fatal(err)
-	}
+	linkErr := os.Symlink(filepath.Join(dir, "secret.txt"), filepath.Join(dir, "view", "link.js"))
 	get := func(path string) *httptest.ResponseRecorder {
 		recorder := httptest.NewRecorder()
 		s.servePluginView(recorder, httptest.NewRequest("GET", path, nil))
@@ -73,6 +71,9 @@ func TestPluginViewFilesAreServedConfined(t *testing.T) {
 		"a folder":           base + "sub/",
 		"without the folder": strings.TrimSuffix(base, "/"),
 	} {
+		if name == "a link out" && linkErr != nil {
+			continue
+		}
 		if response := get(path); response.Code != 404 {
 			t.Errorf("%s: %d %q", name, response.Code, response.Body)
 		}
@@ -119,6 +120,9 @@ func TestPluginViewFilesAreServedConfined(t *testing.T) {
 		if plugin.Name == "notes" && plugin.Contributes.Views[0].URL != base {
 			t.Errorf("address %q, want %q", plugin.Contributes.Views[0].URL, base)
 		}
+	}
+	if linkErr != nil {
+		t.Skip("symlink unavailable, the link out of the folder was not checked: " + linkErr.Error())
 	}
 }
 

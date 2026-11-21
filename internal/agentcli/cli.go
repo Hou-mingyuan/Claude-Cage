@@ -52,7 +52,7 @@ func runAgent(args []string, stdin io.Reader, stdout io.Writer, clientOnly bool)
 			if reply.Error.Code == "invalid_input" || reply.Error.Code == "unknown_operation" {
 				code = 2
 			}
-			if reply.Error.Code == "account_locked" || reply.Error.Code == "user_action_required" {
+			if reply.Error.Code == "account_locked" || reply.Error.Code == "account_missing" || reply.Error.Code == "user_action_required" {
 				code = 3
 			}
 			if reply.Error.Code == "wait_timeout" {
@@ -143,7 +143,7 @@ func runAgent(args []string, stdin io.Reader, stdout io.Writer, clientOnly bool)
 		response, err := workbench.AgentRequest(ctx, path, workbench.AgentTarget{Scope: *scope, Connection: *connection}, "GET", "/api/agent/routes", nil, "", "")
 		return finish(response.Data, err)
 	case "help", "--help", "capabilities":
-		return finish(map[string]any{"platform": runtime.GOOS, "arch": runtime.GOARCH, "commands": []string{"capabilities", "doctor", "init", "service.start", "host.inspect", "call NAME", "request METHOD /api/PATH", "socket /api/PATH", "routes", "job ID", "diagnostics"}, "operations": workbench.AgentOperations(), "routes": "agent routes reads the actual registered routes from the chosen live listener", "exit_codes": map[string]int{"completed_or_accepted": 0, "operation_failed": 1, "invalid_input": 2, "user_action_required": 3, "wait_timeout": 4}, "guide": "https://claude-cage.com/docs/agent/", "scope": "local: owning workload; desktop: client configuration; selected: explicit desktop connection generation; client: lightweight client listener", "request": map[string]any{"methods": []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}, "path": "relative /api/ endpoint from the UI", "binary": "--input FILE --content-type application/octet-stream; --output ABSOLUTE_NEW_FILE", "native": "call native.submit --scope desktop; request GET /api/agent/native/ID --scope desktop; use the same native action and connection_id as the open window"}, "job_retention": "the latest job and the job it replaced (superseded_by names the replacement; a running job replaced by a stop reads as canceled); query promptly and never resubmit an unknown mutation automatically"}, nil)
+		return finish(map[string]any{"platform": runtime.GOOS, "arch": runtime.GOARCH, "commands": []string{"capabilities", "doctor", "init", "service.start", "host.inspect", "call NAME", "request METHOD /api/PATH", "socket /api/PATH", "routes", "job ID", "diagnostics"}, "operations": workbench.AgentOperations(), "routes": "agent routes reads the actual registered routes from the chosen live listener", "exit_codes": map[string]int{"completed_or_accepted": 0, "operation_failed": 1, "invalid_input": 2, "user_action_required": 3, "wait_timeout": 4}, "guide": "https://claude-cage.com/docs/agent/", "scope": "local: owning workload; desktop: client configuration; selected: explicit desktop connection generation; client: lightweight client listener", "request": map[string]any{"methods": []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}, "path": "relative /api/ endpoint from the UI", "binary": "--input FILE --content-type application/octet-stream; --output ABSOLUTE_NEW_FILE", "native": "call native.submit --scope desktop; request GET /api/agent/native/ID --scope desktop; use the same native action and connection_id as the open window"}, "job_retention": "the latest job and the job it replaced (initiator records agent/desktop/setup; canceled_by and superseded_by name the cancellation source and replacement job when a running job is canceled or replaced by a stop); query promptly and never resubmit an unknown mutation automatically"}, nil)
 	case "init":
 		if _, err := os.Stat(path); err == nil {
 			if _, err := cage.Load(path); err != nil {
@@ -156,16 +156,9 @@ func runAgent(args []string, stdin io.Reader, stdout io.Writer, clientOnly bool)
 		if err := host.EnsurePrivateDir(filepath.Dir(path)); err != nil {
 			return finish(nil, err)
 		}
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			return finish(nil, err)
-		}
-		err = host.ProtectFile(path)
+		data, err := json.Marshal(cage.DefaultConfig())
 		if err == nil {
-			err = json.NewEncoder(file).Encode(cage.DefaultConfig())
-		}
-		if e := file.Close(); err == nil {
-			err = e
+			err = host.CreatePrivateFile(path, append(data, '\n'))
 		}
 		return finish(map[string]bool{"created": err == nil}, err)
 	case "service.start":
@@ -327,7 +320,11 @@ func runAgent(args []string, stdin io.Reader, stdout io.Writer, clientOnly bool)
 			return finish(data, nil)
 		}
 		if job.Canceled {
-			return finish(data, &workbench.AgentError{Code: "job_canceled", Message: "The original job was canceled. Inspect status before retrying.", NextAction: "status"})
+			message := "The original job was canceled. Inspect status before retrying."
+			if job.CanceledBy != "" {
+				message = "The original job was canceled by " + job.CanceledBy + ". Inspect status before retrying."
+			}
+			return finish(data, &workbench.AgentError{Code: "job_canceled", Message: message, NextAction: "status"})
 		}
 		if job.Error != "" {
 			return finish(data, &workbench.AgentError{Code: "job_failed", Message: job.Error, NextAction: "doctor"})

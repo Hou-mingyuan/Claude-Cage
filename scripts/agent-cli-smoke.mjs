@@ -55,7 +55,9 @@ try {
   controllerPID = JSON.parse(await readFile(join(profile, 'profile', 'control.json'), 'utf8')).pid;
   call(['service.start']);
   assert.equal(JSON.parse(await readFile(join(profile, 'profile', 'control.json'), 'utf8')).pid, controllerPID);
-  assert.equal(call(['call', 'settings.get'], undefined, 3).error.code, 'account_locked');
+  const missing = call(['call', 'settings.get'], undefined, 3).error;
+  assert.equal(missing.code, 'account_missing');
+  assert.equal(missing.next_action, 'account.create');
   call(['call', 'account.create', '--input', '-'], { username: 'agent_acceptance', password: 'Ephemeral-Test-Password-123!', confirm_password: 'Ephemeral-Test-Password-123!' });
   const before = call(['call', 'settings.get']).data;
   const patch = { balanced_display: !before.balanced_display };

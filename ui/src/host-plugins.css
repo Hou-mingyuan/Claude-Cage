@@ -300,6 +300,7 @@
 .plugin-card-main:hover:not(:disabled) { background: transparent; }
 .plugin-card-text { flex: 1; min-width: 0; display: grid; gap: 6px; }
 .plugin-card-text .plugin-row-title strong { font-size: 1rem; }
+.plugin-byline { min-width: 0; color: var(--muted); font-size: 0.8571rem; overflow-wrap: anywhere; }
 .plugin-card-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--muted); font-size: 0.9286rem; line-height: 1.55; min-height: 3.1em; }
 .plugin-card-item footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px 14px 18px; }
 .plugin-card-permissions { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 0.8214rem; white-space: nowrap; text-overflow: ellipsis; }
@@ -407,3 +408,16 @@ p.plugin-grants-empty { margin-top: 10px; }
 .plugin-grant-add { display: flex; gap: 8px; align-items: center; margin-top: 12px; min-width: 0; }
 .plugin-grant-add select { flex: 1; min-width: 0; height: 32px; }
 .plugin-grant-add button { flex: none; padding: 3px 12px; font-size: 0.8571rem; }
+.plugin-settings { display: flex; flex-direction: column; gap: 14px; }
+.plugin-settings .plugin-page-lead { margin-bottom: 0; }
+.plugin-setting { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.plugin-setting > label { display: flex; gap: 8px; align-items: baseline; }
+.plugin-setting > label strong { color: var(--strong); font-size: 0.9643rem; }
+.plugin-setting > label em { font-style: normal; color: var(--muted); font-size: 0.8125rem; }
+.plugin-setting > p { margin: 0; color: var(--muted); font-size: 0.9286rem; line-height: 1.6; overflow-wrap: anywhere; }
+.plugin-setting input[type="text"], .plugin-setting input[type="password"], .plugin-setting select { width: 100%; min-width: 0; height: 32px; }
+.plugin-setting > .plugin-switch { align-self: flex-start; }
+.plugin-setting-row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.plugin-setting-row input { flex: 1; }
+.plugin-setting-row button { flex: none; padding: 3px 12px; font-size: 0.8571rem; }
+.plugin-settings-actions { display: flex; justify-content: flex-end; }

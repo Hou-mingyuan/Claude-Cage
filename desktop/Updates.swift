@@ -290,15 +290,6 @@ final class CageAppUpdater {
             }
             return state
         }
-        #if arch(x86_64)
-        // The current public desktop update channel supplies ARM64 packages.
-        if Bundle(url: bundleURL)?.bundleIdentifier == cageUpdateBundleID {
-            if state["phase"] as? String != "manual" {
-                change(["phase": "manual", "message": "Intel 开发构建通过独立安装包更新。"])
-            }
-            return state
-        }
-        #endif
         let busy = ["checking", "downloading", "downloaded", "verifying", "installing"].contains(state["phase"] as? String ?? "")
         if ["check", "install"].contains(operation), let value = state["retryAt"] as? String,
            let date = ISO8601DateFormatter().date(from: value), date > Date() { return state }

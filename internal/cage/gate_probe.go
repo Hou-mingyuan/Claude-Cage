@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -11,9 +12,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -63,11 +66,29 @@ func probeExitIP(ctx context.Context, e *Egress) (string, error) {
 	return probeExitIPServices(ctx, client, exitProbeServices, exitProbeStagger)
 }
 
+var (
+	// ErrProxyConnectFailed reports that every exit probe failed while connecting
+	// through the configured proxy (before TLS or HTTP response).
+	ErrProxyConnectFailed = errors.New("proxy connect failed")
+	// ErrExitProbeTimeout reports that every exit probe timed out waiting for a
+	// live exit IP measurement.
+	ErrExitProbeTimeout = errors.New("exit probe timed out")
+)
+
+type exitProbeStageTiming struct {
+	stage      string
+	dialMS     int64
+	tlsMS      int64
+	ttfbMS     int64
+	proxyError bool
+}
+
 type exitProbeResult struct {
 	index    int
 	ip       string
 	err      error
 	duration time.Duration
+	timing   exitProbeStageTiming
 }
 
 // probeExitIPServices returns the first valid public IPv4 reported by any
@@ -80,12 +101,13 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 	start := func(index int) {
 		go func() {
 			started := time.Now()
-			ip, err := queryExitIPService(requestCtx, client, services[index])
-			results <- exitProbeResult{index: index, ip: ip, err: err, duration: time.Since(started)}
+			ip, timing, err := queryExitIPServiceTimed(requestCtx, client, services[index])
+			results <- exitProbeResult{index: index, ip: ip, err: err, duration: time.Since(started), timing: timing}
 		}()
 	}
 	failures := make([]string, len(services))
 	allTimedOut := true
+	allProxyConnectFailed := true
 	started, pending := 1, 1
 	start(0)
 	timer := time.NewTimer(stagger)
@@ -113,11 +135,14 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 		}
 		service := services[result.index]
 		// Fixed service IDs survive URL redaction in exported diagnostics.
-		diagnostics.Log("warn", "exit-probe", fmt.Sprintf("service=%s duration_ms=%d error=%v cause=%v", service.id, result.duration.Milliseconds(), result.err, errors.Unwrap(result.err)))
+		diagnostics.Log("warn", "exit-probe", fmt.Sprintf("service=%s stage=%s dial_ms=%d tls_ms=%d ttfb_ms=%d duration_ms=%d error=%v cause=%v", service.id, result.timing.stage, result.timing.dialMS, result.timing.tlsMS, result.timing.ttfbMS, result.duration.Milliseconds(), result.err, errors.Unwrap(result.err)))
 		failures[result.index] = service.name + "：" + result.err.Error()
 		var networkError net.Error
 		if !errors.Is(result.err, context.DeadlineExceeded) && !(errors.As(result.err, &networkError) && networkError.Timeout()) {
 			allTimedOut = false
+		}
+		if !result.timing.proxyError {
+			allProxyConnectFailed = false
 		}
 		if pending == 0 && started < len(services) && ctx.Err() == nil {
 			start(started)
@@ -135,35 +160,131 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 		return "", usererror.Wrap("通过所选代理查询出口 IP", ctx.Err(), "外网保持关闭。")
 	}
 	if allTimedOut {
-		return "", usererror.New("通过所选代理查询出口 IP", strings.Join(reported, "；"), "出口检测超时，请稍后重试。", context.DeadlineExceeded)
+		return "", usererror.New("实时出口采样超时", strings.Join(reported, "；"), "实时出口采样超时，请稍后重试或切换更稳定的代理节点；外网保持关闭。", errors.Join(ErrExitProbeTimeout, context.DeadlineExceeded))
+	}
+	if allProxyConnectFailed {
+		return "", usererror.New("代理连接失败", strings.Join(reported, "；"), "未能通过所选代理建立连接，请检查代理核心与节点状态；外网保持关闭。", ErrProxyConnectFailed)
 	}
 	return "", errors.New("通过所选代理查询出口 IP 失败：" + strings.Join(reported, "；") + "。未能确认出口时，外网保持关闭。")
 }
 
 func queryExitIP(ctx context.Context, client *http.Client, endpoint string) (string, error) {
-	return queryExitIPService(ctx, client, exitProbeService{endpoint: endpoint})
+	ip, _, err := queryExitIPServiceTimed(ctx, client, exitProbeService{endpoint: endpoint})
+	return ip, err
 }
 
 func queryExitIPService(ctx context.Context, client *http.Client, service exitProbeService) (string, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", service.endpoint, nil)
+	ip, _, err := queryExitIPServiceTimed(ctx, client, service)
+	return ip, err
+}
+
+func queryExitIPServiceTimed(ctx context.Context, client *http.Client, service exitProbeService) (string, exitProbeStageTiming, error) {
+	// The transport may still be dialing in the background after Do returns
+	// (a canceled or timed-out request leaves its dial running), and the trace
+	// callbacks then run on that goroutine. Every field the callbacks touch is
+	// guarded, and the result is read as a snapshot under the same lock.
+	var (
+		mu                                                   sync.Mutex
+		timing                                               exitProbeStageTiming
+		connectStart, tlsStart, wroteRequest                 time.Time
+		connected, tlsDone, gotFirstByte, connectFailedEarly bool
+	)
+	timing.stage = "proxy_connect"
+	snapshot := func() exitProbeStageTiming {
+		mu.Lock()
+		defer mu.Unlock()
+		return timing
+	}
+	trace := &httptrace.ClientTrace{
+		ConnectStart: func(_, _ string) {
+			mu.Lock()
+			defer mu.Unlock()
+			connectStart = time.Now()
+		},
+		ConnectDone: func(_, _ string, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if !connectStart.IsZero() {
+				timing.dialMS = time.Since(connectStart).Milliseconds()
+			}
+			if err != nil {
+				connectFailedEarly = true
+				return
+			}
+			connected = true
+			timing.stage = "tls"
+		},
+		TLSHandshakeStart: func() {
+			mu.Lock()
+			defer mu.Unlock()
+			tlsStart = time.Now()
+			timing.stage = "tls"
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if !tlsStart.IsZero() {
+				timing.tlsMS = time.Since(tlsStart).Milliseconds()
+			}
+			if err == nil {
+				tlsDone = true
+				timing.stage = "response"
+			}
+		},
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			mu.Lock()
+			defer mu.Unlock()
+			wroteRequest = time.Now()
+			if info.Err == nil && tlsDone {
+				timing.stage = "response"
+			}
+		},
+		GotFirstResponseByte: func() {
+			mu.Lock()
+			defer mu.Unlock()
+			gotFirstByte = true
+			if !wroteRequest.IsZero() {
+				timing.ttfbMS = time.Since(wroteRequest).Milliseconds()
+			} else if !connectStart.IsZero() {
+				timing.ttfbMS = time.Since(connectStart).Milliseconds()
+			}
+			timing.stage = "response"
+		},
+	}
+	req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), "GET", service.endpoint, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		var requestError *url.Error
 		if errors.As(err, &requestError) {
 			err = requestError.Err
 		}
-		return "", usererror.Display("通过所选代理查询出口 IP", err, "请检查网络与代理，再重新检测。")
+		var netErr net.Error
+		timedOut := errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout())
+		mu.Lock()
+		result := timing
+		if !connected || connectFailedEarly {
+			result.stage = "proxy_connect"
+			if !timedOut {
+				result.proxyError = true
+			}
+		} else if !tlsDone && !gotFirstByte {
+			result.stage = "tls"
+		} else {
+			result.stage = "response"
+		}
+		mu.Unlock()
+		return "", result, usererror.Display("通过所选代理查询出口 IP", err, "请检查网络与代理，再重新检测。")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("查询出口 IP 失败：检测服务返回 HTTP %d。请检查所选代理，稍后重新检测；外网保持关闭。", resp.StatusCode)
+		return "", snapshot(), fmt.Errorf("查询出口 IP 失败：检测服务返回 HTTP %d。请检查所选代理，稍后重新检测；外网保持关闭。", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4097))
 	if err != nil {
-		return "", usererror.Wrap("读取出口检测响应", err, "请稍后重新检测。")
+		return "", snapshot(), usererror.Wrap("读取出口检测响应", err, "请稍后重新检测。")
 	}
 	if len(body) > 4096 {
-		return "", errors.New("查询出口 IP 失败：检测服务没有返回有效的 IP 记录。请更换可用节点或稍后重新检测；外网保持关闭。")
+		return "", snapshot(), errors.New("查询出口 IP 失败：检测服务没有返回有效的 IP 记录。请更换可用节点或稍后重新检测；外网保持关闭。")
 	}
 	text := strings.TrimSpace(string(body))
 	if service.trace {
@@ -171,9 +292,9 @@ func queryExitIPService(ctx context.Context, client *http.Client, service exitPr
 	}
 	ip, err := netip.ParseAddr(text)
 	if err != nil || !ip.Is4() || !ip.IsGlobalUnicast() || ip.IsPrivate() {
-		return "", errors.New("出口检测结果不是有效公网 IPv4 地址")
+		return "", snapshot(), errors.New("出口检测结果不是有效公网 IPv4 地址")
 	}
-	return ip.String(), nil
+	return ip.String(), snapshot(), nil
 }
 
 // traceIP returns the value of the single "ip=" line, or "" when the line is

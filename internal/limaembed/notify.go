@@ -11,6 +11,7 @@ import (
 
 	"github.com/lima-vm/lima/v2/pkg/hostagent/events"
 
+	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/desktop"
 )
 
@@ -27,12 +28,13 @@ type eventWatch struct {
 	partial []byte
 }
 
-func newEventWatch(w io.Writer, vm string) *eventWatch {
-	n := desktop.Notify
-	if os.Getenv("AGENT_VM_NOTIFY") == "0" {
-		n = func(string, string) {}
+func hostagentEventOutput(w io.Writer, vm string) io.Writer {
+	// Cage starts several local services together. Keep their forwarding
+	// events in the hostagent log without posting a desktop alert for each.
+	if os.Getenv(cage.ConfigEnv) != "" || os.Getenv("AGENT_VM_NOTIFY") == "0" {
+		return w
 	}
-	return &eventWatch{w: w, vm: vm, notify: n}
+	return &eventWatch{w: w, vm: vm, notify: desktop.Notify}
 }
 
 func (e *eventWatch) Write(p []byte) (int, error) {

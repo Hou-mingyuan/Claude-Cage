@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 )
 
@@ -34,7 +35,7 @@ func TestFailedSubscriptionRefreshKeepsWorkingNodesAndSecretsPrivate(t *testing.
 	if err = writePrivate(s.configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err = p.Import("source", "https://example.com/sub?token=private-subscription", []byte(`proxies: [{name: qa, type: socks5, server: 127.0.0.1, port: 1080, password: private-node-password}]`), "source", 24, ""); err != nil {
+	if err = p.Import("source", "https://example.com/sub?token=private-subscription", []byte(`proxies: [{name: qa, type: socks5, server: 192.0.2.1, port: 1080, password: private-node-password}]`), "source", 24, ""); err != nil {
 		t.Fatal(err)
 	}
 	p.Selected = p.Sources[0].Nodes[0].ID
@@ -75,5 +76,31 @@ func TestSettingsCannotWriteProxyEndpoint(t *testing.T) {
 	}
 	if w := request(s, "POST", "/api/proxy/migrate", s.origin, `{}`, true); w.Code != 404 {
 		t.Fatal("removed migration entry accepted", w.Code)
+	}
+}
+
+// A DNS settings save restarts the environment; the core must be reloaded
+// then so its resolvers match guest DNS and the network check.
+func TestProxyDNSOutdatedCoversEveryDNSSetting(t *testing.T) {
+	cfg := cage.DefaultConfig()
+	store := managedproxy.Store{GuestDNS: cfg.DNSEndpoints(), BootstrapDNS: cfg.BootstrapEndpoints()}
+	if proxyDNSOutdated(store, cfg) {
+		t.Fatal("matching core DNS reported outdated")
+	}
+	if proxyDNSOutdated(managedproxy.Store{}, cfg) {
+		t.Fatal("a store from before the DNS options must not force a core reload with default settings")
+	}
+	primary := cfg
+	primary.DNSURL = "https://dns.example/dns-query"
+	backup := cfg
+	backup.DNS = cage.NewDNSOptions([]string{"https://9.9.9.9/dns-query"}, nil, false)
+	public := cfg
+	public.DNS = cage.NewDNSOptions(nil, nil, true)
+	bootstrap := cfg
+	bootstrap.DNS = cage.NewDNSOptions(nil, []string{"https://223.5.5.5/dns-query"}, false)
+	for name, changed := range map[string]cage.Config{"primary": primary, "backup": backup, "public fallback": public, "node resolvers": bootstrap} {
+		if !proxyDNSOutdated(store, changed) {
+			t.Fatalf("%s change not detected", name)
+		}
 	}
 }

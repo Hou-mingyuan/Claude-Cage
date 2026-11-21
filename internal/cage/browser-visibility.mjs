@@ -38,7 +38,7 @@ export class BrowserVisibility {
       await this.cdp("Target.activateTarget", { targetId });
       if (this.visible || !await this.canHide()) {
         const { windowId, bounds } = await this.cdp("Browser.getWindowForTarget", { targetId });
-        if (bounds.windowState === "minimized") await this.setBounds(windowId, { windowState: "normal" });
+        if (bounds.windowState === "minimized") await this.setBounds(windowId, { windowState: "normal" }, { allowMaximized: true });
         await this.setBounds(windowId, { windowState: "fullscreen" });
         this.saved.delete(windowId);
       } else {
@@ -49,13 +49,15 @@ export class BrowserVisibility {
     return result;
   }
 
-  async setBounds(windowId, bounds) {
+  async setBounds(windowId, bounds, { allowMaximized = false } = {}) {
     await this.cdp("Browser.setWindowBounds", { windowId, bounds });
     // The CDP reply can precede the window manager's state transition.
-    // Fullscreen/minimized changes must observe the intermediate normal state.
+    // Fullscreen/minimized changes must observe the intermediate state, which
+    // Openbox may report as maximized instead of normal.
     for (let attempt = 0; attempt < 40; attempt++) {
       const current = await this.cdp("Browser.getWindowBounds", { windowId });
-      if (current.bounds.windowState === bounds.windowState) return;
+      const state = current.bounds.windowState;
+      if (state === bounds.windowState || (allowMaximized && state === "maximized")) return;
       await new Promise(resolve => setTimeout(resolve, 25));
     }
     throw new Error("Browser window did not change state");
@@ -79,14 +81,14 @@ export class BrowserVisibility {
       if (visible) {
         const saved = this.saved.get(windowId);
         if (!saved) continue;
-        await this.setBounds(windowId, { windowState: "normal" });
+        await this.setBounds(windowId, { windowState: "normal" }, { allowMaximized: true });
         const restore = saved.windowState === "normal" ? saved : { windowState: saved.windowState };
         await this.setBounds(windowId, restore);
         this.saved.delete(windowId);
       } else if (bounds.windowState !== "minimized") {
         if (!this.saved.has(windowId)) this.saved.set(windowId, bounds);
         if (bounds.windowState !== "normal") {
-          await this.setBounds(windowId, { windowState: "normal" });
+          await this.setBounds(windowId, { windowState: "normal" }, { allowMaximized: true });
         }
         await this.setBounds(windowId, { windowState: "minimized" });
       }

@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -40,21 +39,32 @@ if sys.argv[1]=="install":
  sys.exit(0)
 if not p.is_file() or hashlib.sha256(p.read_bytes()).hexdigest()!=sys.argv[2]: sys.exit(1)
 os.execv(sys.executable,[sys.executable,"-I",str(p),sys.argv[1]])`
-	cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", shellescape.QuoteCommand([]string{"python3", "-I", "-c", bootstrap, mode, fmt.Sprintf("%x", sha256.Sum256([]byte(desktopCodexHelper)))}))
-	if mode == "install" {
-		cmd.Stdin = strings.NewReader(desktopCodexHelper)
-	} else {
-		data, err := json.Marshal(input)
-		if err != nil {
+	script := shellescape.QuoteCommand([]string{"python3", "-I", "-c", bootstrap, mode, fmt.Sprintf("%x", sha256.Sum256([]byte(desktopCodexHelper)))})
+	data := []byte(desktopCodexHelper)
+	if mode != "install" {
+		var err error
+		if data, err = json.Marshal(input); err != nil {
 			return err
 		}
-		cmd.Stdin = bytes.NewReader(data)
 	}
+	unavailable := errors.New("Desktop Code connector unavailable")
 	var buf bytes.Buffer
-	cmd.Stdout = &boundedStatusWriter{buffer: &buf, remaining: 1 << 20}
-	cmd.WaitDelay = 2 * time.Second
-	if err := cmd.Run(); err != nil {
-		return errors.New("Desktop Code connector unavailable")
+	// The sync runs every five seconds and each endpoint keeps a request
+	// waiting; share the control connection instead of one SSH session each.
+	reply, sent, err := s.controlSession.runInput(ctx, s.lifetimeContext(), s.guestSessionCommand, script, data, 1<<20)
+	if sent {
+		if err != nil || reply.code != 0 || len(reply.stdout) > 1<<20 {
+			return unavailable
+		}
+		buf.Write(reply.stdout)
+	} else {
+		cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", script)
+		cmd.Stdin = bytes.NewReader(data)
+		cmd.Stdout = &boundedStatusWriter{buffer: &buf, remaining: 1 << 20}
+		cmd.WaitDelay = 2 * time.Second
+		if err := cmd.Run(); err != nil {
+			return unavailable
+		}
 	}
 	if output != nil {
 		return json.Unmarshal(buf.Bytes(), output)

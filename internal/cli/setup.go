@@ -483,7 +483,7 @@ func (e *app) buildBase(ctx context.Context, in install, disk, memory, cpus int)
 	(&start{app: e, ctx: ctx, name: building}).printResources()
 
 	fmt.Fprintln(e.io.Stdout, "Starting the selected base system...")
-	if !windowed(func(w io.Writer) error { return e.startVM(ctx, b, building, w) }) {
+	if !windowed(func(w io.Writer) error { return e.startVM(vm.WithFirstBoot(ctx), b, building, w) }) {
 		ha := filepath.Join(LimaHome(e.state), building, "ha.stderr.log")
 		fmt.Fprintf(e.io.Stderr, "Error: Failed to start base VM. Full log: %s\nLima's own log: %s\n", logPath, ha)
 		host.WindowsStartHint(e.io.Stderr, logPath, ha)
@@ -554,7 +554,7 @@ func cageInstallEnv() string {
 		if os.Getenv("CAGE_SETUP_PROGRESS") == "1" {
 			progress = "export CAGE_SETUP_PROGRESS=1\n"
 		}
-		return "set -e\nexport CLAUDE_CAGE=1\n" + progress + cage.DebianPrepareScriptFor(os.Getenv(cage.DebianMirrorEnv)) + "\n" + cage.ToolInstallPrelude()
+		return "set -e\nexport CLAUDE_CAGE=1\n" + progress + cage.InstallTLS12Prelude(os.Getenv(cage.InstallTLS12Env) == "1") + cage.DebianPrepareScriptFor(os.Getenv(cage.DebianMirrorEnv)) + "\n" + cage.ToolInstallPrelude()
 	}
 	return ""
 }

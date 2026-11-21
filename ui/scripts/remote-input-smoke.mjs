@@ -191,7 +191,7 @@ try {
   await clear();
   await page.keyboard.down("Shift");
   await page.evaluate(() => {
-    probe.rfb._cagePasteJob = { id: "punctuation", phase: "fence", timer: setTimeout(() => {}, 1000), resolve() {} };
+    probe.rfb._cagePasteJob = { id: "punctuation", phase: "announce", provided: true, timer: setTimeout(() => {}, 1000), resolve() {} };
     probe.fence("punctuation");
     probe.fence("punctuation-keys");
   });

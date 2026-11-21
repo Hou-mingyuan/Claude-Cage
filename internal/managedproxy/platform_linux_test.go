@@ -68,7 +68,7 @@ func TestLinuxBundledProxyLifecycle(t *testing.T) {
 	}))
 	defer upstream.Close()
 	upstreamPort := upstream.Listener.Addr().(*net.TCPAddr).Port
-	if err := s.Import("local smoke node", "", []byte(fmt.Sprintf("proxies:\n - {name: smoke, type: http, server: 127.0.0.1, port: %d}\n", upstreamPort)), "smoke", 0, ""); err != nil {
+	if err := s.Import("local smoke node", "", []byte(fmt.Sprintf("proxies:\n - {name: smoke, type: http, server: upstream.example.test, port: %d}\n", upstreamPort)), "smoke", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	s.Selected = s.Sources[0].Nodes[0].ID
@@ -104,6 +104,7 @@ func TestLinuxBundledProxyLifecycle(t *testing.T) {
 	if readRecord() != first {
 		t.Fatal("idempotent start replaced the running core")
 	}
+	attachLocalTestServer(t, ctx, profile)
 	proxyURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", s.Port))
 	proxyURL.User = url.UserPassword("cage", s.Auth)
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), DisableKeepAlives: true}
@@ -173,7 +174,7 @@ func TestLinuxCoreStopPinsAndChecksProcessIdentity(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(done) }()
 	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
-	record, err := identifyLinuxCore(cmd.Process.Pid)
+	record, err := identifyStartedLinuxCore(cmd.Process.Pid, cmd.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,11 +200,9 @@ func TestLinuxCoreStopPinsAndChecksProcessIdentity(t *testing.T) {
 	if err := stopLinuxProcess(record, record.Executable); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("proxy process was not reaped")
-	}
+	// stopLinuxProcess returns once the pidfd reports the exit, so reaping
+	// follows without a time window; the go test deadline guards a hang.
+	<-done
 	if err := stopLinuxProcess(record, record.Executable); err != nil {
 		t.Fatal("stopping an exited process should succeed", err)
 	}

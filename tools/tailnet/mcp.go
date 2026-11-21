@@ -21,6 +21,8 @@ type mcpTool struct {
 
 func mcpTools() []mcpTool {
 	none := map[string]any{"type": "object", "properties": map[string]any{}}
+	control := map[string]any{"type": "object", "properties": map[string]any{
+		"control_url": map[string]any{"type": "string", "description": "optional HTTPS control server origin, or empty for the default service"}}}
 	key := map[string]any{"type": "object", "required": []string{"key"},
 		"properties": map[string]any{"key": map[string]any{"type": "string", "description": "one SSH public key line"}}}
 	service := map[string]any{"type": "object", "required": []string{"host", "port"}, "properties": map[string]any{
@@ -29,10 +31,11 @@ func mcpTools() []mcpTool {
 	page := map[string]any{"ui": map[string]any{"visibility": []string{"app"}}}
 	tools := []mcpTool{
 		{Name: "status", Description: "Report the Tailscale connection, its devices and the SSH keys allowed to sign in.", InputSchema: none, action: "status"},
-		{Name: "connect", Description: "Join the Tailscale network, starting sign-in if this device is not signed in.", InputSchema: none, action: "connect"},
-		{Name: "login", Description: "Start signing in to Tailscale again.", InputSchema: none, action: "login"},
+		{Name: "connect", Description: "Join the Tailscale network, starting sign-in if this device is not signed in.", InputSchema: control, action: "connect"},
+		{Name: "login", Description: "Start signing in to Tailscale again.", InputSchema: control, action: "login"},
 		{Name: "disconnect", Description: "Leave the Tailscale network, staying signed in.", InputSchema: none, action: "disconnect"},
 		{Name: "logout", Description: "Sign this device out of Tailscale.", InputSchema: none, action: "logout"},
+		{Name: "set_control_url", Description: "Set a custom HTTPS control server URL, or clear it to use the default service.", InputSchema: control, action: "set-control-url"},
 		{Name: "add_key", Description: "Allow an SSH public key to sign in over the network.", InputSchema: key, action: "add-key"},
 		{Name: "remove_key", Description: "Stop allowing an SSH public key.", InputSchema: key, action: "remove-key"},
 		{Name: "open_service", Description: "Make a port of a device on the network reachable on this system's loopback address.", InputSchema: service, action: "open-service"},

@@ -20,36 +20,51 @@ var (
 
 type browserInputError struct{ error }
 
+// browserCookieInput is one cookie to add or edit. Value is sensitive: it is
+// forwarded to the guest only and never logged or echoed in errors.
+type browserCookieInput struct {
+	Name        string  `json:"name"`
+	Value       string  `json:"value"`
+	Domain      string  `json:"domain"`
+	Path        string  `json:"path"`
+	Secure      bool    `json:"secure,omitempty"`
+	HTTPOnly    bool    `json:"httpOnly,omitempty"`
+	SameSite    string  `json:"sameSite,omitempty"`
+	Expires     float64 `json:"expires,omitempty"`
+	Partitioned bool    `json:"partitioned,omitempty"`
+}
+
 type browserInput struct {
-	Incognito      bool     `json:"incognito,omitempty"`
-	Enabled        *bool    `json:"enabled,omitempty"`
-	CookieKey      string   `json:"cookieKey,omitempty"`
-	CookieKeys     []string `json:"cookieKeys,omitempty"`
-	Scope          string   `json:"scope,omitempty"`
-	Query          string   `json:"query,omitempty"`
-	Page           int      `json:"page,omitempty"`
-	Left           string   `json:"left,omitempty"`
-	Right          string   `json:"right,omitempty"`
-	ID             string   `json:"id"`
-	URL            string   `json:"url"`
-	X              int      `json:"x,omitempty"`
-	Y              int      `json:"y,omitempty"`
-	DeltaX         int      `json:"deltaX,omitempty"`
-	DeltaY         int      `json:"deltaY,omitempty"`
-	Width          int      `json:"width,omitempty"`
-	Height         int      `json:"height,omitempty"`
-	Scale          float64  `json:"scale,omitempty"`
-	Workspace      string   `json:"workspace,omitempty"`
-	ProjectID      string   `json:"project_id,omitempty"`
-	ProjectGrant   string   `json:"grant,omitempty"`
-	Text           string   `json:"text,omitempty"`
-	Mode           string   `json:"mode,omitempty"`
-	Target         string   `json:"target,omitempty"`
-	Session        string   `json:"session,omitempty"`
-	Context        string   `json:"context,omitempty"`
-	Sequence       int      `json:"sequence"`
-	SelectionStart int      `json:"selectionStart,omitempty"`
-	SelectionEnd   int      `json:"selectionEnd,omitempty"`
+	Incognito      bool                `json:"incognito,omitempty"`
+	Enabled        *bool               `json:"enabled,omitempty"`
+	CookieKey      string              `json:"cookieKey,omitempty"`
+	CookieKeys     []string            `json:"cookieKeys,omitempty"`
+	Cookie         *browserCookieInput `json:"cookie,omitempty"`
+	Scope          string              `json:"scope,omitempty"`
+	Query          string              `json:"query,omitempty"`
+	Page           int                 `json:"page,omitempty"`
+	Left           string              `json:"left,omitempty"`
+	Right          string              `json:"right,omitempty"`
+	ID             string              `json:"id"`
+	URL            string              `json:"url"`
+	X              int                 `json:"x,omitempty"`
+	Y              int                 `json:"y,omitempty"`
+	DeltaX         int                 `json:"deltaX,omitempty"`
+	DeltaY         int                 `json:"deltaY,omitempty"`
+	Width          int                 `json:"width,omitempty"`
+	Height         int                 `json:"height,omitempty"`
+	Scale          float64             `json:"scale,omitempty"`
+	Workspace      string              `json:"workspace,omitempty"`
+	ProjectID      string              `json:"project_id,omitempty"`
+	ProjectGrant   string              `json:"grant,omitempty"`
+	Text           string              `json:"text,omitempty"`
+	Mode           string              `json:"mode,omitempty"`
+	Target         string              `json:"target,omitempty"`
+	Session        string              `json:"session,omitempty"`
+	Context        string              `json:"context,omitempty"`
+	Sequence       int                 `json:"sequence"`
+	SelectionStart int                 `json:"selectionStart,omitempty"`
+	SelectionEnd   int                 `json:"selectionEnd,omitempty"`
 }
 
 func (s *Server) browserClient() *browserClient {
@@ -105,17 +120,24 @@ func (s *Server) browserAction(ctx context.Context, action string, input *browse
 	if input != nil {
 		method = http.MethodPost
 		if action == "cookies" && (input.ID == "" ||
-			(input.Mode != "list" && input.Mode != "details" && input.Mode != "delete" && input.Mode != "delete-selected" && input.Mode != "clear") ||
+			(input.Mode != "list" && input.Mode != "details" && input.Mode != "delete" && input.Mode != "delete-selected" && input.Mode != "clear" && input.Mode != "set") ||
 			(input.Scope != "site" && input.Scope != "all") || len(input.Query) > 800 || input.Page < 0 ||
-			((input.Mode == "delete" || input.Mode == "details") && len(input.CookieKey) != 64)) {
+			((input.Mode == "delete" || input.Mode == "details") && len(input.CookieKey) != 64) ||
+			(input.Mode == "set" && input.CookieKey != "" && !validCookieKey(input.CookieKey)) ||
+			(input.Mode != "set" && input.Cookie != nil)) {
 			return nil, browserInputError{errors.New("Cookie 操作或目标标签无效")}
+		}
+		if action == "cookies" && input.Mode == "set" {
+			if err := validBrowserCookie(input.Cookie); err != nil {
+				return nil, browserInputError{err}
+			}
 		}
 		if action == "cookies" && input.Mode == "delete-selected" {
 			if len(input.CookieKeys) == 0 {
 				return nil, browserInputError{errors.New("请选择要删除的 Cookie")}
 			}
 			for _, key := range input.CookieKeys {
-				if len(key) != 64 || strings.Trim(key, "0123456789abcdef") != "" {
+				if !validCookieKey(key) {
 					return nil, browserInputError{errors.New("所选 Cookie 无效")}
 				}
 			}
@@ -187,6 +209,41 @@ func (s *Server) browserAction(ctx context.Context, action string, input *browse
 		return nil, errors.New("浏览器响应超出大小限制")
 	}
 	return data, err
+}
+
+func validCookieKey(key string) bool {
+	return len(key) == 64 && strings.Trim(key, "0123456789abcdef") == ""
+}
+
+// validBrowserCookie checks the format of a cookie to write. The guest owns
+// the site, prefix and SameSite rules because they depend on the tab's page.
+func validBrowserCookie(cookie *browserCookieInput) error {
+	if cookie == nil {
+		return errors.New("Cookie 内容无效")
+	}
+	if cookie.Partitioned {
+		return errors.New("暂不支持新增或编辑分区 Cookie")
+	}
+	invalid := func(text string) bool {
+		return strings.ContainsFunc(text, func(r rune) bool { return r < 0x20 || r == 0x7f || r == ';' })
+	}
+	switch {
+	case cookie.Name == "" || strings.TrimSpace(cookie.Name) != cookie.Name || invalid(cookie.Name) || strings.Contains(cookie.Name, "="):
+		return errors.New("Cookie 名称不能为空，且不能包含空格开头结尾、控制字符、分号或等号")
+	case strings.TrimSpace(cookie.Value) != cookie.Value || invalid(cookie.Value):
+		return errors.New("Cookie 值不能以空格开头结尾，且不能包含控制字符或分号")
+	case len(cookie.Name)+len(cookie.Value) > 4096:
+		return errors.New("Cookie 名称与值合计不能超过 4096 字节")
+	case cookie.Domain == "" || len(cookie.Domain) > 254 || invalid(cookie.Domain):
+		return errors.New("只能为当前网站的主机名或其上级域名设置 Cookie")
+	case !strings.HasPrefix(cookie.Path, "/") || len(cookie.Path) > 1024 || invalid(cookie.Path):
+		return errors.New("Cookie 路径必须以 / 开头，且不超过 1024 字节")
+	case cookie.SameSite != "" && cookie.SameSite != "Strict" && cookie.SameSite != "Lax" && cookie.SameSite != "None":
+		return errors.New("SameSite 取值无效")
+	case cookie.Expires < 0:
+		return errors.New("过期时间必须晚于当前时间；删除 Cookie 请使用删除")
+	}
+	return nil
 }
 
 // browserWheelLimit bounds a position and a scrolled distance, both in

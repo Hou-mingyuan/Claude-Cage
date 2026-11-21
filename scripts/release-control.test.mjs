@@ -151,7 +151,7 @@ async function repositoryFixture(t) {
 async function uploadFiles(root, version) {
   const directory = join(root, 'publish');
   await mkdir(directory);
-  const names = [`Cage-${version}-macos-arm64.dmg`, `Cage-${version}-windows-amd64-setup.exe`, `Cage-${version}-linux-amd64.deb`];
+  const names = [`Cage-${version}-macos-arm64.dmg`, `Cage-${version}-macos-amd64.dmg`, `Cage-${version}-windows-amd64-setup.exe`, `Cage-${version}-linux-amd64.deb`];
   for (const name of names) await writeFile(join(directory, name), `fixture ${name}`);
   await writeFile(join(directory, 'SHA256SUMS'), names.map(name => `${digest(`fixture ${name}`)}  ${name}\n`).join(''));
   return releaseFiles(directory);
@@ -265,6 +265,7 @@ async function artifactFixture(t) {
   const commitSha = 'a'.repeat(40);
   const packages = {
     macos: { [`Cage-${currentVersion}-macos-arm64.dmg`]: 'mac installer', [`mihomo-${macCoreVersion}-source.tar.gz`]: 'same core source' },
+    'macos-intel': { [`Cage-${currentVersion}-macos-amd64.dmg`]: 'intel mac installer' },
     windows: { [`Cage-${currentVersion}-windows-amd64-setup.exe`]: 'windows installer', [`mihomo-${windowsDependencies.mihomo.version}-source.tar.gz`]: 'same core source', [`qemu-${windowsDependencies.qemu.version}-windows-full-source.zip`]: 'complete qemu source' },
     linux: { [`Cage-${currentVersion}-linux-amd64.deb`]: 'linux installer', [linuxDependencies.mihomoSource.file]: 'same core source' },
   };
@@ -278,7 +279,7 @@ async function artifactFixture(t) {
   return { directory: root, output: join(root, 'assembled'), version: currentVersion, commitSha };
 }
 
-test('all three platform identities are required before any assets are assembled', async t => {
+test('all four platform identities are required before any assets are assembled', async t => {
   for (const kind of ['missing metadata', 'different commit', 'different version']) await t.test(kind, async t => {
     const f = await artifactFixture(t);
     const path = join(f.directory, 'linux', 'build-metadata.json');
@@ -299,8 +300,17 @@ test('assembly accepts matching platforms but excludes metadata from public asse
   const f = await artifactFixture(t);
   const result = await assembleRelease(f);
   assert.ok(result.assets.includes(`Cage-${currentVersion}-linux-amd64.deb`));
+  assert.ok(result.assets.includes(`Cage-${currentVersion}-macos-amd64.dmg`));
+  // One Mihomo source serves both macOS packages.
+  assert.equal(result.assets.filter(name => name === `mihomo-${macCoreVersion}-source.tar.gz`).length, 1);
   assert.ok(!result.assets.some(name => name.includes('metadata')));
   assert.ok((await releaseFiles(f.output)).length > 3);
+});
+
+test('a release without the Intel Mac installer is not assembled', async t => {
+  const f = await artifactFixture(t);
+  await rm(join(f.directory, 'macos-intel'), { recursive: true });
+  await assert.rejects(assembleRelease(f));
 });
 
 test('an installer for an unsupported version cannot enter the public release', async t => {

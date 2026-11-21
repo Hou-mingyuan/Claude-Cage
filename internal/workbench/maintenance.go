@@ -18,6 +18,7 @@ import (
 	"al.essio.dev/pkg/shellescape"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 )
 
@@ -163,7 +164,14 @@ const maintenancePort = 18961
 
 // The script and one-use local credential travel on SSH stdin, never argv.
 // APT_CONFIG is passed explicitly through sudo by the owned install scripts.
-func maintenanceScript(script, token string) string {
+func maintenanceScript(script, token string, container bool) string {
+	if container {
+		// Debian container images clean the default archive cache on apt update
+		// and after dpkg. Keep managed downloads outside those cleanup hooks.
+		script = `sudo install -d -m 0755 /var/cache/apt/install-archives
+printf '%s\n' 'Dir::Cache::archives "/var/cache/apt/install-archives";' >> "$CAGE_APT_CONFIG"
+` + script
+	}
 	return fmt.Sprintf(`set -euo pipefail
 umask 077
 cage_maintenance_dir=$(mktemp -d)
@@ -242,7 +250,7 @@ func runMaintenanceScript(ctx context.Context, configPath string, cfg cage.Confi
 	command := "sudo systemd-run --quiet --pipe --wait --collect --unit=cage-maintenance-operation --property=User=cage --property=RuntimeMaxSec=infinity --property=KillMode=control-group --setenv=HOME=/home/cage "
 	command = cfg.GuestProfile.Linux(command) + "--working-directory=" + shellescape.Quote(guestPath(s.environmentDir())) + " /bin/bash -se"
 	cmd := s.sshCommandWithForwarding(ctx, "-o", "ExitOnForwardFailure=yes", "-R", forward, "-T", s.sshTarget(), "--", command)
-	cmd.Stdin = strings.NewReader(maintenanceScript(cage.DebianPrepareScript+"\n"+script, proxy.token))
+	cmd.Stdin = strings.NewReader(maintenanceScript(cage.DebianPrepareScript+"\n"+script, proxy.token, containerenv.Configured(profile)))
 	var output failureOutput
 	cmd.Stdout = output.writer(stdout)
 	cmd.Stderr = output.writer(stderr)
@@ -254,6 +262,9 @@ func runMaintenanceScript(ctx context.Context, configPath string, cfg cage.Confi
 			return ctx.Err()
 		}
 		diagnostics.Log("error", "maintenance", fmt.Sprintf("software installation error=%v", err))
+		if failure := packageInstallFailure("安装或更新环境软件", err, output.String()); failure != nil {
+			return failure
+		}
 		return executionFailure("安装或更新环境软件", err, output.String())
 	}
 	return nil

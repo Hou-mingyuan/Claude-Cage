@@ -271,6 +271,10 @@ func (s *Server) notificationEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
+	// Subscribe before announcing the stream so an event published right after
+	// the window sees ": connected" is not lost.
+	events, unsubscribe := s.notifications.subscribe()
+	defer unsubscribe()
 	_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if _, err := w.Write([]byte(": connected\n\n")); err != nil {
 		return
@@ -278,8 +282,6 @@ func (s *Server) notificationEvents(w http.ResponseWriter, r *http.Request) {
 	if err := controller.Flush(); err != nil {
 		return
 	}
-	events, unsubscribe := s.notifications.subscribe()
-	defer unsubscribe()
 	life := s.lifetimeContext()
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()

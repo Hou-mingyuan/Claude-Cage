@@ -80,7 +80,7 @@ func TestGuestPluginFilesAreCopiedWhole(t *testing.T) {
 	// The program is found in the folder by its bare name, and one left
 	// running from before is ended when the next starts.
 	run := func(arguments ...string) *exec.Cmd {
-		cmd := exec.Command("sh", append([]string{"-c", guestPluginRunScript, "sh", folder}, arguments...)...)
+		cmd := exec.Command("sh", append([]string{"-c", guestPluginRunScript, "sh", folder, "0"}, arguments...)...)
 		cmd.Env = append(os.Environ(), "HOME="+home)
 		return cmd
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sylvinus/agent-vm/internal/durable"
 	"github.com/sylvinus/agent-vm/internal/paths"
 )
 
@@ -92,5 +93,21 @@ func TestRenameForget(t *testing.T) {
 		if _, err := os.Stat(d.Marker(kind, "b")); err == nil {
 			t.Errorf("%s left", kind)
 		}
+	}
+}
+
+// The rename is flushed too: after a power loss the file is not left under
+// its temporary name only.
+func TestWriteFlushesTheDirectory(t *testing.T) {
+	d := Dir(t.TempDir())
+	var synced []string
+	original := durable.SyncDir
+	durable.SyncDir = func(dir string) error { synced = append(synced, dir); return original(dir) }
+	t.Cleanup(func() { durable.SyncDir = original })
+	if err := d.Write("pin", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if len(synced) != 1 || filepath.Clean(synced[0]) != filepath.Clean(string(d)) {
+		t.Fatalf("synced %q", synced)
 	}
 }

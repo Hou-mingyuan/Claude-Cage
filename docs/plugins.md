@@ -1,13 +1,15 @@
 # 插件
 
-插件用来扩展 Cage，分两种用途，一个插件可以两者兼有：
+Cage 的核心路线是把 Claude 的运行外壳关在轻量化的本地隔离环境中，再通过标准 [MCP](https://modelcontextprotocol.io) 插件，让 Claude 安全、受控地使用本机或环境内能力（比直接暴露 SSH 更安全）。
+
+在 Cage 中，**插件 = MCP + 扩展**，分别对应「给 Claude 的能力」与「定制 Cage 工作台」，一个插件可以两者兼有：
 
 | 用途 | 做什么 | 清单里的写法 |
 | --- | --- | --- |
-| 给 Claude 的能力 | 提供工具，让环境里的 Claude 多一项本事 | `contributes.mcpServers` |
-| 定制 Cage | 在 Cage 里加一个自己的页面 | `contributes.views` |
+| 给 Claude 的能力（MCP） | 提供工具，让环境里的 Claude 安全、受控地获得本机或环境内的能力 | `contributes.mcpServers` |
+| 定制 Cage（扩展） | 在 Cage 侧栏加一个自己的沙箱页面，扩展工作台界面与工作流 | `contributes.views` |
 
-工具由标准的 [MCP](https://modelcontextprotocol.io) 服务提供，通过标准输入输出通信，用任何语言都能写。页面是普通的 HTML，运行在沙箱里。
+工具由标准的 [MCP](https://modelcontextprotocol.io) 服务提供，通过标准输入输出通信，用任何语言都能写。页面是普通的 HTML，运行在沙箱里。所有社区插件通过开放的插件市场 [cage-plugins](https://github.com/Lee-xeo/cage-plugins) 与 Cage 主仓库解耦协作：社区在市场持续贡献 MCP 工具与页面扩展，Cage 维护团队专注于隔离环境、网络与工作台本身。日常安装、权限管理与使用说明也见[插件与插件市场指南](guide/plugins.md)。
 
 插件可以运行在两个地方，由清单的 `kind` 决定：
 
@@ -26,11 +28,11 @@
 
 - 卸载或更新时，原来的插件目录不会被删除，而是移到配置目录的 `plugins-removed/` 下。
 - 每个插件可以单独停用，包括内置的命令插件。停用的插件不启动，工具不再提供给 Claude，页面也不再显示；文件保留在原处。
-- 主机插件的程序启动时使用与终端相同的 `PATH`，清单里可以直接写 `python3`、`node`、`npx`、`uvx` 等命令；从桌面打开应用时也按终端的 `PATH` 查找这些命令。
+- 主机插件的程序启动时使用与终端相同的 `PATH`，清单里可以直接写 `python3`、`node`、`npx`、`uvx` 等命令；从桌面打开应用时也按终端的 `PATH` 查找这些命令。本机缺少 `uv`、`uvx`、`npx`、`node` 或 `python3` 等运行环境时，插件详情页会提示缺少的程序名称与安装入口，安装后点击「重新加载插件」即可生效。
 - 环境内插件的文件在启动时同步到环境里的 `~/.local/share/plugins/<插件名>/`，程序在那里运行。清单 `plugin.json` 不会同步过去。
 - 插件市场按分类展示插件，分类由插件在清单的 `categories` 里声明。
-- 基于开源项目的插件，详情页的「上游项目」列出项目名、版本、许可证和项目地址。这些信息来自市场索引的 `source` 字段，只用于展示。
-- 市场里有些插件在第一次启动时由 `npx` 或 `uvx` 从 npm、PyPI 获取上游程序的固定版本，因此需要先安装 Node.js 或 [uv](https://docs.astral.sh/uv/)；插件页和各插件的说明会写明。
+- 基于开源项目的插件，详情页的「上游项目」列出项目名、版本、许可证和项目地址；「信息」栏还会显示市场索引声明的运行环境（`runtime`）与支持的系统。这些信息来自市场索引，只用于展示。
+- 市场里部分主机插件（如 `blender`）在第一次启动时由 `uv` 或 `npx` 获取上游程序的固定版本，因此需要先在本机安装 [uv](https://docs.astral.sh/uv/) 或 Node.js；文档与办公类等环境内插件直接复用环境内的 Python 3 或 Node.js，按锁定哈希校验依赖，无需在本机安装额外运行环境。
 
 ### 授权
 
@@ -49,6 +51,17 @@
 - 手动删除插件目录不会清除授权；之后装回同名插件，会沿用原来的授权。在插件页卸载才会一并清除。
 
 授权记录保存在配置目录的 `host-grants.json`，属于个人数据，更新和重装应用时保留。
+
+### 设置与密钥
+
+插件可以在清单里声明需要你填写的设置，例如服务地址或访问令牌。声明了设置的插件，详情页多一个「设置」标签：
+
+- 必填设置没有值时，插件照常列出，状态为「需要配置」，但不启动；填好并保存后自动启动。
+- 保存后插件会重新启动，新值在下次启动时生效。值以环境变量交给插件的程序，不写在命令行里。
+- 密钥类型的设置用你的 Cage 账户加密保存在配置目录的 `plugin-secrets.json`，保存后不再显示，只能替换或清除。其他设置保存在 `plugin-settings.json`。
+- Cage 锁定时读不到密钥：用到密钥的插件会停止，解锁后自动重新启动；锁定期间也不能保存密钥。
+- 环境内插件同样可以收到密钥，但密钥会离开这台电脑，环境内以同一用户运行的其他程序（包括 Claude）也可能读到它。每次为环境内插件保存密钥前，都需要你在确认窗口中确认这一风险。
+- 在插件页卸载插件时，它的设置一并清除。手动删除插件目录不会清除设置。
 
 ## 开发
 
@@ -126,11 +139,35 @@ my-plugin/
 | 字段 | 说明 |
 | --- | --- |
 | `id` | 小写字母、数字和连字符，插件内唯一，不超过 40 个字符 |
-| `command` | 程序和参数。带路径的程序从插件目录算起；不带路径的，插件目录里有同名文件时用这个文件，否则按 `PATH` 查找 |
+| `command` | 程序和参数。带路径的程序从插件目录算起；不带路径的，插件目录里有同名文件时用这个文件，否则按 `PATH` 查找。参数中可使用 `${PROJECT_DIR}` 占位符，启动时替换为当前打开的项目目录（主机插件为本机路径，环境内插件为环境内挂载路径；可执行文件名本身不替换）。切换项目时只在后台重新启动用到该占位符的插件，其他插件及其进行中的调用不受影响；当前项目不是从本机共享的文件夹（未打开项目、环境默认目录等）时，这类插件不启动并显示原因，不会改用其他项目的目录 |
 
 目前每个插件最多一个 MCP 服务。写了多个服务的插件会列出并显示原因，但不启动。
 
-主机插件的程序继承应用的环境变量，但不包括应用自己的变量；环境内插件的程序只拿到 `HOME`、`USER`、`LOGNAME`、`SHELL`、`PATH`、`LANG`、`LC_ALL`、`TZ`。
+主机插件的程序继承应用的环境变量，但不包括应用自己的变量；环境内插件的程序只拿到 `HOME`、`USER`、`LOGNAME`、`SHELL`、`PATH`、`LANG`、`LC_ALL`、`TZ`。两种插件都会另外拿到 `contributes.settings` 里设置的值。
+
+`contributes.settings[]`（需要 `engines.cage` 至少为 `0.2.0`，最多 20 项）：
+
+| 字段 | 必需 | 说明 |
+| --- | --- | --- |
+| `id` | 是 | 小写字母、数字和连字符，插件内唯一，不超过 40 个字符 |
+| `title` | 是 | 表单里显示的名称，不超过 80 个字符 |
+| `description` | 否 | 显示在名称下方的说明，不超过 500 个字符 |
+| `type` | 是 | `string`（文本）、`secret`（密钥，加密保存、不再显示）、`boolean`（开关，值为 `true` 或 `false`）或 `choice`（从 `choices` 中选一个） |
+| `env` | 是 | 交给程序的环境变量名：大写字母开头，只含大写字母、数字和下划线，不超过 64 个字符，插件内唯一。不能是 `HOME`、`USER`、`LOGNAME`、`SHELL`、`PATH`、`LANG`、`LC_ALL`、`TZ`，也不能以 `LD_` 或 `DYLD_` 开头 |
+| `required` | 否 | 为 `true` 时，没有值的插件不启动 |
+| `default` | 否 | 用户没有填写时使用的值。密钥不能有默认值；开关只能是 `true` 或 `false`，没有默认值时为 `false`；选择必须是 `choices` 之一 |
+| `choices` | 选择类型必需 | 可选的值，1 到 20 个，各不相同，每个不超过 80 个字符 |
+
+值不超过 8192 字节，不能含有换行或 NUL。没有值且不是必填的设置不设置环境变量。
+
+```json
+"settings": [
+  { "id": "url", "title": "Server address", "type": "string", "env": "NOTES_URL", "required": true },
+  { "id": "token", "title": "Access token", "type": "secret", "env": "NOTES_TOKEN", "required": true }
+]
+```
+
+环境内插件的值在启动时经 SSH 标准输入写入环境里只有该用户能读的临时文件 `~/.local/share/plugins/<插件名>.env`，启动脚本读取后立即删除，不会出现在命令行或进程参数里。
 
 `contributes.views[]`：
 
@@ -280,7 +317,7 @@ MCP 服务可以脱离 Cage 单独测试：它只是一个读标准输入、写�
 
 市场的规则、打包方法和收录要求见 [cage-plugins](https://github.com/Lee-xeo/cage-plugins)。应用安装市场里的插件时还会检查：压缩包解压后不超过 100 MiB、不超过 2000 个文件；索引里写的权限必须与插件清单完全一致。
 
-索引条目可以带 `source`，说明插件基于的开源项目：`project`（项目名，如 `microsoft/playwright-mcp`）、`version`、`license`（SPDX 表达式，如 `MIT`）、`url`（https 地址）。格式不对时应用不显示它，插件照常列出。它由市场的打包脚本从插件目录的 `source.json` 生成，不写进 `plugin.json`：较早的应用读取清单时不接受未知字段。
+索引条目可以带 `source`（说明上游开源项目：`project`、`version`、`license`、`url`）与 `runtime`（运行环境标识，如 `python3`、`node`、`npx`、`uv`、`powershell`）。格式不对时应用不显示它们，插件照常列出。它们由市场的打包脚本生成，不写进 `plugin.json`：较早的应用读取清单时不接受未知字段。
 
 ### 尚未提供
 
@@ -296,7 +333,7 @@ MCP 服务可以脱离 Cage 单独测试：它只是一个读标准输入、写�
 - [`desktop-control`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/desktop-control)：主机插件，查看屏幕并使用键鼠，声明了 `screen` 和 `input` 权限。
 - [`system-status`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/system-status)：环境内插件，一个页面加一个工具。
 - [`browser`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/browser)：环境内插件，用环境里的 Chromium 浏览网页，基于 microsoft/playwright-mcp。
-- [`excel-workbooks`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/excel-workbooks)、[`word-documents`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/word-documents)、[`powerpoint-slides`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/powerpoint-slides)：主机插件，读写 Office 文件，不需要安装 Office，基于开源 MCP 服务并以 `uvx` 固定版本启动。
+- [`excel-workbooks`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/excel-workbooks)、[`word-documents`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/word-documents)、[`powerpoint-slides`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/powerpoint-slides)：环境内插件，读写 Office 文件，不需要安装 Office 或本机 `uv`，通过 `launcher.py` 按 `pylock.json` SHA-256 锁定校验启动。
 - [`blender`](https://github.com/Lee-xeo/cage-plugins/tree/main/plugins/blender)：主机插件，操作正在运行的 Blender，基于 ahujasid/blender-mcp。
 
 向市场提交插件的方法见 [cage-plugins](https://github.com/Lee-xeo/cage-plugins)。

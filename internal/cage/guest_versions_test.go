@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net/http"
@@ -19,37 +20,117 @@ import (
 )
 
 func TestGuestManifestIsPublishedOnlyAfterSuccessfulServiceStart(t *testing.T) {
-	for _, body := range []string{"printf started; exit 0", "printf broken; exit 7"} {
-		t.Run(body, func(t *testing.T) {
-			dir := t.TempDir()
-			marker := filepath.Join(dir, "published")
-			// Observe privileged actions without touching the host's /etc or running services.
-			sudo := `#!/bin/sh
-case "$1" in
- rm) rm -f "$AUDIT_MARKER";;
- python3) cat >/dev/null; printf published > "$AUDIT_MARKER";;
- *) exit 91;;
-esac
-`
-			if err := os.WriteFile(filepath.Join(dir, "sudo"), []byte(sudo), 0755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(marker, []byte("old"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			cmd := exec.Command("bash", "-c", markGuestStart(body))
-			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "AUDIT_MARKER="+marker)
-			_, err := cmd.CombinedOutput()
-			data, readErr := os.ReadFile(marker)
-			if strings.Contains(body, "exit 0") {
-				if err != nil || readErr != nil || string(data) != "published" {
-					t.Fatal("successful startup did not publish manifest", err, readErr)
+	for _, initial := range []string{"missing", "old", "current"} {
+		for _, failure := range []string{"none", "body", "publish"} {
+			t.Run(initial+"/"+failure, func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "components.json")
+				pending := filepath.Join(dir, "components.updating")
+				previous := RequiredGuestManifest()
+				if initial == "old" {
+					previous.Revision = "previous"
 				}
-			} else if err == nil || !os.IsNotExist(readErr) {
-				t.Fatal("failed startup retained or published a manifest", err, readErr)
-			}
-		})
+				old, _ := json.Marshal(previous)
+				if initial != "missing" {
+					if err := os.WriteFile(path, old, 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				body := `test -f "$MANIFEST_DIR/components.updating"
+if [ "$INITIAL" != missing ]; then test -f "$MANIFEST_DIR/components.json"; fi
+printf applied > "$MANIFEST_DIR/applied"
+`
+				startBody := body
+				if failure == "body" {
+					startBody += "exit 7\n"
+				}
+				out, err := runGuestManifestStart(t, dir, startBody, initial, failure == "publish")
+				if (err != nil) != (failure != "none") {
+					t.Fatalf("start: %v\n%s", err, out)
+				}
+				data, readErr := os.ReadFile(path)
+				if failure == "none" {
+					var manifest GuestManifest
+					if readErr != nil || json.Unmarshal(data, &manifest) != nil || !manifest.Current() {
+						t.Fatalf("manifest not published: %s, %v", data, readErr)
+					}
+					if _, err := os.Stat(pending); !os.IsNotExist(err) {
+						t.Fatal("successful start retained the pending marker", err)
+					}
+				} else {
+					if initial == "missing" {
+						if !os.IsNotExist(readErr) {
+							t.Fatal("failed start published a manifest", readErr)
+						}
+					} else if readErr != nil || string(data) != string(old) {
+						t.Fatalf("failed start damaged the previous manifest: %s, %v", data, readErr)
+					}
+					if _, err := os.Stat(pending); err != nil {
+						t.Fatal("failed start lost the recovery marker", err)
+					}
+					// Replaying the start body recovers without downloading anything.
+					if out, err := runGuestManifestStart(t, dir, body, initial, false); err != nil {
+						t.Fatalf("recovery failed: %v\n%s", err, out)
+					}
+					var manifest GuestManifest
+					data, err := os.ReadFile(path)
+					if err != nil || json.Unmarshal(data, &manifest) != nil || !manifest.Current() {
+						t.Fatalf("recovery did not publish manifest: %s, %v", data, err)
+					}
+				}
+				if entries, _ := filepath.Glob(filepath.Join(dir, ".components-*")); len(entries) != 0 {
+					t.Fatal("temporary manifests left behind", entries)
+				}
+			})
+		}
 	}
+}
+
+func runGuestManifestStart(t *testing.T, dir, body, initial string, failPublish bool) ([]byte, error) {
+	t.Helper()
+	python := "python3"
+	if runtime.GOOS == "windows" {
+		python = "python"
+	}
+	python, err := exec.LookPath(python)
+	if err != nil {
+		t.Fatal("Python 3 is required", err)
+	}
+	// Execute the generated shell and Python against real files. Instrument the
+	// replace boundary to check that readers still see the previous complete file.
+	bootstrap := `import os,sys,json
+from pathlib import Path
+root=Path(os.environ['MANIFEST_DIR'])
+original_replace=os.replace
+def replace(src,dst):
+ assert Path(src).parent==Path(dst).parent==root
+ assert (root/'components.updating').exists()
+ assert (root/'applied').exists()
+ json.loads(Path(src).read_text())
+ if os.environ['INITIAL']!='missing': json.loads(Path(dst).read_text())
+ if os.environ['FAIL_PUBLISH']=='true': raise OSError('injected replace failure')
+ original_replace(src,dst)
+os.replace=replace
+# Windows cannot fsync directories. Keep real file fsync/replace operations,
+# and emulate only the guest's directory handles on this test host.
+if os.name=='nt':
+ original_open,original_fsync,original_close=os.open,os.fsync,os.close
+ os.open=lambda path,flags,*args,**kwargs: -99 if Path(path)==root else original_open(path,flags,*args,**kwargs)
+ os.fsync=lambda fd: None if fd==-99 else original_fsync(fd)
+ os.close=lambda fd: None if fd==-99 else original_close(fd)
+exec(sys.stdin.read())
+`
+	prelude := `sudo() {
+ case "$1" in
+  python3) "$TEST_PYTHON" -c "$TEST_BOOTSTRAP";;
+  rm) rm -f "$MANIFEST_DIR/components.json";;
+  *) return 91;;
+ esac
+}
+`
+	cmd := exec.Command("bash", "-c", prelude+strings.ReplaceAll(markGuestStart(body), "/etc/claude-cage", filepath.ToSlash(dir)))
+	cmd.Env = append(os.Environ(), "TEST_PYTHON="+filepath.ToSlash(python), "TEST_BOOTSTRAP="+bootstrap, "MANIFEST_DIR="+filepath.ToSlash(dir), "INITIAL="+initial, fmt.Sprintf("FAIL_PUBLISH=%t", failPublish))
+	return cmd.CombinedOutput()
 }
 
 func TestToolDownloadWithRealCurlAndTLS(t *testing.T) {
@@ -543,3 +624,312 @@ printf 206
 		t.Fatal("partial left after success")
 	}
 }
+
+func TestStartClearsInheritedAccountComment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the start script runs in the Linux guest")
+	}
+	for _, test := range []struct{ comment, want string }{{"Host Person,,,", "usermod -c  worker\n"}, {"", ""}} {
+		dir := t.TempDir()
+		log := filepath.Join(dir, "calls")
+		// Stand-ins observe the account change without touching this machine's accounts.
+		for name, body := range map[string]string{
+			"id":     "#!/bin/sh\n[ \"$1\" = -un ] && echo worker\n",
+			"getent": fmt.Sprintf("#!/bin/sh\n[ \"$1 $2\" = 'passwd worker' ] && echo 'worker:x:1000:1000:%s:/home/worker:/bin/bash'\n", test.comment),
+			"sudo":   fmt.Sprintf("#!/bin/sh\n[ \"$1\" = usermod ] || exit 91\necho \"$*\" >> %q\n", log),
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cmd := exec.Command("bash", "-c", "set -euo pipefail\n"+clearAccountComment+"printf continued")
+		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+		out, err := cmd.CombinedOutput()
+		if err != nil || string(out) != "continued" {
+			t.Fatalf("%q: %v %s", test.comment, err, out)
+		}
+		calls, _ := os.ReadFile(log)
+		if string(calls) != test.want {
+			t.Fatalf("comment %q made calls %q", test.comment, calls)
+		}
+	}
+	if !strings.HasPrefix(componentStartScript(), clearAccountComment) {
+		t.Fatal("component start does not clear the account comment")
+	}
+}
+
+func TestGuestManifestInterruptedStartThenRetryPublishesManifest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the start script runs in the Linux guest")
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 unavailable")
+	}
+	dir := t.TempDir()
+	etcDir := filepath.Join(dir, "etc")
+	if err := os.MkdirAll(etcDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(etcDir, "components.json")
+	if err := os.WriteFile(manifestPath, []byte(`{"protocol":1,"revision":"stale"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sudo"), []byte("#!/bin/sh\nexec \"$@\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	started := filepath.Join(dir, "body-started")
+	interrupted := strings.ReplaceAll(markGuestStart("touch \"$STARTED_FLAG\"; sleep 30"), "/etc/claude-cage/", etcDir+"/")
+	cmd := exec.Command("bash", "-c", interrupted)
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "STARTED_FLAG="+started)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatal("guest start body did not begin")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	// The last manifest is kept, but the durable marker says it is not current.
+	if _, err := os.Stat(manifestPath); err != nil {
+		t.Fatalf("manifest removed by SIGKILL mid-start: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(etcDir, "components.updating")); err != nil {
+		t.Fatalf("interrupted start left no updating marker: %v", err)
+	}
+	retry := strings.ReplaceAll(markGuestStart("printf recovered"), "/etc/claude-cage/", etcDir+"/")
+	retryCmd := exec.Command("bash", "-c", retry)
+	retryCmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	if out, err := retryCmd.CombinedOutput(); err != nil {
+		t.Fatalf("retry after SIGKILL failed: %v %s", err, out)
+	}
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got GuestManifest
+	if err := json.Unmarshal(raw, &got); err != nil || !got.Current() {
+		t.Fatalf("republished manifest invalid: %q %v", raw, err)
+	}
+	entries, err := os.ReadDir(etcDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("unexpected temp files left in manifest dir: %v %v", entries, err)
+	}
+}
+
+func TestGuestStartRecoversFromTruncatedGuestFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the start script runs in the Linux guest")
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 unavailable")
+	}
+	// 1. code-server.yaml and browser-password guard against empty/truncated files.
+	guardStart := strings.Index(guestStart, `mkdir -p "$HOME/.config/claude-cage"`)
+	guardEnd := strings.Index(guestStart, `sudo install -d -o cage-browser`)
+	if guardStart < 0 || guardEnd <= guardStart {
+		t.Fatal("credential guard section not found in guest-start.sh")
+	}
+	guardScript := "set -euo pipefail\n" + guestStart[guardStart:guardEnd]
+	for name, badYAML := range map[string]string{"empty": "", "truncated": "auth: password\n"} {
+		t.Run("credentials-"+name, func(t *testing.T) {
+			home := t.TempDir()
+			cfgDir := filepath.Join(home, ".config", "claude-cage")
+			if err := os.MkdirAll(cfgDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			yamlPath := filepath.Join(cfgDir, "code-server.yaml")
+			passPath := filepath.Join(cfgDir, "browser-password")
+			if err := os.WriteFile(yamlPath, []byte(badYAML), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(passPath, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", guardScript)
+			cmd.Env = append(os.Environ(), "HOME="+home)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			yamlBytes, err := os.ReadFile(yamlPath)
+			if err != nil || !strings.Contains(string(yamlBytes), "password: ") {
+				t.Fatalf("code-server.yaml not recovered: %q %v", yamlBytes, err)
+			}
+			passBytes, err := os.ReadFile(passPath)
+			if err != nil || len(strings.TrimSpace(string(passBytes))) != 8 {
+				t.Fatalf("browser-password not recovered: %q %v", passBytes, err)
+			}
+			// Re-entry preserves valid credentials.
+			cmd2 := exec.Command("bash", "-c", guardScript)
+			cmd2.Env = append(os.Environ(), "HOME="+home)
+			if out, err := cmd2.CombinedOutput(); err != nil {
+				t.Fatalf("re-entry: %v %s", err, out)
+			}
+			if again, _ := os.ReadFile(yamlPath); string(again) != string(yamlBytes) {
+				t.Fatal("re-entry overwrote valid code-server.yaml")
+			}
+			if entries, _ := os.ReadDir(cfgDir); len(entries) != 2 {
+				t.Fatalf("temp files left behind: %v", entries)
+			}
+		})
+	}
+
+	// 2. PYCONTROL recovers truncated/corrupt browser-control.json and preserves valid token.
+	ctrlStart := strings.Index(guestStart, "import json, os, secrets, grp, tempfile")
+	ctrlEnd := strings.Index(guestStart[ctrlStart:], "\nPYCONTROL")
+	if ctrlStart < 0 || ctrlEnd < 0 {
+		t.Fatal("PYCONTROL block not found")
+	}
+	ctrlScript := guestStart[ctrlStart : ctrlStart+ctrlEnd]
+	ctrlScript = strings.ReplaceAll(ctrlScript, `Path('/etc/claude-cage/browser-control.json')`, `Path(os.environ["CTRL_PATH"])`)
+	ctrlScript = strings.ReplaceAll(ctrlScript, `Path('/etc/claude-cage/display-scale')`, `Path(os.environ["SCALE_PATH"])`)
+	ctrlScript = strings.ReplaceAll(ctrlScript, "grp.getgrnam('cage-browser').gr_gid", "None")
+	ctrlScript = recordDirectoryFsyncs + ctrlScript + recordDirectoryFsyncsReport
+	for _, tc := range []struct {
+		name      string
+		existing  string
+		wantToken string
+	}{
+		{"empty", "", ""},
+		{"truncated", `{"token":"abc`, ""},
+		{"wrong-type", `[]`, ""},
+		{"valid-preserved", `{"token":"keep-existing-token"}`, "keep-existing-token"},
+	} {
+		t.Run("browser-control-"+tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			home := filepath.Join(dir, "home")
+			etcDir := filepath.Join(dir, "etc")
+			if err := os.MkdirAll(filepath.Join(home, ".config", "claude-cage"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(etcDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(home, ".config", "claude-cage", "code-server.yaml"), []byte("auth: password\npassword: editor-secret\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			ctrlPath := filepath.Join(etcDir, "browser-control.json")
+			scalePath := filepath.Join(etcDir, "display-scale")
+			if err := os.WriteFile(ctrlPath, []byte(tc.existing), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("python3", "-c", ctrlScript)
+			cmd.Env = append(os.Environ(),
+				"CAGE_DISPLAY_SCALE=2",
+				"CAGE_WORKSPACE=/work",
+				"CAGE_USER_HOME="+home,
+				"CTRL_PATH="+ctrlPath,
+				"SCALE_PATH="+scalePath,
+				"FSYNC_DIRS="+etcDir,
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			// display-scale and browser-control.json: each rename is flushed.
+			if got := strings.Count(string(out), "dir-fsync "+etcDir+"\n"); got != 2 {
+				t.Fatalf("directory fsyncs %d, want 2: %s", got, out)
+			}
+			raw, err := os.ReadFile(ctrlPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				Token          string `json:"token"`
+				Workspace      string `json:"workspace"`
+				EditorPassword string `json:"editorPassword"`
+			}
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("invalid browser-control.json: %q %v", raw, err)
+			}
+			if got.Token == "" || got.Workspace != "/work" || got.EditorPassword != "editor-secret" {
+				t.Fatalf("unexpected browser-control.json: %+v", got)
+			}
+			if tc.wantToken != "" && got.Token != tc.wantToken {
+				t.Fatalf("valid token replaced: got %q want %q", got.Token, tc.wantToken)
+			}
+			if entries, _ := os.ReadDir(etcDir); len(entries) != 2 {
+				t.Fatalf("temp files left in etcDir: %v", entries)
+			}
+		})
+	}
+
+	// 3. PYCODE recovers truncated/corrupt Chromium Preferences atomically.
+	prefStart := strings.Index(guestStart, "import json, os\nfrom pathlib import Path\np = Path.home()")
+	prefEnd := strings.Index(guestStart[prefStart:], "\nPYCODE")
+	prefScript := strings.Replace(guestStart[prefStart:prefStart+prefEnd], "Path.home()", `Path(os.environ["FIXTURE"])`, 1)
+	prefScript = recordDirectoryFsyncs + prefScript + recordDirectoryFsyncsReport
+	for name, corrupt := range map[string]string{"empty": "", "truncated": `{"intl":`, "wrong-type": `"bad"`} {
+		t.Run("preferences-"+name, func(t *testing.T) {
+			dir := t.TempDir()
+			prof := filepath.Join(dir, "profile", "Default")
+			if err := os.MkdirAll(prof, 0700); err != nil {
+				t.Fatal(err)
+			}
+			prefs := filepath.Join(prof, "Preferences")
+			if err := os.WriteFile(prefs, []byte(corrupt), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("python3", "-c", prefScript)
+			cmd.Env = append(os.Environ(), "FIXTURE="+dir, "CAGE_LANGUAGE=en-US", "FSYNC_DIRS="+prof)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			if !strings.Contains(string(out), "dir-fsync "+prof+"\n") {
+				t.Fatalf("the rename was not flushed: %s", out)
+			}
+			raw, err := os.ReadFile(prefs)
+			if err != nil || !json.Valid(raw) {
+				t.Fatalf("preferences not recovered: %q %v", raw, err)
+			}
+			entries, _ := os.ReadDir(prof)
+			if corrupt == "" {
+				// Nothing worth keeping in an empty file.
+				if len(entries) != 1 {
+					t.Fatalf("temp files left in profile dir: %v", entries)
+				}
+				return
+			}
+			// The damaged file is kept beside the new one, unchanged.
+			if len(entries) != 2 || !strings.HasPrefix(entries[1].Name(), "Preferences.corrupt-") {
+				t.Fatalf("damaged preferences not kept: %v", entries)
+			}
+			if kept, _ := os.ReadFile(filepath.Join(prof, entries[1].Name())); string(kept) != corrupt {
+				t.Fatalf("backup %q, want %q", kept, corrupt)
+			}
+		})
+	}
+}
+
+// recordDirectoryFsyncs wraps os.fsync in a guest-start.sh Python block to
+// note each directory it flushes; recordDirectoryFsyncsReport prints
+// "dir-fsync PATH" once per flush of a directory listed in FSYNC_DIRS.
+const recordDirectoryFsyncs = `import os as _os, stat as _stat
+_fsyncs = []
+_fsync = _os.fsync
+def _record(fd):
+    info = _os.fstat(fd)
+    if _stat.S_ISDIR(info.st_mode):
+        _fsyncs.append((info.st_dev, info.st_ino))
+    return _fsync(fd)
+_os.fsync = _record
+`
+
+const recordDirectoryFsyncsReport = `
+for _path in _os.environ.get("FSYNC_DIRS", "").split(_os.pathsep):
+    if _path:
+        _info = _os.stat(_path)
+        for _flushed in _fsyncs:
+            if _flushed == (_info.st_dev, _info.st_ino):
+                print("dir-fsync " + _path)
+`

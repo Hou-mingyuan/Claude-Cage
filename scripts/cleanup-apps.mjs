@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Remove Cage bundles only after the caller has verified the replacement.
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { lstat, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { isMainModule } from "./is-main-module.mjs";
@@ -24,9 +25,14 @@ function isCage(bundle) {
   }
 }
 function inUse(bundle) {
-  const files = ["Contents/MacOS/Cage", "Contents/Resources/cage"].map((file) => path.join(bundle, file));
+  const files = ["Contents/MacOS/Cage", "Contents/Resources/cage"]
+    .map((file) => path.join(bundle, file))
+    .filter((file) => existsSync(file));
+  if (!files.length) return false;
   try {
-    return execFileSync("/usr/sbin/lsof", ["-t", ...files], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() !== "";
+    // Only an executable mapping means the App runs; indexers and virtiofs
+    // shares may hold ordinary read-only descriptors on the same files.
+    return execFileSync("/usr/sbin/lsof", ["-n", "-P", "-a", "-d", "txt", "-t", "--", ...files], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() !== "";
   } catch (error) {
     if (String(error.stdout || "").trim()) return true;
     if (error.status === 1) return false;
@@ -49,6 +55,7 @@ export async function cleanupApps({ keep, roots, onInUse = () => {}, onModified 
     retained.add(await realpath(bundle));
   }
   const removed = [];
+  const visited = new Set();
   async function visit(directory) {
     let stat;
     try {
@@ -59,14 +66,15 @@ export async function cleanupApps({ keep, roots, onInUse = () => {}, onModified 
     }
     if (!stat.isDirectory() || stat.isSymbolicLink()) return;
     const canonical = await realpath(directory);
-    if (retained.has(canonical)) return;
+    if (retained.has(canonical) || visited.has(canonical)) return;
+    visited.add(canonical);
     if (directory.endsWith(".app")) {
       if (isCage(directory)) {
         if (!intact(directory)) {
           onModified(directory);
           return;
         }
-        if (inUse(directory)) {
+        if (inUse(canonical)) {
           onInUse(directory);
           return;
         }

@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -174,8 +175,16 @@ func controllerVMOwners(profile string) ([]string, error) {
 	var owners []string
 	for _, path := range records {
 		b, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return nil, err
+		}
+		if len(bytes.TrimSpace(b)) == 0 || !json.Valid(b) {
+			// Only a crash or power loss can leave an empty or cut-off record
+			// (see cage.Config.RecordRunningAt); it names no live owner.
+			continue
 		}
 		var record struct {
 			PID     int    `json:"pid"`

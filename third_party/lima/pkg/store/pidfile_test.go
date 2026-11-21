@@ -93,8 +93,7 @@ func TestReadPIDFileCorruptedFromPreviousBoot(t *testing.T) {
 }
 
 func TestReadPIDFileWithoutBootSessionMarker(t *testing.T) {
-	// PID files written by an older version of Lima have no marker, and are handled as
-	// before: only the liveness of the process matters.
+	// A live owner whose process predates the PID file is retained without a marker.
 	fakeBootSessionID(t, "boot-1", nil)
 	dir := t.TempDir()
 	path := filepath.Join(dir, filenames.HostAgentPID)

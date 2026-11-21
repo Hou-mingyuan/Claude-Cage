@@ -24,13 +24,22 @@ check_destination() {
     exit 1
   fi
   local running_pids
-  running_pids="$(/usr/sbin/lsof -t "$target/Contents/MacOS/Cage" "$target/Contents/Resources/cage" 2>/dev/null || true)"
+  running_pids="$(/usr/sbin/lsof -n -P -a -d txt -t -- "$target/Contents/MacOS/Cage" "$target/Contents/Resources/cage" 2>/dev/null || true)"
   if [[ -n "$running_pids" ]]; then
     echo 'Cage is running from this destination. Quit it before replacing the App.' >&2; exit 1
   fi
 }
 check_destination "$app_destination"
-if [[ "${1:-}" == --install ]]; then check_destination "$installed_app"; fi
+if [[ "${1:-}" == --install ]]; then
+  # The App declares LSMinimumSystemVersion 14.0; stop before downloading
+  # dependencies when it could not open on this Mac.
+  host_version="$(sw_vers -productVersion 2>/dev/null || true)"
+  if [[ ! "$host_version" =~ ^([0-9]+)(\.[0-9]+)*$ ]] || (( BASH_REMATCH[1] < 14 )); then
+    printf 'Cage requires macOS 14.0 or later; this Mac runs %s. Run scripts/build-app.sh without --install to only build the App.\n' "${host_version:-an unknown version}" >&2
+    exit 1
+  fi
+  check_destination "$installed_app"
+fi
 version="$(tr -d '\n\r' < VERSION)"
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then echo 'Invalid VERSION.' >&2; exit 1; fi
 short_version="${version%%-*}"
@@ -44,6 +53,10 @@ export MACOSX_DEPLOYMENT_TARGET=14.0
 export CGO_CFLAGS="${CGO_CFLAGS:-} -mmacosx-version-min=14.0"
 export CGO_LDFLAGS="${CGO_LDFLAGS:-} -mmacosx-version-min=14.0"
 command -v uv >/dev/null || { echo 'Building the workbench requires uv: https://docs.astral.sh/uv/getting-started/installation/' >&2; exit 1; }
+mkdir -p _output
+source scripts/macos-build-env.sh
+macos_prepare_caches
+macos_check_toolchain
 bash scripts/fetch-proxy-core.sh
 make cage VERSION="$version"
 _output/bin/cage verify-web-assets
@@ -52,8 +65,8 @@ install_stage=''
 trap 'rm -rf "$build_stage"; if [[ -n "$install_stage" ]]; then rm -rf "$install_stage"; fi' EXIT
 bundle="$build_stage/Cage.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
-xcrun swiftc -O -target "$(uname -m)-apple-macosx14.0" -parse-as-library -framework Cocoa -framework WebKit -framework Security -framework LocalAuthentication -framework UserNotifications desktop/Cage.swift desktop/InterfaceLanguage.swift desktop/MacKeyboard.swift desktop/NativeInput.swift desktop/Updates.swift desktop/AccountDevice.swift -o "$bundle/Contents/MacOS/Cage"
-xcrun swiftc -O -target "$(uname -m)-apple-macosx14.0" -parse-as-library -framework Cocoa -framework Security desktop/Updates.swift desktop/UpdateInstaller.swift -o "$bundle/Contents/Resources/CageUpdateInstaller"
+xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -O -target "$(uname -m)-apple-macosx14.0" -parse-as-library -framework Cocoa -framework WebKit -framework Security -framework LocalAuthentication -framework UserNotifications desktop/Cage.swift desktop/InterfaceLanguage.swift desktop/MacKeyboard.swift desktop/NativeInput.swift desktop/Updates.swift desktop/AccountDevice.swift -o "$bundle/Contents/MacOS/Cage"
+xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -O -target "$(uname -m)-apple-macosx14.0" -parse-as-library -framework Cocoa -framework Security desktop/Updates.swift desktop/UpdateInstaller.swift -o "$bundle/Contents/Resources/CageUpdateInstaller"
 cp _output/bin/cage "$bundle/Contents/Resources/cage"
 if [[ "$(uname -m)" == x86_64 ]]; then
   bash scripts/build-intel-macos-runtime.sh "$bundle/Contents/Resources/intel-macos"
@@ -70,7 +83,7 @@ done
 mkdir -p "$bundle/Contents/Resources/licenses/mihomo"
 cp _output/proxy-core/LICENSE _output/proxy-core/NOTICE "$bundle/Contents/Resources/licenses/mihomo/"
 node scripts/collect-app-licenses.mjs "$bundle/Contents/Resources/licenses"
-xcrun swift desktop/Icon.swift logo.png _output/Cage.iconset
+xcrun swift ${swift_flags[@]+"${swift_flags[@]}"} desktop/Icon.swift logo.png _output/Cage.iconset
 iconutil -c icns _output/Cage.iconset -o "$bundle/Contents/Resources/Cage.icns"
 cat > "$bundle/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -90,6 +103,7 @@ cat > "$bundle/Contents/Info.plist" <<PLIST
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST
+macos_clear_bundle_attributes "$bundle"
 sign=(codesign --force --sign "$identity")
 if [[ "$identity" != - ]]; then sign+=(--timestamp --options runtime); fi
 "${sign[@]}" --entitlements third_party/lima/vz.entitlements "$bundle/Contents/Resources/cage"

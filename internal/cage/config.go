@@ -29,6 +29,8 @@ type Config struct {
 	Locale          string                `json:"locale"`
 	BrowserLanguage string                `json:"browser_language"`
 	ExitPolicy      ExitPolicy            `json:"exit_policy"`
+	// DNS holds backup and bootstrap resolvers from dns.json beside this file.
+	DNS DNSOptions `json:"-"`
 }
 
 func DefaultConfig() Config {
@@ -55,6 +57,9 @@ func Load(path string) (Config, error) {
 	if err = c.Validate(); err != nil {
 		return c, err
 	}
+	if c.DNS, err = loadDNSOptions(filepath.Dir(path)); err != nil {
+		return c, err
+	}
 	c.GuestProfile, err = guestprofile.Load(filepath.Dir(path))
 	return c, err
 }
@@ -78,9 +83,11 @@ func (c Config) Validate() error {
 	if u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return errors.New("proxy URL must not contain a path, query or fragment")
 	}
-	d, err := url.Parse(c.DNSURL)
-	if err != nil || d.Scheme != "https" || d.Hostname() == "" || d.User != nil || d.Fragment != "" {
-		return errors.New("DNS URL must be an HTTPS DNS-over-HTTPS endpoint")
+	if _, err := validDoH(c.DNSURL); err != nil {
+		return err
+	}
+	if err := c.DNS.Validate(); err != nil {
+		return err
 	}
 	if c.Timezone == "" || c.Timezone == "Local" {
 		return errors.New("timezone must be an explicit IANA name, e.g. Etc/UTC")
