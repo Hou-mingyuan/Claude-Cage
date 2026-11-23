@@ -85,6 +85,8 @@ func (b *browserResponseBody) Close() error {
 func (c *browserClient) request(ctx context.Context, token, method, path string, body []byte) ([]byte, error) {
 	timeout := 5 * time.Second
 	switch path {
+	case "/new", "/login-open":
+		timeout = 15 * time.Second
 	case "/audit", "/paste-image", "/tailnet":
 		timeout = 20 * time.Second
 	case "/editor-restart":
@@ -110,7 +112,6 @@ func (c *browserClient) request(ctx context.Context, token, method, path string,
 		return nil, errors.New(browserOperation(path) + "失败：浏览器返回的数据超过 1 MiB，已停止读取。请关闭不再使用的标签页或扩展后再试；持续出现时导出诊断包。")
 	}
 	if response.StatusCode != http.StatusOK {
-		diagnostics.Log("warn", "browser", fmt.Sprintf("operation=%s http=%d", path, response.StatusCode))
 		var result struct {
 			Error string `json:"error"`
 		}
@@ -139,10 +140,24 @@ func (c *browserClient) request(ctx context.Context, token, method, path string,
 			"当前页面没有网站 Cookie，请选择所有网站":                                    "当前页面没有网站 Cookie。请选择所有网站。",
 			"Cookie 操作无效":                                                "Cookie 操作参数无效。请核对 mode、scope、query 与 page。",
 			"请选择要删除的 Cookie":                                             "请选择要删除的 Cookie。",
+			"诊断时区无效":                                                     "诊断时区无效。请重新应用时区设置后再试。",
+			"浏览器配置诊断未完成":                                                 "浏览器配置诊断未完成。请重新检测，或重启环境后再试。",
+			"诊断页面无法连接":                                                   "浏览器诊断页面无法连接。请重新检测，或重启环境后再试。",
+			"诊断页面尚未就绪":                                                   "浏览器诊断页面尚未就绪。请重新检测，或重启环境后再试。",
+			"浏览器诊断未完成":                                                   "浏览器诊断未完成。请重新检测，或重启环境后再试。",
+			"Failed to open new tab - no browser is open":                "浏览器当前没有打开的窗口。请打开任意浏览器标签页或更新环境组件后再试。",
+			"Browser window did not change state":                        "浏览器窗口状态切换超时，请重试。",
+			"登录任务无效":                                                     "登录任务无效，请重新发起授权。",
+			"仅可打开官方登录地址":                                                 "仅可打开官方登录地址。",
+			"授权账号无效":                                                     "授权账号无效，请刷新账号列表后重试。",
+			"授权页面未能打开":                                                   "浏览器未能打开授权页面，请检查浏览器状态并重试。",
+			"账号出口无效":                                                     "账号独立出口配置无效，请检查节点设置后重试。",
 		}
 		if reason := known[result.Error]; reason != "" {
+			diagnostics.Log("warn", "browser", fmt.Sprintf("operation=%s http=%d reason=%s", path, response.StatusCode, result.Error))
 			return nil, errors.New(browserOperation(path) + "失败：" + reason)
 		}
+		diagnostics.Log("warn", "browser", fmt.Sprintf("operation=%s http=%d", path, response.StatusCode))
 		return nil, serviceHTTPFailure(browserOperation(path), response.StatusCode)
 	}
 	return data, nil

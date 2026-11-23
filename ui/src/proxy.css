@@ -70,8 +70,10 @@
   gap: 14px;
   padding: 18px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  margin: 18px 0 10px;
+  border-radius: 13px;
+  background: var(--paper);
+  box-shadow: var(--shadow-xs);
+  margin: 18px 0 12px;
 }
 .proxy-summary > div {
   flex: 1;
@@ -87,18 +89,21 @@
 }
 .proxy-summary > div > span {
   font-size: 12px;
-  opacity: 0.65;
+  color: var(--muted);
   margin-top: 5px;
 }
 .proxy-badge {
-  padding: 4px 9px;
-  background: color-mix(in srgb, currentColor 6%, transparent);
-  border-radius: 20px;
+  padding: 4px 10px;
+  background: var(--chrome);
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
   font-size: 11px;
+  font-weight: 550;
   white-space: nowrap;
 }
 .proxy-badge.online {
   color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 25%, transparent);
   background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 .proxy-tabs {
@@ -106,20 +111,26 @@
   gap: 4px;
   border-bottom: 1px solid var(--line);
   margin: 20px 0 16px;
-  padding-bottom: 7px;
+  padding-bottom: 8px;
 }
 .proxy-tabs button {
   border: 0;
   background: transparent;
-  color: inherit;
-  opacity: 0.6;
+  color: var(--muted);
   padding: 7px 13px;
+  border-radius: 7px;
+  font-weight: 500;
+}
+.proxy-tabs button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--strong);
 }
 .proxy-tabs button[aria-selected="true"],
 .proxy-tabs button.selected {
-  opacity: 1;
-  background: color-mix(in srgb, currentColor 8%, transparent);
-  border-radius: 6px;
+  color: var(--strong);
+  font-weight: 600;
+  background: var(--selected);
+  border-radius: 7px;
 }
 .proxy-toolbar {
   display: flex;
@@ -130,34 +141,170 @@
 }
 .proxy-toolbar > span {
   margin-right: auto;
-  opacity: 0.65;
+  color: var(--muted);
   font-size: 12px;
 }
 .proxy-toolbar .inline-select {
   max-width: 150px;
 }
-.settings-content
-  .proxy-manager
-  .proxy-toolbar
-  label.proxy-search:not(.check-line) {
+.proxy-toolbar .proxy-search {
   display: flex;
   flex-direction: row;
   flex: 1;
-  min-width: 150px;
+  min-width: 170px;
+  height: 36px;
   align-items: center;
-  gap: 6px;
-  margin: 0;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--input);
+  color: var(--muted);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
 }
-.settings-content
-  .proxy-manager
-  .proxy-toolbar
-  label.proxy-search:not(.check-line)
-  input {
+.proxy-toolbar .proxy-search:focus-within {
+  border-color: var(--accent);
+  background: var(--paper);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.proxy-toolbar .proxy-search > svg {
+  flex: none;
+  color: var(--muted);
+}
+.proxy-toolbar .proxy-search input.proxy-search-input,
+.settings-page .settings-content .proxy-toolbar .proxy-search input.proxy-search-input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
   margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--strong);
+  font-size: 0.9286rem;
+  box-shadow: none;
+}
+.proxy-toolbar .proxy-search input.proxy-search-input:focus-visible {
+  outline: none;
+}
+.proxy-region-panel {
+  margin: 0 0 12px;
+}
+.proxy-region-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.proxy-region-bar.clamped {
+  max-height: 64px;
+  overflow: hidden;
+}
+.proxy-region-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 4px;
+  min-height: 24px;
+  font-size: 0.7857rem;
+  color: var(--muted);
+}
+.proxy-region-toggle:hover:not(:disabled) {
+  color: var(--strong);
+  text-decoration: none;
+}
+.proxy-region-toggle svg {
+  transition: transform 150ms var(--ease-out);
+}
+.proxy-region-toggle svg.rotated {
+  transform: rotate(180deg);
+}
+.settings-page .settings-content .proxy-region-bar button.proxy-region-chip,
+.proxy-region-bar button.proxy-region-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 999px;
+  background: var(--chrome);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.proxy-region-bar button.proxy-region-chip:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--strong);
+}
+.settings-page .settings-content .proxy-region-bar button.proxy-region-chip[aria-pressed="true"],
+.proxy-region-bar button.proxy-region-chip[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink, #fff);
+  font-weight: 560;
+}
+.proxy-region-chip small {
+  font-size: 0.72rem;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+.proxy-region-flag {
+  line-height: 1;
+}
+.proxy-region-group + .proxy-region-group {
+  border-top: 1px solid var(--line);
+}
+.settings-page .settings-content button.proxy-region-group-header,
+button.proxy-region-group-header {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 0;
+  justify-content: flex-start;
+  gap: 7px;
+  background: color-mix(in srgb, var(--chrome) 60%, var(--paper));
+  color: var(--strong);
+  font-size: 0.8571rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line-subtle);
+}
+.settings-page .settings-content button.proxy-region-group-header:hover:not(:disabled),
+button.proxy-region-group-header:hover:not(:disabled) {
+  background: var(--hover);
+}
+.proxy-region-group-header[aria-expanded="false"] {
+  border-bottom: 0;
+}
+.proxy-region-group-header strong {
+  font-weight: 600;
+  color: var(--strong);
+}
+.proxy-region-count {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--paper);
+  border: 1px solid var(--line-subtle);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.proxy-region-chevron {
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 150ms var(--ease-out);
+}
+.proxy-region-chevron.collapsed {
+  transform: rotate(-90deg);
 }
 .proxy-node-list {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 12px;
+  background: var(--paper);
   overflow: hidden;
 }
 .initialization .proxy-node-list {
@@ -168,15 +315,19 @@
 .proxy-node {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-subtle);
   padding-right: 8px;
   gap: 8px;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.proxy-node:hover {
+  background: var(--hover);
 }
 .proxy-node:last-child {
   border-bottom: 0;
 }
 .proxy-node.selected {
-  background: color-mix(in srgb, currentColor 5%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--paper));
 }
 .proxy-node-choice {
   display: flex;
@@ -185,12 +336,15 @@
   gap: 12px;
   flex: 1;
   min-width: 0;
-  padding: 14px 12px;
+  padding: 13px 14px;
   border: 0;
   border-radius: 0;
   background: transparent;
   text-align: left;
   color: inherit;
+}
+.proxy-node-choice:hover:not(:disabled) {
+  background: transparent;
 }
 .proxy-node-choice > span:last-child {
   min-width: 0;
@@ -198,31 +352,35 @@
 }
 .proxy-node-choice strong {
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 560;
+  color: var(--strong);
 }
 .proxy-node small,
 .proxy-source small,
 .proxy-connection small {
-  opacity: 0.6;
+  color: var(--muted);
   font-size: 11px;
   margin-top: 4px;
 }
 .proxy-radio {
   width: 16px;
   height: 16px;
-  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--muted) 55%, var(--line));
   border-radius: 50%;
   flex-shrink: 0;
   display: grid;
   place-items: center;
+  transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
 }
 .proxy-node.selected .proxy-radio {
-  background: var(--strong);
-  color: var(--paper);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink, var(--paper));
 }
 .proxy-delay {
   font-size: 11px;
-  opacity: 0.6;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .proxy-empty {
@@ -236,7 +394,7 @@
 }
 .proxy-empty p {
   font-size: 12px;
-  opacity: 0.65;
+  color: var(--muted);
   margin: 0;
 }
 .proxy-source {
@@ -300,12 +458,18 @@
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
-  background: var(--input-bg, var(--paper));
+  background: var(--input);
   color: inherit;
   border: 1px solid var(--line);
-  padding: 10px;
-  border-radius: 7px;
-  font: 12px/1.6 var(--font-mono, monospace);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font: 12px/1.6 var(--code-font-family);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+.proxy-import textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .proxy-yaml-input {
   margin-top: 4px;
@@ -431,22 +595,26 @@
 .proxy-metrics {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18px;
+  gap: 14px;
   border: 1px solid var(--line);
   padding: 18px;
-  border-radius: 10px;
+  border-radius: 12px;
+  background: var(--chrome);
 }
 .proxy-metrics span {
   font-size: 12px;
+  color: var(--muted);
 }
 .proxy-metrics strong {
   display: block;
   font-size: 20px;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--strong);
+  font-variant-numeric: tabular-nums;
   margin: 6px 0;
 }
 .proxy-metrics small {
-  opacity: 0.6;
+  color: var(--muted);
 }
 .proxy-metrics + .field-help {
   margin-top: 10px;
@@ -510,7 +678,9 @@
 
 .proxy-route {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 13px;
+  background: var(--paper);
+  box-shadow: var(--shadow-xs);
   padding: 18px;
   margin-bottom: 24px;
 }
@@ -537,22 +707,25 @@
   flex-shrink: 0;
   gap: 3px;
   padding: 3px;
-  background: color-mix(in srgb, currentColor 5%, transparent);
-  border-radius: 8px;
+  background: var(--chrome);
+  border: 1px solid var(--line-subtle);
+  border-radius: 9px;
 }
 .proxy-route-mode button {
   border: 0;
+  border-radius: 7px;
   background: transparent;
-  padding: 7px 12px;
+  padding: 6px 12px;
   color: var(--muted);
   transition:
-    background 140ms,
-    color 140ms;
+    background-color 140ms var(--ease-out),
+    color 140ms var(--ease-out);
 }
 .proxy-route-mode button[aria-pressed="true"] {
   background: var(--paper);
   color: var(--strong);
-  box-shadow: 0 1px 3px #00000012;
+  font-weight: 550;
+  box-shadow: var(--shadow-xs);
 }
 .proxy-route-hops {
   list-style: none;

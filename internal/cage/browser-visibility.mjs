@@ -15,19 +15,25 @@ export function targetAfterClose(targets, closed) {
 
 // Chromium must observe a minimized window to throttle its hidden pages.
 // Withdrawing an X window alone leaves document.visibilityState visible.
+// Visible guest browser windows always stay fullscreen so Chromium's own
+// tab strip and address bar never appear inside the workbench browser frame.
 export class BrowserVisibility {
-  constructor(cdp, targets, canHide = async () => true) {
+  constructor(cdp, targets, canHide = async () => true, activeTarget = () => "") {
     this.cdp = cdp;
     this.targets = targets;
     this.canHide = canHide;
+    this.activeTarget = activeTarget;
     this.visible = true;
-    this.saved = new Map();
     this.queue = Promise.resolve();
   }
 
   set(visible) {
     if (typeof visible !== "boolean") throw new Error("Invalid browser visibility");
     this.visible = visible;
+    return this.sync();
+  }
+
+  sync() {
     const result = this.queue.catch(() => {}).then(() => this.apply());
     this.queue = result;
     return result;
@@ -38,9 +44,7 @@ export class BrowserVisibility {
       await this.cdp("Target.activateTarget", { targetId });
       if (this.visible || !await this.canHide()) {
         const { windowId, bounds } = await this.cdp("Browser.getWindowForTarget", { targetId });
-        if (bounds.windowState === "minimized") await this.setBounds(windowId, { windowState: "normal" }, { allowMaximized: true });
-        await this.setBounds(windowId, { windowState: "fullscreen" });
-        this.saved.delete(windowId);
+        await this.ensureFullscreen(windowId, bounds);
       } else {
         await this.apply();
       }
@@ -49,12 +53,21 @@ export class BrowserVisibility {
     return result;
   }
 
+  async ensureFullscreen(windowId, bounds) {
+    if (bounds.windowState === "fullscreen") return false;
+    if (bounds.windowState === "minimized") {
+      await this.setBounds(windowId, { windowState: "normal" }, { allowMaximized: true });
+    }
+    await this.setBounds(windowId, { windowState: "fullscreen" });
+    return true;
+  }
+
   async setBounds(windowId, bounds, { allowMaximized = false } = {}) {
     await this.cdp("Browser.setWindowBounds", { windowId, bounds });
     // The CDP reply can precede the window manager's state transition.
     // Fullscreen/minimized changes must observe the intermediate state, which
     // Openbox may report as maximized instead of normal.
-    for (let attempt = 0; attempt < 40; attempt++) {
+    for (let attempt = 0; attempt < 80; attempt++) {
       const current = await this.cdp("Browser.getWindowBounds", { windowId });
       const state = current.bounds.windowState;
       if (state === bounds.windowState || (allowMaximized && state === "maximized")) return;
@@ -74,23 +87,22 @@ export class BrowserVisibility {
         if (this.targets().includes(targetId)) throw error;
       }
     }
-    for (const windowId of this.saved.keys()) {
-      if (!windows.has(windowId)) this.saved.delete(windowId);
-    }
+    let unminimized = false;
     for (const [windowId, bounds] of windows) {
       if (visible) {
-        const saved = this.saved.get(windowId);
-        if (!saved) continue;
-        await this.setBounds(windowId, { windowState: "normal" }, { allowMaximized: true });
-        const restore = saved.windowState === "normal" ? saved : { windowState: saved.windowState };
-        await this.setBounds(windowId, restore);
-        this.saved.delete(windowId);
+        if (bounds.windowState === "minimized") unminimized = true;
+        await this.ensureFullscreen(windowId, bounds);
       } else if (bounds.windowState !== "minimized") {
-        if (!this.saved.has(windowId)) this.saved.set(windowId, bounds);
         if (bounds.windowState !== "normal") {
           await this.setBounds(windowId, { windowState: "normal" }, { allowMaximized: true });
         }
         await this.setBounds(windowId, { windowState: "minimized" });
+      }
+    }
+    if (visible && unminimized && windows.size > 1) {
+      const active = this.activeTarget();
+      if (active && this.targets().includes(active)) {
+        await this.cdp("Target.activateTarget", { targetId: active }).catch(() => {});
       }
     }
   }

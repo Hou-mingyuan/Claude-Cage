@@ -21,7 +21,9 @@ internal sealed class NativeInput : TextBox
     {
         this.publish = publish;
         BorderStyle = BorderStyle.None; Multiline = true; TabStop = false;
-        ImeMode = ImeMode.On; Visible = false; Size = new Size(1, 24);
+        // Leave the host IME mode to the user when the remote view takes focus.
+        ImeMode = ImeMode.NoControl;
+        Visible = false; Size = new Size(1, 24);
         LostFocus += (_, _) => {
             Cancel(); Emit("deactivated"); owner = ""; Visible = false;
         };

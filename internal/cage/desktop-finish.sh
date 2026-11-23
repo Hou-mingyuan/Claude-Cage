@@ -1,8 +1,12 @@
 #!/bin/bash
 # Runs as the unit's user before systemd tears down the keyring and display.
 set -eu
+umask 077
 runtime=$1
 unit=$2
+if [[ -d "$runtime" ]]; then
+  touch "$runtime/stopping" 2>/dev/null || :
+fi
 if [[ -r "$runtime/app-pid" ]]; then
   read -r app < "$runtime/app-pid"
   if [[ $app =~ ^[1-9][0-9]*$ ]] && grep -Fqx "0::/system.slice/$unit" "/proc/$app/cgroup" 2>/dev/null; then

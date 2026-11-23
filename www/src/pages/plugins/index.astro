@@ -177,8 +177,10 @@ const description =
           const metaParts: string[] = [formatPlatformList(plugin.platforms)];
           if (plugin.source?.project) {
             metaParts.push(plugin.source.license ? `${plugin.source.project} · ${plugin.source.license}` : plugin.source.project);
+          } else if (plugin.author?.official) {
+            metaParts.push('Cage 官方');
           } else if (plugin.author?.name) {
-            metaParts.push(plugin.author.official ? `Cage 官方 · ${plugin.author.name}` : plugin.author.name);
+            metaParts.push(plugin.author.name);
           } else if (plugin.minBytes > 0) {
             metaParts.push(formatBytes(plugin.minBytes));
           }
@@ -262,7 +264,7 @@ const description =
               <span>03</span>
               <div>
                 <strong>向 cage-plugins 提交 PR</strong>
-                <p>自动化脚本完成清单校验、打包与 SHA-256 索引生成，合入后自动同步到所有 Cage 客户端与官网市场。</p>
+                <p>按 PR 模板填写信息并附上插件在 Cage 中的运行效果图，自动化脚本完成清单校验、打包与 SHA-256 索引生成，合入后自动同步到所有 Cage 客户端与官网市场。</p>
               </div>
             </li>
           </ol>
@@ -283,7 +285,7 @@ const description =
   "version": "0.1.0",
   "description": "Shows processor load, memory and disk use.",
   "icon": "icon.svg",
-  "engines": { "cage": ">=0.1.8" },
+  "engines": { "cage": ">=0.2.0" },
   "kind": "guest",
   "permissions": [],
   "categories": ["system"],

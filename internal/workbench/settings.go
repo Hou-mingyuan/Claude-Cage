@@ -49,6 +49,11 @@ type Preferences struct {
 	// tool downloads for proxies that drop curl's TLS 1.3 ClientHello. Off by
 	// default; does not affect normal browsing or API connections.
 	InstallTLS12Compat bool `json:"install_tls12_compat,omitempty"`
+	// TLSClientHelloSplit splits large (>1000 byte) TLS ClientHello records
+	// across two writes with a short gap on outbound proxy tunnels, keeping
+	// full TLS 1.3 / post-quantum handshakes intact for proxy chains that drop
+	// large initial writes with EOF. Off by default.
+	TLSClientHelloSplit bool `json:"tls_client_hello_split,omitempty"`
 	// LocationIPInfoFallback lets ipinfo.io receive the measured exit IP
 	// after the five default location providers all fail. Off by default; its
 	// answer counts at country level only.
@@ -127,6 +132,16 @@ func (s *Server) prepareEnvironment() error {
 		// A private legacy directory cannot remain an authorized project.
 		if _, err := validateWorkspace(p.Workspace, s.profile); err != nil {
 			p.Workspace = ""
+		}
+	}
+	if p.Workspace == "" {
+		if saved, err := s.readSharedProjects(); err == nil {
+			for _, candidate := range saved.Paths {
+				if valid, err := validateWorkspace(candidate, s.profile); err == nil {
+					p.Workspace = valid
+					break
+				}
+			}
 		}
 	}
 	if err := writePrivate(filepath.Join(s.profile, "workbench.json"), p); err != nil {
@@ -216,7 +231,7 @@ func proposedSettings(input Settings, old cage.Config, profile string) (cage.Con
 	if input.ExitPolicy == (cage.ExitPolicy{}) {
 		input.ExitPolicy = old.ExitPolicy
 	}
-	c := cage.Config{ProxyURL: old.ProxyURL, ProxyRevision: old.ProxyRevision, DNSURL: input.DNSURL, DNS: cage.NewDNSOptions(input.DNSFallbackURLs, input.DNSBootstrapURLs, input.DNSPublicFallback), Timezone: input.Timezone, Locale: input.Locale, BrowserLanguage: input.BrowserLanguage, ExitPolicy: input.ExitPolicy.Normalized()}
+	c := cage.Config{ProxyURL: old.ProxyURL, ProxyRevision: old.ProxyRevision, DNSURL: input.DNSURL, DNS: cage.NewDNSOptions(input.DNSFallbackURLs, input.DNSBootstrapURLs, input.DNSPublicFallback), TLSClientHelloSplit: input.TLSClientHelloSplit, Timezone: input.Timezone, Locale: input.Locale, BrowserLanguage: input.BrowserLanguage, ExitPolicy: input.ExitPolicy.Normalized()}
 	if err := c.Validate(); err != nil {
 		return c, input.Preferences, err
 	}

@@ -3,10 +3,15 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: var(--paper);
+  background:
+    radial-gradient(60% 42% at 50% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 72%),
+    var(--paper);
   color: var(--ink);
   padding: 24px;
   overflow: auto;
+}
+:root[data-preset="high-contrast"] .account-gate {
+  background: var(--paper);
 }
 .account-brand {
   align-self: flex-start;
@@ -15,6 +20,7 @@
   gap: 10px;
   font-size: 18px;
   font-weight: 650;
+  color: var(--strong);
 }
 .account-gate-header {
   display: flex;
@@ -25,18 +31,26 @@
 .account-brand img {
   width: 28px;
   height: 28px;
+  border-radius: 7px;
 }
 .account-entry {
-  width: min(100%, 380px);
+  width: min(100%, 420px);
   margin: auto;
-  padding: 44px 0;
+  padding: 36px 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl, 18px);
+  background: var(--paper);
+  box-shadow: var(--shadow-md, 0 10px 30px rgb(0 0 0 / 0.08));
   text-align: center;
+  animation: surface-enter 200ms var(--ease-out, ease-out);
 }
 .account-entry h1 {
-  font-size: 25px;
-  font-weight: 600;
-  line-height: 1.4;
-  margin: 20px 0 10px;
+  font-size: 24px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  margin: 18px 0 8px;
+  color: var(--strong);
   overflow-wrap: anywhere;
 }
 .account-entry-intro {
@@ -48,6 +62,8 @@
 .account-welcome-logo {
   width: 58px;
   height: 58px;
+  border-radius: 14px;
+  box-shadow: var(--shadow-xs);
 }
 .account-entry fieldset,
 .account-settings fieldset {
@@ -65,6 +81,8 @@
   align-items: stretch;
   gap: 8px;
   font-size: 13px;
+  font-weight: 540;
+  color: var(--strong);
   text-align: left;
 }
 .account-field input,
@@ -73,16 +91,19 @@
   min-width: 0;
   font: inherit;
   font-size: 14px;
+  font-weight: 400;
   padding: 11px 12px;
   border: 1px solid var(--line);
   border-radius: 9px;
   color: var(--ink);
-  background: var(--paper);
+  background: var(--input);
+  transition: border-color var(--duration-fast, 130ms) var(--ease-out, ease), box-shadow var(--duration-fast, 130ms) var(--ease-out, ease);
 }
-.account-field input:focus,
-.account-field textarea:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.account-field input:focus-visible,
+.account-field textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .account-field textarea { resize: vertical; line-height: 1.7; overflow-wrap: anywhere; }
 .account-recovery .field-help { text-align: left; line-height: 1.6; }
@@ -138,10 +159,11 @@
   color: var(--muted);
 }
 .account-background i {
-  height: 6px;
-  width: 6px;
+  height: 7px;
+  width: 7px;
   border-radius: 50%;
-  background: #4e8762;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 20%, transparent);
 }
 .account-exit-app {
   margin-top: 12px;
@@ -215,19 +237,24 @@
   flex: 0 0 100%;
   max-height: min(40vh, 240px);
   overflow-y: auto;
-  padding: 4px;
+  padding: 5px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius-md, 10px);
   background: var(--paper);
+  box-shadow: var(--shadow-md);
+  animation: popover-in 140ms var(--ease-out, ease-out);
 }
 .account-menu-label {
-  padding: 8px 10px;
+  padding: 7px 10px 5px;
   font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--muted);
 }
 .account-menu > button {
   width: 100%;
-  padding: 10px;
+  padding: 8px 10px;
+  min-height: 34px;
   border: 0;
   border-radius: 6px;
   display: flex;
@@ -240,7 +267,8 @@
   font-size: 13px;
 }
 .account-menu > button:hover {
-  background: var(--selected);
+  background: var(--hover);
+  color: var(--strong);
 }
 .account-menu small {
   margin-left: auto;
@@ -287,17 +315,23 @@
 }
 @media (max-height: 650px) {
   .account-entry {
-    padding: 20px 0;
+    padding: 22px 24px;
   }
   .account-entry h1 {
     margin-top: 12px;
-    font-size: 22px;
+    font-size: 21px;
   }
   .account-entry fieldset {
     gap: 12px;
   }
   .account-local-note {
     margin-top: 18px;
+  }
+}
+@media (max-width: 480px) {
+  .account-entry {
+    padding: 24px 18px;
+    border-radius: 14px;
   }
 }
 

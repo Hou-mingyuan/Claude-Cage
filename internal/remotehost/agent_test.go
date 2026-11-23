@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sylvinus/agent-vm/internal/host"
 )
 
 func TestAgentSocketValidationRules(t *testing.T) {
@@ -45,7 +47,7 @@ func TestAgentSocketIsOptionalAndOnlyKeptForAgentProfiles(t *testing.T) {
 	}
 	// A profile written before the field existed is read unchanged.
 	old := `{"version":1,"hosts":[{"id":"` + newID() + `","name":"old","host":"localhost","port":22,"user":"cage","auth":{"kind":"agent"},"executable":"cage"}]}`
-	if err := os.WriteFile(filepath.Join(dir, "remote-hosts.json"), []byte(old), 0600); err != nil {
+	if err := host.CreatePrivateFile(filepath.Join(dir, "remote-hosts.json"), []byte(old)); err != nil {
 		t.Fatal(err)
 	}
 	store := NewStore(dir)

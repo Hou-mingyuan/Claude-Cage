@@ -459,6 +459,11 @@ func (e *app) buildBase(ctx context.Context, in install, disk, memory, cpus int)
 		if err != nil {
 			fmt.Fprintf(log, "%v\n", err)
 			fmt.Fprintf(e.io.Stderr, "Error: %s\n", diagnostics.Redact(err.Error()))
+			// Redaction hides each image location; name them by fixed codes.
+			if summary := vm.ImageDownloadSummary(err); summary != "" {
+				fmt.Fprintln(log, summary)
+				fmt.Fprintln(e.io.Stderr, summary)
+			}
 			if f, ok := e.io.Stdout.(*os.File); ok && ui.IsTerminal(f) && os.Getenv(cage.ConfigEnv) == "" {
 				fmt.Fprint(e.io.Stderr, ui.Tail(logPath, 20))
 			}

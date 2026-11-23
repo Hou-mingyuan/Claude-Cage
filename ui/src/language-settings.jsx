@@ -12,7 +12,7 @@ import {
 } from "./interface-language.mjs";
 import "./language-settings.css";
 
-export function LanguageSettings({ compact = false }) {
+export function LanguageSettings({ compact = false, row = false }) {
   const t = useTranslation();
   const { language, active } = useInterfaceLanguage();
   const systemName = compact && language === systemLanguage
@@ -41,6 +41,24 @@ export function LanguageSettings({ compact = false }) {
       pending.current = false;
       setSaving(false);
     }
+  }
+  if (row) {
+    return (
+      <>
+        <div className="settings-row">
+          <div className="settings-row-copy">
+            <strong>{t("界面语言")}</strong>
+          </div>
+          <div className="settings-row-control">
+            <InlineSelect aria-label={t("界面语言")} value={language} displayLabel={systemName} onValueChange={choose} aria-busy={saving}>
+              <option value={systemLanguage}>{t("跟随系统")}</option>
+              {languages.map(({ id, name }) => <option key={id} value={id} lang={id}>{name}</option>)}
+            </InlineSelect>
+          </div>
+        </div>
+        {error && <p className="error-message" role="alert">{t(error)}</p>}
+      </>
+    );
   }
   return (
     <>

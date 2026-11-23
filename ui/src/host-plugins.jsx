@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft, Blocks, Check, ChevronDown, ChevronRight, CircleAlert, Clock, Copy, Download, Folder, FolderOpen, Globe2,
-  Keyboard, LoaderCircle, Monitor, PanelLeft, RefreshCw, Search, Settings, ShieldCheck, SquareTerminal, Store, Trash2, TriangleAlert, Wrench,
+  ArrowLeft, Blocks, Check, ChevronDown, ChevronRight, CircleAlert, Clock, Copy, Download, FileCode2, Folder, FolderOpen, Globe2,
+  Keyboard, LoaderCircle, Monitor, PanelLeft, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, SquareTerminal, Store, Trash2, TriangleAlert, Wrench,
 } from "lucide-react";
 import { api, writeClipboard } from "./api";
-import { runtimeURL } from "./client-context.mjs";
+import { getClientContext, isRemoteClient, runtimeURL } from "./client-context.mjs";
 import { useWindowVisibility } from "./window-visibility";
 import { sameState } from "./workspace-state.mjs";
 import "./host-plugins.css";
-import { translate, useTranslation } from "./interface-language.mjs";
+import { activeInterfaceLanguage, translate, useTranslation } from "./interface-language.mjs";
+import { formatMarketAuthor, localizedPluginText } from "./plugin-i18n.mjs";
+import { localizeBackendMessage } from "./backend-message.mjs";
 
 const permissions = {
   files: { title: "读写文件", text: "读取或修改这台电脑上的文件。", icon: FolderOpen },
@@ -20,7 +22,7 @@ const permissions = {
 const builtIn = { commands: { title: "命令", description: "在已打开的项目文件夹中运行命令，较长的命令可在后台运行并稍后读取结果。" } };
 const toolNotes = { run_command: "在项目文件夹中运行一条命令", command_job: "读取或停止后台运行的命令" };
 const knownIcons = { commands: SquareTerminal, clock: Clock };
-const sources = { builtin: "内置", local: "手动安装", catalog: "随应用附带", market: "插件市场" };
+const sources = { builtin: "内置", default: "默认预装", local: "手动安装", catalog: "随应用附带", market: "插件市场" };
 const runtimeNames = { uv: "uv", uvx: "uv", npx: "Node.js (npx)", node: "Node.js", python3: "Python 3", python: "Python", powershell: "PowerShell" };
 const platformNames = { darwin: "macOS", windows: "Windows", linux: "Linux" };
 
@@ -33,9 +35,13 @@ function missingProgramGuide(program) {
 }
 
 const words = name => name.split(/[-_\s]+/).filter(Boolean);
-export const pluginTitle = plugin => plugin.built_in && builtIn[plugin.name] && translate(builtIn[plugin.name].title) || plugin.display_name
+export const pluginTitle = (plugin, fallbackSource = null) => plugin.built_in && builtIn[plugin.name] && translate(builtIn[plugin.name].title)
+  || localizedPluginText(plugin, "displayName", activeInterfaceLanguage(), fallbackSource)
+  || plugin.display_name
   || words(plugin.name).map(word => word[0].toUpperCase() + word.slice(1)).join(" ") || plugin.name;
-const pluginText = plugin => plugin.built_in && builtIn[plugin.name] && translate(builtIn[plugin.name].description) || plugin.description || translate("插件没有提供说明");
+const pluginText = (plugin, fallbackSource = null) => plugin.built_in && builtIn[plugin.name] && translate(builtIn[plugin.name].description)
+  || localizedPluginText(plugin, "description", activeInterfaceLanguage(), fallbackSource)
+  || plugin.description || translate("插件没有提供说明");
 const permissionText = list => list?.length ? list.map(name => permissions[name]?.title ? translate(permissions[name].title) : name).join(translate("、")) : translate("未声明任何权限");
 // The app explains in problem when a plugin needs a newer app: a guest plugin,
 // an unmet engines range or more than one MCP server. Otherwise an unsupported
@@ -90,7 +96,26 @@ export function useHostPlugins(active) {
   const windowVisible = useWindowVisibility();
   const [view, setView] = useState(null), [error, setError] = useState(""), [busy, setBusy] = useState("");
   const [market, setMarket] = useState({ loading: false, loaded: false });
-  const mounted = useRef(true), revision = useRef(0), marketRevision = useRef(0);
+  const [drafts, setDrafts] = useState({ loading: false, loaded: false, ready: false, items: [], error: "" });
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [bridgeStatus, setBridgeStatus] = useState(null);
+  const mounted = useRef(true), revision = useRef(0), marketRevision = useRef(0), draftsRevision = useRef(0);
+  const refreshRemoteExtras = useCallback(async () => {
+    if (!isRemoteClient()) {
+      setSyncStatus(null);
+      setBridgeStatus(null);
+      return;
+    }
+    try {
+      const [sync, bridge] = await Promise.all([
+        api("/client/plugins/sync").catch(() => null),
+        api("/client/plugins/bridge").catch(() => null),
+      ]);
+      if (!mounted.current) return;
+      if (sync) setSyncStatus(previous => (sameState(previous, sync) ? previous : sync));
+      if (bridge) setBridgeStatus(previous => (sameState(previous, bridge) ? previous : bridge));
+    } catch { /* Remote client status is best-effort alongside /host-tools. */ }
+  }, []);
   const refresh = useCallback(async () => {
     const current = ++revision.current;
     try {
@@ -100,7 +125,8 @@ export function useHostPlugins(active) {
         setError("");
       }
     } catch (e) { if (mounted.current && current === revision.current) setError(e.message); }
-  }, []);
+    await refreshRemoteExtras();
+  }, [refreshRemoteExtras]);
   const loadMarket = useCallback(async (fresh = false) => {
     const current = ++marketRevision.current;
     setMarket(previous => ({ ...previous, loading: true }));
@@ -112,6 +138,23 @@ export function useHostPlugins(active) {
         setMarket(previous => ({ ...previous, loading: false, loaded: true, missing: e.status === 404, error: e.status === 404 ? "" : e.message }));
     }
   }, []);
+  const loadDrafts = useCallback(async () => {
+    const current = ++draftsRevision.current;
+    setDrafts(previous => ({ ...previous, loading: true }));
+    try {
+      const value = await api("/host-tools/drafts");
+      if (mounted.current && current === draftsRevision.current) {
+        const nextItems = value?.drafts || [];
+        setDrafts(previous => {
+          const same = previous.loaded && previous.ready === Boolean(value?.ready) && sameState(previous.items, nextItems) && !previous.error;
+          return same ? { ...previous, loading: false } : { loading: false, loaded: true, ready: Boolean(value?.ready), items: nextItems, error: "" };
+        });
+      }
+    } catch (e) {
+      if (mounted.current && current === draftsRevision.current)
+        setDrafts(previous => ({ ...previous, loading: false, loaded: true, error: e.status === 404 ? "" : e.message }));
+    }
+  }, []);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // "light" keeps only the plugin list current, slowly, for the plugin pages
   // in the main sidebar; the market is read once the plugin views are shown.
@@ -119,9 +162,15 @@ export function useHostPlugins(active) {
   useEffect(() => {
     if (!active || !windowVisible) return;
     void refresh();
-    const timer = setInterval(() => { if (!busy) void refresh(); }, browsing ? 5000 : 30000);
+    if (browsing) void loadDrafts();
+    const timer = setInterval(() => {
+      if (!busy) {
+        void refresh();
+        if (browsing) void loadDrafts();
+      }
+    }, browsing ? 5000 : 30000);
     return () => { revision.current++; clearInterval(timer); };
-  }, [active, browsing, busy, refresh, windowVisible]);
+  }, [active, browsing, busy, refresh, loadDrafts, windowVisible]);
   useEffect(() => { if (browsing && !market.loaded && !market.loading) void loadMarket(); }, [browsing, market.loaded, market.loading, loadMarket]);
   // change sends one request; key names what is in progress, for the buttons.
   const change = useCallback(async (body, key = "change") => {
@@ -129,12 +178,55 @@ export function useHostPlugins(active) {
     try {
       const value = await api("/host-tools", body);
       if (mounted.current) setView(value);
-      if (body.install || body.remove) void loadMarket();
+      if (body.install || body.remove || body.restore_default) void loadMarket();
       return true;
     } catch (e) { if (mounted.current) setError(e.message); return false; }
     finally { if (mounted.current) setBusy(""); }
   }, [loadMarket]);
-  return { view, error, busy, change, market, loadMarket };
+  const readDraftFile = useCallback(async (id, relPath) => {
+    return api(`/host-tools/drafts/file?id=${encodeURIComponent(id)}&path=${encodeURIComponent(relPath)}`);
+  }, []);
+  const installDraft = useCallback(async (body) => {
+    setBusy(`draft-install:${body.id}`); setError(""); revision.current++;
+    try {
+      const value = await api("/host-tools/drafts/install", body);
+      if (mounted.current) setView(value);
+      void loadDrafts();
+      void loadMarket();
+      return true;
+    } catch (e) { if (mounted.current) setError(e.message); return false; }
+    finally { if (mounted.current) setBusy(""); }
+  }, [loadDrafts, loadMarket]);
+  const discardDraft = useCallback(async (id) => {
+    setBusy(`draft-discard:${id}`); setError("");
+    try {
+      await api("/host-tools/drafts/discard", { id });
+      void loadDrafts();
+      return true;
+    } catch (e) { if (mounted.current) setError(e.message); return false; }
+    finally { if (mounted.current) setBusy(""); }
+  }, [loadDrafts]);
+  const triggerSync = useCallback(async () => {
+    setBusy("sync"); setError("");
+    try {
+      const value = await api("/client/plugins/sync", {});
+      if (mounted.current) setSyncStatus(value);
+      setTimeout(() => { if (mounted.current) void refresh(); }, 800);
+      return true;
+    } catch (e) { if (mounted.current) setError(e.message); return false; }
+    finally { if (mounted.current) setBusy(""); }
+  }, [refresh]);
+  const toggleBridge = useCallback(async (plugin, shared) => {
+    setBusy(`bridge:${plugin}`); setError("");
+    try {
+      const value = await api("/client/plugins/bridge", { plugin, shared });
+      if (mounted.current) setBridgeStatus(value);
+      void refresh();
+      return true;
+    } catch (e) { if (mounted.current) setError(e.message); return false; }
+    finally { if (mounted.current) setBusy(""); }
+  }, [refresh]);
+  return { view, error, busy, change, market, loadMarket, drafts, loadDrafts, readDraftFile, installDraft, discardDraft, syncStatus, bridgeStatus, triggerSync, toggleBridge };
 }
 
 // pluginEntries merges what is installed with what can be installed, so the
@@ -153,7 +245,7 @@ export function pluginEntries(model) {
     // listing is the market's card for an installed plugin; offer only when it is newer.
     return { name: plugin.name, plugin, offer: offer?.source === "market" && offer.update ? offer : null,
       listing: offer?.source === "market" ? offer : null,
-      source: plugin.built_in ? "builtin" : offers.get(plugin.name)?.source || "local",
+      source: plugin.built_in ? "builtin" : plugin.default ? "default" : offers.get(plugin.name)?.source || "local",
       icon: plugin.icon ? runtimeURL(`/host-tools/icon?name=${encodeURIComponent(plugin.name)}`) : "" };
   });
   const names = new Set(view.plugins.map(plugin => plugin.name));
@@ -165,6 +257,7 @@ export function pluginEntries(model) {
 
 function entryInfo(entry, view) {
   const item = entry.plugin || entry.offer;
+  const fallback = entry.listing || entry.offer;
   const plugin = entry.plugin;
   let state = { tone: "", label: "可安装" };
   if (plugin) {
@@ -176,15 +269,16 @@ function entryInfo(entry, view) {
       : plugin.loaded ? { tone: "online", label: "运行中" }
       : view.running ? { tone: "", label: "未加载" } : { tone: "waiting", label: "等待启动" };
   } else if (!item.supported) state = { tone: "problem", label: unsupportedLabel(item) };
-  return { item, title: pluginTitle(item), text: plugin?.problem || pluginText(item), version: item.version, state };
+  return { item, title: pluginTitle(item, fallback), text: plugin?.problem || pluginText(item, fallback), version: item.version, state };
 }
 
 export function pluginPageTitle(model, page) {
   if (page.kind === "market") return translate("插件市场");
+  if (page.kind === "drafts") return translate("待审核草稿");
   if (page.kind !== "plugin") return translate("插件设置");
   const { installed, available } = pluginEntries(model);
   const entry = [...installed, ...available].find(item => item.name === page.name);
-  return entry ? pluginTitle(entry.plugin || entry.offer) : pluginTitle({ name: page.name });
+  return entry ? pluginTitle(entry.plugin || entry.offer, entry.listing || entry.offer) : pluginTitle({ name: page.name });
 }
 
 export function PluginIcon({ name, src, builtIn: isBuiltIn, size: pixels = 36 }) {
@@ -316,13 +410,23 @@ const matches = (entry, query) => {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
   const item = entry.plugin || entry.offer;
-  const categories = categoriesOf(entry.offer || entry.listing || item).map(name => categoryNames[name]);
-  return [entry.name, pluginTitle(item), pluginText(item), ...categories].some(text => text.toLowerCase().includes(needle));
+  const fallback = entry.listing || entry.offer;
+  const categories = categoriesOf(entry.offer || entry.listing || item).map(name => translate(categoryNames[name]));
+  const author = (entry.offer || entry.listing)?.author?.name || "";
+  return [
+    entry.name,
+    pluginTitle(item, fallback),
+    pluginText(item, fallback),
+    item.display_name || "",
+    item.description || "",
+    author,
+    ...categories,
+  ].some(text => text.toLowerCase().includes(needle));
 };
 
 export function HostPluginsSidebar({ visible, model, page, onPage, onBack, onConfirm }) {
   const tr = useTranslation();
-  const { view, error, busy, market } = model;
+  const { view, error, busy, market, drafts } = model;
   const sidebar = useRef(null);
   const list = useRef(null);
   const [query, setQuery] = useState("");
@@ -331,7 +435,9 @@ export function HostPluginsSidebar({ visible, model, page, onPage, onBack, onCon
   const shown = installed.filter(entry => matches(entry, query));
   const updates = installed.filter(entry => entry.offer).length;
   const installable = available.filter(entry => entry.offer.supported).length;
+  const draftCount = drafts?.items?.length || 0;
   const inMarket = page?.kind === "market" || page?.kind === "plugin" && !installed.some(entry => entry.name === page.name);
+  const inDrafts = page?.kind === "drafts";
   useLayoutEffect(() => {
     if (!visible) return;
     setQuery("");
@@ -380,6 +486,13 @@ export function HostPluginsSidebar({ visible, model, page, onPage, onBack, onCon
           {updates > 0 && <em aria-hidden="true">{updates}</em>}
           <ChevronRight size={15} className="trailing-icon" />
         </button>
+        <button type="button" className={`plugin-market-entry ${inDrafts ? "selected" : ""}`} aria-current={inDrafts ? "page" : undefined}
+          onClick={() => onPage({ kind: "drafts" })}>
+          <span className="plugin-market-entry-icon"><FileCode2 size={18} /></span>
+          <span><strong>{tr("待审核草稿")}</strong><small>{draftCount ? tr("{0} 个自定义插件待审核", draftCount) : tr("审核 Claude 创建的插件")}</small></span>
+          {draftCount > 0 && <em aria-hidden="true">{draftCount}</em>}
+          <ChevronRight size={15} className="trailing-icon" />
+        </button>
         {view && !view.enabled && view.available && <button type="button" className="plugin-sidebar-notice" onClick={() => onPage({ kind: "settings" })}>
           <ShieldCheck size={17} /><span><strong>{tr("主机工具未开启")}</strong><small>{tr("插件不会运行。点此前往设置开启。")}</small></span>
         </button>}
@@ -391,15 +504,13 @@ export function HostPluginsSidebar({ visible, model, page, onPage, onBack, onCon
           {!shown.length && <p className="plugin-sidebar-hint">{query ? tr("没有匹配的插件") : tr("还没有安装插件")}</p>}
         </SidebarSection>}
       </div>
-      {error && view && <p className="plugin-sidebar-error" role="alert">{error}</p>}
+      {error && view && <p className="plugin-sidebar-error" role="alert">{tr(error)}</p>}
     </aside>
   );
 }
 
 function marketByline(item) {
-  const name = item.author?.name?.trim();
-  if (!name) return translate("作者未注明");
-  return item.author.official ? translate("Cage 官方 · {0}", name) : translate("社区作者 · {0}", name);
+  return formatMarketAuthor(item?.author, translate);
 }
 
 function MarketCard({ entry, view, busy, onOpen, onInstall }) {
@@ -469,13 +580,13 @@ function Market({ model, onConfirm, onPage }) {
             <RefreshCw size={15} className={market.loading ? "spin" : undefined} />{tr("刷新")}
           </button>}
         </div>
-        {fetched && !Number.isNaN(fetched.getTime()) && <small className="plugin-market-fetched">{tr("更新于") + " "}{fetched.toLocaleString()}</small>}
+        {fetched && !Number.isNaN(fetched.getTime()) && <small className="plugin-market-fetched">{tr("更新于") + " "}{fetched.toLocaleString(activeInterfaceLanguage())}</small>}
       </header>
       {sections.length > 0 && <div className="plugin-categories" role="group" aria-label={tr("按分类查看")}>
         <button type="button" aria-pressed={!chosen} onClick={() => setCategory("")}>{tr("全部")}</button>
-        {sections.map(name => <button key={name} type="button" aria-pressed={chosen === name} onClick={() => setCategory(name)}>{categoryNames[name]}</button>)}
+        {sections.map(name => <button key={name} type="button" aria-pressed={chosen === name} onClick={() => setCategory(name)}>{tr(categoryNames[name])}</button>)}
       </div>}
-      {market.error && <div className="plugin-banner problem" role="alert"><TriangleAlert size={17} /><div><strong>{tr("暂时无法读取社区插件")}</strong><p>{market.error}</p></div>
+      {market.error && <div className="plugin-banner problem" role="alert"><TriangleAlert size={17} /><div><strong>{tr("暂时无法读取社区插件")}</strong><p>{localizeBackendMessage(market.error, tr)}</p></div>
         <button type="button" onClick={() => model.loadMarket(true)}>{tr("重试")}</button></div>}
       {updates.length > 0 && <section className="plugin-market-section">
         <h3>{tr("可更新")}<em>{updates.length}</em></h3>
@@ -506,7 +617,7 @@ function CopyField({ value, label }) {
   return (
     <div className="plugin-copy-field">
       <code>{value}</code>
-      <button type="button" onClick={copy} aria-label={label}>{copied === "已复制" ? <Check size={15} /> : <Copy size={15} />}{copied || tr("复制")}</button>
+      <button type="button" onClick={copy} aria-label={label}>{copied === "已复制" ? <Check size={15} /> : <Copy size={15} />}{copied ? tr(copied) : tr("复制")}</button>
     </div>
   );
 }
@@ -682,9 +793,20 @@ function Detail({ model, name, onConfirm, onPage }) {
   const installing = busy === `install:${name}`, removing = busy === `remove:${name}`, switching = busy === `switch:${name}`;
   const on = plugin?.enabled !== false;
   const remove = async () => {
-    if (!await onConfirm({ title: translate("卸载「{0}」？", info.title), body: "插件会停止运行。它的文件夹不会被删除，而是移到数据目录的 plugins-removed 中保留。", confirm: "卸载" })) return;
+    const bodyText = plugin?.default
+      ? "插件会停止运行并移到 plugins-removed 中保留。后续更新 Cage 不会强制重新安装它；如需恢复，可随时在插件设置中一键装回。"
+      : "插件会停止运行。它的文件夹不会被删除，而是移到数据目录的 plugins-removed 中保留。";
+    if (!await onConfirm({ title: translate("卸载「{0}」？", info.title), body: bodyText, confirm: "卸载" })) return;
     // A plugin the market offers stays on its page, ready to install again.
-    if (await change({ remove: name }, `remove:${name}`) && entry.source === "local") onPage(null);
+    if (await change({ remove: name }, `remove:${name}`) && (entry.source === "local" || entry.source === "default")) onPage({ kind: "settings" });
+  };
+  const updateDefault = async () => {
+    if (!await onConfirm({
+      title: translate("更新默认插件「{0}」到 {1}？", info.title, plugin.default_update),
+      body: translate("当前插件文件夹有本地修改。更新后，旧版本会移到数据目录的 plugins-removed 中保留。"),
+      confirm: "更新",
+    })) return;
+    await change({ restore_default: name, replace: true }, `restore:${name}`);
   };
   return (
     <article className={`plugin-page ${plugin && !on ? "off" : ""}`}>
@@ -702,7 +824,7 @@ function Detail({ model, name, onConfirm, onPage }) {
             {plugin && <StateChip state={info.state} />}
             <PurposeTags item={plugin || offer} />
           </div>
-          <p>{pluginText(plugin || offer)}</p>
+          <p>{pluginText(plugin || offer, listing)}</p>
           <div className="plugin-hero-actions">
             {plugin && <label className={`plugin-enable ${on ? "on" : ""}`}>
               <span className="plugin-switch small">
@@ -717,6 +839,9 @@ function Detail({ model, name, onConfirm, onPage }) {
             </button>}
             {plugin && offer && <button type="button" className="primary" disabled={Boolean(busy)} onClick={() => installPlugin(model, entry, onConfirm)}>
               {installing ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}{installing ? tr("正在更新…") : tr("更新到 {0}", (offer.version))}
+            </button>}
+            {plugin && !offer && plugin.default_update && <button type="button" className="primary" disabled={Boolean(busy)} onClick={updateDefault}>
+              {busy === `restore:${name}` ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}{busy === `restore:${name}` ? tr("正在更新…") : tr("更新到 {0}", plugin.default_update)}
             </button>}
             {plugin && !plugin.built_in && <button type="button" disabled={Boolean(busy)} onClick={remove}>
               {removing ? <LoaderCircle size={15} className="spin" /> : <Trash2 size={15} />}{removing ? tr("正在卸载…") : tr("卸载")}
@@ -778,7 +903,7 @@ function Detail({ model, name, onConfirm, onPage }) {
             <div><dt>{tr("标识符")}</dt><dd><code>{name}</code></dd></div>
             {info.version && <div><dt>{tr("版本")}</dt><dd>{info.version}</dd></div>}
             <div><dt>{tr("来源")}</dt><dd>{translate(sources[entry.source])}</dd></div>
-            {(plugin || offer).kind && <div><dt>{tr("运行位置")}</dt><dd>{(plugin || offer).kind === "guest" ? tr("Cage 环境") : tr("这台电脑")}</dd></div>}
+            {(plugin || offer).kind && <div><dt>{tr("运行位置")}</dt><dd>{(plugin || offer).kind === "guest" ? (isRemoteClient() ? tr("远程 Cage 环境") : tr("Cage 环境")) : (isRemoteClient() ? tr("远程主机") : tr("这台电脑"))}</dd></div>}
             {runtimeLabel && <div><dt>{tr("运行环境")}</dt><dd>{runtimeLabel}</dd></div>}
             {platformList && <div><dt>{tr("支持系统")}</dt><dd>{platformList}</dd></div>}
             <div><dt>{tr("状态")}</dt><dd>{plugin ? tr(info.state.label) : offer.supported ? tr("未安装") : unsupportedLabel(offer)}</dd></div>
@@ -806,27 +931,48 @@ function Detail({ model, name, onConfirm, onPage }) {
 
 function SettingsPage({ model, status, onConfirm }) {
   const tr = useTranslation();
-  const { view, busy, change } = model;
+  const { view, busy, change, syncStatus, bridgeStatus, triggerSync, toggleBridge } = model;
+  const remote = isRemoteClient();
+  const hostName = getClientContext().name || tr("远程主机");
   const waiting = view.enabled && !view.running;
   const toggle = async () => {
-    if (!view.enabled && !await onConfirm({ title: "允许 Claude 使用这台电脑？",
-      body: "开启后，环境内的 Claude 可以通过插件在这台电脑上操作，例如在已打开的项目文件夹中运行命令。命令以你的系统账户权限运行，不受环境的隔离保护。每次操作前，系统会弹出确认窗口，由你决定是否允许。",
-      confirm: "开启" })) return;
+    if (!view.enabled && !await onConfirm({
+      title: remote ? translate("允许远程主机「{0}」上的 Claude 使用插件？", hostName) : "允许 Claude 使用这台电脑？",
+      body: remote
+        ? translate("开启后，远程环境内的 Claude 可以通过插件在远程主机「{0}」上执行命令或调用工具。每次需要审批时，确认窗口会弹在你面前的这台电脑上，并明确标出远程主机名称。", hostName)
+        : "开启后，环境内的 Claude 可以通过插件在这台电脑上操作，例如在已打开的项目文件夹中运行命令。命令以你的系统账户权限运行，不受环境的隔离保护。每次操作前，系统会弹出确认窗口，由你决定是否允许。",
+      confirm: "开启",
+    })) return;
     await change({ enabled: !view.enabled }, "toggle");
   };
   const state = !view.available ? { tone: "problem", label: "此环境不支持" } : view.running ? { tone: "online", label: "已开启，插件正在运行" }
     : waiting ? { tone: "waiting", label: status?.ready ? "已开启，正在启动插件" : "已开启，环境启动后生效" } : { tone: "", label: "未开启" };
+  const syncLabel = !syncStatus ? tr("等待同步")
+    : syncStatus.state === "syncing" ? tr("正在从本机同步…")
+    : syncStatus.state === "locked" ? tr("等待远程解锁后自动同步")
+    : syncStatus.state === "error" ? tr("同步失败")
+    : syncStatus.synced?.length ? tr("已同步 {0} 个插件", syncStatus.synced.length)
+    : tr("已与本机兼容插件保持一致");
+  const onToggleBridge = async (item) => {
+    const next = !item.shared;
+    if (next && !await onConfirm({
+      title: translate("向远程主机「{0}」临时共享本机插件「{1}」？", hostName, item.display_name || item.name),
+      body: translate("开启后，远程主机「{0}」环境内的 Claude 可通过加密隧道调用你这台电脑上的「{1}」。调用时会先在本机弹出确认窗口并在本机执行，断开远程连接后自动收回。", hostName, item.display_name || item.name),
+      confirm: "共享",
+    })) return;
+    await toggleBridge(item.name, next);
+  };
   return (
     <div className="plugin-settings">
       <section className={`plugin-card plugin-master ${view.enabled ? "on" : ""}`}>
         <div className="plugin-master-row">
           <span className="plugin-master-icon"><Blocks size={24} /></span>
           <div>
-            <h2>{tr("允许 Claude 使用这台电脑")}</h2>
-            <p>{tr("插件通过 MCP 把这台电脑的能力提供给环境内的 Claude Code 和 Claude 桌面应用。")}</p>
+            <h2>{remote ? tr("允许远程主机「{0}」的 Claude 使用插件", hostName) : tr("允许 Claude 使用这台电脑")}</h2>
+            <p>{remote ? tr("插件通过 MCP 把远程主机与环境内的能力提供给远程 Claude Code 和 Claude 桌面应用，审批窗口会回流到你本机桌面。") : tr("插件通过 MCP 把这台电脑的能力提供给环境内的 Claude Code 和 Claude 桌面应用。")}</p>
           </div>
           {view.available && <label className="plugin-switch">
-            <input role="switch" type="checkbox" aria-label={tr("允许 Claude 使用这台电脑")} checked={view.enabled} disabled={Boolean(busy)} onChange={toggle} />
+            <input role="switch" type="checkbox" aria-label={remote ? tr("允许远程主机使用插件") : tr("允许 Claude 使用这台电脑")} checked={view.enabled} disabled={Boolean(busy)} onChange={toggle} />
             <span aria-hidden="true" />
           </label>}
         </div>
@@ -838,18 +984,106 @@ function SettingsPage({ model, status, onConfirm }) {
         </div>
       </section>
       <ul className="plugin-facts">
-        <li><ShieldCheck size={18} /><div><strong>{tr("每次操作都先征求同意")}</strong><p>{tr("系统会弹窗显示插件、工具和参数，你可以只允许一次，或在本次运行期间都允许。")}</p></div></li>
+        <li><ShieldCheck size={18} /><div><strong>{tr("每次操作都先征求同意")}</strong><p>{remote ? tr("需要确认时会在你本机弹出原生确认框并标明远程主机名称，可选择允许一次或始终允许。") : tr("系统会弹窗显示插件、工具和参数，你可以只允许一次，或在本次运行期间都允许。")}</p></div></li>
         <li><TriangleAlert size={18} /><div><strong>{tr("不受环境隔离保护")}</strong><p>{tr("插件以你的系统账户权限运行。只安装你信任的插件。")}</p></div></li>
         <li><CircleAlert size={18} /><div><strong>{tr("试验功能")}</strong><p>{tr("此功能仍在试验阶段，默认关闭。")}</p></div></li>
       </ul>
+      {remote && syncStatus && syncStatus.state !== "unsupported" && (
+        <section className="plugin-card">
+          <div className="plugin-card-head-row">
+            <div>
+              <h3>{tr("从本机自动同步")}</h3>
+              <p className="plugin-card-lead">{tr("连接远程主机后会自动把本机兼容的插件同步过去（单向增量，不删除远程已有插件，不同步授权和密钥）。")}</p>
+            </div>
+            <button type="button" disabled={Boolean(busy) || syncStatus.state === "syncing"} onClick={triggerSync}>
+              <RefreshCw size={14} className={busy === "sync" || syncStatus.state === "syncing" ? "spin" : undefined} />{tr("立即同步")}
+            </button>
+          </div>
+          <div className="plugin-sync-summary">
+            <StateChip state={{ tone: syncStatus.state === "error" ? "problem" : syncStatus.state === "syncing" || syncStatus.state === "locked" ? "waiting" : "online", label: syncLabel }} />
+          </div>
+          {syncStatus.error && <p className="error-message">{syncStatus.error}</p>}
+          {syncStatus.skipped?.length > 0 && (
+            <ul className="plugin-sync-notes">
+              {syncStatus.skipped.map(item => <li key={item.name}><code>{item.name}</code><span>{item.reason}</span></li>)}
+            </ul>
+          )}
+          {syncStatus.failed?.length > 0 && (
+            <ul className="plugin-sync-notes problem">
+              {syncStatus.failed.map(item => <li key={item.name}><code>{item.name}</code><span>{item.reason}</span></li>)}
+            </ul>
+          )}
+        </section>
+      )}
+      {remote && bridgeStatus?.supported && (
+        <section className="plugin-card">
+          <h3>{tr("共享本机插件给当前远程")}</h3>
+          <p className="plugin-card-lead">{tr("把本机桌面插件（如 Blender、桌面控制）通过加密隧道临时提供给远程 Claude。调用时会在你本机弹窗审批并在本机执行，断开连接自动收回。")}</p>
+          {bridgeStatus.error && <p className="error-message">{bridgeStatus.error}</p>}
+          {bridgeStatus.plugins?.length ? (
+            <ul className="plugin-bridge-list">
+              {bridgeStatus.plugins.map(item => (
+                <li key={item.name} className="plugin-bridge-row">
+                  <div>
+                    <div className="plugin-bridge-title">
+                      <strong>{item.display_name || item.name}</strong>
+                      <code>{item.name}</code>
+                      {item.shared && item.running && <StateChip state={{ tone: "online", label: tr("已共享") }} />}
+                    </div>
+                    <p>{item.description || tr("本机插件")}</p>
+                    {item.problem && <p className="error-message">{item.problem}</p>}
+                    {item.skipped?.length > 0 && <p className="plugin-bridge-note">{tr("跳过冲突工具：{0}", item.skipped.map(s => s.name).join("、"))}</p>}
+                  </div>
+                  <label className="plugin-switch small">
+                    <input role="switch" type="checkbox" checked={Boolean(item.shared)} disabled={Boolean(busy) || !view.enabled}
+                      aria-label={tr("共享本机插件 {0}", item.display_name || item.name)}
+                      onChange={() => onToggleBridge(item)} />
+                    <span aria-hidden="true" />
+                  </label>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="plugin-empty compact"><Blocks size={22} /><p>{tr("本机还没有可反向共享的桌面/本机插件。")}</p></div>
+          )}
+        </section>
+      )}
       {view.problems?.length > 0 && <div className="plugin-banner problem" role="alert"><TriangleAlert size={17} /><div><strong>{tr("部分插件未能加载")}</strong>{view.problems.map(problem => <p key={problem}>{problem}</p>)}</div></div>}
       <section className="plugin-card">
         <h3>{tr("可操作的文件夹")}</h3>
-        <p className="plugin-card-lead">{tr("命令插件只能在这些已打开的项目文件夹中运行。")}</p>
+        <p className="plugin-card-lead">{remote ? tr("远程命令插件只能在远程主机这些已打开的项目文件夹中运行。") : tr("命令插件只能在这些已打开的项目文件夹中运行。")}</p>
         {view.folders.length ? <ul className="plugin-folder-list">
           {view.folders.map(folder => <li key={folder}><Folder size={16} /><code>{folder}</code></li>)}
         </ul> : <div className="plugin-empty compact"><FolderOpen size={22} /><p>{tr("还没有打开项目。打开项目后，它的文件夹会出现在这里。")}</p></div>}
       </section>
+      {view.dismissed_defaults?.length > 0 && (
+        <section className="plugin-card">
+          <h3>{tr("已卸载的默认插件")}</h3>
+          <p className="plugin-card-lead">{tr("这些随应用附带的默认插件已被你卸载，更新 Cage 时不会强制装回。需要时可随时恢复安装。")}</p>
+          <ul className="plugin-bridge-list">
+            {view.dismissed_defaults.map(item => {
+              const restoring = busy === `restore:${item.name}`;
+              return (
+                <li key={item.name} className="plugin-bridge-row">
+                  <div>
+                    <div className="plugin-bridge-title">
+                      <strong>{pluginTitle(item)}</strong>
+                      <code>{item.name}</code>
+                      {item.version && <small>{item.version}</small>}
+                    </div>
+                    <p>{pluginText(item)}</p>
+                  </div>
+                  <button type="button" disabled={Boolean(busy) || !item.supported}
+                    onClick={() => change({ restore_default: item.name }, `restore:${item.name}`)}>
+                    {restoring ? <LoaderCircle size={14} className="spin" /> : <RotateCcw size={14} />}
+                    {restoring ? tr("正在恢复…") : tr("恢复安装")}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <section className="plugin-card">
         <h3>{tr("手动安装插件")}</h3>
         <p className="plugin-card-lead">{tr("把插件文件夹放进下面的位置，然后点击“重新加载插件”。每个插件是一个带有 plugin.json 的文件夹。")}</p>
@@ -859,16 +1093,226 @@ function SettingsPage({ model, status, onConfirm }) {
   );
 }
 
+function DraftCard({ draft, model, onConfirm, onPage }) {
+  const tr = useTranslation();
+  const { busy, readDraftFile, installDraft, discardDraft } = model;
+  const [kind, setKind] = useState(draft.recommended_kind === "host" ? "host" : "guest");
+  const [selectedFile, setSelectedFile] = useState("");
+  const [fileState, setFileState] = useState({ loading: false, data: null, error: "" });
+  const installing = busy === `draft-install:${draft.id}`;
+  const discarding = busy === `draft-discard:${draft.id}`;
+  const title = draft.display_name || pluginTitle({ name: draft.name });
+  const added = contributions(draft);
+  const declared = draft.permissions || [];
+
+  const openFile = async (relPath) => {
+    if (selectedFile === relPath && fileState.data) {
+      setSelectedFile("");
+      return;
+    }
+    setSelectedFile(relPath);
+    setFileState({ loading: true, data: null, error: "" });
+    try {
+      const data = await readDraftFile(draft.id, relPath);
+      setFileState({ loading: false, data, error: "" });
+    } catch (e) {
+      setFileState({ loading: false, data: null, error: e.message });
+    }
+  };
+
+  const onInstall = async () => {
+    const overwriteNote = draft.exists
+      ? translate("同名插件已安装，旧版本会移到 plugins-removed 中保留，且原有的「始终允许」授权会被强制撤销。")
+      : "";
+    const runNote = kind === "host"
+      ? translate("你将以「主机插件」身份在这台电脑上运行它，调用前会逐次弹窗询问。请先展开并确认源码可信。")
+      : translate("插件将在 Cage 环境内以普通用户身份运行。");
+    const confirmed = await onConfirm({
+      title: draft.exists ? translate("覆盖安装草稿「{0}」？", title) : translate("安装自定义插件「{0}」？", title),
+      body: [runNote, overwriteNote].filter(Boolean).join(" "),
+      confirm: draft.exists ? "覆盖并重载" : "安装并重载",
+      danger: kind === "host" || draft.existing_source === "default",
+    });
+    if (!confirmed) return;
+    const ok = await installDraft({
+      id: draft.id,
+      kind,
+      digest: draft.digest || "",
+      replace: Boolean(draft.exists),
+      confirm_overwrite: Boolean(draft.exists),
+    });
+    if (ok) onPage({ kind: "plugin", name: draft.name });
+  };
+
+  const onDiscard = async () => {
+    if (!await onConfirm({
+      title: translate("丢弃草稿「{0}」？", title),
+      body: translate("只会移除待审核提交快照，不会删除环境内工作区的草稿源码。"),
+      confirm: "丢弃",
+    })) return;
+    await discardDraft(draft.id);
+  };
+
+  return (
+    <article className="plugin-card plugin-draft-card">
+      <div className="plugin-draft-head">
+        <div>
+          <div className="plugin-hero-name">
+            <h3>{title}</h3>
+            <code>{draft.name}</code>
+            {draft.version && <small>v{draft.version}</small>}
+            {draft.exists && <span className="plugin-state waiting"><i />{draft.existing_version ? tr("将更新 {0}", draft.existing_version) : tr("同名已安装")}</span>}
+          </div>
+          <p className="plugin-card-lead">{draft.description}</p>
+          {draft.summary && <p className="plugin-draft-summary">{tr("提交说明：{0}", draft.summary)}</p>}
+        </div>
+        <div className="plugin-draft-actions">
+          <button type="button" className="primary" disabled={Boolean(busy) || draft.protected || !draft.digest} onClick={onInstall}>
+            {installing ? <LoaderCircle size={14} className="spin" /> : <Download size={14} />}
+            {installing ? tr("正在安装…") : draft.exists ? tr("覆盖并重载") : tr("安装并重载")}
+          </button>
+          <button type="button" disabled={Boolean(busy)} onClick={onDiscard}>
+            {discarding ? <LoaderCircle size={14} className="spin" /> : <Trash2 size={14} />}
+            {discarding ? tr("正在丢弃…") : tr("丢弃")}
+          </button>
+        </div>
+      </div>
+
+      {draft.protected && (
+        <div className="plugin-banner problem" role="alert">
+          <TriangleAlert size={16} />
+          <div><strong>{tr("无法覆盖内置核心插件")}</strong><p>{tr("标识符与内置插件冲突，请让 Claude 更改名称后重新提交。")}</p></div>
+        </div>
+      )}
+
+      {draft.warnings?.length > 0 && (
+        <div className="plugin-banner" role="status">
+          <CircleAlert size={16} />
+          <div><strong>{tr("校验提示")}</strong>{draft.warnings.map(item => <p key={item}>{item}</p>)}</div>
+        </div>
+      )}
+
+      <div className="plugin-draft-meta">
+        <div>
+          <span className="plugin-draft-label">{tr("运行位置")}</span>
+          <div className="plugin-segmented" role="radiogroup" aria-label={tr("选择运行位置")}>
+            <button type="button" role="radio" aria-checked={kind === "guest"} disabled={Boolean(busy)} onClick={() => setKind("guest")}>
+              {tr("Cage 环境内（推荐）")}
+            </button>
+            <button type="button" role="radio" aria-checked={kind === "host"} disabled={Boolean(busy)} onClick={() => setKind("host")}>
+              {tr("这台电脑（主机）")}
+            </button>
+          </div>
+        </div>
+        <div>
+          <span className="plugin-draft-label">{tr("声明权限")}</span>
+          <span>{permissionText(declared)}</span>
+        </div>
+        {draft.tools?.length > 0 && (
+          <div>
+            <span className="plugin-draft-label">{tr("MCP 工具")}</span>
+            <span className="plugin-draft-chips">{draft.tools.map(t => <code key={t.name}>{t.name}</code>)}</span>
+          </div>
+        )}
+        {added.length > 0 && (
+          <div>
+            <span className="plugin-draft-label">{tr("界面扩展")}</span>
+            <span>{added.map(a => a.title).join(tr("、"))}</span>
+          </div>
+        )}
+      </div>
+
+      {kind === "host" && (
+        <div className="plugin-banner problem" role="status">
+          <TriangleAlert size={16} />
+          <div>
+            <strong>{tr("主机插件风险提示")}</strong>
+            <p>{tr("主机插件以你的系统账户在这台电脑上运行，不受环境隔离保护。请仔细检查下方所有文件后再安装；安装后默认逐次弹窗确认，且原有授权会被清空。")}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="plugin-draft-files">
+        <span className="plugin-draft-label">{tr("包含文件（点击查看源码）")}</span>
+        <div className="plugin-draft-file-list">
+          {(draft.files || []).map(file => (
+            <button key={file.path} type="button" className={`plugin-draft-file-chip ${selectedFile === file.path ? "active" : ""}`}
+              onClick={() => openFile(file.path)}>
+              <FileCode2 size={13} /><code>{file.path}</code><small>{size(file.size) || `${file.size} B`}</small>
+            </button>
+          ))}
+        </div>
+        {selectedFile && (
+          <div className="plugin-draft-preview">
+            <div className="plugin-draft-preview-head">
+              <code>{selectedFile}</code>
+              {fileState.data?.installed_exists && (
+                <span className={`plugin-state ${fileState.data.changed ? "waiting" : "online"}`}>
+                  <i />{fileState.data.changed ? tr("与已安装版本不同") : tr("与已安装版本一致")}
+                </span>
+              )}
+            </div>
+            {fileState.loading ? <p className="plugin-draft-preview-note">{tr("正在读取文件…")}</p>
+              : fileState.error ? <p className="error-message">{fileState.error}</p>
+              : !fileState.data?.text ? <p className="plugin-draft-preview-note">{tr("二进制文件，暂不支持文本预览。")}</p>
+              : <pre className="plugin-draft-code"><code>{fileState.data.content}</code></pre>}
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function DraftsPage({ model, status, onConfirm, onPage }) {
+  const tr = useTranslation();
+  const { drafts, loadDrafts, busy } = model;
+  const items = drafts?.items || [];
+  return (
+    <div className="plugin-market">
+      <header className="plugin-market-head">
+        <div>
+          <h2>{tr("待审核草稿")}</h2>
+          <p>{tr("环境内的 Claude 可以通过「插件工坊」编写、校验并提交自定义 MCP 工具与侧栏页面。所有草稿必须经你审查源码与权限并点击安装后才会生效。")}</p>
+        </div>
+        <div className="plugin-market-tools">
+          <button type="button" disabled={Boolean(busy) || drafts?.loading} onClick={() => loadDrafts()}>
+            <RefreshCw size={15} className={drafts?.loading ? "spin" : undefined} />{tr("刷新")}
+          </button>
+        </div>
+      </header>
+      {drafts?.error && <div className="plugin-banner problem" role="alert"><TriangleAlert size={17} /><div><strong>{tr("无法读取草稿")}</strong><p>{drafts.error}</p></div></div>}
+      {!status?.ready && !drafts?.ready ? (
+        <div className="plugin-empty">
+          <FileCode2 size={28} />
+          <strong>{tr("等待环境启动")}</strong>
+          <p>{tr("环境启动后，Claude 提交的自定义插件草稿会显示在这里。")}</p>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="plugin-empty">
+          <FileCode2 size={28} />
+          <strong>{tr("暂无待审核草稿")}</strong>
+          <p>{tr("直接告诉环境里的 Claude 你需要什么能力或侧栏页面，它会使用默认的「插件工坊」生成代码、自动测试并提交到这里供你一键安装。")}</p>
+        </div>
+      ) : (
+        <div className="plugin-draft-list">
+          {items.map(draft => <DraftCard key={draft.id} draft={draft} model={model} onConfirm={onConfirm} onPage={onPage} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // HostPluginsPanel shows, in the workspace, what the plugin sidebar chose.
 export function HostPluginsPanel({ model, page, status, onConfirm, onPage }) {
   const tr = useTranslation();
   const { view, error } = model;
-  if (!view) return <div className="plugin-panel">{error ? <p role="alert" className="error-message">{error}</p> : <p role="status" className="plugin-loading"><LoaderCircle size={16} className="spin" />{tr("正在读取插件…")}</p>}</div>;
+  if (!view) return <div className="plugin-panel">{error ? <p role="alert" className="error-message">{tr(error)}</p> : <p role="status" className="plugin-loading"><LoaderCircle size={16} className="spin" />{tr("正在读取插件…")}</p>}</div>;
   return (
     <div className="plugin-panel">
-      {error && <p role="alert" className="plugin-banner problem"><TriangleAlert size={17} /><span>{error}</span></p>}
+      {error && <p role="alert" className="plugin-banner problem"><TriangleAlert size={17} /><span>{tr(error)}</span></p>}
       {page.kind === "plugin" ? <Detail key={page.name} model={model} name={page.name} onConfirm={onConfirm} onPage={onPage} />
         : page.kind === "market" ? <Market model={model} onConfirm={onConfirm} onPage={onPage} />
+        : page.kind === "drafts" ? <DraftsPage model={model} status={status} onConfirm={onConfirm} onPage={onPage} />
         : <SettingsPage model={model} status={status} onConfirm={onConfirm} />}
     </div>
   );

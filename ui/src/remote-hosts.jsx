@@ -20,6 +20,7 @@ import { setClientContext } from "./client-context.mjs";
 import { Modal } from "./modal";
 import { applyInterfaceLanguage } from "./interface-language.mjs";
 import { HostForm } from "./remote-host-form";
+import { SSHConfigImport } from "./ssh-config-import";
 import logo from "./logo.png";
 import "./remote-hosts.css";
 import { translate, useTranslation } from "./interface-language.mjs";
@@ -174,6 +175,7 @@ function Environment({ context, refresh, children }) {
   const [hosts, setHosts] = useState([]);
   const [selected, setSelected] = useState(context.host_id || recent());
   const [form, setForm] = useState(null);
+  const [importSSH, setImportSSH] = useState(false);
   const [remove, setRemove] = useState(null);
   const [stop, setStop] = useState(null);
   const [decision, setDecision] = useState(null);
@@ -483,7 +485,7 @@ function Environment({ context, refresh, children }) {
       {tr(label)}
     </button>
   );
-  const modalOpen = Boolean(form || remove || stop || decision);
+  const modalOpen = Boolean(form || importSSH || remove || stop || decision);
   const decisionBusy = busy === "commit" || busy === "cancel";
   const cancelDecision = () => act("cancel", () => cancel(decision.pending));
   const unlockButton = localLocked && (
@@ -613,6 +615,9 @@ function Environment({ context, refresh, children }) {
                   <Plus size={16} />
                 </button>
               </div>
+              <button disabled={Boolean(busy) || verifying} onClick={() => setImportSSH(true)}>
+                {tr("导入本机 SSH 配置")}
+              </button>
               {hosts.map((item) => (
                 <button
                   className={`ssh-host-row ${selected === item.id ? "selected" : ""}`}
@@ -849,6 +854,17 @@ function Environment({ context, refresh, children }) {
             setSelected(saved.id);
             setPassword("");
             setForm(null);
+          }}
+        />
+      )}
+      {importSSH && (
+        <SSHConfigImport
+          platform={context.client_platform}
+          onClose={() => setImportSSH(false)}
+          onSaved={async (added) => {
+            await load();
+            if (added.length) setSelected(added[0].id);
+            setPassword("");
           }}
         />
       )}

@@ -2,6 +2,7 @@ package mobilelink
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -75,5 +76,53 @@ func TestScanEnrollsOnlyHolderOfOriginalCode(t *testing.T) {
 		if _, err = expired.identity(); err == nil {
 			t.Fatal("expired optical pairing accepted")
 		}
+	}
+}
+
+func TestManualPairCodePrefixDecoding(t *testing.T) {
+	const admin = "private-test-credential-for-custom-relay"
+	service, err := relay.New(relay.Config{AdminToken: admin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edge := httptest.NewServer(service)
+	defer edge.Close()
+	defer service.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	desktop, err := remotelink.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone, err := remotelink.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RedeemPair(ctx, ManualPairCodePrefix+"!!!not-base64!!!", edge.URL, phone.Pin); err == nil {
+		t.Fatal("malformed manual pair code accepted")
+	}
+	if _, err := RedeemPair(ctx, ManualPairCodePrefix+base64.RawURLEncoding.EncodeToString([]byte("WRONG:{}")), edge.URL, phone.Pin); err == nil {
+		t.Fatal("manual pair code without CAGE1: payload accepted")
+	}
+	room, err := CreateRoom(ctx, edge.URL, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, raw, err := NewPairCode(edge.URL, room, desktop.Pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual := "  " + ManualPairCodePrefix + base64.RawURLEncoding.EncodeToString([]byte(raw)) + "\n"
+	done := make(chan error, 1)
+	go func() {
+		done <- AcceptPair(ctx, code, room.HostToken, desktop, func(pin string) (PairedHost, error) {
+			return PairedHost{1, edge.URL, desktop.Pin, strings.Repeat("A", 43)}, nil
+		})
+	}()
+	got, clientErr := RedeemPair(ctx, manual, edge.URL, phone.Pin)
+	hostErr := <-done
+	var saved PairedHost
+	if hostErr != nil || clientErr != nil || json.Unmarshal([]byte(got), &saved) != nil || saved.HostPin != desktop.Pin {
+		t.Fatalf("manual pair code failed: host=%v client=%v got=%q", hostErr, clientErr, got)
 	}
 }

@@ -32,11 +32,12 @@ type Egress struct {
 	// does not cost every query a timeout. dnsPrimaryRetry (Unix nanoseconds)
 	// is when one query next tries the primary endpoint first again, so a
 	// single transient failure does not leave every later query on a backup.
-	dnsPreferred    atomic.Int32
-	dnsPrimaryRetry atomic.Int64
-	client          *http.Client
-	public          netguard.Policy
-	connect         proxy.ContextDialer
+	dnsPreferred     atomic.Int32
+	dnsPrimaryRetry  atomic.Int64
+	client           *http.Client
+	public           netguard.Policy
+	connect          proxy.ContextDialer
+	splitClientHello bool
 }
 
 // The SOCKS handshake runs on our socket so TCP half-close remains available
@@ -79,9 +80,21 @@ func NewEgress(c Config) (*Egress, error) {
 		return nil, err
 	}
 	u, _ := url.Parse(c.ProxyURL)
-	e := &Egress{upstream: u, dnsURLs: c.DNSEndpoints(), connect: &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}}
+	e := &Egress{
+		upstream:         u,
+		dnsURLs:          c.DNSEndpoints(),
+		connect:          &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second},
+		splitClientHello: c.TLSClientHelloSplit,
+	}
 	e.client = &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{Proxy: nil, DialContext: e.DialContext, ForceAttemptHTTP2: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("DNS redirect refused") }}
 	return e, nil
+}
+
+func (e *Egress) wrapConn(conn net.Conn) net.Conn {
+	if e.splitClientHello {
+		return newTLSClientHelloSplitConn(conn)
+	}
+	return conn
 }
 
 func (e *Egress) Allows(network string, dst netip.AddrPort) bool {
@@ -149,7 +162,7 @@ func (e *Egress) DialContext(ctx context.Context, network, addr string) (net.Con
 			_ = c.Close()
 			return nil, proxyConnectionError(ctx, "连接指定 SOCKS5 代理", err)
 		}
-		return c, nil
+		return e.wrapConn(c), nil
 	}
 	conn, err := e.connect.DialContext(ctx, "tcp", e.upstream.Host)
 	if err != nil {
@@ -194,7 +207,7 @@ func (e *Egress) DialContext(ctx context.Context, network, addr string) (net.Con
 	}
 	conn.SetDeadline(time.Time{})
 	ok = true
-	return &bufferedConn{Conn: conn, reader: r}, nil
+	return e.wrapConn(&bufferedConn{Conn: conn, reader: r}), nil
 }
 
 // ExchangeDNS forwards DNS wire messages over HTTPS via the same upstream.

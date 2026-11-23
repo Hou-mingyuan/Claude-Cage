@@ -54,3 +54,15 @@ test("attachment paths preserve apostrophes in both PowerShell and POSIX shells"
   assert.equal(f.shellFilePaths(["C:\\Users\\Cage\\O'Brien.txt"]), "'C:\\Users\\Cage\\O''Brien.txt' ");
   assert.equal(f.shellFilePaths(["/home/cage/O'Brien.txt"]), "'/home/cage/O'\\''Brien.txt' ");
 });
+
+test("desktop instance id is forwarded on start and omitted when absent", async () => {
+  const f = fixture();
+  const instance = "a".repeat(24);
+  await f.sendFiles({ files: [{ name: "doc.pdf", size: 42 }], kind: "drop" }, "desktop", undefined, { desktop: instance });
+  assert.equal(f.calls[0][0], "/input/files/start");
+  assert.equal(f.calls[0][1].desktop, instance);
+
+  const g = fixture();
+  await g.sendFiles({ files: [{ name: "doc.pdf", size: 42 }], kind: "drop" }, "desktop", undefined);
+  assert.equal("desktop" in g.calls[0][1], false);
+});

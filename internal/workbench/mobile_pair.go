@@ -352,5 +352,5 @@ func (s *Server) pairPhone(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	w.Header().Set("Cache-Control", "no-store")
-	jsonReply(w, map[string]any{"image": "data:image/png;base64," + base64.StdEncoding.EncodeToString(png), "expires": room.ExpiresAt, "manual": "CAGE-" + base64.RawURLEncoding.EncodeToString([]byte(raw))})
+	jsonReply(w, map[string]any{"image": "data:image/png;base64," + base64.StdEncoding.EncodeToString(png), "expires": room.ExpiresAt, "manual": mobilelink.ManualPairCodePrefix + base64.RawURLEncoding.EncodeToString([]byte(raw))})
 }

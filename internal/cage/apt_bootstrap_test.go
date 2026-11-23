@@ -87,6 +87,71 @@ esac
 	}
 }
 
+func TestAPTBootstrapPrefersHTTPSAndFallsBackToHTTP(t *testing.T) {
+	for _, tc := range []struct {
+		mode, want string
+		ok         bool
+	}{
+		{"https-only-network", "https\n", true},
+		{"http-only-network", "https\nhttp\n", true},
+		{"no-ca-bundle", "http\n", true},
+		{"offline", "https\nhttp\n", false},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "version"), []byte("3.0.3"), 0600)
+			os.WriteFile(filepath.Join(dir, "os-release"), []byte("ID=debian\nVERSION_ID=13\n"), 0600)
+			if tc.mode != "no-ca-bundle" {
+				os.WriteFile(filepath.Join(dir, "ca.crt"), []byte("bundle"), 0600)
+			}
+			commands := map[string]string{
+				"sudo":       "#!/bin/sh\nexec \"$@\"\n",
+				"dpkg-query": "#!/bin/sh\ncat \"$FIXTURE/version\"\n",
+				"dpkg":       "#!/bin/sh\n[ \"$2\" != 3.0.3 ]\n",
+				"apt-get": `#!/bin/sh
+for arg; do
+  case "$arg" in Dir::Etc::sourcelist=*) list=${arg#Dir::Etc::sourcelist=};; esac
+done
+case "$(cat "$list")" in
+ *' https://deb.debian.org/'*) scheme=https;;
+ *' http://deb.debian.org/'*) scheme=http;;
+ *) exit 91;;
+esac
+case "$*" in
+ *' update')
+  printf '%s\n' "$scheme" >> "$FIXTURE/updates"
+  case "$MODE:$scheme" in
+   offline:*|https-only-network:http|http-only-network:https) echo "Connection failed" >&2; exit 100;;
+  esac;;
+ *'install '*) echo 3.0.4 > "$FIXTURE/version";;
+esac
+`,
+			}
+			for name, body := range commands {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			script := strings.ReplaceAll(APTBootstrapScript, ". /etc/os-release", ". \"$FIXTURE/os-release\"")
+			script = strings.ReplaceAll(script, "/etc/ssl/certs/ca-certificates.crt", "$FIXTURE/ca.crt")
+			cmd := exec.Command("sh", "-c", script+"\nprintf continued >> \"$FIXTURE/continued\"\n")
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE="+dir, "MODE="+tc.mode, "TMPDIR="+dir)
+			out, err := cmd.CombinedOutput()
+			updates, _ := os.ReadFile(filepath.Join(dir, "updates"))
+			_, continued := os.Stat(filepath.Join(dir, "continued"))
+			if string(updates) != tc.want || (err == nil) != tc.ok || (continued == nil) != tc.ok {
+				t.Fatalf("sources tried %q, err %v: %s", updates, err, out)
+			}
+			if tc.ok && strings.Contains(string(out), "APT_FAILED") {
+				t.Fatalf("recovered fallback emitted stale APT_FAILED marker: %s", out)
+			}
+			if !tc.ok && !strings.Contains(string(out), "APT_FAILED exit=100 command=apt-get update") {
+				t.Fatalf("failed bootstrap did not report its APT command: %s", out)
+			}
+		})
+	}
+}
+
 func TestAPTBootstrapFinishesInterruptedPackageInstallation(t *testing.T) {
 	for _, mode := range []string{"interrupted", "clean", "repair-fails"} {
 		t.Run(mode, func(t *testing.T) {

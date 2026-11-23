@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
@@ -44,6 +46,11 @@ func (list claudeAccountList) validateDesktopBindings() error {
 			return errors.New("Desktop 实例归属记录无效")
 		}
 	}
+	for id, label := range list.DesktopLabels {
+		if !validDesktopInstance(id) || strings.TrimSpace(label) != label || !validDesktopLabel(label) {
+			return errors.New("Desktop 名称记录无效")
+		}
+	}
 	return nil
 }
 
@@ -57,14 +64,63 @@ func (list *claudeAccountList) desktopOwner(id string) *claudeAccount {
 }
 
 func (list *claudeAccountList) desktopEntry(id string) desktopEntry {
+	var entry desktopEntry
 	if a := list.desktopOwner(id); a != nil {
-		return desktopEntry{ID: id, AccountID: a.ID, Number: a.Number, Label: a.Label, Dedicated: a.DesktopDedicatedNetwork || a.ProxyNodeID != ""}
+		entry = desktopEntry{ID: id, AccountID: a.ID, Number: a.Number, Label: a.Label, Dedicated: a.DesktopDedicatedNetwork || a.ProxyNodeID != ""}
+	} else {
+		label := "待登录 Desktop"
+		if id == "default" {
+			label = "默认 Desktop"
+		}
+		entry = desktopEntry{ID: id, Label: label}
 	}
-	label := "待登录 Desktop"
-	if id == "default" {
-		label = "默认 Desktop"
+	if custom := list.DesktopLabels[id]; custom != "" {
+		entry.Label = custom
 	}
-	return desktopEntry{ID: id, Label: label}
+	return entry
+}
+
+func (list *claudeAccountList) renameDesktop(id, raw string) (desktopEntry, error) {
+	label := strings.TrimSpace(raw)
+	if !validDesktopLabel(label) {
+		return desktopEntry{}, errors.New("Desktop 名称需要 1 至 100 个字符，不能含控制字符")
+	}
+	if !validDesktopInstance(id) || list.DesktopRedirects[id] != "" {
+		return desktopEntry{}, os.ErrNotExist
+	}
+	if id != "default" && list.desktopOwner(id) == nil && list.PendingDesktop != id {
+		return desktopEntry{}, os.ErrNotExist
+	}
+	if list.DesktopLabels == nil {
+		list.DesktopLabels = map[string]string{}
+	}
+	list.DesktopLabels[id] = label
+	return list.desktopEntry(id), nil
+}
+
+func (list *claudeAccountList) deleteDesktop(id string) bool {
+	if id == "" || id == "default" {
+		return false
+	}
+	found := false
+	if list.PendingDesktop == id {
+		list.PendingDesktop = ""
+		found = true
+	}
+	if owner := list.desktopOwner(id); owner != nil {
+		owner.DesktopInstanceID = ""
+		owner.DesktopStatus = ""
+		found = true
+	}
+	if found {
+		delete(list.DesktopLabels, id)
+		for old, target := range list.DesktopRedirects {
+			if old == id || target == id {
+				delete(list.DesktopRedirects, old)
+			}
+		}
+	}
+	return found
 }
 
 func (list *claudeAccountList) createDesktop(account string) (desktopEntry, error) {
@@ -120,6 +176,109 @@ func (s *Server) newAccountDesktop(w http.ResponseWriter, r *http.Request) {
 	jsonReply(w, entry)
 }
 
+func (s *Server) updateAccountDesktopMetadata(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validDesktopInstance(id) {
+		http.NotFound(w, r)
+		return
+	}
+	var input struct {
+		Label *string `json:"label"`
+	}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	if input.Label == nil {
+		http.Error(w, "请填写 Desktop 名称", http.StatusBadRequest)
+		return
+	}
+	if !s.accountDesktopsSupported() {
+		http.Error(w, "此环境尚未支持独立 Desktop", http.StatusNotImplemented)
+		return
+	}
+	if !s.op.TryLock() {
+		http.Error(w, "另一个操作仍在进行，请稍候", http.StatusConflict)
+		return
+	}
+	defer s.op.Unlock()
+	m := &s.claudeAccounts
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	list, err := s.loadClaudeAccounts()
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	entry, err := list.renameDesktop(id, *input.Label)
+	if errors.Is(err, os.ErrNotExist) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.saveClaudeAccounts(list); err != nil {
+		requestError(w, err)
+		return
+	}
+	jsonReply(w, entry)
+}
+
+func (s *Server) deleteAccountDesktop(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "default" {
+		http.Error(w, "默认 Desktop 不能删除", http.StatusBadRequest)
+		return
+	}
+	if !validClaudeID(id) {
+		http.NotFound(w, r)
+		return
+	}
+	if !s.accountDesktopsSupported() {
+		http.Error(w, "此环境尚未支持独立 Desktop", http.StatusNotImplemented)
+		return
+	}
+	if !s.vmRunning() {
+		http.Error(w, "请先启动环境", http.StatusConflict)
+		return
+	}
+	if !s.op.TryLock() {
+		http.Error(w, "另一个操作仍在进行，请稍候", http.StatusConflict)
+		return
+	}
+	defer s.op.Unlock()
+	m := &s.claudeAccounts
+	m.mu.Lock()
+	list, err := s.loadClaudeAccounts()
+	exists := err == nil && (list.desktopOwner(id) != nil || list.PendingDesktop == id)
+	m.mu.Unlock()
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	if !exists {
+		http.NotFound(w, r)
+		return
+	}
+	if err := s.changeAccountDesktop(s.operationContext(), id, claudeAccount{}, "delete"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	m.mu.Lock()
+	list, err = s.loadClaudeAccounts()
+	if err == nil {
+		list.deleteDesktop(id)
+		err = s.saveClaudeAccounts(list)
+	}
+	m.mu.Unlock()
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	jsonReply(w, map[string]bool{"ok": true})
+}
+
 // Directory presence identifies a previously created Desktop. Unused account
 // records alone do not create instances during upgrade.
 func (list *claudeAccountList) migrateDesktopInstances(observed map[string]desktopObservation) bool {
@@ -173,6 +332,7 @@ func (list *claudeAccountList) bindDesktop(id string, observation claudeGuestSna
 		list.Accounts = append(list.Accounts, claudeAccount{ID: randomToken()[:24], Source: "managed", Status: "signed_out", CodeUnlinked: true, Label: observation.email(), Email: observation.email(), Organization: observation.Organization})
 		target = &list.Accounts[len(list.Accounts)-1]
 	}
+	list.undismissDefault(subject)
 	dest := target.DesktopInstanceID
 	if dest != "" && dest != id {
 		if list.DesktopRedirects == nil {
@@ -185,6 +345,7 @@ func (list *claudeAccountList) bindDesktop(id string, observation claudeGuestSna
 			}
 		}
 		list.DesktopRedirects[id] = dest
+		delete(list.DesktopLabels, id)
 		return true, dest, true
 	}
 	target.DesktopInstanceID = id
@@ -331,7 +492,7 @@ func (s *Server) desktopCatalog(w http.ResponseWriter, r *http.Request) {
 		e.Generation = observed[id].Generation
 		instances = append(instances, e)
 	}
-	if _, exists := observed["default"]; (exists || list.desktopOwner("default") != nil) && list.DesktopRedirects["default"] == "" {
+	if _, exists := observed["default"]; (exists || list.desktopOwner("default") != nil || list.DesktopLabels["default"] != "") && list.DesktopRedirects["default"] == "" {
 		add("default")
 	}
 	for _, a := range list.Accounts {

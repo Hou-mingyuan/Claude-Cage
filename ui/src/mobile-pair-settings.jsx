@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { api, writeClipboard } from "./api";
 import { QrCode } from "lucide-react";
 import { useTranslation } from "./interface-language.mjs";
+import { localizeBackendMessage } from "./backend-message.mjs";
 
 export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
   const tr = useTranslation();
@@ -125,7 +126,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
           </p>
         )}
         {paired && power?.active && <p className="note">{tr("远程待机已请求主机保持运行，屏幕可正常熄灭。移除配对或结束后台服务后恢复原系统休眠策略。")}</p>}
-        {paired && power?.error && <p role="alert">{tr("主机防休眠未生效：")}{power.error}</p>}
+        {paired && power?.error && <p role="alert">{tr("主机防休眠未生效：")}{tr(power.error)}</p>}
         {code && (
           <div className="remote-pair-code">
             <img
@@ -179,7 +180,7 @@ export function MobilePairSettings({ relay, savedRelay, onChange, onConfirm }) {
             {tr("只将二维码或配对码交给你希望授权的手机。")}
           </p>
         )}
-        {notice && <p role="status">{notice}</p>}
+        {notice && <p role="status">{localizeBackendMessage(notice, tr)}</p>}
       </section>
       <section className="remote-relay-settings" aria-label={tr("中继设置")}>
         <div className="remote-relay-row">

@@ -62,8 +62,18 @@ func (s *Server) remoteManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonReply(w, RemoteEntry{APIProtocol: remoteAPIProtocol, InstanceID: s.instanceID,
 		Version: version.Version, Platform: runtime.GOOS, Runtime: kind, Origin: s.origin,
-		Capabilities: map[string]bool{"projects_browse": true, "client_project_share": runtime.GOOS == "linux" && kind == "container", "terminal": true,
-			"browser": true, "desktop": true, "audio": true}})
+		Capabilities: map[string]bool{
+			"projects_browse":      true,
+			"client_project_share": runtime.GOOS == "linux" && kind == "container",
+			"remote_plugins":       true,
+			"remote_approvals":     true,
+			"client_plugin_bridge": true,
+			"terminal":             true,
+			"browser":              true,
+			"desktop":              true,
+			"audio":                true,
+			"audio_input":          true,
+		}})
 }
 
 // ServerEntry is used only over an authenticated SSH command channel. It
@@ -89,9 +99,9 @@ func ServerEntry(configPath string) (RemoteEntry, error) {
 		return RemoteEntry{}, errors.New("云端服务不支持当前远程连接协议")
 	}
 	// The manifest lookup consumed the first ticket; issue another for the
-	// connecting client's private transport.
+	// connecting client's private transport with remote-desktop scope.
 	var launch launchResponse
-	status, err = c.call("POST", "/api/launch", map[string]string{"token": c.record.Token}, &launch)
+	status, err = c.call("POST", "/api/launch", map[string]any{"token": c.record.Token, "remote_desktop": true}, &launch)
 	if err != nil || status != http.StatusOK {
 		return RemoteEntry{}, errors.New("无法取得云端一次性入口")
 	}

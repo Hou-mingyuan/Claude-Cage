@@ -59,14 +59,11 @@ export function projectName(path, groups = [], fallback = "新项目") {
   return folderName(path) || fallback;
 }
 
-export function tabName(tab, saved, project) {
-  return (tab.incognito ? "无痕 · " : "") + (
-    saved[tab.id]?.title ||
-    (tab.kind === "editor"
-      ? `文件 · ${tab.workspace ? projectName(tab.workspace) : project}`
-      : tab.title) ||
-    "新标签页"
-  );
+export function tabName(tab, saved, project, localize = value => value) {
+  const name = saved[tab.id]?.title || (tab.kind === "editor"
+    ? `${localize("文件")} · ${tab.workspace ? localize(projectName(tab.workspace)) : project}`
+    : tab.title) || localize("新标签页");
+  return tab.incognito ? `${localize("无痕")} · ${name}` : name;
 }
 
 // The focused tab and its neighbour retain their screen positions on focus changes.
@@ -163,4 +160,16 @@ export function mergeBrowserTabs(previous, browserTabs) {
     }
   }
   return changed ? next : previous;
+}
+
+export function shouldShowBrowserError({
+  browserError,
+  browserVisible,
+  managementPage,
+  running,
+  connectionError,
+}) {
+  return Boolean(
+    browserError && browserVisible && !managementPage && running && !connectionError,
+  );
 }

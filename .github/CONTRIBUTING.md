@@ -36,7 +36,7 @@ Issue 按涉及的主机系统带有三个标签：`macOS 主机`、`Windows 主
 1. 接受邀请后，将本地基线更新到仓库最新的 `main`。
 2. 为本次贡献创建独立分支，命名为“开始日期-GitHub用户名-工作内容”，例如 `261112-alice-fix-startup`。保留无关的在途改动，提交范围与审核通过的方案保持一致；扩大范围时先在原 Issue 中讨论。
 3. 完成实现并运行与改动相关的检查。涉及共享功能时核对 macOS、Windows 和 Linux；说明实际验证的平台、结果及未验证范围。
-4. 推送分支并创建指向 `main` 的 PR，在正文中关联贡献 Issue，例如 `Closes #123`，说明用户可见的变化、验证结果和已知限制。
+4. 推送分支并按 [PR 模板](PULL_REQUEST_TEMPLATE.md) 创建指向 `main` 的 PR，在正文中关联贡献 Issue（例如 `Closes #123`），说明用户可见的变化、验证结果、未验证范围和已知限制。
 5. 根据评审意见更新 PR。通过审查与所需检查后由维护者合入，随后删除已合入的分支并关闭对应 Issue。
 
 源代码、配置、日志和附件中均不得包含密码、令牌、订阅链接等敏感信息。引用第三方代码时注明来源并保留所需许可。
@@ -66,6 +66,8 @@ bash scripts/build-app.sh
 `GOTOOLCHAIN=auto` 会在需要时查找或下载满足模块要求的工具链；未在本地找到时，需要能访问 Go 工具链下载服务。macOS CI 的 `setup-go` 读取根 `go.mod`，构建子模块时也依赖这一选择机制。规则见 [Go 工具链说明](https://go.dev/doc/toolchain)。
 
 使用 `GOTOOLCHAIN=local` 时，先让 `PATH` 中的 Go 本身满足两个模块的要求，例如 Go 1.27.3 或更新版本；仅准备 Go 1.26.10 会在构建 `tools/tailnet` 时失败。离线构建还需预先准备 Go 模块、前端依赖和构建脚本所需的下载材料。Windows 与 Linux 构建也会使用该子模块，须核对同一版本要求。
+
+`build-app.sh` 会先获取随附的代理核心 Mihomo。单独运行 `make cage` 只生成 `_output/bin/cage`，不含代理核心，此时代理导入会直接报“随附代理核心缺失”；在 macOS 或 Linux x86_64 上运行 `make cage-core`，它会校验并放到 `_output/proxy-core/mihomo`，`cage` 运行时从这里或同目录加载。
 
 ### macOS 构建排查
 

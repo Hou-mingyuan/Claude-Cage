@@ -306,3 +306,108 @@ func TestClaudeAccountNumbersSurviveLegacyReorderAndRemoval(t *testing.T) {
 		t.Fatal("new account reused a retired number")
 	}
 }
+
+func TestClaudeAccountDeletionGuardsCleanupAndNoResurrection(t *testing.T) {
+	s := testServer(t)
+	bound := strings.Repeat("a", 24)
+	desktop := strings.Repeat("d", 24)
+	redirectOld := strings.Repeat("e", 24)
+	defaultID := strings.Repeat("b", 24)
+	emailA, orgA := "alice@example.org", "org-a"
+	emailB, orgB := "bob@example.org", "org-b"
+	list := claudeAccountList{
+		Accounts: []claudeAccount{
+			{ID: bound, Source: "managed", Label: "工作", Status: "ready", Enabled: true, Email: emailA, Organization: orgA, DesktopInstanceID: desktop, DesktopStatus: "ready"},
+			{ID: defaultID, Source: "default", Label: emailB, Status: "ready", Enabled: true, Email: emailB, Organization: orgB},
+		},
+		DesktopLabels:    map[string]string{desktop: "工作桌面", "default": "主桌面"},
+		DesktopRedirects: map[string]string{redirectOld: desktop},
+	}
+	if err := s.saveClaudeAccounts(list); err != nil {
+		t.Fatal(err)
+	}
+	deleteReq := func(id string, want int) {
+		t.Helper()
+		w := request(s, "POST", "/api/claude-accounts", s.origin, `{"action":"delete","id":"`+id+`"}`, true)
+		if w.Code != want {
+			t.Fatalf("delete %s got %d, want %d: %s", id, w.Code, want, w.Body)
+		}
+	}
+	if w := request(s, "POST", "/api/claude-accounts", "https://claude.ai", `{"action":"delete","id":"`+bound+`"}`, true); w.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin delete: %d", w.Code)
+	}
+	if w := request(s, "POST", "/api/claude-accounts", s.origin, `{"action":"delete","id":"`+bound+`"}`, false); w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated delete: %d", w.Code)
+	}
+	deleteReq("not-valid", http.StatusConflict)
+	// Active operation blocks deletion.
+	s.op.Lock()
+	deleteReq(bound, http.StatusConflict)
+	s.op.Unlock()
+	// Active terminal blocks deletion.
+	s.terminals.sessions = map[string]*terminalSession{"work": {claudeAccountID: bound, kind: "claude"}}
+	deleteReq(bound, http.StatusConflict)
+	delete(s.terminals.sessions, "work")
+	// In-flight refresh blocks deletion.
+	s.claudeAccounts.mu.Lock()
+	poll := s.claudeAccounts.claim(bound)
+	s.claudeAccounts.mu.Unlock()
+	deleteReq(bound, http.StatusConflict)
+	s.claudeAccounts.finish(bound, poll, nil)
+	// Active mobile CLI turn blocks deletion.
+	s.mobileCLI.mu.Lock()
+	s.mobileCLI.active = map[string]*mobileRun{"turn-1": {cancel: func() {}, record: &mobileRecord{Account: claudeSelection{ID: bound}}}}
+	s.mobileCLI.mu.Unlock()
+	deleteReq(bound, http.StatusConflict)
+	s.mobileCLI.mu.Lock()
+	delete(s.mobileCLI.active, "turn-1")
+	s.mobileCLI.mu.Unlock()
+
+	// Deleting bound account cleans desktop label/redirect, preserves default label & LastNumber, and bumps catalog revision.
+	beforeRev := s.desktopCatalogRevision.Load()
+	deleteReq(bound, http.StatusOK)
+	// Idempotent second delete succeeds.
+	deleteReq(bound, http.StatusOK)
+	if s.desktopCatalogRevision.Load() <= beforeRev {
+		t.Fatal("delete did not advance desktopCatalogRevision")
+	}
+	stored, err := s.loadClaudeAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.find(bound) != nil || len(stored.Accounts) != 1 || stored.LastNumber != 2 {
+		t.Fatalf("unexpected accounts after bound delete: %+v", stored)
+	}
+	if stored.DesktopLabels[desktop] != "" || stored.DesktopLabels["default"] != "主桌面" || len(stored.DesktopRedirects) != 0 {
+		t.Fatalf("unexpected desktop metadata after account delete: %+v", stored)
+	}
+
+	// Deleting a default-sourced account dismisses passive rediscovery from ~/.claude.
+	deleteReq(defaultID, http.StatusOK)
+	stored, err = s.loadClaudeAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Accounts) != 0 {
+		t.Fatalf("expected empty account list: %+v", stored)
+	}
+	reading := claudeGuestSnapshot{LoggedIn: true, Email: emailB, Organization: orgB}
+	if err := stored.observeDefault(reading, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Accounts) != 0 {
+		t.Fatalf("deleted default account must not resurrect on passive discovery: %+v", stored.Accounts)
+	}
+	// Explicit re-login (e.g. Desktop bind or adding account) clears dismissal and adds cleanly.
+	pendingDesktop, err := stored.createDesktop("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, _, _ := stored.bindDesktop(pendingDesktop.ID, reading)
+	if !changed || len(stored.Accounts) != 1 || stored.Accounts[0].Email != emailB {
+		t.Fatalf("explicit login must re-add previously deleted account: %+v", stored)
+	}
+	if len(stored.DismissedDefaults) != 1 || stored.DismissedDefaults[0] != claudeIdentityHash(emailA, orgA) {
+		t.Fatalf("explicit login must undismiss only its own subject: %+v", stored.DismissedDefaults)
+	}
+}

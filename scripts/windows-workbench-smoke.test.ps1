@@ -1,4 +1,4 @@
-# Cross-platform regression for the real smoke-report and CI artifact contract.
+﻿# Cross-platform regression for the real smoke-report and CI artifact contract.
 . (Join-Path $PSScriptRoot 'windows-common.ps1')
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('cage-smoke-contract-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $directory | Out-Null
@@ -43,7 +43,7 @@ try {
     $report = Join-Path $directory 'smoke.json'
     $fixture = Join-Path $directory 'fixture.json'
     $profile = Join-Path $directory 'profile'
-    $storageError = '此目录包含或属于凭据、用户资料或版本控制数据，无法共享'
+    $storageError = '请选择具体项目，不要共享主目录、Cage 配置或包含配置的上级目录'
     $controllerLogs = Join-Path $profile 'logs'
     New-Item -ItemType Directory -Path $controllerLogs -Force | Out-Null
     @(

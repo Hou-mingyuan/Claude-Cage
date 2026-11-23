@@ -148,6 +148,58 @@ def channel_message(text):
     return match.group(1), body.removesuffix("\n")
 
 
+COMMAND_RECORD_TAGS = (
+    "command-name",
+    "command-message",
+    "command-args",
+    "local-command-stdout",
+    "local-command-stderr",
+    "local-command-caveat",
+)
+SUMMARY_CACHE_VERSION = 2
+
+
+def is_command_record(text):
+    if not text:
+        return False
+    pos, end, found = 0, len(text), False
+    while True:
+        while pos < end and text[pos].isspace():
+            pos += 1
+        if pos >= end:
+            return found
+        matched = False
+        for tag in COMMAND_RECORD_TAGS:
+            open_tag = "<" + tag + ">"
+            if text.startswith(open_tag, pos):
+                close_tag = "</" + tag + ">"
+                close = text.find(close_tag, pos + len(open_tag))
+                if close < 0:
+                    return False
+                pos = close + len(close_tag)
+                found = True
+                matched = True
+                break
+        if not matched:
+            return False
+
+
+def auto_title_from_row(row):
+    if row.get("isSidechain") or row.get("isCompactSummary") or row.get("type") != "user":
+        return ""
+    text = text_content(row.get("message") or {})
+    if not text:
+        return ""
+    channel = channel_message(text) if row.get("isMeta") else None
+    if channel:
+        candidate = channel[1]
+    elif row.get("isMeta") or is_command_record(text):
+        return ""
+    else:
+        candidate = text
+    return candidate[:40] if candidate.strip() else ""
+
+
 def update_tools(turn, role, content):
     if not isinstance(content, list):
         return
@@ -184,9 +236,9 @@ def update_tools(turn, role, content):
 
 
 def transcript(path):
-    turns, seen, workspace, title = [], set(), "", ""
+    turns, seen, workspace, custom_title, auto_title = [], set(), "", "", ""
     if not path or not path.is_file() or path.is_symlink():
-        return turns, workspace, title, seen
+        return turns, workspace, "", seen
     with path.open(encoding="utf-8") as stream:
         for line in stream:
             if len(line) > 4 * 1024 * 1024:
@@ -195,11 +247,13 @@ def transcript(path):
                 row = json.loads(line)
             except ValueError:
                 continue
-            if row.get("isSidechain"):
+            if not isinstance(row, dict) or row.get("isSidechain"):
                 continue
             workspace = row.get("cwd") or workspace
             if row.get("type") == "custom-title":
-                title = row.get("customTitle") or title
+                custom_title = row.get("customTitle") or custom_title
+            if not auto_title:
+                auto_title = auto_title_from_row(row)
             key = row.get("uuid")
             if not key or key in seen:
                 continue
@@ -225,7 +279,7 @@ def transcript(path):
                 turn = turns[-1]
                 value = turn["text"] + ("\n\n" if turn["text"] else "") + text
                 turn["text"], turn["truncated"] = clip_text(value, REPLY_LIMIT), len(value.encode()) > REPLY_LIMIT
-    return turns, workspace, title, seen
+    return turns, workspace, custom_title or auto_title, seen
 
 
 def connection_states():
@@ -260,9 +314,12 @@ def view(config, session_id, path=None):
     running = live(state.get("pid")) and not state.get("closed")
     channel = running and live(state.get("channel_pid")) and not state.get("blocked") and not state.get("policy_unavailable") and not state.get("native_ccs_unverified")
     known = {turn["id"] for turn in turns}
+    queued_title = ""
     for sent in state.get("sent", []):
         if sent["id"] not in known:
             turns.append({"id": sent["id"], "prompt": sent["text"], "text": "", "status": "interrupted" if sent.get("interrupted") else "queued"})
+            if not queued_title and isinstance(sent.get("text"), str) and sent["text"].strip():
+                queued_title = sent["text"][:40]
     display = state.get("display")
     if turns and display and state.get("busy") and display.get("text"):
         text = display["text"]
@@ -292,7 +349,7 @@ def view(config, session_id, path=None):
     elif state.get("policy_unavailable"):
         notice = "Cage 默认环境的通道配置未能更新，请在电脑更新环境组件。"
     return {"cli_id": session_id, "config": str(config), "connection": connection, "native_ccs_unverified": bool(state.get("native_ccs_unverified")),
-            "workspace": workspace or state.get("workspace", ""), "title": title or (turns[0]["prompt"][:40] if turns else "Claude Code"),
+            "workspace": workspace or state.get("workspace", ""), "title": title or queued_title or "Claude Code",
             "updated_at": modified, "turns": turns, "running": bool(running), "active": bool(running and (state.get("busy") or state.get("approvals"))), "channel_ready": bool(channel), "can_send": bool(channel and not state.get("resume_task")), "has_history": has_history, "history_truncated": shortened,
             "connection_notice": "" if channel else notice, "account_failure": state.get("account_failure", ""),
             "resume_pending": bool(state.get("resume_task")), "native_history": native_history}
@@ -321,7 +378,7 @@ def view_token(config, session_id):
 def history_summary(path):
     workspace, title = "", ""
     with path.open(encoding="utf-8") as stream:
-        for _ in range(64):
+        for _ in range(256):
             line = stream.readline(4 << 20)
             if not line:
                 break
@@ -329,14 +386,11 @@ def history_summary(path):
                 row = json.loads(line)
             except ValueError:
                 continue
+            if not isinstance(row, dict) or row.get("isSidechain"):
+                continue
             workspace = row.get("cwd") or workspace
-            if row.get("type") == "user":
-                text = text_content(row.get("message") or {})
-                channel = channel_message(text) if row.get("isMeta") else None
-                if channel:
-                    title = channel[1][:40]
-                elif not row.get("isMeta"):
-                    title = text[:40]
+            if not title:
+                title = auto_title_from_row(row)
             if workspace and title:
                 break
     # Names and directory changes are appended to the transcript. Read a
@@ -348,6 +402,8 @@ def history_summary(path):
         try:
             row = json.loads(line)
         except (ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(row, dict) or row.get("isSidechain"):
             continue
         workspace = row.get("cwd") or workspace
         if row.get("type") == "custom-title":
@@ -430,11 +486,11 @@ def discover(request):
             key, sig = str(path), stamp(info)
             current.add(key)
             entry = summaries.get(key)
-            if isinstance(entry, list) and len(entry) == 3 and entry[0] == sig:
+            if isinstance(entry, list) and len(entry) == 4 and entry[0] == sig and entry[3] == SUMMARY_CACHE_VERSION:
                 workspace, title = entry[1], entry[2]
             else:
                 workspace, title = history_summary(path)
-                summaries[key] = [sig, workspace, title]
+                summaries[key] = [sig, workspace, title, SUMMARY_CACHE_VERSION]
                 changed = True
             if not any(workspace_within(workspace, root) for root in allowed):
                 continue

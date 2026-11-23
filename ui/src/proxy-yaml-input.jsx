@@ -179,13 +179,13 @@ export function ProxyYAMLInput({
         {reading
           ? tr("正在读取文件，请稍候。")
           : selected
-            ? tr("{0} · {1}，待导入验证", (fileSize), (edited ? "内容已编辑" : "文件已读取"))
+            ? tr("{0} · {1}，待导入验证", (fileSize), tr(edited ? "内容已编辑" : "文件已读取"))
             : ""}
       </p>
       {error && (
         <p id={errorID} className="proxy-yaml-error" role="alert">
           <AlertCircle size={15} aria-hidden="true" />
-          {error}
+          {tr(error)}
         </p>
       )}
       <label>

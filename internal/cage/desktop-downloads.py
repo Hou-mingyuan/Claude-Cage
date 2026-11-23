@@ -178,8 +178,17 @@ class Downloads:
         return {'ok': True}
 
 
-def create_downloads():
+def downloads_directory(runtime=None):
+    base = Path.home() / '.local/share/cage/desktop-downloads'
+    if runtime:
+        name = Path(runtime).name
+        if re.fullmatch(r'desktop-[a-f0-9]{24}', name):
+            return base / name
+    return base
+
+
+def create_downloads(runtime=None):
     helper = SourceFileLoader('cage_download_copy', '/usr/local/bin/cage-save-download').load_module()
     with open('/etc/claude-cage/desktop-downloads.json') as config:
         workspace = json.load(config)['workspace']
-    return Downloads(Path.home() / '.local/share/cage/desktop-downloads', workspace, helper.copy_to_workspace)
+    return Downloads(downloads_directory(runtime), workspace, helper.copy_to_workspace)

@@ -185,6 +185,9 @@ func (r *Runtime) PrepareFresh(ctx context.Context, profile *guestprofile.Profil
 	}
 	copyID := *identity
 	copyID.Hostname = profile.Hostname
+	if err := copyID.Validate(); err != nil {
+		return err
+	}
 	if _, err := r.output(ctx, r.createArguments(&copyID)...); err != nil {
 		return err
 	}
@@ -192,10 +195,7 @@ func (r *Runtime) PrepareFresh(ctx context.Context, profile *guestprofile.Profil
 	if err != nil {
 		return err
 	}
-	if container == nil {
-		return errors.New("容器创建后未能验证身份")
-	}
-	if err := checkContainerConfiguration(container); err != nil {
+	if err := checkCreatedContainer(container, &copyID); err != nil {
 		return err
 	}
 	if err := r.recordStorage(ctx, container.ID); err != nil {

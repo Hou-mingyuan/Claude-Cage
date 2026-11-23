@@ -114,6 +114,7 @@ try {
         }
     }
     Invoke-InIsolatedTestTemp {
+        Invoke-BuildTool 'go' @('test', './internal/remotehost')
         Invoke-BuildTool 'go' @('test', './internal/workbench', './internal/appupdate', './internal/host', './internal/managedproxy', './internal/env', './internal/paths', './internal/mounts')
         Invoke-BuildTool 'go' @('test', './internal/cage', '-run', 'Test(Storage|Gate|ProxyRevision|ConfigChange|JobStop|CONNECT|SOCKS|DNS|RejectHostLAN|Credentials|ProxyHostname|SafetyReport|Renew)')
         Invoke-BuildTool 'go' @('test', './internal/vm', '-run', 'Test(NetworkConfined|WindowsQEMUIdentity|VMStartError)')

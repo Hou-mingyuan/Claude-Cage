@@ -50,8 +50,10 @@ function fixture(intermediateState = "normal") {
   const targets = new Map([["one", 1], ["two", 1]]);
   const calls = [];
   let legacyViewer = false;
+  let active = "one";
   const cdp = async (method, input) => {
     calls.push({ method, ...input });
+    if (method === "Target.activateTarget") return {};
     if (method === "Browser.getWindowForTarget") {
       const windowId = targets.get(input.targetId);
       return { windowId, bounds: { ...windows.get(windowId) } };
@@ -60,11 +62,16 @@ function fixture(intermediateState = "normal") {
     const current = windows.get(input.windowId);
     assert.ok(current);
     if (input.bounds.windowState === "minimized") assert.equal(current.windowState, intermediateState);
+    if (input.bounds.windowState === "fullscreen") assert.notEqual(current.windowState, "minimized");
     Object.assign(current, input.bounds);
     if (input.bounds.windowState === "normal") current.windowState = intermediateState;
   };
-  const visibility = new BrowserVisibility(cdp, () => [...targets.keys()], async () => !legacyViewer);
-  return { visibility, windows, targets, calls, setLegacyViewer: value => { legacyViewer = value; } };
+  const visibility = new BrowserVisibility(cdp, () => [...targets.keys()], async () => !legacyViewer, () => active);
+  return {
+    visibility, windows, targets, calls,
+    setLegacyViewer: value => { legacyViewer = value; },
+    setActive: value => { active = value; },
+  };
 }
 
 test("browser visibility restores fullscreen and processes shared windows once", async () => {
@@ -76,7 +83,10 @@ test("browser visibility restores fullscreen and processes shared windows once",
   assert.equal(f.calls.filter(call => call.method === "Browser.setWindowBounds").length, 2);
   await f.visibility.set(true);
   assert.equal(f.windows.get(1).windowState, "fullscreen");
-  assert.equal(f.visibility.saved.size, 0);
+  // Already fullscreen: another visible sync makes no redundant bounds calls.
+  const before = f.calls.filter(call => call.method === "Browser.setWindowBounds").length;
+  await f.visibility.set(true);
+  assert.equal(f.calls.filter(call => call.method === "Browser.setWindowBounds").length, before);
 });
 
 test("browser visibility continues when Openbox maximizes the intermediate window", async () => {
@@ -85,22 +95,60 @@ test("browser visibility continues when Openbox maximizes the intermediate windo
   assert.equal(f.windows.get(1).windowState, "minimized");
   await f.visibility.set(true);
   assert.equal(f.windows.get(1).windowState, "fullscreen");
-  assert.equal(f.visibility.saved.size, 0);
 });
 
-test("browser visibility preserves geometry, closed windows and legacy viewers", async () => {
+test("window opened maximized while hidden restores to fullscreen instead of showing browser chrome", async () => {
+  const f = fixture("maximized");
+  // Simulate closing the last tab, hiding the browser view, then opening a new
+  // window (whose Openbox initial state is maximized) before VNC reconnects.
+  f.targets.clear();
+  f.windows.clear();
+  await f.visibility.set(false);
+  f.windows.set(2, { windowState: "maximized", left: 0, top: 0, width: 1200, height: 800 });
+  f.targets.set("reopened", 2);
+  f.setActive("reopened");
+  await f.visibility.activate("reopened");
+  assert.equal(f.windows.get(2).windowState, "minimized");
+  await f.visibility.set(true);
+  assert.equal(f.windows.get(2).windowState, "fullscreen");
+});
+
+test("non-fullscreen visible window is forced back to fullscreen on sync or show", async () => {
+  const f = fixture("maximized");
+  f.windows.set(2, { windowState: "maximized", left: 0, top: 0, width: 1200, height: 800 });
+  f.targets.set("extra", 2);
+  await f.visibility.sync();
+  assert.equal(f.windows.get(2).windowState, "fullscreen");
+  // Simulate exiting fullscreen (e.g. F11) while visible.
+  f.windows.get(1).windowState = "maximized";
+  await f.visibility.set(true);
+  assert.equal(f.windows.get(1).windowState, "fullscreen");
+});
+
+test("browser visibility restores fullscreen for closed windows, legacy viewers and multi-window active order", async () => {
   const f = fixture();
   const bounds = { windowState: "normal", left: 40, top: 80, width: 900, height: 600 };
   f.windows.set(2, { ...bounds }); f.targets.set("popup", 2);
   f.setLegacyViewer(true);
   await f.visibility.set(false);
-  assert.equal(f.calls.filter(call => call.method === "Browser.setWindowBounds").length, 0);
+  assert.equal(f.windows.get(2).windowState, "fullscreen");
   f.setLegacyViewer(false);
   await f.visibility.set(false);
-  f.targets.delete("one"); f.targets.delete("two"); f.windows.delete(1);
+  assert.equal(f.windows.get(1).windowState, "minimized");
+  assert.equal(f.windows.get(2).windowState, "minimized");
+  // Restoring multiple windows re-activates the active target so it stays on top.
+  f.setActive("one");
   await f.visibility.set(true);
-  assert.deepEqual(f.windows.get(2), bounds);
-  assert.equal(f.visibility.saved.size, 0);
+  assert.equal(f.windows.get(1).windowState, "fullscreen");
+  assert.equal(f.windows.get(2).windowState, "fullscreen");
+  const activations = f.calls.filter(call => call.method === "Target.activateTarget");
+  assert.equal(activations.at(-1)?.targetId, "one");
+  // Closing a window while hidden still restores remaining windows cleanly.
+  await f.visibility.set(false);
+  f.targets.delete("one"); f.targets.delete("two"); f.windows.delete(1);
+  f.setActive("popup");
+  await f.visibility.set(true);
+  assert.equal(f.windows.get(2).windowState, "fullscreen");
 });
 
 test("a newer browser viewer restores a hide that is already running", async () => {
@@ -122,5 +170,4 @@ test("a newer browser viewer restores a hide that is already running", async () 
   release();
   await Promise.all([hidden, activated, shown]);
   assert.equal(state, "fullscreen");
-  assert.equal(visibility.saved.size, 0);
 });

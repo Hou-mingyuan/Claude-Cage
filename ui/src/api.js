@@ -1,13 +1,15 @@
 import { reportDiagnostic } from "./diagnostics.mjs";
-import { httpErrorMessage, connectionErrorMessage, operationName, nativeFailureMessage } from "./error-message.mjs";
+import { httpErrorMessage, connectionErrorMessage, operationName, nativeFailureMessage, errorText, localizeFailure } from "./error-message.mjs";
 import { assertConnection, connectionHeaders, getClientContext, isProjectSharesPath } from "./client-context.mjs";
 import { installAgentNativeConsumer } from "./agent-native.js";
+import { translate } from "./message-catalog.mjs";
+
 let sessionRenewal;
 class WorkbenchUnreachable extends Error {}
 async function responseError(response, path, method = "GET") {
   const body = await response.text();
   const error = new Error(
-    httpErrorMessage(path, response.status, body, response.headers.get("Content-Type") || "", method),
+    httpErrorMessage(path, response.status, body, response.headers.get("Content-Type") || "", method, translate),
   );
   error.status = response.status;
   // Plugin page calls answer with a JSON-RPC error code and message.
@@ -25,7 +27,7 @@ async function renewSession() {
       const entry = new URL(url);
       if (entry.origin !== location.origin) {
         await native("reconnect");
-        throw new Error("工作台地址已更新，连接恢复后请重试刚才的操作。");
+        throw new Error(translate("工作台地址已更新，连接恢复后请重试刚才的操作。"));
       }
       const response = await fetch("/api/session", {
         method: "POST",
@@ -52,7 +54,7 @@ export async function api(path, body, method, headers = {}, { signal } = {}) {
     catch (error) {
       if (signal?.aborted) throw signal.reason;
       reportDiagnostic("frontend", error);
-      const message = connectionErrorMessage(path, options.method);
+      const message = connectionErrorMessage(path, options.method, translate);
       if (error instanceof TypeError) throw new WorkbenchUnreachable(message, { cause: error });
       throw new Error(message, { cause: error });
     }
@@ -68,7 +70,7 @@ export async function api(path, body, method, headers = {}, { signal } = {}) {
   if (!response.ok) throw await responseError(response, path, options.method);
   let value;
   try { value = await response.json(); }
-  catch (error) { reportDiagnostic("frontend", error); throw new Error(`${operationName(path, options.method)}失败：后台返回的结果格式无效。请重新连接；仍出现时在设置中导出诊断包。`, { cause: error }); }
+  catch (error) { reportDiagnostic("frontend", error); throw new Error(localizeFailure(translate, errorText.invalidResponse, operationName(path, options.method)), { cause: error }); }
   if (path !== "/session" && !path.startsWith("/agent/native") && (!path.startsWith("/client/") || isProjectSharesPath(path))) assertConnection(connection);
   return value;
 }
@@ -76,7 +78,7 @@ export async function uploadFile(path, file, { signal, onProgress } = {}) {
   const headers = connectionHeaders(path);
   const connection = getClientContext().connection_id;
   const send = () => new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(new DOMException("上传已取消", "AbortError")); return; }
+    if (signal?.aborted) { reject(new DOMException(translate("上传已取消"), "AbortError")); return; }
     const request = new XMLHttpRequest();
     const abort = () => request.abort();
     const cleanup = () => signal?.removeEventListener("abort", abort);
@@ -84,19 +86,19 @@ export async function uploadFile(path, file, { signal, onProgress } = {}) {
     request.setRequestHeader("Content-Type", "application/octet-stream");
     for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
     request.upload.onprogress = event => onProgress?.(event.loaded, event.total || file.size);
-    request.onerror = () => { cleanup(); reject(new Error("上传文件失败：与 Cage 后台的连接中断。请恢复连接后核对目标是否已收到文件，再重新选择文件。")); };
-    request.onabort = () => { cleanup(); reject(new DOMException("上传已取消", "AbortError")); };
+    request.onerror = () => { cleanup(); reject(new Error(translate("上传文件失败：与 Cage 后台的连接中断。请恢复连接后核对目标是否已收到文件，再重新选择文件。"))); };
+    request.onabort = () => { cleanup(); reject(new DOMException(translate("上传已取消"), "AbortError")); };
     request.onload = () => {
       cleanup();
       if (request.status === 423) window.dispatchEvent(new Event("cage-account-locked"));
       if (request.status !== 200) {
-        const error = new Error(httpErrorMessage(path, request.status, request.responseText, request.getResponseHeader("Content-Type") || ""));
+        const error = new Error(httpErrorMessage(path, request.status, request.responseText, request.getResponseHeader("Content-Type") || "", "POST", translate));
         error.status = request.status; reject(error); return;
       }
       try { assertConnection(connection); }
       catch (error) { reject(error); return; }
       try { resolve(JSON.parse(request.responseText)); }
-      catch { reject(new Error("上传文件后未收到有效确认。请先核对目标是否已收到文件，避免重复上传；仍失败时导出诊断包。")); }
+      catch { reject(new Error(translate("上传文件后未收到有效确认。请先核对目标是否已收到文件，避免重复上传；仍失败时导出诊断包。"))); }
     };
     signal?.addEventListener("abort", abort, { once: true });
     request.send(file);
@@ -145,7 +147,7 @@ export async function native(action, extra = {}) {
   catch (error) {
     reportDiagnostic("frontend", error);
     const original = error?.message || String(error);
-    const message = nativeFailureMessage(action, original);
+    const message = nativeFailureMessage(action, original, translate);
     if (message === original) throw error;
     throw new Error(message, { cause: error });
   }
@@ -161,7 +163,7 @@ export function normalizeURL(text) {
   if (!value || value === "about:blank") return "about:blank";
   if (/^https?:\/\//i.test(value)) return new URL(value).href;
   if (/^[a-z][a-z\d+.-]*:/i.test(value) && !/^localhost:\d+/i.test(value))
-    throw new Error("地址仅支持 http 或 https");
+    throw new Error(translate("地址仅支持 http 或 https"));
   if (
     !/\s/.test(value) &&
     (value.includes(".") || /^localhost(?::\d+)?(?:\/|$)/i.test(value))

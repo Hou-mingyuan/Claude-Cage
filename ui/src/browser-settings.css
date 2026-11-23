@@ -2,13 +2,15 @@
 .browser-settings-page { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: auto; background: var(--paper); color: var(--strong); font-size: 1rem; }
 .browser-settings-top { display: flex; flex: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 24px 28px 20px; border-bottom: 1px solid var(--line); }
 .browser-settings-top h1 { font-size: 1.7rem; margin: 0; letter-spacing: -.025em; }
-.browser-settings-search { display: flex; align-items: center; gap: 8px; width: min(330px, 100%); border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; color: var(--muted); background: var(--paper); }
-.browser-settings-search input { width: 100%; min-width: 0; border: 0; background: transparent; padding: 9px 0; color: var(--strong); font: inherit; outline-offset: 3px; }
+.browser-settings-search { display: flex; align-items: center; gap: 8px; width: min(330px, 100%); border: 1px solid var(--line); border-radius: 8px; padding: 0 11px; color: var(--muted); background: var(--input); transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out); }
+.browser-settings-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.browser-settings-search input { width: 100%; min-width: 0; border: 0; background: transparent; padding: 9px 0; color: var(--strong); font: inherit; outline: none; }
 .browser-settings-layout { display: flex; align-items: flex-start; min-height: 0; flex: 1; }
 .browser-settings-nav { width: 190px; flex: none; display: grid; gap: 3px; padding: 18px 10px; position: sticky; top: 0; }
-.browser-settings-nav button { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 0; background: transparent; text-align: left; color: var(--muted); border-radius: 6px; font: inherit; transition: background 120ms, color 120ms; }
+.browser-settings-nav button { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 0; background: transparent; text-align: left; color: var(--muted); border-radius: 8px; font: inherit; transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
 .browser-settings-nav button svg { flex: none; }
 .browser-settings-nav button[aria-current="page"] { background: var(--selected); color: var(--strong); font-weight: 600; }
+.browser-settings-nav button[aria-current="page"]::before { content: ""; position: absolute; inset-inline-start: 2px; top: 8px; bottom: 8px; width: 3px; border-radius: 999px; background: var(--accent); }
 .browser-settings-nav button:hover { background: var(--hover); color: var(--strong); }
 .settings-unsaved-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--focus); margin-left: auto; }
 .browser-settings-content { min-width: 0; width: min(100%, 820px); padding: 28px 32px 48px; }
@@ -19,7 +21,8 @@
 .browser-setting-form { margin-top: 28px; display: grid; gap: 12px; }
 .browser-setting-field { display: grid; gap: 10px; min-width: 0; font-weight: 600; }
 .browser-setting-field input, .browser-setting-field .inline-select { width: 100%; min-width: 0; font-weight: 400; }
-.browser-setting-field input { padding: 10px 12px; font: inherit; background: var(--paper); color: var(--strong); border: 1px solid var(--line); border-radius: 6px; }
+.browser-setting-field input { padding: 10px 12px; font: inherit; background: var(--input); color: var(--strong); border: 1px solid var(--line); border-radius: 8px; transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out); }
+.browser-setting-field input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .browser-setting-actions, .browser-settings-links, .extension-import-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .browser-setting-actions button, .browser-settings-links button, .extension-import-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; min-height: 36px; font-size: inherit; }
 .browser-setting-actions [role="status"] { color: var(--muted); }
@@ -36,7 +39,8 @@
 .browser-settings-section .browser-cookies { margin: 0; font-size: 1rem; border: 0; border-radius: 0; padding: 0; }
 .browser-settings-section .cookie-list { max-height: 300px; }
 .browser-settings-section .cookie-toolbar { gap: 8px; }
-.extension-item, .extension-install-preview, .extension-import { border: 1px solid var(--line); border-radius: 8px; padding: 18px; margin-top: 16px; min-width: 0; }
+.extension-item, .extension-install-preview, .extension-import { border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-top: 16px; min-width: 0; background: var(--paper); transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out); }
+.extension-item:hover { border-color: color-mix(in srgb, var(--ink) 16%, var(--line)); box-shadow: var(--shadow-xs); }
 .extension-item .browser-setting-heading { margin-top: 0; flex-wrap: wrap; }
 .extension-version { display: inline-block; margin-left: 9px; color: var(--muted); font-size: .92rem; }
 .extension-enable { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); white-space: nowrap; }

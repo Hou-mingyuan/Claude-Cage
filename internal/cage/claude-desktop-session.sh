@@ -11,6 +11,21 @@ export XDG_RUNTIME_DIR=/run/cage-desktop XDG_CURRENT_DESKTOP=Openbox
 export PATH="$HOME/.local/bin:$PATH" BROWSER=/usr/local/bin/cage-open
 dbus-update-activation-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR XDG_CURRENT_DESKTOP
 umask 077
+rm -f "$XDG_RUNTIME_DIR/stopping"
+app_pid=
+# shellcheck disable=SC2329
+on_term() {
+  if [ -n "${app_pid:-}" ]; then
+    kill -TERM "$app_pid" 2>/dev/null || true
+  fi
+  if [ -f "$XDG_RUNTIME_DIR/stopping" ]; then
+    rm -f "$XDG_RUNTIME_DIR/stopping"
+    exit 0
+  fi
+  trap - TERM
+  kill -TERM "$$"
+}
+trap on_term TERM
 touch "$XAUTHORITY"
 xauth -f "$XAUTHORITY" add "$DISPLAY" . "$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 printf '%s' "$DBUS_SESSION_BUS_ADDRESS" > "$XDG_RUNTIME_DIR/bus-address"
@@ -23,7 +38,7 @@ tigervncpasswd -f < "$password" > "$XDG_RUNTIME_DIR/vnc-password"
 Xtigervnc "$DISPLAY" -geometry 1600x1000 -depth 24 -rfbport -1 -rfbunixpath "$XDG_RUNTIME_DIR/vnc.sock" -rfbunixmode 0600 -nolisten tcp -auth "$XAUTHORITY" -SecurityTypes VncAuth -PasswordFile "$XDG_RUNTIME_DIR/vnc-password" -AlwaysShared &
 display_pid=$!
 trap 'kill "$display_pid" 2>/dev/null || true' EXIT
-for i in $(seq 1 100); do
+for _ in $(seq 1 100); do
   if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then break; fi
   kill -0 "$display_pid"
   sleep .1
@@ -42,7 +57,7 @@ keyring_unlocked() {
   gdbus call --session --dest org.freedesktop.secrets --object-path /org/freedesktop/secrets/aliases/login --method org.freedesktop.DBus.Properties.Get org.freedesktop.Secret.Collection Locked 2>/dev/null | grep -q false &&
   gdbus call --session --dest org.freedesktop.secrets --object-path /org/freedesktop/secrets/aliases/default --method org.freedesktop.DBus.Properties.Get org.freedesktop.Secret.Collection Locked 2>/dev/null | grep -q false
 }
-for i in $(seq 1 50); do
+for _ in $(seq 1 50); do
   if keyring_unlocked; then break; fi
   sleep .1
 done
@@ -86,7 +101,7 @@ CAGE_DESKTOP_DPI_READY
 fi
 /usr/local/bin/cage-desktop-files &
 files_pid=$!
-for i in $(seq 1 100); do
+for _ in $(seq 1 100); do
   kill -0 "$files_pid"
   if [ -S "$XDG_RUNTIME_DIR/files.sock" ]; then break; fi
   sleep .1
@@ -113,16 +128,28 @@ if [[ -s "$XDG_RUNTIME_DIR/account-scope" ]]; then
     fi
   fi
 fi
-DESKTOP_LOG_LEVEL=debug CLAUDE_ENABLE_LOGGING=1 DEBUG='*current-account*' /usr/local/bin/cage-input-session /usr/bin/python3 -I /usr/local/bin/client_runtime.py claude-desktop "${scale_args[@]}" --password-store=gnome-libsecret --xdg-portal-required-version=3 > >(/usr/bin/python3 -I /usr/local/lib/desktop-identity.py "$XDG_RUNTIME_DIR/account.json" "${history_args[@]}") &
+lang_args=()
+if [[ "${CAGE_LANGUAGE:-}" =~ ^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$ ]]; then
+  lang_args=("--lang=${CAGE_LANGUAGE}")
+fi
+DESKTOP_LOG_LEVEL=debug CLAUDE_ENABLE_LOGGING=1 DEBUG='*current-account*' /usr/local/bin/cage-input-session /usr/bin/python3 -I /usr/local/bin/client_runtime.py claude-desktop "${scale_args[@]}" ${lang_args[@]+"${lang_args[@]}"} --password-store=gnome-libsecret --xdg-portal-required-version=3 > >(/usr/bin/python3 -I /usr/local/lib/desktop-identity.py "$XDG_RUNTIME_DIR/account.json" "${history_args[@]}") &
 app_pid=$!
 printf '%s\n' "$app_pid" > "$XDG_RUNTIME_DIR/app-pid"
 # The service becomes ready only after the application has opened a window.
-for i in $(seq 1 200); do
-  kill -0 "$app_pid"
+for _ in $(seq 1 200); do
+  if ! kill -0 "$app_pid" 2>/dev/null; then
+    break
+  fi
   if xprop -root _NET_CLIENT_LIST 2>/dev/null | grep -q '0x[1-9a-f]'; then
     NOTIFY_SOCKET="$CAGE_NOTIFY_SOCKET" systemd-notify --ready
     break
   fi
   sleep .1
 done
-wait "$app_pid"
+status=0
+wait "$app_pid" || status=$?
+if [ -f "$XDG_RUNTIME_DIR/stopping" ]; then
+  rm -f "$XDG_RUNTIME_DIR/stopping"
+  exit 0
+fi
+exit "$status"

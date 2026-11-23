@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/managedproxy"
 )
 
 func TestExitProbeTimeoutKeepsExistingLeaseWithoutRenewing(t *testing.T) {
@@ -265,5 +266,175 @@ func TestConfigurationMismatchDoesNotScheduleRecovery(t *testing.T) {
 	s.finishSafetyObservation(context.Background(), client, state, "", "guest observation timed out", true)
 	if s.recovery.RunID != "" || gate.Status().Mode != cage.GateClosed {
 		t.Fatal("configuration change got transient recovery")
+	}
+}
+
+func appliedProxyHealthServer(t *testing.T) (*Server, *cage.EgressGate) {
+	t.Helper()
+	s, gate := grantedToolUpdateServer(t)
+	s.setJobForTest(Job{})
+	p, err := managedproxy.Load(s.profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Sources = []managedproxy.Source{{
+		ID:   "src-1",
+		Name: "Fixture",
+		Nodes: []managedproxy.Node{{
+			ID:     "node-1",
+			Name:   "Exit",
+			Type:   "socks5",
+			Config: map[string]any{"name": "node-1", "type": "socks5", "server": "203.0.113.10", "port": 1080},
+		}},
+	}}
+	p.Selected = "node-1"
+	p.Revision = "rev-1"
+	if err := p.Save(s.profile); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(s.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ProxyURL = p.Endpoint()
+	cfg.ProxyRevision = p.Revision
+	if err := writePrivate(s.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	// Replace the gate with one matching the applied proxy configuration.
+	newGate, err := cage.NewEgressGate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, err := cage.StartGateControl(s.configPath, s.instanceDir(), newGate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	if err := newGate.BeginCheck(); err != nil {
+		t.Fatal(err)
+	}
+	grantTestGate(t, newGate)
+	s.publishGate(newGate.Status())
+	_ = gate
+	return s, newGate
+}
+
+func TestProxyHealthRecoverySchedulesFullRecheckAfterCoreRecovers(t *testing.T) {
+	s, gate := appliedProxyHealthServer(t)
+	unhealthy := func(context.Context, string, managedproxy.Store) string { return "readiness.configs.timeout" }
+	healthy := func(context.Context, string, managedproxy.Store) string { return "" }
+
+	// Step 1: Transient proxy health failure closes the gate without scheduling recovery yet.
+	s.checkProxyHealthWith(unhealthy)
+	closed := gate.Status()
+	if closed.Mode != cage.GateClosed || closed.Reason != proxyNotReadyReason {
+		t.Fatalf("expected closed gate with proxy reason, got %+v", closed)
+	}
+	if s.recovery.RunID != "" {
+		t.Fatalf("recovery scheduled while proxy core is still unhealthy: %+v", s.recovery)
+	}
+
+	// Step 2: Core recovers -> schedules full recheck (15s wait) while keeping gate closed.
+	s.checkProxyHealthWith(healthy)
+	if gate.Status().Mode != cage.GateClosed {
+		t.Fatalf("healthy proxy reopened gate directly without full recheck: %+v", gate.Status())
+	}
+	first := s.recovery
+	if first.RunID != closed.RunID || first.Epoch != closed.Epoch || first.Configuration != closed.Configuration || first.Attempts != 0 {
+		t.Fatalf("unexpected scheduled recovery: %+v (gate=%+v)", first, closed)
+	}
+	if !first.Next.After(time.Now().Add(10 * time.Second)) {
+		t.Fatalf("recovery did not preserve 15s wait: %+v", first)
+	}
+
+	// Step 3: Repeated healthy ticks do not overwrite the existing schedule or backoff.
+	s.mu.Lock()
+	s.recovery.Attempts = 2
+	s.recovery.Next = time.Now().Add(45 * time.Second)
+	backedOff := s.recovery
+	s.mu.Unlock()
+	s.checkProxyHealthWith(healthy)
+	if s.recovery != backedOff {
+		t.Fatalf("repeated healthy tick reset backoff: got %+v, want %+v", s.recovery, backedOff)
+	}
+
+	// Step 4: Another proxy failure while waiting cancels pending recovery until healthy again.
+	s.checkProxyHealthWith(unhealthy)
+	if s.recovery.RunID != "" || gate.Status().Mode != cage.GateClosed {
+		t.Fatalf("second proxy failure did not clear pending recovery: recovery=%+v gate=%+v", s.recovery, gate.Status())
+	}
+
+	// Step 5: Core recovers again and full check passes -> gate opens and recovery clears.
+	s.checkProxyHealthWith(healthy)
+	expected := s.recovery
+	if expected.RunID == "" || expected.Epoch != gate.Status().Epoch {
+		t.Fatalf("recovery not rescheduled for new closed epoch: %+v (gate=%+v)", expected, gate.Status())
+	}
+	err := s.runNetworkRecovery(expected, func() error {
+		if err := gate.BeginCheck(); err != nil {
+			return err
+		}
+		state := gate.Status()
+		report := *state.Report
+		report.CheckID = state.CheckID
+		report.ID = "proxy-health-recovered"
+		report.CreatedAt = time.Now()
+		for i := range report.Checks {
+			report.Checks[i].CheckedAt = report.CreatedAt
+		}
+		return gate.Grant(report)
+	})
+	if err != nil || gate.Status().Mode != cage.GateOpen || s.recovery.RunID != "" {
+		t.Fatalf("full recovery failed: err=%v gate=%+v recovery=%+v", err, gate.Status(), s.recovery)
+	}
+}
+
+func TestProxyHealthRecoveryRespectsPauseConfigReportAndReason(t *testing.T) {
+	unhealthy := func(context.Context, string, managedproxy.Store) string { return "readiness.configs" }
+	healthy := func(context.Context, string, managedproxy.Store) string { return "" }
+
+	for _, tc := range []string{"manual-pause", "config-changed", "other-close-reason", "no-prior-report"} {
+		t.Run(tc, func(t *testing.T) {
+			s, gate := appliedProxyHealthServer(t)
+			switch tc {
+			case "manual-pause":
+				s.checkProxyHealthWith(unhealthy)
+				if err := s.pauseNetworkNow("用户暂停外网"); err != nil {
+					t.Fatal(err)
+				}
+			case "config-changed":
+				s.checkProxyHealthWith(unhealthy)
+				cfg, _ := loadConfig(s.configPath)
+				cfg.Timezone = "Asia/Tokyo"
+				if err := writePrivate(s.configPath, cfg); err != nil {
+					t.Fatal(err)
+				}
+			case "other-close-reason":
+				gate.Close("出口位于不允许的地区")
+				s.publishGate(gate.Status())
+			case "no-prior-report":
+				cfg, _ := loadConfig(s.configPath)
+				freshGate, err := cage.NewEgressGate(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stop, err := cage.StartGateControl(s.configPath, s.instanceDir(), freshGate)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(stop)
+				freshGate.Close(proxyNotReadyReason)
+				s.publishGate(freshGate.Status())
+				gate = freshGate
+			}
+			s.checkProxyHealthWith(healthy)
+			if s.recovery.RunID != "" {
+				t.Fatalf("%s unexpectedly scheduled recovery: %+v", tc, s.recovery)
+			}
+			if gate.Status().Mode != cage.GateClosed {
+				t.Fatalf("%s unexpectedly opened gate: %+v", tc, gate.Status())
+			}
+		})
 	}
 }

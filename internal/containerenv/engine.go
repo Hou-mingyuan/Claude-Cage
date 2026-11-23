@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/lima-vm/lima/v2/pkg/guestidentity"
 )
 
 type State struct {
@@ -269,14 +271,21 @@ func (r *Runtime) engineSecurity(ctx context.Context) (rootless, limited bool, e
 	return lines[0] == "true", lines[1] == "systemd" && (lines[2] == "v2" || lines[2] == "2"), nil
 }
 
+const legacyContainerHostname = "cage"
+
 func checkContainerConfiguration(container *engineContainer) error {
 	identity, err := containerIdentity(container)
 	if err != nil {
 		return err
 	}
-	hostname := "cage"
+	// Only pre-guestidentity legacy containers omit the identity label.
+	// Newly created containers always persist a randomized guestidentity label
+	// (verified by checkCreatedContainer) and never fall back to this value.
+	hostname := container.Config.Hostname
 	if identity != nil {
 		hostname = identity.Hostname
+	} else if hostname == "" {
+		hostname = legacyContainerHostname
 	}
 	config := container.HostConfig
 	if config.Privileged || config.NetworkMode != "none" || (config.PidMode != "" && config.PidMode != "private") || config.IpcMode != "private" || config.CgroupnsMode != "private" {
@@ -307,6 +316,22 @@ func checkContainerConfiguration(container *engineContainer) error {
 		}
 	}
 	return nil
+}
+
+// checkCreatedContainer verifies that a newly created container persisted its
+// randomized guest identity and did not silently fall back to legacy defaults.
+func checkCreatedContainer(container *engineContainer, expected *guestidentity.Identity) error {
+	if container == nil {
+		return errors.New("容器创建后未能验证身份")
+	}
+	actual, err := containerIdentity(container)
+	if err != nil {
+		return err
+	}
+	if actual == nil || expected == nil || actual.Hostname != expected.Hostname || actual.UUID != expected.UUID {
+		return errors.New("容器创建后缺少有效的随机客机身份")
+	}
+	return checkContainerConfiguration(container)
 }
 
 func (r *Runtime) Inspect(ctx context.Context) (Inspection, error) {

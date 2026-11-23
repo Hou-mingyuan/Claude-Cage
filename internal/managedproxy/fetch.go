@@ -178,6 +178,10 @@ func queryInfrastructureDNS(ctx context.Context, client *http.Client, server str
 	}
 	return netip.Addr{}, errors.New("代理基础设施域名没有可用公网 IPv4")
 }
+// subscriptionUserAgent matches the bundled Mihomo core version without
+// exposing any product-specific identifier to subscription providers.
+const subscriptionUserAgent = "clash.meta/v1.19.33"
+
 func Fetch(ctx context.Context, client *http.Client, rawURL string) ([]byte, string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
@@ -187,7 +191,7 @@ func Fetch(ctx context.Context, client *http.Client, rawURL string) ([]byte, str
 	if err != nil {
 		return nil, "", errors.New("订阅网址无效")
 	}
-	req.Header.Set("User-Agent", "clash.meta/Cage")
+	req.Header.Set("User-Agent", subscriptionUserAgent)
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, "", errors.New("订阅下载失败，请检查下载路径和服务地址")

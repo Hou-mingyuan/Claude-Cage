@@ -2,13 +2,16 @@ package exitpolicy
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
+	"sync"
 	"time"
 	_ "time/tzdata"
 )
@@ -78,12 +81,43 @@ func LookupWithOptions(ctx context.Context, client *http.Client, address net.IP,
 func queryLocation(ctx context.Context, client *http.Client, endpoint string, requireSuccess, countryFieldCode bool, address net.IP) (Location, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	var (
+		mu                  sync.Mutex
+		tlsStarted, tlsDone bool
+	)
+	trace := &httptrace.ClientTrace{
+		TLSHandshakeStart: func() {
+			mu.Lock()
+			tlsStarted = true
+			mu.Unlock()
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			if err == nil {
+				mu.Lock()
+				tlsDone = true
+				mu.Unlock()
+			}
+		},
+	}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodGet, endpoint, nil)
 	if err != nil {
 		return Location{}, errors.New("查询地址无效")
 	}
 	r, err := client.Do(req)
 	if err != nil {
+		mu.Lock()
+		inTLS := tlsStarted && !tlsDone
+		mu.Unlock()
+		if inTLS {
+			var netErr net.Error
+			if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+				return Location{}, errors.New("TLS 握手超时")
+			}
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return Location{}, errors.New("TLS 握手失败（EOF）")
+			}
+			return Location{}, errors.New("TLS 握手失败")
+		}
 		return Location{}, errors.New("连接失败或超时")
 	}
 	defer r.Body.Close()

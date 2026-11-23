@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/hostbridge"
 	"github.com/sylvinus/agent-vm/internal/hostproxy"
@@ -22,17 +22,20 @@ import (
 
 // hostPluginView is one plugin as the plugin page shows it.
 type hostPluginView struct {
-	Name        string   `json:"name"`
-	DisplayName string   `json:"display_name,omitempty"`
-	Version     string   `json:"version,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Permissions []string `json:"permissions"`
+	Name        string                              `json:"name"`
+	DisplayName string                              `json:"display_name,omitempty"`
+	Version     string                              `json:"version,omitempty"`
+	Description string                              `json:"description,omitempty"`
+	I18n        map[string]hostbridge.LocalizedText `json:"i18n,omitempty"`
+	Permissions []string                            `json:"permissions"`
 	// Categories are the plugin's market sections this application knows.
 	Categories []string `json:"categories,omitempty"`
 	// Kind is host or guest: where the plugin's programs run.
 	Kind        string               `json:"kind,omitempty"`
-	Contributes *hostContributesView `json:"contributes,omitempty"`
-	BuiltIn     bool                 `json:"built_in,omitempty"`
+	Contributes   *hostContributesView `json:"contributes,omitempty"`
+	BuiltIn       bool                 `json:"built_in,omitempty"`
+	Default       bool                 `json:"default,omitempty"`
+	DefaultUpdate string               `json:"default_update,omitempty"`
 	// Icon says the plugin has a picture, served by the icon route.
 	Icon      bool `json:"icon,omitempty"`
 	Supported bool `json:"supported"`
@@ -42,9 +45,10 @@ type hostPluginView struct {
 	Always         bool     `json:"always"`
 	AlwaysProjects []string `json:"always_projects,omitempty"`
 	// Enabled is false for a plugin the user turned off.
-	Enabled bool                  `json:"enabled"`
-	Loaded  bool                  `json:"loaded"`
-	Tools   []hostbridge.ToolInfo `json:"tools,omitempty"`
+	Enabled bool                    `json:"enabled"`
+	Loaded  bool                    `json:"loaded"`
+	Tools   []hostbridge.ToolInfo   `json:"tools,omitempty"`
+	Prompts []hostbridge.PromptInfo `json:"prompts,omitempty"`
 	// Problem is why the plugin's folder cannot be used.
 	Problem string `json:"problem,omitempty"`
 	// MissingProgram names the host program (such as uv, uvx, npx, node or
@@ -120,13 +124,19 @@ type hostToolsView struct {
 	Available bool `json:"available"`
 	Enabled   bool `json:"enabled"`
 	Running   bool `json:"running"`
+	Headless  bool `json:"headless,omitempty"`
+	Platform  string `json:"platform,omitempty"`
 	// Directory is where the user puts plugin folders.
-	Directory string           `json:"directory"`
-	Folders   []string         `json:"folders"`
-	Plugins   []hostPluginView `json:"plugins"`
-	Problems  []string         `json:"problems,omitempty"`
+	Directory    string                 `json:"directory"`
+	Folders      []string               `json:"folders"`
+	Plugins      []hostPluginView       `json:"plugins"`
+	ClientBridge []hostClientBridgeView `json:"client_bridge,omitempty"`
+	Problems     []string               `json:"problems,omitempty"`
 	// Catalog is always empty; kept for windows that still read it.
 	Catalog []hostCatalogView `json:"catalog"`
+	// DismissedDefaults lists bundled default plugins the user uninstalled and
+	// can restore with one click.
+	DismissedDefaults []hostDefaultPluginView `json:"dismissed_defaults,omitempty"`
 }
 
 type hostCatalogView struct {
@@ -150,12 +160,21 @@ func (s *Server) hostToolsView() hostToolsView {
 		pluginProblems, missingPrograms, problems = tools.pluginProblems, tools.missingPrograms, tools.problems
 	}
 	s.mu.Unlock()
-	view := hostToolsView{Available: !containerenv.Configured(s.profile), Enabled: enabled, Running: tools != nil && tools.serving,
-		Directory: s.hostPluginDir(), Folders: s.hostToolDirs()}
+	view := hostToolsView{
+		Available:    !s.clientOnly,
+		Enabled:      enabled,
+		Running:      tools != nil && tools.serving,
+		Headless:     s.hostIsHeadless(),
+		Platform:     runtime.GOOS,
+		Directory:    s.hostPluginDir(),
+		Folders:      s.hostToolDirs(),
+		ClientBridge: s.clientBridge.views(),
+	}
 	if view.Folders == nil {
 		view.Folders = []string{}
 	}
 	loaded := map[string][]hostbridge.ToolInfo{}
+	loadedPrompts := map[string][]hostbridge.PromptInfo{}
 	s.pluginSettingsMu.Lock()
 	settings := s.readPluginSettings()
 	s.pluginSettingsMu.Unlock()
@@ -165,15 +184,18 @@ func (s *Server) hostToolsView() hostToolsView {
 			// One waiting for a project folder is kept, not running.
 			if plugin.Running() {
 				loaded[plugin.Manifest.Name] = plugin.ToolList()
+				loadedPrompts[plugin.Manifest.Name] = plugin.PromptList()
 			}
 		}
 	}
 	view.Plugins = []hostPluginView{{Name: hostCommandsPlugin, BuiltIn: true, Supported: true, Enabled: !slices.Contains(off, hostCommandsPlugin),
 		AlwaysProjects: s.hostGrantStore().projects(),
 		Loaded:         tools != nil && tools.serving && !slices.Contains(off, hostCommandsPlugin), Permissions: []string{"commands"},
-		Tools: []hostbridge.ToolInfo{{Name: "run_command"}, {Name: "command_job"}}}}
+		Tools:   []hostbridge.ToolInfo{{Name: "run_command"}, {Name: "command_job"}},
+		Prompts: (hostbridge.Command{}).PromptList()}}
 	entries, _ := os.ReadDir(view.Directory)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	var installedNames []string
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
@@ -187,11 +209,15 @@ func (s *Server) hostToolsView() hostToolsView {
 			continue
 		}
 		unavailable := manifest.Unavailable(version.Version, true)
+		_, isDefault := hostbridge.DefaultPluginByName(manifest.Name)
 		plugin := hostPluginView{Name: manifest.Name, DisplayName: manifest.DisplayName, Version: manifest.Version, Description: manifest.Description,
+			I18n:        hostbridge.LoadI18n(filepath.Join(view.Directory, entry.Name())),
 			Categories:  hostbridge.ShownCategories(manifest.Categories),
 			Permissions: manifest.Permissions, Kind: manifest.Kind, Contributes: hostContributes(manifest.Contributes),
+			Default: isDefault, DefaultUpdate: s.defaultPluginUpdateVersion(manifest.Name, manifest.Version),
 			Supported: manifest.Supported() && unavailable == "", Icon: manifest.Icon != "", Enabled: !slices.Contains(off, entry.Name())}
 		if manifest.Name == entry.Name() {
+			installedNames = append(installedNames, manifest.Name)
 			plugin.Settings = pluginSettingsView(manifest, settings[manifest.Name])
 			plugin.NeedsSettings = len(pluginMissingSettings(manifest, settings[manifest.Name])) > 0
 		}
@@ -213,7 +239,7 @@ func (s *Server) hostToolsView() hostToolsView {
 		} else if unavailable != "" {
 			plugin.Problem = hostPluginUnavailable(unavailable)
 		} else if list, ok := loaded[manifest.Name]; ok {
-			plugin.Loaded, plugin.Tools = true, list
+			plugin.Loaded, plugin.Tools, plugin.Prompts = true, list, loadedPrompts[manifest.Name]
 		} else if msg := pluginProblems[manifest.Name]; msg != "" {
 			plugin.Problem = msg
 			plugin.MissingProgram = missingPrograms[manifest.Name]
@@ -223,6 +249,7 @@ func (s *Server) hostToolsView() hostToolsView {
 	// The market is the one place plugins are offered: a copy shipped with
 	// the application would fall behind it and be installed in its place.
 	view.Catalog = []hostCatalogView{}
+	view.DismissedDefaults = s.dismissedDefaultPluginViews(installedNames)
 	return view
 }
 
@@ -311,7 +338,7 @@ func (s *Server) setHostPluginAlways(name, project string, always bool) error {
 		return errors.New("插件名称无效")
 	}
 	if !always {
-		if err := grants.revoke(hostGrantPlugin + name); err != nil {
+		if err := grants.revokePlugin(name); err != nil {
 			return err
 		}
 		s.closeHostTools()
@@ -358,8 +385,9 @@ func (s *Server) setHostTools(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Enabled *bool  `json:"enabled"`
 		Reload  bool   `json:"reload"`
-		Install string `json:"install"`
-		Remove  string `json:"remove"`
+		Install        string `json:"install"`
+		RestoreDefault string `json:"restore_default"`
+		Remove         string `json:"remove"`
 		// Install names a plugin on the community list; Replace sets an
 		// installed version aside first. Source is accepted and ignored.
 		Source  string `json:"source"`
@@ -382,11 +410,11 @@ func (s *Server) setHostTools(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	if !s.hasTrustedView(r) {
-		http.Error(w, "请在本机 Cage 窗口更改主机工具", http.StatusForbidden)
+	if !s.hasPluginControlView(r) {
+		http.Error(w, "请在受信任的 Cage 窗口更改主机工具", http.StatusForbidden)
 		return
 	}
-	if containerenv.Configured(s.profile) {
+	if s.clientOnly {
 		http.Error(w, "此环境不支持主机工具", http.StatusConflict)
 		return
 	}
@@ -437,6 +465,12 @@ func (s *Server) setHostTools(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.RestoreDefault != "" {
+		if err := s.restoreDefaultPlugin(body.RestoreDefault, body.Replace); err != nil {
+			requestError(w, errors.New("默认插件安装失败："+err.Error()))
+			return
+		}
+	}
 	if body.Remove != "" {
 		// Stop the plugin's program before its folder moves.
 		s.closeHostTools()
@@ -446,11 +480,12 @@ func (s *Server) setHostTools(w http.ResponseWriter, r *http.Request) {
 		}
 		// A plugin installed again later starts turned on, and asks again.
 		_ = s.recordHostPluginOn(body.Remove, true)
-		_ = s.hostGrantStore().revoke(hostGrantPlugin + body.Remove)
+		_ = s.hostGrantStore().revokePlugin(body.Remove)
 		s.forgetPluginSettings(body.Remove)
+		s.markDefaultPluginDismissed(body.Remove, true)
 	}
 	// New settings reach a program only when it starts again.
-	if body.Reload || body.Install != "" || body.Plugin != "" && (body.On != nil || body.Settings != nil) {
+	if body.Reload || body.Install != "" || body.RestoreDefault != "" || body.Plugin != "" && (body.On != nil || body.Settings != nil) {
 		s.closeHostTools()
 	}
 	if ready || !s.hostToolsView().Enabled {
@@ -497,12 +532,13 @@ func (s *Server) hostMarketEntries(ctx context.Context, refresh bool) ([]hostbri
 }
 
 type hostMarketEntryView struct {
-	Name        string                   `json:"name"`
-	DisplayName string                   `json:"display_name,omitempty"`
-	Version     string                   `json:"version"`
-	Description string                   `json:"description,omitempty"`
-	Author      *hostbridge.MarketAuthor `json:"author,omitempty"`
-	Permissions []string                 `json:"permissions"`
+	Name        string                              `json:"name"`
+	DisplayName string                              `json:"display_name,omitempty"`
+	Version     string                              `json:"version"`
+	Description string                              `json:"description,omitempty"`
+	Author      *hostbridge.MarketAuthor            `json:"author,omitempty"`
+	I18n        map[string]hostbridge.LocalizedText `json:"i18n,omitempty"`
+	Permissions []string                            `json:"permissions"`
 	Categories  []string                 `json:"categories,omitempty"`
 	Kind        string                   `json:"kind,omitempty"`
 	Contributes *hostContributesView     `json:"contributes,omitempty"`
@@ -587,7 +623,7 @@ func (s *Server) getHostMarket(w http.ResponseWriter, r *http.Request) {
 		if len(platforms) == 0 {
 			platforms = []string{"darwin", "windows", "linux"}
 		}
-		item := hostMarketEntryView{Name: entry.Name, DisplayName: entry.DisplayName, Version: entry.Version, Description: entry.Description, Author: entry.Author,
+		item := hostMarketEntryView{Name: entry.Name, DisplayName: entry.DisplayName, Version: entry.Version, Description: entry.Description, Author: entry.Author, I18n: entry.I18n,
 			Permissions: entry.Permissions, Categories: hostbridge.ShownCategories(entry.Categories), Kind: entry.Kind, Contributes: hostContributes(entry.Contributes), Problem: hostPluginUnavailable(unavailable),
 			Supported: entry.Supported() && unavailable == "", Bytes: entry.Bytes, Icon: entry.Icon != "",
 			Runtime: entry.Runtime, Platforms: platforms, Source: entry.Source}
@@ -599,6 +635,9 @@ func (s *Server) getHostMarket(w http.ResponseWriter, r *http.Request) {
 			item.InstalledVersion, item.Update = "?", true
 		}
 		view.Entries = append(view.Entries, item)
+	}
+	if err == nil && len(entries) > 0 {
+		s.refreshGuestMarketCatalogAsync()
 	}
 	jsonReply(w, view)
 }

@@ -219,6 +219,8 @@ func Prepare(ctx context.Context, cache string, plan Plan, output io.Writer, tra
 	return plan, Save(cache, plan)
 }
 
+const downloadUserAgent = "Wget/1.21.4 (linux-gnu)"
+
 func download(ctx context.Context, plan Plan, file *os.File, offset int64, output io.Writer, transport http.RoundTripper) error {
 	client := &http.Client{Transport: transport, Timeout: 2 * time.Hour, CheckRedirect: func(request *http.Request, previous []*http.Request) error {
 		if len(previous) >= 5 {
@@ -232,7 +234,7 @@ func download(ctx context.Context, plan Plan, file *os.File, offset int64, outpu
 		return err
 	}
 	request.Header.Set("Accept-Encoding", "identity")
-	request.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Cage-SystemInstaller/1.0)")
+	request.Header.Set("User-Agent", downloadUserAgent)
 	if offset > 0 {
 		request.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}

@@ -142,3 +142,92 @@ func TestProxyImportAndRefreshUseBundledCoreValidation(t *testing.T) {
 		t.Fatal("core rejection changed the last good source or active route", err)
 	}
 }
+
+func TestProxySourceDNSRefreshAndConflictPreserveSavedConfiguration(t *testing.T) {
+	s := testServer(t)
+	cfg, _ := loadConfig(s.configPath)
+	cfg.ProxyRevision = ""
+	if err := writePrivate(s.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	oldValidate, oldFetch := validateProxyCore, fetchProxySource
+	t.Cleanup(func() { validateProxyCore, fetchProxySource = oldValidate, oldFetch })
+	validateProxyCore = func(_ context.Context, profile string, p managedproxy.Store) error {
+		_, err := p.Runtime(profile)
+		return err
+	}
+	response := `proxies: [{name: dns-node, type: http, server: source-dns.example.test, port: 8080}]
+dns:
+  proxy-server-nameserver: [https://resolver.example.test/dns-query/private-dns-token]
+`
+	fetchProxySource = func(context.Context, *http.Client, string) ([]byte, string, error) { return []byte(response), "", nil }
+	if err := s.changeProxy("import", proxyInput{Name: "dns", URL: "https://example.test/sub", HostDownload: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	saved, _ := managedproxy.Load(s.profile)
+	src := saved.Sources[len(saved.Sources)-1]
+	if !reflect.DeepEqual(src.NodeDNS, []string{"https://resolver.example.test/dns-query/private-dns-token"}) {
+		t.Fatal("subscription import lost node DNS")
+	}
+	w := request(s, "GET", "/api/proxy", s.origin, "", true)
+	if strings.Contains(w.Body.String(), "private-dns-token") {
+		t.Fatal("proxy status leaked private resolver URL")
+	}
+	// An overlapping source must fail validation without modifying the saved set.
+	response = "proxies: [{name: collision, type: http, server: source-dns.example.test, port: 8081}]"
+	if err := s.changeProxy("import", proxyInput{Name: "conflict", URL: "https://example.test/other", HostDownload: true}, nil); err == nil {
+		t.Fatal("conflicting source DNS was accepted")
+	}
+	after, _ := managedproxy.Load(s.profile)
+	if !reflect.DeepEqual(saved, after) {
+		t.Fatal("failed conflicting import changed saved sources")
+	}
+	// Refreshing with a wildcard node server + custom DNS fails validation and preserves the saved configuration.
+	response = `proxies: [{name: dns-node, type: http, server: '*.example.test', port: 8080}]
+dns:
+  proxy-server-nameserver: [https://replacement.example.test/dns-query]
+`
+	if err := s.changeProxy("refresh", proxyInput{ID: src.ID, HostDownload: true}, nil); err == nil {
+		t.Fatal("wildcard source DNS refresh was accepted")
+	}
+	after, _ = managedproxy.Load(s.profile)
+	current := after.Sources[len(after.Sources)-1]
+	if !reflect.DeepEqual(src.NodeDNS, current.NodeDNS) || !reflect.DeepEqual(src.Nodes, current.Nodes) {
+		t.Fatal("failed DNS refresh replaced working configuration")
+	}
+	// Refreshing with fragmented/unsafe Clash DoH entries ignores them instead of failing refresh.
+	response = `proxies: [{name: dns-node, type: http, server: source-dns.example.test, port: 8080}]
+dns:
+  proxy-server-nameserver: ['https://resolver.example.test/dns-query#private-route', 'https://223.5.5.5/dns-query#skip-cert-verify=true']
+`
+	if err := s.changeProxy("refresh", proxyInput{ID: src.ID, HostDownload: true}, nil); err != nil {
+		t.Fatalf("fragmented Clash DoH blocked refresh: %v", err)
+	}
+	after, _ = managedproxy.Load(s.profile)
+	if len(after.Sources[len(after.Sources)-1].NodeDNS) != 0 {
+		t.Fatalf("unsafe fragmented DNS was adopted: %v", after.Sources[len(after.Sources)-1].NodeDNS)
+	}
+	w = request(s, "GET", "/api/proxy", s.origin, "", true)
+	if strings.Contains(w.Body.String(), "private-route") {
+		t.Fatal("proxy status leaked ignored resolver fragment")
+	}
+	response = `proxies: [{name: dns-node, type: http, server: source-dns.example.test, port: 8080}]
+dns:
+  proxy-server-nameserver: [https://replacement.example.test:44443/dns-query]
+`
+	if err := s.changeProxy("refresh", proxyInput{ID: src.ID, HostDownload: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, _ = managedproxy.Load(s.profile)
+	if !reflect.DeepEqual(after.Sources[len(after.Sources)-1].NodeDNS, []string{"https://replacement.example.test:44443/dns-query"}) {
+		t.Fatal("successful refresh retained stale source DNS")
+	}
+	response = strings.Split(response, "\ndns:")[0]
+	if err := s.changeProxy("refresh", proxyInput{ID: src.ID, HostDownload: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, _ = managedproxy.Load(s.profile)
+	if len(after.Sources[len(after.Sources)-1].NodeDNS) != 0 {
+		t.Fatal("refresh did not remove old source DNS")
+	}
+}

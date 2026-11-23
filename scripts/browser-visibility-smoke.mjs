@@ -20,6 +20,14 @@ try {
   const created = await api("/new", { url: origin + "/background-new" });
   await waitFor(() => evaluate(created.id, "document.hidden"), "new background tab");
   await api("/close", { id: created.id });
+  const hiddenPrivate = await api("/new", { url: origin + "/background-private", incognito: true });
+  await waitFor(() => evaluate(hiddenPrivate.id, "document.hidden"), "new background private window");
+  await api("/visibility", { visible: true });
+  await waitFor(() => evaluate(hiddenPrivate.id, "!document.hidden"), "restore hidden private window");
+  assert.equal((await cdp(hiddenPrivate.id, "Browser.getWindowForTarget", { targetId: hiddenPrivate.id })).bounds.windowState, "fullscreen");
+  await api("/close", { id: hiddenPrivate.id });
+  await api("/visibility", { visible: false });
+  await waitFor(() => evaluate(original, "document.hidden"), "hide after private window");
   for (let cycle = 0; cycle < 12; cycle++) {
     await api("/visibility", { visible: true });
     await waitFor(() => evaluate(original, "!document.hidden"), "restore viewing");
@@ -28,15 +36,23 @@ try {
     await api("/visibility", { visible: false });
     await waitFor(() => evaluate(original, "document.hidden"), "hide viewing");
   }
+  await api("/close", { id: original });
+  const reopened = await api("/new", { url: origin + "/reopened-while-hidden" });
+  await waitFor(() => evaluate(reopened.id, "document.hidden"), "reopened window stays hidden");
+  await api("/visibility", { visible: true });
+  await waitFor(() => evaluate(reopened.id, "!document.hidden"), "restore reopened window");
+  assert.equal((await cdp(reopened.id, "Browser.getWindowForTarget", { targetId: reopened.id })).bounds.windowState, "fullscreen");
+  await api("/visibility", { visible: false });
+  await waitFor(() => evaluate(reopened.id, "document.hidden"), "hide reopened window");
   listener = net.createServer(socket => { accepted = socket; });
   await new Promise(resolve => listener.listen(15900, "127.0.0.1", resolve));
   legacy = net.connect(15900, "127.0.0.1");
   await once(legacy, "connect");
-  await waitFor(() => evaluate(original, "!document.hidden"), "legacy VNC viewer restores the hidden window");
+  await waitFor(() => evaluate(reopened.id, "!document.hidden"), "legacy VNC viewer restores the hidden window");
   legacy.destroy(); accepted.destroy();
   await new Promise(resolve => listener.close(resolve)); listener = undefined;
-  await waitFor(() => evaluate(original, "document.hidden"), "hide after legacy viewer closes");
-  console.log(JSON.stringify({ passed: true, cycles: 12, checks: ["background rendering pauses", "background JavaScript continues", "new background tab stays hidden", "fullscreen and unsaved input restored", "legacy VNC viewer respected"] }));
+  await waitFor(() => evaluate(reopened.id, "document.hidden"), "hide after legacy viewer closes");
+  console.log(JSON.stringify({ passed: true, cycles: 12, checks: ["background rendering pauses", "background JavaScript continues", "new background tab stays hidden", "hidden private and reopened windows restore fullscreen", "fullscreen and unsaved input restored", "legacy VNC viewer respected"] }));
 } finally {
   legacy?.destroy(); accepted?.destroy(); listener?.close();
   await api("/visibility", { visible: true }).catch(() => {});

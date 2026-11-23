@@ -306,11 +306,21 @@ class Governor:
 
 def main():
     try:
-        from Xlib import display
+        from Xlib import display, error
     except ImportError:
         # Optional: the display keeps its full rate until python3-xlib arrives.
         print('display governor: python3-xlib is not installed', file=sys.stderr)
         return 0
+    disconnect_errors = tuple(
+        cls for cls in (
+            getattr(error, 'DisplayConnectionError', None),
+            getattr(error, 'ConnectionClosedError', None),
+            BrokenPipeError,
+            ConnectionResetError,
+            EOFError,
+        )
+        if cls is not None
+    )
     for attempt in range(40):
         try:
             connection = display.Display()
@@ -320,38 +330,49 @@ def main():
             if attempt == 39:
                 raise
             time.sleep(.25)
-    if not connection.has_extension('RANDR') or not connection.has_extension('XInputExtension'):
-        # Without both extensions the display simply keeps its full rate.
-        print('display governor: RandR or XInput2 unavailable', file=sys.stderr)
-        return 0
-    if not negotiate_input(connection):
-        print('display governor: XI 2.1 unavailable; keeping the full rate', file=sys.stderr)
-        connection.close()
-        return 0
-    governor = Governor(connection, os.environ.get('CAGE_DISPLAY_OUTPUT', 'VNC-0'),
-                        Activity(os.environ.get('CAGE_DISPLAY_ACTIVITY')))
-    # Never raise out of a python-xlib request: it can leave a reply lock held
-    # and deadlock the full-rate restore below. Mark shutdown and wake select
-    # instead, including when the idle display has no next timer deadline.
-    wake_read, wake_write = os.pipe()
-    os.set_blocking(wake_read, False)
-    os.set_blocking(wake_write, False)
-    previous_wakeup = signal.set_wakeup_fd(wake_write)
-    previous_handler = signal.signal(signal.SIGTERM, lambda *_: setattr(governor, 'stopping', True))
     try:
-        governor.run(wakeup_fd=wake_read)
-    finally:
-        # A stopped governor leaves the display at its full rate.
         try:
-            if governor.apply(ACTIVE_RATE) == 'foreign':
-                governor.apply(ACTIVE_RATE)
+            if not connection.has_extension('RANDR') or not connection.has_extension('XInputExtension'):
+                # Without both extensions the display simply keeps its full rate.
+                print('display governor: RandR or XInput2 unavailable', file=sys.stderr)
+                return 0
+            if not negotiate_input(connection):
+                print('display governor: XI 2.1 unavailable; keeping the full rate', file=sys.stderr)
+                return 0
+            governor = Governor(connection, os.environ.get('CAGE_DISPLAY_OUTPUT', 'VNC-0'),
+                                Activity(os.environ.get('CAGE_DISPLAY_ACTIVITY')))
+        except disconnect_errors:
+            return 0
+        # Never raise out of a python-xlib request: it can leave a reply lock held
+        # and deadlock the full-rate restore below. Mark shutdown and wake select
+        # instead, including when the idle display has no next timer deadline.
+        wake_read, wake_write = os.pipe()
+        os.set_blocking(wake_read, False)
+        os.set_blocking(wake_write, False)
+        previous_wakeup = signal.set_wakeup_fd(wake_write)
+        previous_handler = signal.signal(signal.SIGTERM, lambda *_: setattr(governor, 'stopping', True))
+        disconnected = False
+        try:
+            governor.run(wakeup_fd=wake_read)
+        except disconnect_errors:
+            disconnected = True
+        finally:
+            # A stopped governor leaves the display at its full rate.
+            if not disconnected:
+                try:
+                    if governor.apply(ACTIVE_RATE) == 'foreign':
+                        governor.apply(ACTIVE_RATE)
+                except Exception:
+                    pass
+            signal.signal(signal.SIGTERM, previous_handler)
+            signal.set_wakeup_fd(previous_wakeup)
+            os.close(wake_read)
+            os.close(wake_write)
+    finally:
+        try:
+            connection.close()
         except Exception:
             pass
-        signal.signal(signal.SIGTERM, previous_handler)
-        signal.set_wakeup_fd(previous_wakeup)
-        os.close(wake_read)
-        os.close(wake_write)
-        connection.close()
     return 0
 
 

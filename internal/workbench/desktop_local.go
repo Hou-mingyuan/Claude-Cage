@@ -12,18 +12,25 @@ import (
 	"time"
 
 	"github.com/sylvinus/agent-vm/internal/containerenv"
+	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 	"github.com/sylvinus/agent-vm/internal/remotehost"
 )
 
 type desktopLocal struct {
 	config, profile, executable string
+	adoptIdleStandalone         bool
 	mu                          sync.Mutex
 	ownedLaunch                 string
 }
 
 func NewDesktopLocalController(configPath, fullExecutable string) DesktopLocalController {
-	return &desktopLocal{config: configPath, profile: filepath.Dir(configPath), executable: fullExecutable}
+	return &desktopLocal{
+		config:              configPath,
+		profile:             filepath.Dir(configPath),
+		executable:          fullExecutable,
+		adoptIdleStandalone: os.Getenv("CAGE_DESKTOP_OWNER_PID") != "",
+	}
 }
 
 func (d *desktopLocal) available() bool {
@@ -153,6 +160,14 @@ func (d *desktopLocal) Connect(ctx context.Context) (_ *remotehost.Session, retu
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
+	if d.adoptIdleStandalone && st.Known && st.ServiceRunning && !st.Busy && !st.Running && st.LiveTerminals == 0 {
+		if adopted, adoptErr := d.releaseIdleStandalone(ctx, st); adoptErr != nil {
+			diagnostics.Log("warn", "desktop-local", "could not restart idle non-desktop controller under desktop app: "+adoptErr.Error())
+		} else if adopted {
+			st.ServiceRunning = false
+			st.ControllerID = ""
+		}
+	}
 	var launchID string
 	if !st.ServiceRunning {
 		launchID = randomToken()
@@ -230,6 +245,40 @@ func (d *desktopLocal) ReleaseOwnedIdle(ctx context.Context, expected DesktopLoc
 		return false, errors.New("本机后台或任务状态已变化，请重新确认")
 	}
 	if err := d.Release(ctx, expected, false); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// releaseIdleStandalone releases an idle controller that was started outside
+// the desktop app (empty LaunchID, e.g. by CLI or an agent), so Connect can
+// start a fresh controller under the desktop app's process hierarchy (required
+// on macOS for host plugins to inherit Cage.app's TCC permissions). Active or
+// desktop-launched controllers are never disturbed.
+func (d *desktopLocal) releaseIdleStandalone(ctx context.Context, expected DesktopLocalStatus) (bool, error) {
+	c, err := openController(d.profile)
+	if errors.Is(err, errControllerUnavailable) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	view, err := c.localControl(ctx, "status", desktopLocalRequest{})
+	c.close()
+	if err != nil {
+		return false, err
+	}
+	if view.LaunchID != "" {
+		return false, nil
+	}
+	if !view.Known || view.Busy || view.Running || view.LiveTerminals > 0 {
+		return false, nil
+	}
+	if expected.ControllerID != "" && view.ControllerID != expected.ControllerID {
+		return false, nil
+	}
+	diagnostics.Log("info", "desktop-local", "restarting idle non-desktop controller under desktop app")
+	if err := d.Release(ctx, view.DesktopLocalStatus, false); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -112,6 +113,90 @@ class PolicyTests(unittest.TestCase):
                 self.assertEqual(governor.negotiate_input(connection), supported)
                 query.assert_called_once_with(display=connection.display, opcode=131,
                                               major_version=2, minor_version=1)
+
+    def test_main_exits_cleanly_on_display_disconnect(self):
+        class FakeDisplayConnectionError(Exception):
+            pass
+
+        class FakeConnectionClosedError(Exception):
+            pass
+
+        fake_error = types.ModuleType('Xlib.error')
+        fake_error.DisplayConnectionError = FakeDisplayConnectionError
+        fake_error.ConnectionClosedError = FakeConnectionClosedError
+
+        fake_display = types.ModuleType('Xlib.display')
+        fake_xlib = types.ModuleType('Xlib')
+        fake_xlib.display = fake_display
+        fake_xlib.error = fake_error
+
+        for label, exc in [
+            ('DisplayConnectionError', FakeDisplayConnectionError('Display connection closed by server')),
+            ('ConnectionClosedError', FakeConnectionClosedError('Connection closed by server')),
+            ('BrokenPipeError', BrokenPipeError('broken pipe')),
+        ]:
+            with self.subTest(error=label):
+                connection = mock.Mock()
+                connection.has_extension.return_value = True
+                connection.close.side_effect = FakeDisplayConnectionError('already closed')
+                fake_display.Display = mock.Mock(return_value=connection)
+                instance = mock.Mock()
+                instance.run.side_effect = exc
+                with mock.patch.dict(sys.modules, {'Xlib': fake_xlib, 'Xlib.display': fake_display, 'Xlib.error': fake_error}), \
+                        mock.patch.object(governor, 'negotiate_input', return_value=True), \
+                        mock.patch.object(governor, 'Governor', return_value=instance):
+                    self.assertEqual(governor.main(), 0)
+                instance.apply.assert_not_called()
+                connection.close.assert_called_once()
+
+    def test_main_ignores_close_error_after_normal_stop_and_propagates_bugs(self):
+        class FakeDisplayConnectionError(Exception):
+            pass
+
+        fake_error = types.ModuleType('Xlib.error')
+        fake_error.DisplayConnectionError = FakeDisplayConnectionError
+        fake_display = types.ModuleType('Xlib.display')
+        fake_xlib = types.ModuleType('Xlib')
+        fake_xlib.display = fake_display
+        fake_xlib.error = fake_error
+
+        # Normal shutdown still restores full rate even if connection.close raises.
+        connection = mock.Mock()
+        connection.has_extension.return_value = True
+        connection.close.side_effect = FakeDisplayConnectionError('closed during teardown')
+        fake_display.Display = mock.Mock(return_value=connection)
+        instance = mock.Mock()
+        instance.apply.return_value = 'shown'
+        with mock.patch.dict(sys.modules, {'Xlib': fake_xlib, 'Xlib.display': fake_display, 'Xlib.error': fake_error}), \
+                mock.patch.object(governor, 'negotiate_input', return_value=True), \
+                mock.patch.object(governor, 'Governor', return_value=instance):
+            self.assertEqual(governor.main(), 0)
+        instance.apply.assert_called_once_with(governor.ACTIVE_RATE)
+        connection.close.assert_called_once()
+
+        # Disconnect during Governor setup also exits cleanly without traceback.
+        connection = mock.Mock()
+        connection.has_extension.return_value = True
+        connection.close.side_effect = FakeDisplayConnectionError('closed during init')
+        fake_display.Display = mock.Mock(return_value=connection)
+        with mock.patch.dict(sys.modules, {'Xlib': fake_xlib, 'Xlib.display': fake_display, 'Xlib.error': fake_error}), \
+                mock.patch.object(governor, 'negotiate_input', return_value=True), \
+                mock.patch.object(governor, 'Governor', side_effect=FakeDisplayConnectionError('closed during init')):
+            self.assertEqual(governor.main(), 0)
+        connection.close.assert_called_once()
+
+        # Unexpected non-disconnect errors still propagate.
+        connection = mock.Mock()
+        connection.has_extension.return_value = True
+        fake_display.Display = mock.Mock(return_value=connection)
+        instance = mock.Mock()
+        instance.run.side_effect = RuntimeError('unexpected bug')
+        with mock.patch.dict(sys.modules, {'Xlib': fake_xlib, 'Xlib.display': fake_display, 'Xlib.error': fake_error}), \
+                mock.patch.object(governor, 'negotiate_input', return_value=True), \
+                mock.patch.object(governor, 'Governor', return_value=instance):
+            with self.assertRaises(RuntimeError):
+                governor.main()
+        connection.close.assert_called_once()
 
 
 @unittest.skipUnless(display and shutil.which('Xtigervnc') and shutil.which('xrandr'), 'needs Xtigervnc, xrandr and python3-xlib')

@@ -1,0 +1,32 @@
+{
+  "name": "use-cage",
+  "displayName": "Use Cage",
+  "version": "0.1.0",
+  "description": "Reads workspace status and adjusts appearance, display preferences, and plugins within safe boundaries.",
+  "icon": "icon.svg",
+  "engines": {
+    "cage": ">=0.2.0"
+  },
+  "kind": "host",
+  "platforms": [
+    "darwin",
+    "linux",
+    "windows"
+  ],
+  "permissions": [],
+  "categories": [
+    "productivity",
+    "system"
+  ],
+  "contributes": {
+    "mcpServers": [
+      {
+        "id": "control",
+        "command": [
+          "python3",
+          "server.py"
+        ]
+      }
+    ]
+  }
+}

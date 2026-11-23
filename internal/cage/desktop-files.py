@@ -390,7 +390,9 @@ class Portal:
         method_type = C.CFUNCTYPE(None, p, s, s, s, s, p, p, p)
         property_type = C.CFUNCTYPE(p, p, s, s, s, s, p, p)
         self.method_callback = method_type(self.method)
-        self.property_callback = property_type(lambda *_: self.new_uint(3))
+        # Advertise FileChooser v4 so Electron/Chromium accepts the portal even
+        # when callers pass defaultPath/current_folder instead of falling back to GTK.
+        self.property_callback = property_type(lambda *_: self.new_uint(4))
         class VTable(C.Structure):
             _fields_ = [('method', method_type), ('get', property_type), ('set', p), ('padding', p * 8)]
         self.vtable = VTable(self.method_callback, self.property_callback, None)
@@ -483,7 +485,7 @@ class Portal:
                     if saving:
                         if not self.broker.downloads:
                             raise ValueError('下载服务不可用')
-                        destination = self.broker.downloads.begin(self.option(options, 'current_name', 'download'))
+                        destination = self.broker.downloads.begin(self.option(options, 'current_name', '') or 'download')
                 except Exception:
                     self.unregister(self.connection, self.objects.pop(handle))
                     if key:
@@ -600,15 +602,25 @@ def clipboard(paths, expected_context=None):
     main()
 
 
+def open_socket_path():
+    runtime = os.environ.get('XDG_RUNTIME_DIR')
+    if runtime:
+        candidate = Path(runtime) / 'files.sock'
+        if candidate.is_socket():
+            return str(candidate)
+    return '/run/cage-desktop/files.sock'
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == '--open':
         import http.client
         import socket
+        socket_path = open_socket_path()
         class Connection(http.client.HTTPConnection):
             def connect(self):
                 self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 self.sock.settimeout(self.timeout)
-                self.sock.connect('/run/cage-desktop/files.sock')
+                self.sock.connect(socket_path)
         client = Connection('localhost', timeout=5)
         try:
             # Electron's folder fallback invokes `xdg-open .` with the target
@@ -651,7 +663,7 @@ def main():
     shutil.rmtree(directory, ignore_errors=True)
     from importlib.machinery import SourceFileLoader
     downloads = SourceFileLoader('cage_desktop_downloads', '/usr/local/lib/cage-desktop-downloads.py').load_module()
-    broker = Broker(directory, downloads=downloads.create_downloads())
+    broker = Broker(directory, downloads=downloads.create_downloads(runtime))
     portal = Portal(broker)
     broker.deliver = portal.deliver
     socket = runtime / 'files.sock'

@@ -85,6 +85,13 @@ def cli_environment(base):
         # Let Claude resolve its normal ~/.claude.json and ~/.claude itself.
         # Preserve provider variables: an API-authenticated shell is not a
         # signed-in default subscription, even if a previous login exists.
+        # A caller may pass CLAUDE_CONFIG_DIR naming that same ~/.claude (the
+        # session channel does): with it set, Claude reads its global config
+        # from ~/.claude/.claude.json instead and loses user-level MCP servers
+        # (#662). A different directory chosen by the user is kept.
+        inherited = env.get("CLAUDE_CONFIG_DIR")
+        if inherited and Path(inherited).resolve() == (Path.home() / ".claude").resolve():
+            del env["CLAUDE_CONFIG_DIR"]
         return _runtime["environment"](env)
     env["CLAUDE_CONFIG_DIR"] = str(config_directory(base))
     for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -2644,8 +2651,18 @@ def main(args, *, mobile_settings_fd=None, verify_mobile=None):
     owner_args = ["--account-id", owner] if re.fullmatch("[0-9a-f]{24}", owner) else []
     scoped = _controller_context.get("CAGE_ACCOUNT_BROWSER")
     if mode == "login":
+        opener_dir = None
         if os.name != "nt":
-            env["BROWSER"] = _runtime["launcher"](scoped or OPEN, executable=True, arguments=[*owner_args, "--login-id", account_id])
+            launcher_path = _runtime["launcher"](scoped or OPEN, executable=True, arguments=[*owner_args, "--login-id", account_id])
+            env["BROWSER"] = launcher_path
+            if sys.platform != "darwin":
+                # Claude Code on Linux may invoke xdg-open directly instead of $BROWSER.
+                # Put a neutral xdg-open shim first on PATH so it forwards --login-id
+                # (and --account-id) to /login-open rather than falling back to /new.
+                opener_dir = tempfile.mkdtemp(prefix="xdg-")
+                os.chmod(opener_dir, PRIVATE_MODE)
+                os.symlink(launcher_path, Path(opener_dir) / "xdg-open")
+                env["PATH"] = opener_dir + (os.pathsep + env["PATH"] if env.get("PATH") else "")
         # Set the handler before spawning so SSH/window closure also disposes
         # the ephemeral browser and its cookies.
         def interrupted(_signum, _frame):
@@ -2657,6 +2674,8 @@ def main(args, *, mobile_settings_fd=None, verify_mobile=None):
             (base / "quota.json").unlink(missing_ok=True)
             return subprocess.call([_runtime["path"](binary), "auth", "login", *([] if os.name == "nt" else ["--claudeai"])], cwd=Path.home(), env=env)
         finally:
+            if opener_dir:
+                shutil.rmtree(opener_dir, ignore_errors=True)
             if os.name != "nt":
                 finish = [scoped or OPEN, *owner_args, "--login-id", account_id, "--finish-login"]
                 subprocess.run(finish, env=os.environ, timeout=8, check=False,

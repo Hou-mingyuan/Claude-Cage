@@ -17,8 +17,10 @@
   color: var(--toolbar-ink);
   border: 1px solid var(--line);
   border-top: 0;
-  border-radius: 0 0 7px 7px;
-  opacity: 0.65;
+  border-radius: 0 0 8px 8px;
+  box-shadow: var(--shadow-xs);
+  opacity: 0.72;
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 .desktop-toolbar-reveal:hover,
 .desktop-toolbar-reveal:focus-within {
@@ -144,8 +146,15 @@
 .account-desktop-nav {min-width:0;}
 .account-desktop-list {padding-inline-start:14px;}
 .account-desktop-row,.account-desktop-panes,.account-desktop-pane header {display:flex;}
-.account-desktop-row {align-items:center;}
-.account-desktop-row .sidebar-link {flex:1;min-width:0;}
+.account-desktop-row {position:relative;align-items:center;border-radius:8px;margin-bottom:2px;min-height:38px;transition:background-color var(--duration-fast) var(--ease-out);}
+.account-desktop-row:hover {background:var(--hover);}
+.account-desktop-row.active {background:var(--selected, var(--hover));color:var(--strong);font-weight:550;}
+.account-desktop-row.active::before {content:"";position:absolute;inset-inline-start:2px;top:8px;bottom:8px;width:3px;border-radius:999px;background:var(--accent);}
+.account-desktop-row > .sidebar-link {flex:1;min-width:0;min-height:38px;background:transparent;}
+.account-desktop-row > .sidebar-link:hover {background:transparent;}
+.account-desktop-row:is(:hover, :focus-within, :has([aria-expanded="true"])) .terminal-row-actions {visibility:visible;max-width:none;margin-inline-end:3px;opacity:1;transform:none;}
+.account-desktop-row .terminal-row-actions > button.desktop-delete-action:is(:hover, :focus-visible) {color:var(--danger);}
+.account-desktop-status {margin-inline-start:auto;flex:none;color:var(--muted);font-size:.7rem;}
 .account-desktop-list .sidebar-link > svg,.account-desktop-title > svg,.account-desktop-pane header > button {flex:none;}
 .account-desktop-label {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .account-desktop-panes {height:100%;min-width:0;}
@@ -155,7 +164,6 @@
 .account-desktop-title {display:flex;align-items:center;gap:10px;min-width:0;}
 .account-desktop-screen {min-height:0;flex:1;overflow:hidden;}
 .account-desktop-message {position:absolute;inset:auto 8px 8px;background:var(--paper);padding:6px;}
-.account-desktop-row .sidebar-link[aria-pressed="true"] {background:var(--selected, var(--hover));}
 
 .desktop-create-fields {display:grid;gap:8px;padding:6px 8px 10px;}
 .desktop-create-fields label {display:grid;gap:4px;font-size:.85rem;}

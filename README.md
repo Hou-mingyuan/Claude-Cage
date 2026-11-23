@@ -147,9 +147,9 @@ Cage 核心代码与文档贡献采用“`contribution` Issue 审核 → 邀请�
 
 本项目仍在快速迭代中，欢迎加入交流群提意见，欢迎社区大佬一起维护与共建插件生态
 
-| QQ 群 · 273237690 | 微信 |
+| QQ 群 · 112745758 | 微信 |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ 群 · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="微信" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ 群 · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="微信" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

@@ -91,6 +91,7 @@ func (s *Server) openProject(w http.ResponseWriter, r *http.Request) {
 		s.projectConnectionError(w, err)
 		return
 	}
+	activateLocal := (input.Activate || preferences.Workspace == "") && !isClientMountPath(workspace)
 	if input.Activate && isClientMountPath(workspace) {
 		s.mu.Lock()
 		if m := s.clientMounts[workspace]; m == nil || !m.live() {
@@ -100,18 +101,20 @@ func (s *Server) openProject(w http.ResponseWriter, r *http.Request) {
 		}
 		s.clientWorkspace = workspace
 		s.mu.Unlock()
-	} else if input.Activate {
+	} else if activateLocal {
 		preferences.Workspace = workspace
 		if err = writePrivate(filepath.Join(s.profile, "workbench.json"), preferences); err != nil {
 			requestError(w, err)
 			return
 		}
 		s.mu.Lock()
-		s.clientWorkspace = ""
+		if input.Activate {
+			s.clientWorkspace = ""
+		}
 		s.preferences.Workspace = workspace
 		s.mu.Unlock()
 	}
-	if input.Activate {
+	if input.Activate || activateLocal {
 		// Only plugins taking ${PROJECT_DIR}, in the background.
 		s.restartProjectPlugins()
 	}
@@ -434,11 +437,32 @@ func (s *Server) restoreProjectShares() {
 		}
 	}
 	var failures []projectShareError
+	firstRestored := ""
 	for _, path := range saved.Paths {
 		if err := s.ensureProjectShare(path); err != nil {
 			failures = append(failures, projectShareFailure(path, err))
-		} else if err := s.rememberSharedProject(path); err != nil {
-			failures = append(failures, projectShareError{Path: path, Message: "项目已连接，但未能保存项目记录：" + err.Error()})
+		} else {
+			if firstRestored == "" {
+				firstRestored = path
+			}
+			if err := s.rememberSharedProject(path); err != nil {
+				failures = append(failures, projectShareError{Path: path, Message: "项目已连接，但未能保存项目记录：" + err.Error()})
+			}
+		}
+	}
+	if current == "" && firstRestored != "" {
+		s.mu.Lock()
+		next := s.preferences
+		s.mu.Unlock()
+		if next.Workspace == "" {
+			next.Workspace = firstRestored
+			if err := writePrivate(filepath.Join(s.profile, "workbench.json"), next); err == nil {
+				s.mu.Lock()
+				if s.preferences.Workspace == "" {
+					s.preferences.Workspace = firstRestored
+				}
+				s.mu.Unlock()
+			}
 		}
 	}
 	s.mu.Lock()

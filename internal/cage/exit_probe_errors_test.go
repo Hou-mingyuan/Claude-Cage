@@ -31,7 +31,13 @@ func TestExitProbeBodyTimeoutKeepsDeadlineAndShortReadCause(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client := &http.Client{Timeout: 100 * time.Millisecond}
+			// Only the stalled body is meant to run into the deadline. A
+			// short one must be read as short however slow the machine is.
+			timeout := 10 * time.Second
+			if stall {
+				timeout = 100 * time.Millisecond
+			}
+			client := &http.Client{Timeout: timeout}
 			ip, err := queryExitIP(context.Background(), client, server.URL)
 			want := error(io.ErrUnexpectedEOF)
 			if stall {
@@ -65,7 +71,7 @@ func TestExitProbeProxyFailureKeepsServiceAndHTTPStatusAfterRedaction(t *testing
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
-	for _, marker := range []string{"service=icanhazip", "service=ipify", "duration_ms=", "HTTP 407"} {
+	for _, marker := range []string{"service=icanhazip", "service=amazonaws", "service=akamai", "service=cftrace", "service=ipify", "service=geojs", "duration_ms=", "HTTP 407"} {
 		if !strings.Contains(string(log), marker) {
 			t.Fatalf("missing diagnostic %q: %s", marker, log)
 		}

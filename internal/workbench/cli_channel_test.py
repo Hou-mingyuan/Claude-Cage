@@ -510,6 +510,79 @@ class ChannelTests(unittest.TestCase):
         self.assertEqual(cached, {}, "removed transcript kept a cache entry")
         self.assertTrue(str(channel.cache_path("agents", "x")).startswith(str(self.home)))
 
+    def test_auto_title_skips_command_records_and_refreshes_legacy_cache(self):
+        config = self.home / ".claude"
+        request = {"accounts": ["default"], "workspaces": {self.project: self.project}}
+        cases = (
+            ("model-only-tag", [
+                {"type": "user", "message": {"content": "<command-name>/model</command-name>"}},
+                {"type": "user", "message": {"content": "Review the demo project"}},
+            ], "Review the demo project"),
+            ("clear-with-metadata-and-output", [
+                {"type": "user", "message": {"content": "<local-command-caveat>Caveat: local commands</local-command-caveat>"}},
+                {"type": "user", "message": {"content": "<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>"}},
+                {"type": "user", "message": {"content": "<local-command-stdout></local-command-stdout>"}},
+                {"type": "user", "message": {"content": "<command-message>model</command-message>\n<command-name>/model</command-name>\n<command-args>opus</command-args>"}},
+                {"type": "user", "message": {"content": "<local-command-stderr>Set model failed</local-command-stderr>"}},
+                {"type": "user", "isCompactSummary": True, "message": {"content": "compacted summary"}},
+                {"type": "user", "message": {"content": "Fix the login redirect"}},
+            ], "Fix the login redirect"),
+            ("command-only-session", [
+                {"type": "user", "message": {"content": "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"}},
+                {"type": "user", "message": {"content": "<local-command-stdout></local-command-stdout>"}},
+            ], "Claude Code"),
+            ("command-only-with-custom-title", [
+                {"type": "user", "message": {"content": "<command-name>/clear</command-name>"}},
+                {"type": "custom-title", "customTitle": "Pinned manual title"},
+            ], "Pinned manual title"),
+            ("plain-text-mentioning-tag", [
+                {"type": "user", "message": {"content": "为什么显示 <command-name>/clear</command-name>"}},
+            ], "为什么显示 <command-name>/clear</command-name>"[:40]),
+            ("tag-prefix-with-plain-text", [
+                {"type": "user", "message": {"content": "<command-name>/clear</command-name> 怎么跳过"}},
+            ], "<command-name>/clear</command-name> 怎么跳过"[:40]),
+            ("unclosed-tag-kept", [
+                {"type": "user", "message": {"content": "<command-name>/clear"}},
+            ], "<command-name>/clear"),
+            ("custom-title-not-filtered", [
+                {"type": "user", "message": {"content": "Review the demo project"}},
+                {"type": "custom-title", "customTitle": "<command-name>/clear</command-name>"},
+            ], "<command-name>/clear</command-name>"),
+        )
+        with patch.object(channel, "running_sessions", return_value=[]):
+            for name, messages, expected in cases:
+                with self.subTest(case=name):
+                    session = str(uuid.uuid4())
+                    path = self.history(session, self.project, messages)
+                    try:
+                        workspace, summary_title = channel.history_summary(path)
+                        self.assertEqual(workspace, self.project)
+                        self.assertEqual(summary_title or "Claude Code", expected)
+                        opened = channel.view(config, session)
+                        self.assertEqual(opened["title"], expected)
+                        if name == "model-only-tag":
+                            self.assertEqual([t["prompt"] for t in opened["turns"]],
+                                             ["<command-name>/model</command-name>", "Review the demo project"])
+                        found = {item["cli_id"]: item for item in channel.discover(request)}
+                        self.assertEqual(found[session]["title"], expected)
+                    finally:
+                        path.unlink(missing_ok=True)
+
+        # Legacy v1 summary cache entries (3-element list) must be recomputed once.
+        legacy_session = str(uuid.uuid4())
+        path = self.history(legacy_session, self.project, [
+            {"type": "user", "message": {"content": "<command-name>/clear</command-name>"}},
+            {"type": "user", "message": {"content": "Real prompt after clear"}},
+        ])
+        summary_path = channel.cache_path("summaries", str(config))
+        channel.save(summary_path, {str(path): [channel.stamp(path.lstat()), self.project, "<command-name>/clear</command-name>"]})
+        with patch.object(channel, "running_sessions", return_value=[]):
+            with patch.object(channel, "history_summary", wraps=channel.history_summary) as summary:
+                self.assertEqual(channel.discover(request)[0]["title"], "Real prompt after clear")
+                self.assertEqual(summary.call_count, 1, "legacy cached command title was not refreshed")
+                self.assertEqual(channel.discover(request)[0]["title"], "Real prompt after clear")
+                self.assertEqual(summary.call_count, 1, "refreshed versioned summary cache was not reused")
+
     def test_purge_removes_only_target_transcripts_and_retries(self):
         target = self.history(self.session, self.project, [{"type":"user", "message":{"content":"delete this"}}])
         other = self.history(str(uuid.uuid4()), self.project, [{"type":"user", "message":{"content":"keep this"}}])

@@ -37,6 +37,7 @@ internal static class NativeInputTests
         using var input = new NativeInput(events.Add);
         host.Controls.Add(web);
         host.Controls.Add(input);
+        Check(input.ImeMode == ImeMode.NoControl, "native input must leave host IME mode untouched");
         var owner = Guid.NewGuid().ToString();
         Check(input.ProcessRequest(JsonSerializer.SerializeToElement(new {
             owner, operation = "activate", x = 0, y = 0, height = 24,

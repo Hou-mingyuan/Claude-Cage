@@ -45,7 +45,7 @@ for (const [platform, system] of [["darwin", "macos"], ["win32", "windows-11"], 
     await nav.getByRole("button", { name: "打开浏览器", exact: true }).click();
     await page.locator(".address-bar input").first().waitFor();
     await openAccounts();
-    await nav.getByRole("button", { name: "工作台", exact: true }).click();
+    await sidebar.getByRole("button", { name: "工作台", exact: true }).click();
     await accountPage.waitFor({ state: "hidden" });
     assert.equal(await entry.getAttribute("aria-current"), null);
     const terminal = page.getByRole("tab", { name: "原有终端", exact: true });

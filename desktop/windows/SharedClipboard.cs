@@ -1,5 +1,7 @@
 using System.Collections.Specialized;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Cage.Windows;
@@ -13,6 +15,42 @@ internal static class SharedClipboard
     private static readonly HashSet<string> pending = new();
     private static readonly System.Windows.Forms.Timer timer = new() { Interval = 1000 };
     private static bool watching, loaded, collecting;
+    private static string? lastImageDigest;
+
+    // Hash dimensions and RGB pixels so an external clipboard manager (e.g.
+    // remote desktop software) rewriting the same image as CF_DIB/PNG does not
+    // trigger an endless clipboard ownership loop.
+    private static string ComputeImageDigest(Image image)
+    {
+        var ownsBitmap = image is not Bitmap;
+        var bitmap = image as Bitmap ?? new Bitmap(image);
+        try
+        {
+            var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+            var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+            try
+            {
+                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                Span<byte> dims = stackalloc byte[8];
+                BitConverter.TryWriteBytes(dims[..4], bitmap.Width);
+                BitConverter.TryWriteBytes(dims[4..], bitmap.Height);
+                hash.AppendData(dims);
+                var rowBytes = bitmap.Width * 3;
+                var row = new byte[rowBytes];
+                for (var y = 0; y < bitmap.Height; y++)
+                {
+                    Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), row, 0, rowBytes);
+                    hash.AppendData(row);
+                }
+                return Convert.ToHexString(hash.GetHashAndReset());
+            }
+            finally { bitmap.UnlockBits(data); }
+        }
+        finally
+        {
+            if (ownsBitmap) bitmap.Dispose();
+        }
+    }
 
     public static void Cancel()
     {
@@ -82,9 +120,15 @@ internal static class SharedClipboard
         finally { collecting = false; }
     }
 
+    private static string ConnectionID(JsonElement request)
+    {
+        var connection = request.Text("connection_id");
+        return string.IsNullOrEmpty(connection) ? "local" : connection;
+    }
+
     private static async Task ReleaseRemote(string connection, string id, CancellationToken token)
     {
-        var response = await Backend.Json(["clipboard-files", "--json", "--connection", connection, "release", id], token, TimeSpan.FromSeconds(10));
+        var response = await Backend.Json(["clipboard-files", "--json", "--connection", string.IsNullOrEmpty(connection) ? "local" : connection, "release", id], token, TimeSpan.FromSeconds(10));
         if (response.Exit != 0) throw new IOException("clipboard_selection_release_failed");
     }
 
@@ -92,7 +136,7 @@ internal static class SharedClipboard
     {
         var id = request.Text("files");
         if (!Guid.TryParse(id, out _)) throw new InvalidDataException("剪贴板文件标识无效");
-        await ReleaseRemote(request.Text("connection_id"), id, token);
+        await ReleaseRemote(ConnectionID(request), id, token);
         return new { ok = true };
     }
 
@@ -112,6 +156,7 @@ internal static class SharedClipboard
         var capturedGeneration = generation;
         if (Clipboard.ContainsFileDropList())
         {
+            lastImageDigest = null;
             var selected = Clipboard.GetFileDropList().Cast<string>().ToArray();
             if (request.TryGetProperty("defer_files", out var defer) && defer.ValueKind == JsonValueKind.True)
                 return new { revision, files_pending = true, count = selected.Length };
@@ -119,30 +164,43 @@ internal static class SharedClipboard
             readers.Add(selected);
             try
             {
-                var arguments = new List<string> { "clipboard-files", "--json", "--connection", request.Text("connection_id"), "send" };
+                var connection = ConnectionID(request);
+                var arguments = new List<string> { "clipboard-files", "--json", "--connection", connection, "send" };
                 arguments.AddRange(selected);
                 var response = await Backend.Json(arguments.ToArray(), cancellation.Token, TimeSpan.FromMinutes(30));
                 if (response.Exit != 0) throw new IOException(response.Data.Text("message"));
                 var files = response.Data.Text("files");
                 if (capturedGeneration != generation || revision != Revision)
                 {
-                    try { await ReleaseRemote(request.Text("connection_id"), files, CancellationToken.None); } catch { }
+                    try { await ReleaseRemote(connection, files, CancellationToken.None); } catch { }
                 }
                 return new { revision, files };
             }
             catch (OperationCanceledException) { throw new IOException("剪贴板文件传递已取消"); }
             finally { readers.Remove(selected); await Collect(); }
         }
-        if (RichText() is { } copied) return new { revision, text = copied };
+        if (RichText() is { } copied)
+        {
+            lastImageDigest = null;
+            return new { revision, text = copied };
+        }
         if (Clipboard.ContainsImage())
         {
             using var image = Clipboard.GetImage() ?? throw new IOException("无法读取剪贴板图片");
             if ((long)image.Width * image.Height > 40_000_000) throw new IOException("图片不能超过 4000 万像素");
+            var initial = request.TryGetProperty("initial", out var initProp) && initProp.ValueKind == JsonValueKind.True;
+            var digest = ComputeImageDigest(image);
+            if (!initial && digest == lastImageDigest)
+            {
+                return new { revision, unchanged = true };
+            }
             using var output = new MemoryStream();
             image.Save(output, System.Drawing.Imaging.ImageFormat.Png);
             if (output.Length > 20 * 1024 * 1024) throw new IOException("图片不能超过 20 MB");
+            lastImageDigest = digest;
             return new { revision, png = Convert.ToBase64String(output.ToArray()) };
         }
+        lastImageDigest = null;
         return new { revision, text = Clipboard.ContainsText() ? Clipboard.GetText() : "" };
     }
 
@@ -157,7 +215,7 @@ internal static class SharedClipboard
             if (!Guid.TryParse(id, out _)) throw new InvalidDataException("剪贴板文件标识无效");
             try
             {
-                var response = await Backend.Json(["clipboard-files", "--json", "--connection", request.Text("connection_id"), "receive", id], token, TimeSpan.FromMinutes(30));
+                var response = await Backend.Json(["clipboard-files", "--json", "--connection", ConnectionID(request), "receive", id], token, TimeSpan.FromMinutes(30));
                 if (response.Exit != 0) throw new IOException(response.Data.Text("message"));
                 paths = response.Data.GetProperty("paths").EnumerateArray().Select(value => value.GetString()!).ToArray();
                 cache = response.Data.Text("cache_id");
@@ -174,6 +232,7 @@ internal static class SharedClipboard
             }
             if (paths != null)
             {
+                lastImageDigest = null;
                 var files = new StringCollection(); files.AddRange(paths); Clipboard.SetFileDropList(files);
             }
             else if (request.Text("png") is { Length: > 0 } png)
@@ -183,10 +242,26 @@ internal static class SharedClipboard
                 using var input = new MemoryStream(bytes);
                 using var image = Image.FromStream(input);
                 if ((long)image.Width * image.Height > 40_000_000) throw new InvalidDataException("图片不能超过 4000 万像素");
-                Clipboard.SetImage(image);
+                var digest = ComputeImageDigest(image);
+                var sameOnClipboard = false;
+                if (Clipboard.ContainsImage())
+                {
+                    try
+                    {
+                        using var existing = Clipboard.GetImage();
+                        if (existing != null && (long)existing.Width * existing.Height <= 40_000_000)
+                        {
+                            sameOnClipboard = ComputeImageDigest(existing) == digest;
+                        }
+                    }
+                    catch { /* Fall through to write if existing image cannot be inspected. */ }
+                }
+                lastImageDigest = digest;
+                if (!sameOnClipboard) Clipboard.SetImage(image);
             }
             else if (request.TryGetProperty("text", out var text))
             {
+                lastImageDigest = null;
                 var value = text.GetString() ?? "";
                 if (System.Text.Encoding.UTF8.GetByteCount(value) > 2 * 1024 * 1024) throw new InvalidDataException("文本不能超过 2 MB");
                 if (value.Length == 0) Clipboard.Clear(); else Clipboard.SetText(value);

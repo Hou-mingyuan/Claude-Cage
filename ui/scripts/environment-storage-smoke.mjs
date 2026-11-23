@@ -24,7 +24,11 @@ try {
     if (!rejected && !job.running) location = { ...location, directory: input.directory, backup: location.has_environment ? location.directory : "" };
     return route.fulfill({ json: job });
   });
-  await page.getByRole("button", { name: "选择环境存储位置" }).click();
+  const openStorageSettings = async () => {
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await page.getByRole("button", { name: "环境与恢复", exact: true }).click();
+  };
+  await openStorageSettings();
   const panel = page.getByRole("region", { name: "本机环境存储" });
   const picker = panel.getByRole("button", { name: "选择文件夹" });
   const target = panel.getByLabel("新存储位置");
@@ -39,7 +43,7 @@ try {
   assert.equal(writes[0].migrate, false);
   location.has_environment = true;
   await page.reload();
-  await page.getByRole("button", { name: "选择环境存储位置" }).click();
+  await openStorageSettings();
   await panel.getByText(destination, { exact: true }).waitFor();
   await target.fill(occupied);
   await panel.getByRole("button", { name: "迁移到此位置" }).click();

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,17 +54,296 @@ func validFileTargetID(target, id string) bool {
 	return browserFileID.MatchString(id)
 }
 
-// Desktop requests use the private session socket, carried over the existing
-// SSH connection. Directory selections use an authorized project's guest path.
-func (s *Server) guestFiles(ctx context.Context, target, method, path string, body io.Reader, name string) (map[string]any, error) {
+func desktopFileSocket(desktopID string) (string, error) {
+	switch desktopID {
+	case "", "default":
+		return "/run/cage-desktop/files.sock", nil
+	default:
+		if !validClaudeID(desktopID) {
+			return "", errors.New("桌面实例标识无效")
+		}
+		return "/run/desktop-" + desktopID + "/files.sock", nil
+	}
+}
+
+func (s *Server) rememberDesktopFileOwner(id, desktopID string) {
+	if !browserFileID.MatchString(id) {
+		return
+	}
+	if desktopID == "default" {
+		desktopID = ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.desktopFileOwners == nil {
+		s.desktopFileOwners = map[string]string{}
+	} else if len(s.desktopFileOwners) >= 1024 {
+		if _, exists := s.desktopFileOwners[id]; !exists {
+			clear(s.desktopFileOwners)
+		}
+	}
+	s.desktopFileOwners[id] = desktopID
+}
+
+func (s *Server) desktopFileOwner(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.desktopFileOwners[id]
+}
+
+// desktopFilesPollAllScript polls the default Desktop broker (when active) and
+// any active independent account desktop brokers in a single guest command.
+func desktopFilesPollAllScript(asWorkUser string) string {
+	return `state=$(systemctl is-active cage-claude-desktop.service 2>/dev/null) || true
+default_active=0
+default_failed=0
+case "$state" in
+  inactive|activating|deactivating|unknown) ;;
+  active) default_active=1 ;;
+  # A failed default Desktop does not stop the account Desktops' transfers.
+  *) default_failed=1 ;;
+esac
+sources=()
+if [ "$default_active" -eq 1 ]; then
+  sources+=("default:/run/cage-desktop/files.sock")
+fi
+for sock in /run/desktop-*/files.sock; do
+  [ -S "$sock" ] || continue
+  dir=${sock%/files.sock}
+  id=${dir#/run/desktop-}
+  case "$id" in
+    *[!a-f0-9]*) continue ;;
+  esac
+  [ "${#id}" -eq 24 ] || continue
+  astate=$(systemctl is-active "desktop-${id}.service" 2>/dev/null) || true
+  if [ "$astate" = active ]; then
+    sources+=("${id}:${sock}")
+  fi
+done
+if [ "${#sources[@]}" -eq 0 ]; then
+  if [ "$default_failed" -eq 1 ]; then
+    printf 'desktop file service state=%s\n' "$state" >&2
+    exit 1
+  fi
+  printf '%s\n' '{"available":false,"sources":{}}'
+  exit 0
+fi
+out=""
+for entry in "${sources[@]}"; do
+  key=${entry%%:*}
+  sock=${entry#*:}
+  if ! body=$(` + asWorkUser + `curl --silent --show-error --max-time 5 --write-out '\nCAGE_FILE_HTTP:%{http_code}' --unix-socket "$sock" -X GET http://localhost/requests); then
+    if [ "$key" = default ]; then
+      exit 1
+    fi
+    continue
+  fi
+  case "$body" in
+    *$'\n'CAGE_FILE_HTTP:*)
+      code=${body##*$'\n'CAGE_FILE_HTTP:}
+      json=${body%$'\n'CAGE_FILE_HTTP:*}
+      ;;
+    *)
+      if [ "$key" = default ]; then
+        printf 'desktop file broker missing status\n' >&2
+        exit 1
+      fi
+      continue
+      ;;
+  esac
+  if [ "$code" != 200 ] || [ -z "$json" ]; then
+    if [ "$key" = default ]; then
+      printf 'desktop file broker http=%s\n' "$code" >&2
+      exit 1
+    fi
+    continue
+  fi
+  if [ -n "$out" ]; then out+=","; fi
+  out+="\"${key}\":${json}"
+done
+printf '{"available":true,"sources":{%s}}\n' "$out"
+`
+}
+
+func (s *Server) mergeDesktopFilePoll(raw map[string]any) map[string]any {
+	merged := map[string]any{
+		"available": false,
+		"uploads":   []any{},
+		"downloads": []any{},
+		"opens":     []any{},
+	}
+	sources, ok := raw["sources"].(map[string]any)
+	if !ok || len(sources) == 0 {
+		return merged
+	}
+	keys := make([]string, 0, len(sources))
+	for key := range sources {
+		if key != "default" && !validClaudeID(key) {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i] == "default" {
+			return true
+		}
+		if keys[j] == "default" {
+			return false
+		}
+		return keys[i] < keys[j]
+	})
+	uploads := []any{}
+	downloads := []any{}
+	opens := []any{}
+	seenUploads := map[string]bool{}
+	seenDownloads := map[string]bool{}
+	seenOpens := map[string]bool{}
+	available := false
+	for _, key := range keys {
+		src, ok := sources[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		if avail, _ := src["available"].(bool); avail {
+			available = true
+		}
+		if list, ok := src["uploads"].([]any); ok {
+			for _, value := range list {
+				item, ok := value.(map[string]any)
+				if !ok {
+					continue
+				}
+				id, _ := item["id"].(string)
+				if id != "" {
+					if seenUploads[id] {
+						continue
+					}
+					seenUploads[id] = true
+					s.rememberDesktopFileOwner(id, key)
+				}
+				item["desktop"] = key
+				uploads = append(uploads, item)
+			}
+		}
+		if list, ok := src["downloads"].([]any); ok {
+			for _, value := range list {
+				item, ok := value.(map[string]any)
+				if !ok {
+					continue
+				}
+				id, _ := item["id"].(string)
+				if id != "" {
+					if seenDownloads[id] {
+						continue
+					}
+					seenDownloads[id] = true
+					s.rememberDesktopFileOwner(id, key)
+				}
+				item["desktop"] = key
+				downloads = append(downloads, item)
+			}
+		}
+		if list, ok := src["opens"].([]any); ok {
+			for _, value := range list {
+				item, ok := value.(map[string]any)
+				if !ok {
+					continue
+				}
+				id, _ := item["id"].(string)
+				if id != "" {
+					if seenOpens[id] {
+						continue
+					}
+					seenOpens[id] = true
+					s.rememberDesktopFileOwner(id, key)
+				}
+				item["desktop"] = key
+				opens = append(opens, item)
+			}
+		}
+	}
+	merged["available"] = available
+	merged["uploads"] = uploads
+	merged["downloads"] = downloads
+	merged["opens"] = opens
+	return merged
+}
+
+func (s *Server) pollAllDesktopFiles(ctx context.Context) (map[string]any, error) {
 	asWorkUser, err := s.linuxTemplate("sudo -H -u cage ")
 	if err != nil {
 		return nil, err
 	}
-	script := asWorkUser + "curl --silent --show-error --max-time 1800 --write-out '\\nCAGE_FILE_HTTP:%{http_code}' --unix-socket /run/cage-desktop/files.sock -X " + method
+	script := desktopFilesPollAllScript(asWorkUser)
+	var stderr fileControlStderr
+	var data []byte
+	var readErr error
+	const limit = 262144
+	shared := false
+	var reply guestSessionReply
+	if reply, shared, err = s.guestShared(ctx, script); shared {
+		data, stderr.data = reply.stdout, reply.stderr
+		if err == nil && reply.code != 0 {
+			err = fmt.Errorf("exit status %d", reply.code)
+		}
+	}
+	if !shared {
+		command := "exec /bin/bash --noprofile --norc -c " + shellescape.Quote(script)
+		cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", command)
+		cmd.Stderr = &stderr
+		pipe, pipeErr := cmd.StdoutPipe()
+		if pipeErr != nil {
+			return nil, pipeErr
+		}
+		if err = cmd.Start(); err != nil {
+			return nil, usererror.Wrap("连接文件传递服务", err, "请确认 Cage 安装完整，环境已经启动；持续失败时在设置中导出诊断包。")
+		}
+		data, readErr = io.ReadAll(io.LimitReader(pipe, limit+64))
+		if readErr != nil || len(data) > limit+64 {
+			_ = cmd.Process.Kill()
+		}
+		err = cmd.Wait()
+	}
+	var raw map[string]any
+	decodeErr := json.Unmarshal(data, &raw)
+	if err != nil || readErr != nil || len(data) > limit || decodeErr != nil || raw == nil {
+		_ = diagnostics.New(s.profile).Record("error", "desktop-files", fmt.Sprintf("target=desktop method=GET route=/requests exit=%v read=%v invalid_json=%t oversized=%t context=%v stderr=%s", err, readErr, decodeErr != nil || raw == nil, len(data) > limit, ctx.Err(), stderr.data))
+		switch {
+		case ctx.Err() != nil:
+			return nil, usererror.Wrap("传递文件", ctx.Err(), "请确认环境仍在运行；恢复连接后重新选择文件，并核对目标是否已收到文件。")
+		case err != nil:
+			return nil, executionFailure("连接文件传递服务", err, string(stderr.data))
+		case readErr != nil:
+			return nil, usererror.Wrap("读取文件传递结果", readErr, "结果没有完整返回，请恢复连接后核对文件是否已收到。")
+		case len(data) > limit:
+			return nil, errors.New("读取文件传递结果失败：服务返回的数据超过限制。请分批处理文件；持续出现时导出诊断包。")
+		default:
+			return nil, errors.New("读取文件传递结果失败：服务没有返回有效的文件记录。请重新打开接收文件的应用；旧环境请先更新环境组件。")
+		}
+	}
+	return s.mergeDesktopFilePoll(raw), nil
+}
+
+// Desktop requests use the private session socket, carried over the existing
+// SSH connection. Directory selections use an authorized project's guest path.
+func (s *Server) guestFiles(ctx context.Context, target, method, path string, body io.Reader, name string) (map[string]any, error) {
+	return s.guestFilesForDesktop(ctx, "", target, method, path, body, name)
+}
+
+func (s *Server) guestFilesForDesktop(ctx context.Context, desktopID, target, method, path string, body io.Reader, name string) (map[string]any, error) {
+	asWorkUser, err := s.linuxTemplate("sudo -H -u cage ")
+	if err != nil {
+		return nil, err
+	}
+	var script string
 	if target == "terminal" {
 		script = asWorkUser + "/usr/local/bin/cage-desktop-files --save-file " + shellescape.Quote(name)
 	} else {
+		sock, sockErr := desktopFileSocket(desktopID)
+		if sockErr != nil {
+			return nil, sockErr
+		}
+		script = asWorkUser + "curl --silent --show-error --max-time 1800 --write-out '\\nCAGE_FILE_HTTP:%{http_code}' --unix-socket " + shellescape.Quote(sock) + " -X " + method
 		if body != nil {
 			script += " --upload-file -"
 		}
@@ -73,7 +353,7 @@ func (s *Server) guestFiles(ctx context.Context, target, method, path string, bo
 	var data []byte
 	var readErr error
 	shared := false
-	if target != "terminal" && method == "GET" && path == "/requests" {
+	if target != "terminal" && method == "GET" && path == "/requests" && (desktopID == "" || desktopID == "default") {
 		script = desktopFilesPoll + script
 		// The workbench asks for pending requests every second or two.
 		var reply guestSessionReply
@@ -185,6 +465,7 @@ func (s *Server) fileInputAction(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Target    string  `json:"target"`
 		ID        string  `json:"id"`
+		Desktop   string  `json:"desktop,omitempty"`
 		Kind      string  `json:"kind"`
 		X         float64 `json:"x"`
 		Y         float64 `json:"y"`
@@ -199,6 +480,10 @@ func (s *Server) fileInputAction(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
 	if action != "start" && action != "finish" && action != "cancel" && action != "directory" && action != "download-retry" {
 		http.NotFound(w, r)
+		return
+	}
+	if input.Desktop != "" && input.Desktop != "default" && !validClaudeID(input.Desktop) {
+		http.Error(w, "桌面实例标识无效", 400)
 		return
 	}
 	if !(action == "start" && (input.Target == "browser" && input.ID != "" && len(input.ID) <= 256 || input.Target == "desktop")) && !validFileTargetID(input.Target, input.ID) {
@@ -269,10 +554,19 @@ func (s *Server) fileInputAction(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(data)
 		return
 	}
-	result, err := s.guestFiles(ctx, "desktop", "POST", "/"+action, bytes.NewReader(body), "")
+	desktopID := input.Desktop
+	if action != "start" && desktopID == "" {
+		desktopID = s.desktopFileOwner(input.ID)
+	}
+	result, err := s.guestFilesForDesktop(ctx, desktopID, "desktop", "POST", "/"+action, bytes.NewReader(body), "")
 	if err != nil {
 		requestError(w, err)
 		return
+	}
+	if action == "start" {
+		if id, _ := result["id"].(string); id != "" {
+			s.rememberDesktopFileOwner(id, desktopID)
+		}
 	}
 	jsonReply(w, result)
 }
@@ -284,9 +578,9 @@ func (s *Server) desktopFileRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	result, err := s.guestFiles(ctx, "desktop", "GET", "/requests", nil, "")
+	result, err := s.pollAllDesktopFiles(ctx)
 	if err != nil {
-		// Service/transport failures are not invalid user input. guestFiles has
+		// Service/transport failures are not invalid user input. pollAllDesktopFiles has
 		// already recorded the bounded diagnostic, including the real exit code.
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -368,7 +662,11 @@ func (s *Server) fileInputUpload(w http.ResponseWriter, r *http.Request) {
 	if prepared.Unclean {
 		w.Header().Set("X-Cage-Metadata-Warning", "metadata-may-remain")
 	}
-	result, err := s.guestFiles(ctx, target, "POST", "/upload?"+url.Values{"id": {id}, "name": {name}}.Encode(), prepared.Body, name)
+	desktopID := ""
+	if target == "desktop" {
+		desktopID = s.desktopFileOwner(id)
+	}
+	result, err := s.guestFilesForDesktop(ctx, desktopID, target, "POST", "/upload?"+url.Values{"id": {id}, "name": {name}}.Encode(), prepared.Body, name)
 	if err != nil {
 		requestError(w, err)
 		return

@@ -293,3 +293,78 @@ func TestRemoteAutoReleasesOnlyOwnedLocalService(t *testing.T) {
 		})
 	}
 }
+
+func TestDesktopGatewayCloseReleasesIdleLocalControllerRegardlessOfOrigin(t *testing.T) {
+	cases := []struct {
+		name        string
+		remoteView  bool
+		status      DesktopLocalStatus
+		wantRelease bool
+	}{
+		{
+			name:        "idle-external-local-controller",
+			status:      DesktopLocalStatus{Known: true, Available: true, ServiceRunning: true, ControllerID: "external-idle"},
+			wantRelease: true,
+		},
+		{
+			name:        "running-vm-kept-alive",
+			status:      DesktopLocalStatus{Known: true, Available: true, ServiceRunning: true, Running: true, ControllerID: "running-vm"},
+			wantRelease: false,
+		},
+		{
+			name:        "busy-controller-kept-alive",
+			status:      DesktopLocalStatus{Known: true, Available: true, ServiceRunning: true, Busy: true, ControllerID: "busy-controller"},
+			wantRelease: false,
+		},
+		{
+			name:        "live-terminal-kept-alive",
+			status:      DesktopLocalStatus{Known: true, Available: true, ServiceRunning: true, LiveTerminals: 1, ControllerID: "live-term"},
+			wantRelease: false,
+		},
+		{
+			name:        "remote-active-does-not-release-local",
+			remoteView:  true,
+			status:      DesktopLocalStatus{Known: true, Available: true, ServiceRunning: true, ControllerID: "external-idle"},
+			wantRelease: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := gatewayFixture(t)
+			d := s.remote.desktop
+			f.status = tc.status
+			f.owned = false
+			released := 0
+			f.release = func(expected DesktopLocalStatus, stop bool) error {
+				released++
+				if stop {
+					t.Errorf("close must never force stop=true on release")
+				}
+				if expected.ControllerID != tc.status.ControllerID {
+					t.Errorf("released controller %q, want %q", expected.ControllerID, tc.status.ControllerID)
+				}
+				return nil
+			}
+			if tc.remoteView {
+				ctx, cancel := context.WithCancel(context.Background())
+				session, err := f.Connect(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				d.mu.Lock()
+				d.active = &desktopTarget{id: "remote-1", mode: "remote", ctx: ctx, cancel: cancel, session: session}
+				d.mu.Unlock()
+			} else {
+				chooseLocal(t, d, d.context().ConnectionID)
+			}
+			d.close()
+			want := 0
+			if tc.wantRelease {
+				want = 1
+			}
+			if released != want {
+				t.Fatalf("release calls = %d, want %d", released, want)
+			}
+		})
+	}
+}

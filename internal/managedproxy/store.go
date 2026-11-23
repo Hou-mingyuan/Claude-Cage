@@ -44,6 +44,7 @@ type Source struct {
 	Usage     string      `json:"usage,omitempty"`
 	Nodes     []Node      `json:"nodes"`
 	Skipped   []NodeIssue `json:"skipped,omitempty"`
+	NodeDNS   []string    `json:"node_dns,omitempty"`
 }
 type Store struct {
 	Version      int                          `json:"version"`
@@ -233,7 +234,11 @@ func (s *Store) Import(name, rawURL string, data []byte, id string, interval int
 	if err != nil {
 		return err
 	}
-	src := Source{ID: id, Name: name, URL: rawURL, Interval: interval, Updated: time.Now(), Attempted: time.Now(), Nodes: nodes, Usage: usage, Skipped: skipped}
+	nodeDNS, err := subscriptionNodeDNS(data)
+	if err != nil {
+		return err
+	}
+	src := Source{ID: id, Name: name, URL: rawURL, Interval: interval, Updated: time.Now(), Attempted: time.Now(), Nodes: nodes, Usage: usage, Skipped: skipped, NodeDNS: nodeDNS}
 	for i := range s.Sources {
 		if s.Sources[i].ID == id {
 			// Refresh must retain every hop of the saved route, including legacy
@@ -400,6 +405,13 @@ func (s Store) Runtime(profile string) ([]byte, error) {
 	// own DNS listener (none is configured) and stays false. Cage Egress keeps
 	// blocking all guest IPv6 and enforcing IPv4 exits.
 	dns := map[string]any{"enable": true, "ipv6": false, "use-hosts": false, "use-system-hosts": false, "default-nameserver": s.NodeResolvers(), "proxy-server-nameserver": s.NodeResolvers(), "nameserver": s.coreNameservers()}
+	policies, err := s.sourceDNSPolicies(blocked)
+	if err != nil {
+		return nil, err
+	}
+	if len(policies) > 0 {
+		dns["proxy-server-nameserver-policy"] = policies
+	}
 	config := map[string]any{"mixed-port": s.Port, "bind-address": "127.0.0.1", "allow-lan": false, "skip-auth-prefixes": []string{}, "mode": "rule", "ipv6": routeHasIPv6Server(route, originals), "log-level": "warning", "find-process-mode": "off", "external-controller-unix": Socket(profile), "tun": map[string]any{"enable": false}, "dns": dns, "geo-auto-update": false, "profile": map[string]any{"store-selected": false}, "proxy-groups": []any{map[string]any{"name": Group, "type": "select", "proxies": []string{s.Selected}}}}
 	// An explicit environment chain can override imported dialers. Named
 	// account routes retain the node's imported chain, including dependent hops.

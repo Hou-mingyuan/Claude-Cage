@@ -80,8 +80,9 @@ func (s *Server) desktopFileOpenAction(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 	defer cancel()
+	desktopID := s.desktopFileOwner(input.ID)
 	body, _ := json.Marshal(input)
-	result, err := s.guestFiles(ctx, "desktop", "POST", "/open-"+input.Stage, bytes.NewReader(body), "")
+	result, err := s.guestFilesForDesktop(ctx, desktopID, "desktop", "POST", "/open-"+input.Stage, bytes.NewReader(body), "")
 	if err != nil {
 		requestError(w, err)
 		return
@@ -108,7 +109,7 @@ func (s *Server) desktopFileOpenAction(w http.ResponseWriter, r *http.Request) {
 		body, _ = json.Marshal(map[string]string{"id": input.ID, "error": err.Error()})
 		cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancelCleanup()
-		_, _ = s.guestFiles(cleanup, "desktop", "POST", "/open-complete", bytes.NewReader(body), "")
+		_, _ = s.guestFilesForDesktop(cleanup, desktopID, "desktop", "POST", "/open-complete", bytes.NewReader(body), "")
 		requestError(w, err)
 		return
 	}

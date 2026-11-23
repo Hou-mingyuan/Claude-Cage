@@ -1,6 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { collectDeviceObservation } from "./device-observation.mjs";
 
+async function openSettingsTarget(cdp, url) {
+  try {
+    return await cdp("Target.createTarget", {
+      url, background: true, newWindow: false,
+    });
+  } catch (error) {
+    if (!/no browser is open/i.test(error?.message || "")) throw error;
+    // When all normal tabs are closed (or only private/login windows remain),
+    // open a minimized default-profile window so Chromium still applies the
+    // profile's renderer preferences without flashing over the workspace.
+    return cdp("Target.createTarget", {
+      url, background: true, newWindow: true, windowState: "minimized",
+    });
+  }
+}
+
 // Read settings in a background blank page in the user profile, excluded from
 // Cage's tab strip. Chromium's hidden-target path skips the profile's renderer
 // preferences and reads UI-locale defaults even in the default context.
@@ -10,9 +26,7 @@ async function readBrowserSettings(cdp, exclusions, expectedTimezone, device) {
   exclusions.add(url);
   let targetId;
   try {
-    ({ targetId } = await cdp("Target.createTarget", {
-      url, background: true, newWindow: false,
-    }));
+    ({ targetId } = await openSettingsTarget(cdp, url));
     const { sessionId } = await cdp("Target.attachToTarget", { targetId, flatten: true });
     const response = await cdp("Runtime.evaluate", {
       expression: `(async () => ({timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,

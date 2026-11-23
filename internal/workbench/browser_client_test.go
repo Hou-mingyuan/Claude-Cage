@@ -2,16 +2,21 @@ package workbench
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sylvinus/agent-vm/internal/diagnostics"
 )
 
 func browserClientForTest(t *testing.T, s *Server, transport http.RoundTripper) *browserClient {
@@ -156,5 +161,54 @@ func TestBrowserSubscriptionCancellationKeepsClientUsable(t *testing.T) {
 	closeLifetime()
 	if _, err := client.events(context.Background(), "token"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("browser accepted request after service lifetime ended: %v", err)
+	}
+}
+
+func TestBrowserClientLogsAllowlistedReasonOnly(t *testing.T) {
+	profile := t.TempDir()
+	previous := diagnostics.Default()
+	diagnostics.SetDefault(diagnostics.New(profile))
+	t.Cleanup(func() { diagnostics.SetDefault(previous) })
+
+	var currentErr string
+	guest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": currentErr})
+	}))
+	defer guest.Close()
+
+	client := localBrowserClient(t, context.Background(), guest)
+
+	currentErr = "Failed to open new tab - no browser is open"
+	if _, err := client.request(context.Background(), "token", http.MethodPost, "/audit", []byte(`{}`)); err == nil {
+		t.Fatal("expected audit error for known reason")
+	}
+
+	currentErr = "授权页面未能打开"
+	if _, err := client.request(context.Background(), "token", http.MethodPost, "/new", []byte(`{}`)); err == nil || !strings.Contains(err.Error(), "未能打开授权页面") {
+		t.Fatalf("expected specific login open error, got %v", err)
+	}
+
+	currentErr = "Browser window did not change state"
+	if _, err := client.request(context.Background(), "token", http.MethodPost, "/new", []byte(`{}`)); err == nil || !strings.Contains(err.Error(), "窗口状态切换超时") {
+		t.Fatalf("expected specific visibility timeout error, got %v", err)
+	}
+
+	currentErr = "https://private.example/secret-token"
+	if _, err := client.request(context.Background(), "token", http.MethodPost, "/audit", []byte(`{}`)); err == nil {
+		t.Fatal("expected audit error for unknown reason")
+	}
+
+	log, err := os.ReadFile(filepath.Join(profile, "logs", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(log)
+	if !strings.Contains(text, "operation=/audit http=400 reason=Failed to open new tab - no browser is open") {
+		t.Fatalf("missing allowlisted diagnostic reason: %s", text)
+	}
+	if strings.Contains(text, "private.example") || strings.Contains(text, "secret-token") {
+		t.Fatalf("unrecognized guest error leaked into diagnostics log: %s", text)
 	}
 }

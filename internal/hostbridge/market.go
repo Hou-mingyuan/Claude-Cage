@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // Market is a published list of plugins and where their archives live.
@@ -40,12 +41,13 @@ var CommunityMarket = Market{
 
 // MarketEntry is one plugin in the list.
 type MarketEntry struct {
-	Name        string        `json:"name"`
-	DisplayName string        `json:"displayName,omitempty"`
-	Version     string        `json:"version"`
-	Description string        `json:"description"`
-	Author      *MarketAuthor `json:"author,omitempty"`
-	Platforms   []string      `json:"platforms,omitempty"`
+	Name        string                   `json:"name"`
+	DisplayName string                   `json:"displayName,omitempty"`
+	Version     string                   `json:"version"`
+	Description string                   `json:"description"`
+	Author      *MarketAuthor            `json:"author,omitempty"`
+	I18n        map[string]LocalizedText `json:"i18n,omitempty"`
+	Platforms   []string                 `json:"platforms,omitempty"`
 	Permissions []string      `json:"permissions"`
 	Categories  []string      `json:"categories,omitempty"`
 	// Kind, Engines and Contributes repeat the plugin's manifest. Kind is
@@ -109,6 +111,74 @@ type MarketAuthor struct {
 	Official bool   `json:"official,omitempty"`
 }
 
+// LocalizedText is a plugin's display name and description in one language.
+type LocalizedText struct {
+	DisplayName string `json:"displayName,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// I18nFile is the optional translation table kept beside plugin.json.
+const (
+	I18nFile  = "i18n.json"
+	I18nLimit = 256 << 10
+)
+
+var localeTag = regexp.MustCompile(`^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$`)
+
+func plainText(text string, limit int) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || utf8.RuneCountInString(trimmed) > limit || strings.ContainsFunc(trimmed, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return "", false
+	}
+	return trimmed, true
+}
+
+func sanitizeI18n(raw map[string]LocalizedText) map[string]LocalizedText {
+	if len(raw) == 0 {
+		return nil
+	}
+	clean := make(map[string]LocalizedText, len(raw))
+	for code, entry := range raw {
+		if !localeTag.MatchString(code) || len(code) > 20 {
+			continue
+		}
+		var item LocalizedText
+		if name, ok := plainText(entry.DisplayName, 80); ok {
+			item.DisplayName = name
+		}
+		if desc, ok := plainText(entry.Description, 600); ok {
+			item.Description = desc
+		}
+		if item.DisplayName == "" && item.Description == "" {
+			continue
+		}
+		clean[code] = item
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	return clean
+}
+
+// LoadI18n reads the optional i18n.json inside an installed plugin folder.
+// Missing, linked or malformed files yield nil so plugins still load cleanly.
+func LoadI18n(dir string) map[string]LocalizedText {
+	file := filepath.Join(dir, I18nFile)
+	info, err := os.Lstat(file)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > I18nLimit {
+		return nil
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil
+	}
+	var raw map[string]LocalizedText
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	return sanitizeI18n(raw)
+}
+
 // FetchIcon downloads the entry's picture and returns it with its media type.
 func (m Market) FetchIcon(ctx context.Context, client *http.Client, entry MarketEntry) ([]byte, string, error) {
 	if entry.Icon == "" {
@@ -154,7 +224,7 @@ func mergePlatforms(existing, added []string, allKnown bool) ([]string, bool) {
 }
 
 const (
-	marketIndexLimit   = 1 << 20
+	marketIndexLimit   = 4 << 20
 	marketArchiveLimit = 20 << 20
 	// What an archive may unpack to.
 	marketUnpackedLimit = 100 << 20
@@ -220,6 +290,14 @@ func (m Market) shown(entry MarketEntry) MarketEntry {
 	if entry.Runtime != "" && !marketRuntime.MatchString(entry.Runtime) {
 		entry.Runtime = ""
 	}
+	if entry.Author != nil {
+		if name, ok := plainText(entry.Author.Name, 80); ok {
+			entry.Author = &MarketAuthor{Name: name, Official: entry.Author.Official}
+		} else {
+			entry.Author = nil
+		}
+	}
+	entry.I18n = sanitizeI18n(entry.I18n)
 	// A picture from anywhere else is not shown; the plugin still is.
 	if rest := strings.TrimPrefix(entry.Icon, m.IconPrefix+entry.Name+"/"); m.IconPrefix == "" || rest == entry.Icon || !validIcon(rest) || strings.ContainsAny(rest, "?#%") {
 		entry.Icon = ""

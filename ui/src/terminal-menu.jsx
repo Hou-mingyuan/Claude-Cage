@@ -1,9 +1,15 @@
-import React, { useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { AgentIcon } from "./agent-icon";
 import { InlineSelect } from "./inline-select";
 import { useTranslation } from "./interface-language.mjs";
 import { TERMINAL_LIMIT } from "./session-order.mjs";
+import {
+  autoSelectionUnavailable,
+  defaultTerminalAccount,
+  eligibleAutoAccounts,
+  reconcileTerminalAccount,
+} from "./terminal-menu-state.mjs";
 
 export function TerminalMenu({ choice, busy, atLimit = false, profiles, usesOfficialCLI, onClose, onSelect }) {
   const tr = useTranslation();
@@ -11,6 +17,8 @@ export function TerminalMenu({ choice, busy, atLimit = false, profiles, usesOffi
   const [configuring, setConfiguring] = useState(false);
   const [account, setAccount] = useState("auto");
   const [handoff, setHandoff] = useState(false);
+  const manualAccount = useRef(false);
+  const manualHandoff = useRef(false);
   const close = useRef(onClose);
   close.current = onClose;
   useLayoutEffect(() => {
@@ -58,22 +66,38 @@ export function TerminalMenu({ choice, busy, atLimit = false, profiles, usesOffi
     };
   }, [choice, configuring]);
 
-  const selectAccount = (id) => {
+  const applyAccount = (id, { userInitiated = false } = {}) => {
+    if (userInitiated) {
+      manualAccount.current = true;
+      manualHandoff.current = false;
+    }
     setAccount(id);
-    setHandoff(id === "auto" && profiles.scheduling.switch_policy === "allow");
+    if (userInitiated || !manualHandoff.current) {
+      setHandoff(id === "auto" && profiles.scheduling.switch_policy === "allow");
+    }
   };
+  const selectAccount = (id) => applyAccount(id, { userInitiated: true });
+  useEffect(() => {
+    if (!configuring) return;
+    const next = reconcileTerminalAccount({
+      account,
+      accounts: profiles.accounts,
+      manual: manualAccount.current,
+    });
+    if (next !== account) applyAccount(next);
+  }, [configuring, account, profiles.accounts, profiles.scheduling?.switch_policy]);
   const configureCode = () => {
     if (!usesOfficialCLI) { onSelect("claude"); return; }
-    const known = profiles.accounts || [];
-    const initial = known.some(a => a.enabled && a.status === "ready") ? "auto"
-      : known.find(a => a.status === "ready")?.id || (profiles.accounts ? "login" : "auto");
-    selectAccount(initial);
+    manualAccount.current = false;
+    manualHandoff.current = false;
+    applyAccount(defaultTerminalAccount(profiles.accounts));
     setConfiguring(true);
     void profiles.load();
   };
   if (configuring) {
     const accounts = profiles.accounts || [];
-    const eligible = accounts.filter(a => a.enabled && a.status === "ready");
+    const eligible = eligibleAutoAccounts(profiles.accounts);
+    const autoDisabled = autoSelectionUnavailable(profiles.accounts);
     const sources = account === "auto" ? eligible : accounts.filter(a => a.id === account);
     const hasBackup = sources.some(a => a.handoff_group && eligible.some(other =>
       other.id !== a.id && other.handoff_group === a.handoff_group));
@@ -84,7 +108,7 @@ export function TerminalMenu({ choice, busy, atLimit = false, profiles, usesOffi
       role="group" aria-label={tr("新建 Claude Code 终端")}>
       <label>{tr("启动账号")}
         <InlineSelect inline aria-label={tr("启动账号")} value={account} disabled={busy} onValueChange={selectAccount}>
-          <option value="auto">{tr("自动选择账号")}</option>
+          <option value="auto" disabled={autoDisabled}>{tr("自动选择账号")}</option>
           {(profiles.accounts || []).map(a => <option key={a.id} value={a.id}>
             {`#${String(a.number).padStart(2, "0")} ${a.label}${a.status === "ready" ? "" : " · " + tr("需要登录")}`}
           </option>)}
@@ -92,9 +116,9 @@ export function TerminalMenu({ choice, busy, atLimit = false, profiles, usesOffi
         </InlineSelect>
       </label>
       <label className="check-line"><input type="checkbox" checked={handoff} disabled={busy}
-        onChange={e => setHandoff(e.target.checked)} />{tr("额度用尽后自动接续")}</label>
-      {handoff && <small>{handoffNote}</small>}
-      <button className="primary" disabled={busy} onClick={() => onSelect("claude", account, handoff)}>{tr("创建 Claude Code 终端")}</button>
+        onChange={e => { manualHandoff.current = true; setHandoff(e.target.checked); }} />{tr("额度用尽后自动接续")}</label>
+      {handoff && <small>{tr(handoffNote)}</small>}
+      <button className="primary" disabled={busy || (autoDisabled && account === "auto")} onClick={() => onSelect("claude", account, handoff)}>{tr("创建 Claude Code 终端")}</button>
     </div>;
   }
   return (

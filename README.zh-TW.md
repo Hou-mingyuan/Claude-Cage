@@ -130,9 +130,9 @@ macOS 和已簽章 Windows 版本支援透過所選代理更新；Windows 未簽
 
 本專案仍在快速迭代中，歡迎加入交流群提意見，歡迎社群大佬一起維護
 
-| QQ 群 · 273237690 | 微信 |
+| QQ 群 · 112745758 | 微信 |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ 群 · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="微信" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ 群 · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="微信" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

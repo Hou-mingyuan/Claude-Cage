@@ -327,8 +327,8 @@ static void reply_error(WebKitScriptMessageReply *reply, const char *message) {
 static char *choose_file(GtkFileChooserAction kind, const char *title, const char *filename) {
     if (app.picker_open) return NULL;
     app.picker_open = TRUE;
-    GtkWidget *dialog = gtk_file_chooser_dialog_new(title, GTK_WINDOW(app.window), kind,
-        "取消", GTK_RESPONSE_CANCEL, kind == GTK_FILE_CHOOSER_ACTION_SAVE ? "保存" : "选择", GTK_RESPONSE_ACCEPT, NULL);
+    GtkWidget *dialog = gtk_file_chooser_dialog_new(ui_text(title), GTK_WINDOW(app.window), kind,
+        ui_text("取消"), GTK_RESPONSE_CANCEL, ui_text(kind == GTK_FILE_CHOOSER_ACTION_SAVE ? "保存" : "选择"), GTK_RESPONSE_ACCEPT, NULL);
     gtk_file_chooser_set_local_only(GTK_FILE_CHOOSER(dialog), TRUE);
     if (kind == GTK_FILE_CHOOSER_ACTION_SAVE) {
         char *base = g_path_get_basename(filename && *filename ? filename : "Cage.cage-theme.json");
@@ -339,7 +339,7 @@ static char *choose_file(GtkFileChooserAction kind, const char *title, const cha
     if (kind != GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER) {
         GtkFileFilter *filter = gtk_file_filter_new();
         gboolean diagnostic = filename && g_str_has_suffix(filename, ".zip");
-        gtk_file_filter_set_name(filter, diagnostic ? "诊断包 (*.zip)" : "Cage 主题 (*.json)");
+        gtk_file_filter_set_name(filter, ui_text(diagnostic ? "诊断包 (*.zip)" : "Cage 主题 (*.json)"));
         gtk_file_filter_add_pattern(filter, diagnostic ? "*.zip" : "*.json");
         gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
     }
@@ -1138,8 +1138,8 @@ static gboolean bridge_received(WebKitUserContentManager *manager, JSCValue *val
             char *path = NULL;
             if (!strcmp(operation,"save")) {
                 app.picker_open = TRUE;
-                GtkWidget *dialog = gtk_file_chooser_dialog_new("将下载另存为到本机", GTK_WINDOW(app.window), GTK_FILE_CHOOSER_ACTION_SAVE,
-                    "取消", GTK_RESPONSE_CANCEL, "保存", GTK_RESPONSE_ACCEPT, NULL);
+                GtkWidget *dialog = gtk_file_chooser_dialog_new(ui_text("将下载另存为到本机"), GTK_WINDOW(app.window), GTK_FILE_CHOOSER_ACTION_SAVE,
+                    ui_text("取消"), GTK_RESPONSE_CANCEL, ui_text("保存"), GTK_RESPONSE_ACCEPT, NULL);
                 char *base = g_path_get_basename(text_member(request,"name"));
                 gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), *base ? base : "download");
                 gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog), TRUE);
@@ -1189,23 +1189,29 @@ static gboolean bridge_received(WebKitUserContentManager *manager, JSCValue *val
         reply_json(reply,context,"true");
     } else if (!strcmp(name, "clipboardSyncRelease")) {
         const char *id = text_member(request, "files");
+        const char *connection = text_member(request, "connection_id");
+        if (!*connection) connection = "local";
         if (!g_uuid_string_is_valid(id)) reply_error(reply, "剪贴板文件标识无效。");
         else {
-            const char *args[] = {app.backend, "clipboard-files", "--json", "--connection", text_member(request, "connection_id"), "release", id, NULL};
+            const char *args[] = {app.backend, "clipboard-files", "--json", "--connection", connection, "release", id, NULL};
             backend_arguments(args, 10, browser_file_finished, pending_reply(reply, context));
         }
     } else if (!strcmp(name, "clipboardSyncRead")) {
-        PendingReply *pending = pending_reply(reply,context); pending->sync = TRUE; pending->generation = clipboard_generation; pending->revision = clipboard_current_revision(); pending->connection = g_strdup(text_member(request,"connection_id"));
+        const char *connection = text_member(request, "connection_id");
+        if (!*connection) connection = "local";
+        PendingReply *pending = pending_reply(reply,context); pending->sync = TRUE; pending->generation = clipboard_generation; pending->revision = clipboard_current_revision(); pending->connection = g_strdup(connection);
         JsonNode *defer = json_object_get_member(request,"defer_files");
         pending->defer_files = defer && JSON_NODE_HOLDS_VALUE(defer) && json_node_get_value_type(defer) == G_TYPE_BOOLEAN && json_node_get_boolean(defer);
         gtk_clipboard_request_uris(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD),clipboard_file_uris,pending);
     } else if (!strcmp(name, "clipboardSyncWrite")) {
+        const char *connection = text_member(request, "connection_id");
+        if (!*connection) connection = "local";
         PendingReply *pending = pending_reply(reply,context); pending->generation = clipboard_generation; pending->revision = json_object_has_member(request,"revision") ? (guint64)json_object_get_int_member(request,"revision") : clipboard_current_revision();
         if (pending->revision != clipboard_current_revision()) clipboard_sync_reply(pending,TRUE);
         else if (*text_member(request,"files")) {
             const char *id = text_member(request,"files");
             if (!g_uuid_string_is_valid(id)) { reply_error(reply,"剪贴板文件标识无效。"); pending_free(pending); }
-            else { const char *args[] = {app.backend,"clipboard-files","--json","--connection",text_member(request,"connection_id"),"receive",id,NULL}; backend_arguments(args,1800,clipboard_files_received,pending); }
+            else { const char *args[] = {app.backend,"clipboard-files","--json","--connection",connection,"receive",id,NULL}; backend_arguments(args,1800,clipboard_files_received,pending); }
         } else if (*text_member(request,"png")) {
             gsize length = 0; guchar *bytes = g_base64_decode(text_member(request,"png"),&length);
             GdkPixbufLoader *loader = gdk_pixbuf_loader_new_with_type("png",NULL);
@@ -1224,8 +1230,8 @@ static gboolean bridge_received(WebKitUserContentManager *manager, JSCValue *val
         if (app.picker_open) reply_error(reply, "请先完成当前文件窗口。");
         else {
             app.picker_open = TRUE;
-            GtkWidget *dialog = gtk_file_chooser_dialog_new("选择本机文件", GTK_WINDOW(app.window), GTK_FILE_CHOOSER_ACTION_OPEN,
-                "取消", GTK_RESPONSE_CANCEL, "选择", GTK_RESPONSE_ACCEPT, NULL);
+            GtkWidget *dialog = gtk_file_chooser_dialog_new(ui_text("选择本机文件"), GTK_WINDOW(app.window), GTK_FILE_CHOOSER_ACTION_OPEN,
+                ui_text("取消"), GTK_RESPONSE_CANCEL, ui_text("选择"), GTK_RESPONSE_ACCEPT, NULL);
             JsonNode *multiple = json_object_get_member(request, "multiple");
             gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), multiple && JSON_NODE_HOLDS_VALUE(multiple) && json_node_get_value_type(multiple) == G_TYPE_BOOLEAN && json_node_get_boolean(multiple));
             gtk_file_chooser_set_local_only(GTK_FILE_CHOOSER(dialog), TRUE);
@@ -1455,8 +1461,20 @@ static gboolean decide_policy(WebKitWebView *web, WebKitPolicyDecision *decision
     }
     return FALSE;
 }
-static gboolean deny_permission(WebKitWebView *web, WebKitPermissionRequest *request, gpointer data) {
-    (void)web; (void)data; webkit_permission_request_deny(request); return TRUE;
+static gboolean handle_permission(WebKitWebView *web, WebKitPermissionRequest *request, gpointer data) {
+    (void)data;
+    if (WEBKIT_IS_USER_MEDIA_PERMISSION_REQUEST(request)) {
+        WebKitUserMediaPermissionRequest *media = WEBKIT_USER_MEDIA_PERMISSION_REQUEST(request);
+        const char *uri = webkit_web_view_get_uri(web);
+        if (webkit_user_media_permission_is_for_audio_device(media) &&
+            !webkit_user_media_permission_is_for_video_device(media) &&
+            valid_workbench(uri, app.port, FALSE)) {
+            webkit_permission_request_allow(request);
+            return TRUE;
+        }
+    }
+    webkit_permission_request_deny(request);
+    return TRUE;
 }
 static gboolean workbench_file_chooser(WebKitWebView *web, WebKitFileChooserRequest *request, gpointer data) {
     (void)data;
@@ -1627,12 +1645,12 @@ static void create_window(void) {
     webkit_settings_set_javascript_can_open_windows_automatically(web_settings, FALSE);
     webkit_settings_set_enable_write_console_messages_to_stdout(web_settings, FALSE);
     webkit_settings_set_enable_webgl(web_settings, FALSE);
-    webkit_settings_set_enable_media_stream(web_settings, FALSE);
+    webkit_settings_set_enable_media_stream(web_settings, TRUE);
 #if WEBKIT_CHECK_VERSION(2, 38, 0)
     webkit_settings_set_enable_webrtc(web_settings, FALSE);
 #endif
     g_signal_connect(app.web, "decide-policy", G_CALLBACK(decide_policy), NULL);
-    g_signal_connect(app.web, "permission-request", G_CALLBACK(deny_permission), NULL);
+    g_signal_connect(app.web, "permission-request", G_CALLBACK(handle_permission), NULL);
     g_signal_connect(app.web, "run-file-chooser", G_CALLBACK(workbench_file_chooser), NULL);
     g_signal_connect(app.web, "context-menu", G_CALLBACK(deny_context_menu), NULL);
     g_signal_connect(app.web, "load-changed", G_CALLBACK(load_changed), NULL);

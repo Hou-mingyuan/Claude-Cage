@@ -34,8 +34,7 @@ func proxyCommand(command, profile string, cfg cage.Config) error {
 		_ = closeManagedGates(profile)
 		return err
 	}
-	bound, _ := managedproxy.BoundInterface(filepath.Join(managedproxy.Dir(profile), "config.yaml"))
-	if bound == name && managedproxy.Running(context.Background(), profile, p) {
+	if managedproxy.BindingMatches(filepath.Join(managedproxy.Dir(profile), "config.yaml"), name) && managedproxy.Running(context.Background(), profile, p) {
 		return nil
 	}
 	if err = closeManagedGates(profile); err != nil {

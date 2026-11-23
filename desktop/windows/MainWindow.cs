@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -35,7 +36,10 @@ internal sealed class MainWindow : Form
         Deactivate += (_, _) => { PublishFocus(false); Script("window.dispatchEvent(new Event('cage-window-deactivated'));"); };
         AutoScaleMode = AutoScaleMode.Dpi; AutoScaleDimensions = new SizeF(96, 96);
         Text = "Cage";
-        StartPosition = FormStartPosition.CenterScreen; BackColor = Color.FromArgb(247, 247, 247);
+        chrome = WindowChrome.SystemDefault();
+        StartPosition = FormStartPosition.CenterScreen;
+        BackColor = chrome.Background;
+        message.ForeColor = chrome.Foreground;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application;
         status.Controls.AddRange([message, retry, existing, complete]);
         Controls.Add(web); Controls.Add(status);
@@ -48,17 +52,17 @@ internal sealed class MainWindow : Form
             if (ConfirmStop()) await Bootstrap("--complete-update");
         };
         var trayMenu = new TrayMenu();
-        AddTrayItem("打开 Cage", (_, _) => RestoreWindow());
-        AddTrayItem("检查应用更新…", (_, _) => updater!.Handle("check"));
-        AddTrayItem("关于 Cage", (_, _) => MessageBox.Show(this,
+        AddTrayItem("打开 Cage", TrayIconKind.Open, (_, _) => RestoreWindow());
+        AddTrayItem("检查应用更新…", TrayIconKind.CheckUpdates, (_, _) => updater!.Handle("check"));
+        AddTrayItem("关于 Cage", TrayIconKind.About, (_, _) => MessageBox.Show(this,
             $"Cage {AppUpdater.Version}\n" + InterfaceLanguage.Text("本机隔离编码工作区"),
             InterfaceLanguage.Text("关于 Cage")));
         trayMenu.Items.Add(new ToolStripSeparator());
-        AddTrayItem("退出 Cage…", (_, _) => RequestQuit());
+        AddTrayItem("退出 Cage…", TrayIconKind.Quit, (_, _) => RequestQuit(), destructive: true);
         trayMenu.Opening += (_, _) => {
             foreach (ToolStripItem item in trayMenu.Items)
-                if (item.Tag is string source) item.Text = InterfaceLanguage.Text(source);
-            (chrome ?? new WindowChrome(BackColor, ForeColor, false)).ApplyMenu(trayMenu);
+                if (item.Tag is TrayItemMetadata meta) item.Text = InterfaceLanguage.Text(meta.SourceKey);
+            (chrome ?? WindowChrome.SystemDefault()).ApplyMenu(trayMenu);
         };
         tray = new NotifyIcon { Icon = Icon, Text = "Cage", Visible = true, ContextMenuStrip = trayMenu };
         tray.DoubleClick += (_, _) => RestoreWindow();
@@ -71,7 +75,7 @@ internal sealed class MainWindow : Form
             if (!ambiguous && target != null && target.Value.TerminalID.Length > 0)
                 Script("window.dispatchEvent(new CustomEvent('cage-notification-click',{detail:" + JsonSerializer.Serialize(new { terminal_id = target.Value.TerminalID, connection_id = target.Value.ConnectionID }) + "}));");
         };
-        updater = new AppUpdater(PublishUpdate, () => { allowQuit = true; Close(); }, () => _ = Bootstrap());
+        updater = new AppUpdater(PublishUpdate, () => { allowQuit = true; Close(); }, () => _ = Bootstrap(), report: message => _ = Backend.Report(message));
         Shown += async (_, _) => {
             if (Program.SmokeOutput != null) _ = SmokeDeadline();
             await Initialize();
@@ -82,8 +86,9 @@ internal sealed class MainWindow : Form
             if (!allowQuit && e.CloseReason is not (CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing)) { e.Cancel = true; Hide(); }
         };
         FormClosed += (_, _) => { lifetime.Cancel(); updater.Dispose(); tray.Dispose(); trayMenu.Dispose(); web.Dispose(); };
-        void AddTrayItem(string source, EventHandler action) =>
-            trayMenu.Items.Add(InterfaceLanguage.Text(source), null, action).Tag = source;
+        void AddTrayItem(string source, TrayIconKind icon, EventHandler action, bool destructive = false) =>
+            trayMenu.Items.Add(InterfaceLanguage.Text(source), null, action).Tag =
+                new TrayItemMetadata(source, icon, destructive);
     }
 
     protected override void OnLoad(EventArgs e)
@@ -128,6 +133,7 @@ internal sealed class MainWindow : Form
     }
 
     private WindowChrome? chrome;
+    private bool hasWorkbenchAppearance;
 
     private void ApplyWindowChrome()
     {
@@ -146,6 +152,12 @@ internal sealed class MainWindow : Form
     protected override void OnSystemColorsChanged(EventArgs e)
     {
         base.OnSystemColorsChanged(e);
+        if (!hasWorkbenchAppearance)
+        {
+            chrome = WindowChrome.SystemDefault();
+            BackColor = chrome.Background;
+            message.ForeColor = chrome.Foreground;
+        }
         ApplyWindowChrome();
     }
 
@@ -208,7 +220,12 @@ internal sealed class MainWindow : Form
             core.NavigationStarting += (_, e) => { if (!UpdatePolicy.IsWorkbench(e.Uri, expectedPort)) e.Cancel = true; };
             core.NewWindowRequested += (_, e) => e.Handled = true;
             core.DownloadStarting += (_, e) => e.Cancel = true;
-            core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
+            core.PermissionRequested += (_, e) => {
+                e.State = e.PermissionKind == CoreWebView2PermissionKind.Microphone &&
+                    UpdatePolicy.AllowMicrophonePermission(e.Uri, expectedPort)
+                    ? CoreWebView2PermissionState.Allow
+                    : CoreWebView2PermissionState.Deny;
+            };
             core.WebMessageReceived += Receive;
             core.ProcessFailed += (_, _) => { webFailed = true; Error(InterfaceLanguage.Text("工作台显示进程已退出。后台任务保留，可重试连接。")); };
             core.NavigationCompleted += (_, e) => {
@@ -298,9 +315,13 @@ internal sealed class MainWindow : Form
         }
         catch (Exception error) { errors.Add(error.Message); }
         // WebView2 releases its processes asynchronously after Dispose. Its
-        // browser can retain the app's working directory until this event.
+        // browser can retain the app's working directory until this event,
+        // though the exit event can race with Dispose() or be missed if the
+        // browser process already exited. Wait on both the event and the OS
+        // process handle so an already-exited browser never fails the smoke run.
         if (environment != null)
         {
+            var browserPid = web.CoreWebView2?.BrowserProcessId ?? 0u;
             var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             void BrowserExited(object? sender, CoreWebView2BrowserProcessExitedEventArgs args) => exited.TrySetResult();
             environment.BrowserProcessExited += BrowserExited;
@@ -308,7 +329,26 @@ internal sealed class MainWindow : Form
             {
                 if (nativeBridgeReady && errors.Count == 0) smokePhase = "stopping_browser";
                 web.Dispose();
-                await exited.Task.WaitAsync(shutdown.Token);
+                Process? browserProcess = null;
+                if (browserPid != 0)
+                {
+                    try { browserProcess = Process.GetProcessById((int)browserPid); }
+                    catch (ArgumentException) { exited.TrySetResult(); }
+                    catch (InvalidOperationException) { exited.TrySetResult(); }
+                }
+                try
+                {
+                    if (browserProcess == null)
+                    {
+                        await exited.Task.WaitAsync(shutdown.Token);
+                    }
+                    else if (!browserProcess.HasExited)
+                    {
+                        var completed = await Task.WhenAny(exited.Task, browserProcess.WaitForExitAsync(shutdown.Token)).WaitAsync(shutdown.Token);
+                        await completed;
+                    }
+                }
+                finally { browserProcess?.Dispose(); }
             }
             catch (Exception error) { errors.Add("自检浏览器尚未退出：" + error.Message); }
             finally { environment.BrowserProcessExited -= BrowserExited; }
@@ -410,7 +450,7 @@ internal sealed class MainWindow : Form
                         ? new { returnedFocus = accepted && returnedFocus } : accepted;
                     break;
                 case "exportDiagnostics":
-                    using (var picker = new SaveFileDialog { Title = "导出诊断包", Filter = "诊断包 (*.zip)|*.zip", FileName = "cage-diagnostics.zip", DefaultExt = "zip", AddExtension = true })
+                    using (var picker = new SaveFileDialog { Title = InterfaceLanguage.Text("导出诊断包"), Filter = InterfaceLanguage.Text("诊断包 (*.zip)") + "|*.zip", FileName = "cage-diagnostics.zip", DefaultExt = "zip", AddExtension = true })
                     {
                         if (picker.ShowDialog(this) != DialogResult.OK) { result = new { canceled = true }; break; }
                         var connection = request.Text("connection_id");
@@ -424,7 +464,7 @@ internal sealed class MainWindow : Form
                     updater.MarkReady(); result = true; _ = CompleteSmoke(); break;
                 case "appUpdate": result = updater.Handle(request.Text("operation")); break;
                 case "importTheme":
-                    using (var picker = new OpenFileDialog { Filter = "Cage 主题 (*.json)|*.json", Title = "导入主题", Multiselect = false })
+                    using (var picker = new OpenFileDialog { Filter = InterfaceLanguage.Text("Cage 主题 (*.json)") + "|*.json", Title = InterfaceLanguage.Text("导入主题"), Multiselect = false })
                     {
                         if (picker.ShowDialog(this) != DialogResult.OK) { result = ""; break; }
                         using var stream = File.OpenRead(picker.FileName);
@@ -437,7 +477,7 @@ internal sealed class MainWindow : Form
                 {
                     var key = request.Text("key");
                     if (key.Length != 71 || !System.Text.RegularExpressions.Regex.IsMatch(key, "^[A-F0-9]{8}(-[A-F0-9]{8}){7}$")) throw new InvalidDataException("恢复密钥格式无效");
-                    using var picker = new SaveFileDialog { Filter = "文本文件 (*.txt)|*.txt", Title = "保存账户恢复密钥", FileName = "账户恢复密钥.txt", DefaultExt = "txt", AddExtension = true };
+                    using var picker = new SaveFileDialog { Filter = InterfaceLanguage.Text("文本文件 (*.txt)") + "|*.txt", Title = InterfaceLanguage.Text("保存账户恢复密钥"), FileName = "账户恢复密钥.txt", DefaultExt = "txt", AddExtension = true };
                     if (picker.ShowDialog(this) != DialogResult.OK) { result = false; break; }
                     try { File.WriteAllText(picker.FileName, key + "\n", new System.Text.UTF8Encoding(false)); result = true; }
                     catch { throw new IOException("恢复密钥未能保存，请检查保存位置的权限"); }
@@ -448,7 +488,7 @@ internal sealed class MainWindow : Form
                     if (System.Text.Encoding.UTF8.GetByteCount(themeText) > 256 * 1024) throw new InvalidDataException("主题文件不能超过 256 KB");
                     var themeDocument = JsonDocument.Parse(themeText).RootElement;
                     if (themeDocument.Text("format") != "cage-theme" || themeDocument.GetProperty("version").GetInt32() != 1) throw new InvalidDataException("主题文件格式无效");
-                    using (var picker = new SaveFileDialog { Filter = "Cage 主题 (*.json)|*.json", Title = "导出主题", FileName = Path.GetFileName(request.Text("filename")), DefaultExt = "json", AddExtension = true })
+                    using (var picker = new SaveFileDialog { Filter = InterfaceLanguage.Text("Cage 主题 (*.json)") + "|*.json", Title = InterfaceLanguage.Text("导出主题"), FileName = Path.GetFileName(request.Text("filename")), DefaultExt = "json", AddExtension = true })
                     {
                         if (picker.ShowDialog(this) != DialogResult.OK) { result = false; break; }
                         File.WriteAllText(picker.FileName, themeText, new System.Text.UTF8Encoding(false)); result = true;
@@ -460,7 +500,7 @@ internal sealed class MainWindow : Form
                     var accessMode = request.Text("mode");
                     if (connection.Length == 0 || accessMode is not ("read" or "write")) throw new InvalidDataException("请在云端工作台重新选择项目");
                     using var picker = new FolderBrowserDialog {
-                        Description = accessMode == "write" ? "云端 Cage 可以读取、修改和删除所选项目中的文件。" : "云端 Cage 可以读取所选项目中的文件。",
+                        Description = InterfaceLanguage.Text(accessMode == "write" ? "云端 Cage 可以读取、修改和删除所选项目中的文件。" : "云端 Cage 可以读取所选项目中的文件。"),
                         UseDescriptionForTitle = true, ShowNewFolderButton = false
                     };
                     if (picker.ShowDialog(this) != DialogResult.OK) { result = new { canceled = true }; break; }
@@ -469,7 +509,7 @@ internal sealed class MainWindow : Form
                     result = response.Data; break;
                 }
                 case "chooseFolder":
-                    using (var picker = new FolderBrowserDialog { Description = request.Text("purpose") == "environmentStorage" ? "请选择用于保存镜像和虚拟磁盘的空文件夹。" : "仅此文件夹会与 Cage 共享。请选择具体项目。", UseDescriptionForTitle = true, ShowNewFolderButton = true })
+                    using (var picker = new FolderBrowserDialog { Description = InterfaceLanguage.Text(request.Text("purpose") == "environmentStorage" ? "请选择用于保存镜像和虚拟磁盘的空文件夹。" : "仅此文件夹会与 Cage 共享。请选择具体项目。"), UseDescriptionForTitle = true, ShowNewFolderButton = true })
                         result = picker.ShowDialog(this) == DialogResult.OK ? picker.SelectedPath : "";
                     break;
                 case "clipboardRead": result = Clipboard.ContainsText() ? Clipboard.GetText() : ""; break;
@@ -500,7 +540,7 @@ internal sealed class MainWindow : Form
                     {
                         var fileName = Path.GetFileName(request.Text("name"));
                         foreach (var character in Path.GetInvalidFileNameChars()) fileName = fileName.Replace(character, '_');
-                        using var picker = new SaveFileDialog { Title = "将下载另存为到本机", FileName = fileName, OverwritePrompt = true, AddExtension = false };
+                        using var picker = new SaveFileDialog { Title = InterfaceLanguage.Text("将下载另存为到本机"), FileName = fileName, OverwritePrompt = true, AddExtension = false };
                         if (picker.ShowDialog(this) != DialogResult.OK) { result = new { canceled = true }; break; }
                         arguments.Add(picker.FileName);
                     }
@@ -523,7 +563,7 @@ internal sealed class MainWindow : Form
                     else result = new { text = Clipboard.ContainsText() ? Clipboard.GetText() : "" };
                     break;
                 case "chooseGuestMedia":
-                    using (var picker = new OpenFileDialog { Title = "选择 Windows 11 x64 安装镜像", Filter = "Windows ISO (*.iso)|*.iso", Multiselect = false })
+                    using (var picker = new OpenFileDialog { Title = InterfaceLanguage.Text("选择 Windows 11 x64 安装镜像"), Filter = InterfaceLanguage.Text("Windows ISO (*.iso)") + "|*.iso", Multiselect = false })
                         result = picker.ShowDialog(this) == DialogResult.OK ? picker.FileName : "";
                     break;
                 case "appReference":
@@ -543,7 +583,7 @@ internal sealed class MainWindow : Form
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(reference) { UseShellExecute = true });
                     result = true; break;
                 case "chooseUploadFiles":
-                    using (var picker = new OpenFileDialog { Title = "选择本机文件", Multiselect = request.TryGetProperty("multiple", out var multiple) && multiple.ValueKind == JsonValueKind.True, CheckFileExists = true })
+                    using (var picker = new OpenFileDialog { Title = InterfaceLanguage.Text("选择本机文件"), Multiselect = request.TryGetProperty("multiple", out var multiple) && multiple.ValueKind == JsonValueKind.True, CheckFileExists = true })
                         result = picker.ShowDialog(this) == DialogResult.OK ? RememberFiles(picker.FileNames) : new { canceled = true };
                     break;
                 case "uploadHostFiles":
@@ -573,13 +613,25 @@ internal sealed class MainWindow : Form
                     result = true; break;
                 case "appearance":
                     var mode = request.Text("mode"); var background = request.Text("background");
-                    if (mode is not ("system" or "light" or "dark") || !System.Text.RegularExpressions.Regex.IsMatch(background, "^#[0-9a-fA-F]{6}$"))
+                    if (mode is not ("system" or "light" or "dark") || !WindowChrome.TryParseHexColor(background, out var bgColor))
                         throw new InvalidDataException("外观参数无效");
                     var foreground = request.Text("foreground");
-                    BackColor = ColorTranslator.FromHtml(background); web.DefaultBackgroundColor = BackColor;
-                    var ink = System.Text.RegularExpressions.Regex.IsMatch(foreground, "^#[0-9a-fA-F]{6}$")
-                        ? ColorTranslator.FromHtml(foreground) : WindowChrome.ContrastingText(BackColor);
-                    chrome = new WindowChrome(BackColor, ink, request.Text("variant") == "dark");
+                    BackColor = bgColor; web.DefaultBackgroundColor = BackColor;
+                    var ink = WindowChrome.TryParseHexColor(foreground, out var fgColor)
+                        ? fgColor : WindowChrome.ContrastingText(BackColor);
+                    this.message.ForeColor = ink;
+                    hasWorkbenchAppearance = true;
+                    chrome = WindowChrome.FromAppearance(
+                        BackColor,
+                        ink,
+                        request.Text("variant") == "dark",
+                        menuBackground: request.Text("menuBackground"),
+                        menuForeground: request.Text("menuForeground"),
+                        muted: request.Text("muted"),
+                        border: request.Text("border"),
+                        hover: request.Text("hover"),
+                        selected: request.Text("selected"),
+                        danger: request.Text("danger"));
                     ApplyWindowChrome();
                     web.CoreWebView2.Profile.PreferredColorScheme = mode == "dark" ? CoreWebView2PreferredColorScheme.Dark : mode == "light" ? CoreWebView2PreferredColorScheme.Light : CoreWebView2PreferredColorScheme.Auto;
                     result = true; break;

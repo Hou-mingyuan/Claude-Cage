@@ -16,6 +16,11 @@ import (
 	"github.com/sylvinus/agent-vm/internal/remotelink"
 )
 
+const (
+	PairCodePrefix       = "CAGE1:"
+	ManualPairCodePrefix = "CAGE-"
+)
+
 // The optical channel transfers a temporary TLS client seed and the pinned
 // server identity. Neither seed nor persistent lookup token goes to the relay.
 type PairCode struct {
@@ -43,7 +48,7 @@ func NewPairCode(origin string, room relay.Invitation, host string) (PairCode, s
 		code.Relay = ""
 	}
 	b, err := json.Marshal(code)
-	return code, "CAGE1:" + string(b), err
+	return code, PairCodePrefix + string(b), err
 }
 func (p PairCode) origin() string {
 	if p.Relay == "" {
@@ -97,14 +102,17 @@ func AcceptPair(ctx context.Context, p PairCode, hostToken string, host *remotel
 func RedeemPair(ctx context.Context, raw, selectedRelay, phonePin string) (string, error) {
 	var p PairCode
 	raw = strings.TrimSpace(raw)
-	if len(raw) <= 4096 && strings.HasPrefix(raw, "CAGE-") {
-		b, err := base64.RawURLEncoding.DecodeString(raw[5:])
-		if err != nil {
-			return "", errors.New("配对码格式无效")
+	if len(raw) <= 4096 {
+		if encoded, ok := strings.CutPrefix(raw, ManualPairCodePrefix); ok {
+			b, err := base64.RawURLEncoding.DecodeString(encoded)
+			if err != nil {
+				return "", errors.New("配对码格式无效")
+			}
+			raw = string(b)
 		}
-		raw = string(b)
 	}
-	if len(raw) > 4096 || !strings.HasPrefix(raw, "CAGE1:") || json.Unmarshal([]byte(raw[6:]), &p) != nil || !pairPin(phonePin) {
+	payload, ok := strings.CutPrefix(raw, PairCodePrefix)
+	if len(raw) > 4096 || !ok || json.Unmarshal([]byte(payload), &p) != nil || !pairPin(phonePin) {
 		return "", errors.New("请扫描 Cage 电脑端的配对码")
 	}
 	if p.origin() != selectedRelay || !ValidRelayOrigin(selectedRelay) {

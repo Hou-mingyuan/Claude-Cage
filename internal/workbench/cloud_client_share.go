@@ -192,9 +192,6 @@ func (s *Server) clientProjectRoot(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := validateHostProjectData(root, profile); err != nil {
-		return "", err
-	}
 	var private []string
 	if runtime.GOOS == "windows" {
 		if strings.HasPrefix(root, `\\`) {
@@ -208,22 +205,13 @@ func (s *Server) clientProjectRoot(path string) (string, error) {
 	} else {
 		private = []string{"/proc", "/sys", "/dev", "/etc", "/boot", "/run", "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/System", "/Library", "/Applications"}
 	}
-	hosts, err := s.remote.store.List()
-	if err != nil {
-		return "", errors.New("无法核对本机 SSH 凭据位置")
-	}
-	for _, host := range hosts {
-		if host.Auth.IdentityFile != "" {
-			private = append(private, host.Auth.IdentityFile)
-		}
-	}
 	for _, p := range private {
 		if cage.StoragePathsOverlap(root, p) {
-			return "", errors.New("系统目录和包含 SSH 密钥的目录不能共享")
+			return "", errors.New("系统目录不能共享")
 		}
 		real, err := paths.Resolve(p)
 		if err == nil && cage.StoragePathsOverlap(root, real) {
-			return "", errors.New("系统目录和包含 SSH 密钥的目录不能共享")
+			return "", errors.New("系统目录不能共享")
 		}
 	}
 	return root, nil

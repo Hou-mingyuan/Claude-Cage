@@ -369,7 +369,7 @@ export function BrowserDownloads({
                       <span className="download-state">
                         {item.localSaved
                           ? tr("已保存到本机")
-                          : labels[item.state] || tr("状态待确认")}
+                          : labels[item.state] ? tr(labels[item.state]) : tr("状态待确认")}
                         {item.state === "downloading" &&
                           item.totalBytes > 0 &&
                           ` · ${Math.min(100, Math.floor((item.receivedBytes / item.totalBytes) * 100))}%`}
@@ -432,8 +432,8 @@ export function BrowserDownloads({
                                   : "icon-button download-reveal"
                               }
                               key={operation}
-                              aria-label={label}
-                              title={label}
+                              aria-label={tr(label)}
+                              title={tr(label)}
                               onClick={async () => {
                                 try {
                                   await native("browserDownloadAction", {
@@ -448,7 +448,7 @@ export function BrowserDownloads({
                               {operation === "reveal" ? (
                                 <FolderOpen size={16} />
                               ) : (
-                                label
+                                tr(label)
                               )}
                             </button>
                           ))}
@@ -478,6 +478,28 @@ export function BrowserDownloads({
                             }}
                           >
                             {retrying === item.id ? tr("正在重试…") : tr("重试保存")}
+                          </button>
+                        )}
+                        {item.retryable && item.target !== "desktop" && (
+                          <button
+                            className="download-text-action"
+                            disabled={!ready || Boolean(retrying)}
+                            onClick={async () => {
+                              setRetrying(`discard:${item.id}`);
+                              try {
+                                await api("/browser/download-discard", {
+                                  id: item.id,
+                                });
+                              } catch (error) {
+                                onStatus(error.message);
+                              } finally {
+                                setRetrying("");
+                              }
+                            }}
+                          >
+                            {retrying === `discard:${item.id}`
+                              ? tr("正在丢弃…")
+                              : tr("丢弃文件")}
                           </button>
                         )}
                       </div>

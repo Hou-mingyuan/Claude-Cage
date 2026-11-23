@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,32 @@ func TestResourceLimitsUseExistingHostShare(t *testing.T) {
 		if memory != tc.wantMemory || cpus != tc.wantCPU {
 			t.Fatal(tc, memory, cpus)
 		}
+	}
+}
+
+func TestWindowsVMCPUsStayBelowQEMUEventLimit(t *testing.T) {
+	for _, tc := range []struct {
+		goos       string
+		share, cpu int
+	}{{"windows", 96, 16}, {"windows", 32, 16}, {"windows", 16, 16}, {"windows", 4, 4}, {"linux", 96, 96}, {"darwin", 32, 32}} {
+		if got := vmCPULimit(tc.goos, tc.share); got != tc.cpu {
+			t.Fatalf("%s host with a %d CPU share: %d vCPUs", tc.goos, tc.share, got)
+		}
+	}
+	oldMem, oldCPU := host.MemGiB, host.CPUs
+	t.Cleanup(func() { host.MemGiB, host.CPUs = oldMem, oldCPU })
+	t.Setenv("AGENT_VM_HOST_SHARE", "2")
+	host.MemGiB = func() int { return 64 }
+	host.CPUs = func() int { return 192 }
+	want := vmCPULimit(runtime.GOOS, 96)
+	for _, a := range []ResourceAllocation{{Automatic: true}, {MemoryGiB: 8, CPUs: want}} {
+		if _, cpus, err := a.Limits(); err != nil || cpus != want {
+			t.Fatalf("%+v on a 192-thread host: %d %v", a, cpus, err)
+		}
+	}
+	// A larger value saved earlier never reaches the VM, and still starts it.
+	if _, cpus, err := (ResourceAllocation{MemoryGiB: 8, CPUs: want + 1}).Limits(); err != nil || cpus != want {
+		t.Fatalf("a saved %d vCPUs gave %d %v, want the host's %d", want+1, cpus, err, want)
 	}
 }
 

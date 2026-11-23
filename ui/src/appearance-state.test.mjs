@@ -253,3 +253,36 @@ test("accessible presets keep text, state colors, focus, borders and all ANSI te
       check(terminal.cursorAccent, terminal.cursor, threshold, "cursor text");
     }
 });
+
+test("derived muted color maintains clear visual hierarchy without losing legibility on soft palettes", async () => {
+  const { themeCatalog, applyThemePreset } = await import(
+    "./appearance-presets.mjs"
+  );
+  for (const variant of ["light", "dark"]) {
+    const codex = themeVariables(defaultAppearance[variant + "Theme"], variant);
+    const inkRatio = contrastRatio(codex["--ink"], codex["--paper"]);
+    const mutedRatio = contrastRatio(codex["--muted"], codex["--paper"]);
+    assert.ok(mutedRatio >= 4.5, `codex/${variant} muted contrast ${mutedRatio}`);
+    assert.ok(
+      inkRatio - mutedRatio >= 4,
+      `codex/${variant} muted should visually step down from ink`,
+    );
+  }
+  for (const item of themeCatalog) {
+    for (const variant of ["light", "dark"]) {
+      if (!item[variant]) continue;
+      const theme = applyThemePreset(
+        defaultAppearance[variant + "Theme"],
+        variant,
+        item.id,
+      );
+      const vars = themeVariables(theme, variant);
+      if (contrastRatio(vars["--ink"], vars["--paper"]) >= 5.2) {
+        assert.ok(
+          contrastRatio(vars["--muted"], vars["--paper"]) >= 4.5,
+          `${item.id}/${variant} muted contrast dropped below 4.5`,
+        );
+      }
+    }
+  }
+});

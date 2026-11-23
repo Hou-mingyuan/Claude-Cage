@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { api } from "./api";
 import "./environment-cache.css";
-import { translate, useTranslation } from "./interface-language.mjs";
+import { activeInterfaceLanguage, translate, useTranslation } from "./interface-language.mjs";
 
 function size(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -68,7 +68,7 @@ export function EnvironmentCache({ status, onConfirm }) {
       {inventory && <button disabled={disabled || !selected.length} onClick={() => mutate("clean")}>{tr("清理所选缓存")}{selected.length ? `（${selected.length}）` : ""}</button>}
     </div>
     {!status.ready && <p className="field-help">{tr("请先启动当前环境。此操作不会扫描本机其他应用的数据。")}</p>}
-    {error && <p role="alert" className="error-message">{error}</p>}
+    {error && <p role="alert" className="error-message">{tr(error)}</p>}
     {result && <div role="status" className="cache-result">
       <strong>{result.status === "partial" ? tr("部分项目未完成，请查看原因") : result.action === "clean" ? tr("缓存清理完成，恢复副本已保留") : tr("缓存恢复完成")}</strong>
       {result.outcomes.map(item => <p key={item.id}>{result.titles[item.id] || item.id}：{item.reason}</p>)}
@@ -95,7 +95,7 @@ export function EnvironmentCache({ status, onConfirm }) {
         <p className="field-help">{tr("副本仍占用磁盘空间，不会自动删除。恢复不覆盖新生成的数据。")}</p>
         {!inventory.batches.length && <p className="field-help">{tr("暂无可恢复批次。")}</p>}
         {inventory.batches.map(batch => <div className="setting-summary-row" key={batch.id}>
-          <span>{new Date(batch.created_at * 1000).toLocaleString()} · {batch.count}{" " + tr("项缓存")}</span>
+          <span>{new Date(batch.created_at * 1000).toLocaleString(activeInterfaceLanguage())} · {batch.count}{" " + tr("项缓存")}</span>
           <button disabled={disabled} onClick={() => mutate("restore", batch.id)}>{tr("恢复此批缓存")}</button>
         </div>)}
       </div>

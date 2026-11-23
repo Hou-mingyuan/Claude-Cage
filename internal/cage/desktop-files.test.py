@@ -200,6 +200,32 @@ class DesktopFileDBusTests(unittest.TestCase):
                 server.server_close()
                 socket.unlink(missing_ok=True)
 
+    def test_portal_version_four_and_open_socket_resolution(self):
+        import socket as sockmod
+        root = Path(tempfile.mkdtemp(prefix='cage-portal-v4-'))
+        self.addCleanup(shutil.rmtree, root, True)
+        # Verify portal advertises FileChooser version 4 for Electron defaultPath support.
+        portal_source = Path(__file__).with_name('desktop-files.py').read_text()
+        self.assertIn('self.new_uint(4)', portal_source)
+        self.assertIn("self.option(options, 'current_name', '') or 'download'", portal_source)
+        # Verify open_socket_path prefers $XDG_RUNTIME_DIR/files.sock when present.
+        sock_path = root / 'files.sock'
+        srv = sockmod.socket(sockmod.AF_UNIX, sockmod.SOCK_STREAM)
+        srv.bind(str(sock_path))
+        srv.listen(1)
+        old_runtime = os.environ.get('XDG_RUNTIME_DIR')
+        try:
+            os.environ['XDG_RUNTIME_DIR'] = str(root)
+            self.assertEqual(files.open_socket_path(), str(sock_path))
+            os.environ['XDG_RUNTIME_DIR'] = str(root / 'empty')
+            self.assertEqual(files.open_socket_path(), '/run/cage-desktop/files.sock')
+        finally:
+            srv.close()
+            if old_runtime is None:
+                os.environ.pop('XDG_RUNTIME_DIR', None)
+            else:
+                os.environ['XDG_RUNTIME_DIR'] = old_runtime
+
 
 if __name__ == '__main__':
     unittest.main()

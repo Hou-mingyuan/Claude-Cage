@@ -201,5 +201,15 @@ class DesktopDownloadsTests(unittest.TestCase):
                 server.server_close()
 
 
+class DesktopDownloadsDirectoryTests(unittest.TestCase):
+    def test_downloads_directory_isolates_account_desktop_instances(self):
+        base = Path.home() / '.local/share/cage/desktop-downloads'
+        account_id = 'a' * 24
+        self.assertEqual(downloads.downloads_directory(None), base)
+        self.assertEqual(downloads.downloads_directory('/run/cage-desktop'), base)
+        self.assertEqual(downloads.downloads_directory(f'/run/desktop-{account_id}'), base / f'desktop-{account_id}')
+        self.assertEqual(downloads.downloads_directory('/run/desktop-not-valid'), base)
+
+
 if __name__ == '__main__':
     unittest.main()

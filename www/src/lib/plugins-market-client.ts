@@ -132,8 +132,10 @@ function buildCard(plugin: MarketPlugin, onOpen: (plugin: MarketPlugin) => void)
   const parts: string[] = [formatPlatformList(plugin.platforms)];
   if (plugin.source?.project) {
     parts.push(plugin.source.license ? `${plugin.source.project} · ${plugin.source.license}` : plugin.source.project);
+  } else if (plugin.author?.official) {
+    parts.push('Cage 官方');
   } else if (plugin.author?.name) {
-    parts.push(plugin.author.official ? `Cage 官方 · ${plugin.author.name}` : plugin.author.name);
+    parts.push(plugin.author.name);
   } else if (plugin.minBytes > 0) {
     parts.push(formatBytes(plugin.minBytes));
   }
@@ -241,12 +243,12 @@ function initMarketplace() {
     }
     heroInfo.append(pills);
 
-    if (plugin.author?.name) {
+    if (plugin.author?.official || plugin.author?.name) {
       heroInfo.append(
         el(
           'p',
           'pm-detail-author',
-          plugin.author.official ? `Cage 官方 · ${plugin.author.name}` : `社区作者 · ${plugin.author.name}`,
+          plugin.author.official ? 'Cage 官方' : plugin.author.name,
         ),
       );
     }

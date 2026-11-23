@@ -1,0 +1,62 @@
+{
+  "zh-CN": {
+    "displayName": "插件工坊（查找与创建）",
+    "description": "让 Claude 先检索插件市场寻找现成插件；若没有合适插件，再按规范创建、校验并提交自定义 MCP 工具与侧栏页面供你审核安装。"
+  },
+  "zh-TW": {
+    "displayName": "外掛工坊（搜尋與建立）",
+    "description": "讓 Claude 先搜尋外掛市場尋找現成外掛；若沒有合適外掛，再依規範建立、驗證並提交自訂 MCP 工具與側欄頁面供你審核安裝。"
+  },
+  "ru": {
+    "displayName": "Поиск и создание плагинов",
+    "description": "Позволяет Claude сначала искать готовые плагины в каталоге, а при их отсутствии — создавать, проверять и отправлять на установку собственные."
+  },
+  "ar": {
+    "displayName": "البحث عن الإضافات وإنشاؤها",
+    "description": "يمكّن Claude من البحث أولاً في سوق الإضافات عن إضافة جاهزة، وإلا إنشاء إضافات MCP وصفحات جانبية مخصصة والتحقق منها وإرسالها للمراجعة."
+  },
+  "fa": {
+    "displayName": "جستجو و ساخت افزونه",
+    "description": "به Claude امکان می‌دهد ابتدا در بازار افزونه‌ها جستجو کند و در صورت نبود افزونه مناسب، افزونه سفارشی بسازد، بررسی کند و برای تأیید ارسال نماید."
+  },
+  "ko": {
+    "displayName": "플러그인 검색 및 제작",
+    "description": "Claude가 먼저 플러그인 마켓에서 기존 플러그인을 찾고, 없으면 직접 사용자 정의 MCP 도구와 사이드바 페이지를 제작·검증해 제출합니다."
+  },
+  "es": {
+    "displayName": "Buscar y crear complementos",
+    "description": "Permite a Claude buscar primero complementos existentes en el mercado y, si no hay ninguno, crear, validar y enviar complementos personalizados."
+  },
+  "my": {
+    "displayName": "ပလပ်အင် ရှာဖွေခြင်းနှင့် ဖန်တီးခြင်း",
+    "description": "Claude သည် စျေးကွက်တွင် ရှိပြီးသားပလပ်အင်ကို အရင်ရှာပြီး မရှိပါက စိတ်ကြိုက် MCP ကိရိယာနှင့် ဘေးဘားစာမျက်နှာကို ဖန်တီးစစ်ဆေးတင်သွင်းနိုင်စေသည်။"
+  },
+  "be": {
+    "displayName": "Пошук і стварэнне плагінаў",
+    "description": "Дазваляе Claude спачатку шукаць гатовыя плагіны ў каталогу, а пры іх адсутнасці — ствараць, правяраць і адпраўляць на ўсталяванне ўласныя."
+  },
+  "ps": {
+    "displayName": "د پلګین لټون او جوړول",
+    "description": "Claude ته اجازه ورکوي چې لومړی په بازار کې شته پلګین ولټوي، او که نه وي نو دودیز پلګین جوړ، تایید او د بیاکتنې لپاره وسپاري."
+  },
+  "prs": {
+    "displayName": "جستجو و ساخت افزونه",
+    "description": "به Claude اجازه می‌دهد ابتدا در بازار افزونه‌ها جستجو کند و اگر افزونه مناسب نبود، افزونه سفارشی بسازد، بررسی کند و برای تأیید ارسال نماید."
+  },
+  "am": {
+    "displayName": "ተሰኪ መፈለግና መፍጠር",
+    "description": "Claude በመጀመሪያ በገበያው ውስጥ ያሉ ተሰኪዎችን እንዲፈልግ፣ ካልተገኘ ደግሞ ብጁ የMCP መሣሪያዎችንና ገጾችን እንዲፈጥርና ለግምገማ እንዲያቀርብ ያስችላል።"
+  },
+  "so": {
+    "displayName": "Raadi oo Abuur Ku-xirayaal",
+    "description": "Wuxuu u oggolaadaa Claude inuu marka hore suuqa ka raadiyo ku-xirayaal diyaar ah, haddii kale uu abuuro, xaqiijiyo, oo u gudbiyo kuwo gaar ah."
+  },
+  "ti": {
+    "displayName": "ተሰኪ ድለያን ምፍጣርን",
+    "description": "Claude መጀመርያ ኣብ ዕዳጋ ዘሎ ተሰኪ ክደሊ፣ እንተዘይተረኺቡ ድማ ብሕታዊ ተሰኪ ፈጢሩ ከረጋግጽን ንግምጋም ከቕርብን የኽእል።"
+  },
+  "fr": {
+    "displayName": "Rechercher et créer des plugins",
+    "description": "Permet à Claude de chercher d’abord un plugin existant sur le marché, puis d’en créer, valider et soumettre un sur mesure si besoin."
+  }
+}

@@ -16,6 +16,9 @@ const failureHelp = "在设置中导出诊断包，并附上出错时正在执�
 // Only recognize known diagnostics. Unrecognized process output stays in the
 // existing operation log and never becomes an arbitrary user-facing message.
 func executionFailure(action string, err error, output string) error {
+	if reason, next, ok := imageDownloadFailure(output); ok {
+		return usererror.New(action, reason, next, err)
+	}
 	lower := strings.ToLower(output)
 	for _, rule := range []struct {
 		patterns     []string

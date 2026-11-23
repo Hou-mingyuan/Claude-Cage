@@ -460,12 +460,23 @@ func (d *desktopGateway) close() {
 	d.mu.Lock()
 	d.closed = true
 	d.mu.Unlock()
+	localActive := d.active != nil && d.active.mode == "local"
 	if t := d.active; t != nil && t.mode == "local" && t.state().State == "connected" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_ = suspendLocalView(ctx, t)
 		cancel()
 	}
 	d.clearSelection()
+	if localActive && d.local != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		st, err := d.local.Status(ctx)
+		if err == nil && st.Known && st.ServiceRunning && !st.Busy && !st.Running && st.LiveTerminals == 0 {
+			if relErr := d.local.Release(ctx, st, false); relErr != nil {
+				diagnostics.Log("warn", "desktop-gateway", "idle local controller release on close skipped: "+relErr.Error())
+			}
+		}
+		cancel()
+	}
 }
 
 func (d *desktopGateway) handle(path string, w http.ResponseWriter, r *http.Request) bool {

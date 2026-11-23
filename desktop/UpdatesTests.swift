@@ -115,6 +115,35 @@ enum UpdatesTests {
         try CageUpdateFiles.restore(backup: backup, target: old, manager: .default)
         try verifyPersonalData()
         try rejects("unsigned application refused") { _ = try CageUpdateFiles.signingInfo(old, bundle: true) }
+        do {
+            _ = try CageUpdateFiles.signingInfo(old, bundle: true, currentApp: true)
+            throw CageUpdateError("TEST FAILED: unsigned current app unexpectedly accepted")
+        } catch {
+            try expect(error.localizedDescription.contains("当前应用") && !error.localizedDescription.contains("更新应用"),
+                       "unreadable current app signing failure must not blame the update package: \(error.localizedDescription)")
+        }
+        do {
+            _ = try CageUpdateFiles.signingInfo(URL(fileURLWithPath: CommandLine.arguments[0]), bundle: false, currentApp: true)
+            throw CageUpdateError("TEST FAILED: ad-hoc current binary unexpectedly accepted")
+        } catch {
+            try expect(error.localizedDescription.contains("当前 macOS 应用") && error.localizedDescription.contains("状态码") && !error.localizedDescription.contains("更新应用"),
+                       "ad-hoc current app signing failure must not blame the update package: \(error.localizedDescription)")
+        }
+
+        // Kernel process exit monitor must detect a real process exiting without AppKit KVO.
+        do {
+            let child = Process()
+            child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            child.arguments = ["5"]
+            try child.run()
+            let monitor = CageUpdateProcessMonitor(pid: child.processIdentifier)
+            try expect(!monitor.hasExited, "running process reported as exited")
+            child.terminate()
+            child.waitUntilExit()
+            try expect(monitor.waitForExit(timeout: 3), "kqueue process monitor did not detect process exit")
+            try expect(monitor.hasExited, "exited monitor stayed false")
+            try expect(!CageUpdateFiles.parentHasExited(getppid()), "live parent reported as exited")
+        }
 
         // A real child that ignores SIGTERM must not keep cancellation pending.
         let running = root.appendingPathComponent("validation-running")
@@ -205,6 +234,118 @@ enum UpdatesTests {
         let invocationData = try Data(contentsOf: countFile)
         try expect(String(data: invocationData, encoding: .utf8) == "x", "native menu or install bypassed cooldown")
         print("PASS: native update failure retained retry deadline and blocked early check/install")
+
+        // Unsigned / source-built macOS bundles installed in /Applications or ~/Applications
+        // can upgrade in-place to the pinned official signed release; all other unsigned
+        // builds stay on manual update without downloading. Signed bundles keep strict same-team updates.
+        do {
+            let homeApps = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Cage.app")
+            try expect(CageUpdateFiles.isInstalledApplicationsPath(URL(fileURLWithPath: "/Applications/Cage.app")), "/Applications/Cage.app must be recognized")
+            try expect(CageUpdateFiles.isInstalledApplicationsPath(homeApps), "~/Applications/Cage.app must be recognized")
+            try expect(!CageUpdateFiles.isInstalledApplicationsPath(root.appendingPathComponent("_output/Cage.app")), "local _output build must not be treated as installed")
+            try expect(!CageUpdateFiles.isInstalledApplicationsPath(URL(fileURLWithPath: "/Volumes/Cage/Cage.app")), "DMG volume path must not be treated as installed")
+            try expect(!CageUpdateFiles.isInstalledApplicationsPath(URL(fileURLWithPath: "/Applications/Nested/Cage.app")), "nested directory under /Applications must not be treated as installed")
+
+            let legacyPlanJSON = Data("""
+            {"version":"0.2.1","team":"WBR2J2NFHN","target":"/Applications/Cage.app","candidate":"/tmp/Cage.app","backup":"/tmp/previous.app","parentPID":1,"resultPath":"/tmp/last-result.json"}
+            """.utf8)
+            let legacyPlan = try JSONDecoder().decode(CageUpdatePlan.self, from: legacyPlanJSON)
+            try expect(!legacyPlan.unsignedSource, "legacy update plan without unsignedSource must default to false")
+            let upgradePlan = CageUpdatePlan(version: "0.2.1", team: cageOfficialAppleTeamID, target: "/Applications/Cage.app", candidate: "/tmp/Cage.app", backup: "/tmp/previous.app", parentPID: 1, resultPath: "/tmp/last-result.json", unsignedSource: true)
+            let roundTripped = try JSONDecoder().decode(CageUpdatePlan.self, from: try JSONEncoder().encode(upgradePlan))
+            try expect(roundTripped.unsignedSource, "unsignedSource flag must round-trip through CageUpdatePlan")
+
+            let validUnsigned = root.appendingPathComponent("valid-unsigned.app")
+            let validUnsignedResources = validUnsigned.appendingPathComponent("Contents/Resources")
+            try CageUpdateFiles.privateDirectory(validUnsignedResources)
+            let validInfo: [String: Any] = [
+                "CFBundleIdentifier": cageUpdateBundleID,
+                "CFBundleExecutable": "Cage",
+                "CageVersion": "0.2.0",
+            ]
+            try PropertyListSerialization.data(fromPropertyList: validInfo, format: .xml, options: 0).write(to: validUnsigned.appendingPathComponent("Contents/Info.plist"))
+            let validControl = validUnsignedResources.appendingPathComponent("cage")
+            try Data("#!/bin/sh\nexit 0\n".utf8).write(to: validControl)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: validControl.path)
+            try CageUpdateFiles.verifyUnsignedAppIdentity(validUnsigned, version: "0.2.0")
+            try rejects("unsigned identity version mismatch rejected") {
+                try CageUpdateFiles.verifyUnsignedAppIdentity(validUnsigned, version: "0.1.9")
+            }
+            let wrongIDInfo: [String: Any] = [
+                "CFBundleIdentifier": "com.example.fork",
+                "CFBundleExecutable": "Cage",
+                "CageVersion": "0.2.0",
+            ]
+            try PropertyListSerialization.data(fromPropertyList: wrongIDInfo, format: .xml, options: 0).write(to: validUnsigned.appendingPathComponent("Contents/Info.plist"))
+            try rejects("custom fork bundle ID rejected for unsigned official upgrade") {
+                try CageUpdateFiles.verifyUnsignedAppIdentity(validUnsigned)
+            }
+
+            let eligibilityBundle = root.appendingPathComponent("eligibility.app")
+            let eligibilityResources = eligibilityBundle.appendingPathComponent("Contents/Resources")
+            try CageUpdateFiles.privateDirectory(eligibilityResources)
+            let requestsFile = root.appendingPathComponent("eligibility-requests")
+            let phaseFile = root.appendingPathComponent("eligibility-phase")
+            let fixtureScript = """
+            #!/bin/sh
+            printf '%s\\n' "$2" >> '\(requestsFile.path)'
+            phase="$(cat '\(phaseFile.path)')"
+            if [ "$2" = "download" ]; then
+              printf '%s\\n' '{"phase":"failed","message":"download-invoked","retryable":true,"retryAt":""}'
+              exit 1
+            fi
+            printf '{"phase":"%s","latestVersion":"99.0.0","message":"fixture","retryable":false,"retryAt":""}\\n' "$phase"
+            """
+            let fixtureCage = eligibilityResources.appendingPathComponent("cage")
+            try Data(fixtureScript.utf8).write(to: fixtureCage)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fixtureCage.path)
+
+            func exercise(_ operation: String, backendPhase: String, team: String?, allowUnsignedUpgrade: Bool = false, expectedArg: String, expectedPhase: String) throws -> [String: Any] {
+                try? FileManager.default.removeItem(at: requestsFile)
+                try Data(backendPhase.utf8).write(to: phaseFile)
+                var seenPhases: [String] = []
+                let candidate = CageAppUpdater(bundleURL: eligibilityBundle, onChange: { next in
+                    if let p = next["phase"] as? String { seenPhases.append(p) }
+                }, quit: {}, reconnect: {}, readTeam: {
+                    if let team { return team }
+                    throw CageUpdateError("unsigned fixture")
+                }, canUpgradeUnsigned: { allowUnsignedUpgrade })
+                _ = candidate.handle(operation)
+                let end = Date().addingTimeInterval(5)
+                while Date() < end {
+                    if let phase = candidate.handle("status")["phase"] as? String, phase == expectedPhase { break }
+                    _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+                }
+                _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
+                let recorded = (try? String(contentsOf: requestsFile, encoding: .utf8)) ?? ""
+                try expect(recorded == expectedArg + "\n", "unexpected backend op for \(operation)/\(backendPhase): got \(recorded)")
+                let finalState = candidate.handle("status")
+                try expect(finalState["phase"] as? String == expectedPhase, "expected phase \(expectedPhase), got \(String(describing: finalState["phase"]))")
+                if team == nil && !allowUnsignedUpgrade && backendPhase == "available" {
+                    try expect(!seenPhases.contains("available") && !seenPhases.contains("downloading"), "ineligible unsigned macOS build exposed automatic install")
+                }
+                return finalState
+            }
+
+            for op in ["check", "install"] {
+                let st = try exercise(op, backendPhase: "available", team: nil, allowUnsignedUpgrade: false, expectedArg: "check", expectedPhase: "manual")
+                try expect(st["latestVersion"] as? String == "99.0.0", "unsigned manual update lost latestVersion")
+                try expect((st["message"] as? String)?.contains("官方发布页") == true, "unsigned manual update omitted release guidance")
+                try expect(st["officialUpgrade"] as? Bool != true, "manual update must not advertise officialUpgrade")
+            }
+            _ = try exercise("check", backendPhase: "current", team: nil, allowUnsignedUpgrade: false, expectedArg: "check", expectedPhase: "current")
+
+            let unsignedUpgradeCheck = try exercise("check", backendPhase: "available", team: nil, allowUnsignedUpgrade: true, expectedArg: "check", expectedPhase: "available")
+            try expect(unsignedUpgradeCheck["officialUpgrade"] as? Bool == true, "eligible unsigned macOS build must mark officialUpgrade on available")
+            _ = try exercise("install", backendPhase: "available", team: nil, allowUnsignedUpgrade: true, expectedArg: "download", expectedPhase: "failed")
+            let unsignedUpgradeCurrent = try exercise("check", backendPhase: "current", team: nil, allowUnsignedUpgrade: true, expectedArg: "check", expectedPhase: "current")
+            try expect(unsignedUpgradeCurrent["officialUpgrade"] as? Bool != true, "current phase must clear officialUpgrade")
+
+            let signedCheck = try exercise("check", backendPhase: "available", team: "WBR2J2NFHN", allowUnsignedUpgrade: true, expectedArg: "check", expectedPhase: "available")
+            try expect(signedCheck["officialUpgrade"] as? Bool != true, "signed macOS build must not mark officialUpgrade")
+            _ = try exercise("install", backendPhase: "available", team: "WBR2J2NFHN", allowUnsignedUpgrade: true, expectedArg: "download", expectedPhase: "failed")
+            print("PASS: macOS updater unsigned manual fallback, eligible official upgrade, and signed download eligibility")
+        }
 
         if CommandLine.arguments.count == 2 {
             let signed = URL(fileURLWithPath: CommandLine.arguments[1])

@@ -4,7 +4,8 @@ import { api, native, nativeAvailable } from "./api";
 import { getClientContext } from "./client-context.mjs";
 import { Modal } from "./modal";
 import { stopAndExit } from "./quit";
-import { useTranslation } from "./interface-language.mjs";
+import { activeInterfaceLanguage, useTranslation } from "./interface-language.mjs";
+import { localizeBackendMessage } from "./backend-message.mjs";
 
 const activePhases = new Set(["checking", "downloading", "downloaded", "verifying", "installing"]);
 const checkInterval = 6 * 60 * 60 * 1000;
@@ -93,7 +94,7 @@ export function useAppUpdates() {
   }, [available, run]);
   useEffect(() => {
     if (!startupFailure) return;
-    const timer = setTimeout(() => setStartupFailure(""), 8000);
+    const timer = setTimeout(() => setStartupFailure(""), 20000);
     return () => clearTimeout(timer);
   }, [startupFailure]);
   return { state, run, available, startupFailure, coolingDown, installationPrompt, setInstallationPrompt };
@@ -101,7 +102,7 @@ export function useAppUpdates() {
 
 export function AppUpdateDialog({ updates, onStatus }) {
   const tr = useTranslation();
-  const { installationPrompt, setInstallationPrompt, run } = updates;
+  const { state, installationPrompt, setInstallationPrompt, run } = updates;
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
   const attempt = useRef(null);
@@ -151,6 +152,7 @@ export function AppUpdateDialog({ updates, onStatus }) {
   </>}>
     <div className="modal-body">
       <p>{tr("更新已下载并验证。请先保存文件，点击下方按钮停止环境后安装并重启 Cage。当前终端任务会结束，项目、账户和登录状态会保留。")}</p>
+      {state.officialUpgrade && <p>{tr("当前运行的是本地未签名构建。继续安装将切换为官方签名发行版，本地源码改动不会保留；配置、账户、项目和虚拟机磁盘会保留，后续将持续接收官方自动更新。")}</p>}
       <p>{tr("取消可稍后安装，已下载的更新会保留。停止开始后，取消只推迟安装，环境仍会停止。")}</p>
       {stopping && <p role="status"><LoaderCircle size={16} className="spin" />{" " + tr("正在等待环境停止，完成后继续安装…")}</p>}
       {error && <p className="error-message" role="alert">{tr(error)}</p>}
@@ -191,10 +193,11 @@ export function AppUpdateButton({ updates }) {
     : state.phase === "installing" ? tr("正在安装更新，完成后自动重启")
     : state.phase === "checking" ? tr("正在准备更新")
     : coolingDown ? tr("等待重试更新") : failed ? tr("重试更新") : manual ? tr("查看新版本") : state.phase === "ready" ? tr("安装已下载的更新") : tr("下载更新");
-  const hint = coolingDown ? tr("{0}，可于 {1} 后重试", state.message ? tr(state.message) : tr("更新源请求受限"), new Date(state.retryAt).toLocaleString())
-    : failed ? tr("{0}，点击重试", state.message ? tr(state.message) : tr("更新未完成"))
+  const hint = coolingDown ? tr("{0}，可于 {1} 后重试", state.message ? localizeBackendMessage(state.message, tr) : tr("更新源请求受限"), new Date(state.retryAt).toLocaleString(activeInterfaceLanguage()))
+    : failed ? tr("{0}，点击重试", state.message ? localizeBackendMessage(state.message, tr) : tr("更新未完成"))
     : busy ? label
-    : manual ? tr("新版本 {0} 已发布。{1}点击打开发布页面。", state.latestVersion, state.message ? tr(state.message) + " " : "")
+    : manual ? tr("新版本 {0} 已发布。{1}点击打开发布页面。", state.latestVersion, state.message ? localizeBackendMessage(state.message, tr) + " " : "")
+    : state.officialUpgrade ? tr("更新至 {0}。当前为本地未签名构建，更新后将切换为官方签名发行版（配置、账户、项目和虚拟机磁盘会保留，本地源码改动不会保留）。", state.latestVersion)
     : tr("更新至 {0}。先下载并验证，安装前会提示你保存工作并手动停止环境。", state.latestVersion);
   const circumference = 2 * Math.PI * 15;
   return (

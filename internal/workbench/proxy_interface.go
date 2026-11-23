@@ -14,10 +14,12 @@ import (
 )
 
 var physicalProxyInterface = managedproxy.PhysicalInterface
+var proxyBindingMatches = managedproxy.BindingMatches
 
 type proxyInterfaceObservation struct {
 	name, configuration, jobID string
 	bound                      string
+	bindingMatches             bool
 	bindingErr                 error
 	err                        error
 }
@@ -41,7 +43,8 @@ func (s *Server) observeProxyInterface(ctx context.Context) proxyInterfaceObserv
 		return proxyInterfaceObservation{}
 	}
 	observed := proxyInterfaceObservation{configuration: cfg.Fingerprint(), jobID: job.ID}
-	observed.bound, observed.bindingErr = managedproxy.BoundInterface(filepath.Join(managedproxy.Dir(s.profile), "config.yaml"))
+	configPath := filepath.Join(managedproxy.Dir(s.profile), "config.yaml")
+	observed.bound, observed.bindingErr = managedproxy.BoundInterface(configPath)
 	if errors.Is(observed.bindingErr, managedproxy.ErrLocalProxyNode) {
 		return observed
 	}
@@ -49,6 +52,9 @@ func (s *Server) observeProxyInterface(ctx context.Context) proxyInterfaceObserv
 		return proxyInterfaceObservation{}
 	}
 	observed.name, observed.err = physicalProxyInterface(ctx)
+	if observed.err == nil && observed.bindingErr == nil && observed.bound == observed.name {
+		observed.bindingMatches = proxyBindingMatches(configPath, observed.name)
+	}
 	return observed
 }
 
@@ -85,7 +91,7 @@ func (s *Server) applyProxyInterfaceObservation(observed proxyInterfaceObservati
 	lost := s.proxyNetworkLost
 	retry := s.proxyNetworkRetry
 	s.mu.Unlock()
-	if observed.bindingErr != nil && !(lost && os.IsNotExist(observed.bindingErr)) || (observed.bound == observed.name && !lost) {
+	if observed.bindingErr != nil && !(lost && os.IsNotExist(observed.bindingErr)) || (observed.bindingMatches && !lost) {
 		return
 	}
 	if lost && time.Now().Before(retry) {
@@ -95,7 +101,11 @@ func (s *Server) applyProxyInterfaceObservation(observed proxyInterfaceObservati
 		return
 	}
 	// Revoke the previous report before the asynchronous recovery can start.
-	if err := s.closeProxyGate("物理网卡已变化，正在重新绑定代理并检查出口"); err != nil {
+	reason := "物理网卡已变化，正在重新绑定代理并检查出口"
+	if observed.bound == observed.name && !lost {
+		reason = "代理节点路由接口已变化，正在重新绑定代理并检查出口"
+	}
+	if err := s.closeProxyGate(reason); err != nil {
 		return
 	}
 	s.mu.Lock()

@@ -41,8 +41,8 @@ try {
     .getByRole("navigation", { name: "主导航" })
     .getByRole("button")
     .allTextContents();
-  assert.match(links[0], /工作台/);
-  assert.match(links[1], /浏览器/);
+  assert.ok(await page.getByRole("button", { name: "工作台", exact: true }).isVisible());
+  assert.ok(links.some((text) => /浏览器/.test(text)));
   await shot("running");
   await page.getByRole("button", { name: /^打开浏览器/ }).click();
   await page.getByLabel("网页地址或搜索").waitFor();
@@ -85,7 +85,7 @@ try {
   await shot("offline");
   state.status.ready = false;
   state.status.vm_running = false;
-  await page.getByRole("heading", { name: "先启动 Cage 环境" }).waitFor();
+  await page.getByRole("heading", { name: "Claude Cage" }).waitFor();
   assert.equal(await page.locator(".environment-shield.healthy").count(), 0);
   await page.setViewportSize({ width: 820, height: 558 });
   await shot("minimum");

@@ -130,9 +130,9 @@ macOS와 서명된 Windows 버전은 선택한 프록시를 통해 업데이트�
 
 이 프로젝트는 빠르게 발전하고 있습니다. 피드백을 공유하려면 커뮤니티 그룹에 가입하세요. 커뮤니티 관리자를 환영합니다.
 
-| QQ group · 273237690 | WeChat |
+| QQ group · 112745758 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

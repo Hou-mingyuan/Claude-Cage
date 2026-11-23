@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/hostbridge"
 	"github.com/sylvinus/agent-vm/internal/paths"
@@ -43,6 +42,7 @@ var hostToolsRelayScript string
 // environment's port to it.
 type hostTools struct {
 	bridge  *hostbridge.Bridge
+	control *workspaceControlBridge
 	plugins []*hostbridge.External
 	jobs    *hostbridge.Jobs
 	// problems are the reasons plugins were left out, for the user to read.
@@ -84,6 +84,9 @@ func (h *hostTools) close() {
 	if h.bridge != nil {
 		_ = h.bridge.Close()
 	}
+	if h.control != nil {
+		h.control.Close()
+	}
 	for _, plugin := range h.plugins {
 		plugin.Close()
 	}
@@ -98,7 +101,7 @@ func (h *hostTools) close() {
 // whenever the environment is known to be reachable, so a forward that
 // dropped is replaced on the next check.
 func (s *Server) ensureHostTools() {
-	if containerenv.Configured(s.profile) {
+	if s.clientOnly {
 		return
 	}
 	s.mu.Lock()
@@ -142,6 +145,10 @@ func (s *Server) startHostTools(serving bool) error {
 		return err
 	}
 	approvals := newHostApprovals()
+	approvals.remoteAsk = s.remoteApprovals.ask
+	approvals.neverAlways[workspaceControlPlugin+"/"+workspaceControlManageTool] = true
+	// Preferences include the command every new terminal runs.
+	approvals.neverAlways[workspaceControlPlugin+"/"+workspaceControlPreferencesTool] = true
 	jobs := hostbridge.NewJobs()
 	ctx, cancel := context.WithCancel(s.lifetimeContext())
 	// Plugins the user installed run beside the built-in command tool. One
@@ -149,10 +156,20 @@ func (s *Server) startHostTools(serving bool) error {
 	s.mu.Lock()
 	off := hostPluginsOff(s.preferences)
 	s.mu.Unlock()
+	var control *workspaceControlBridge
+	if serving && !slices.Contains(off, workspaceControlPlugin) {
+		if _, statErr := os.Lstat(filepath.Join(s.profile, "plugins", workspaceControlPlugin)); statErr == nil {
+			if started, ctrlErr := s.startWorkspaceControlBridge(); ctrlErr == nil {
+				control = started
+			} else {
+				diagnostics.Log("warn", "host-tools", fmt.Sprintf("workspace-control bridge error=%v", ctrlErr))
+			}
+		}
+	}
 	external, failures := hostbridge.LoadPlugins(ctx, filepath.Join(s.profile, "plugins"), hostbridge.LoadOptions{
-		Taken: []string{"run_command", "command_job"}, Off: off, Version: version.Version,
+		Taken: []string{"run_command", "command_job"}, TakenPrompts: []string{hostCommandsPlugin}, Off: off, Version: version.Version,
 		ProjectDir: s.hostActiveProjectDir(),
-		Approve:    approvals.approveTool, Guest: s.guestPluginCommand, GuestOnly: !serving, Env: s.pluginSettingsEnv})
+		Approve:    approvals.approveTool, Guest: s.guestPluginCommand, GuestOnly: !serving, Env: s.workspaceControlPluginEnv(control)})
 	var problems []string
 	pluginProblems := map[string]string{}
 	missingPrograms := map[string]string{}
@@ -204,7 +221,7 @@ func (s *Server) startHostTools(serving bool) error {
 			approvals.unasked[plugin.Manifest.Name] = true
 		}
 	}
-	tools := &hostTools{cancel: cancel, ctx: ctx, done: make(chan struct{}), plugins: external, jobs: jobs,
+	tools := &hostTools{cancel: cancel, ctx: ctx, done: make(chan struct{}), control: control, plugins: external, jobs: jobs,
 		problems: problems, pluginProblems: pluginProblems, missingPrograms: missingPrograms, serving: serving, awaitingUnlock: awaitingUnlock}
 	s.stopSecretPluginsOnLock(tools)
 	if !serving {
@@ -223,6 +240,7 @@ func (s *Server) startHostTools(serving bool) error {
 		return err
 	}
 	tools.bridge = bridge
+	s.reattachClientPluginBridge(bridge)
 	forward := fmt.Sprintf("127.0.0.1:%d:%s", hostToolsPort, bridge.Addr())
 	s.releaseHostToolsPort(ctx)
 	cmd := s.sshCommandWithForwarding(ctx, "-o", "ExitOnForwardFailure=yes", "-N", "-T", "-R", forward, s.sshTarget())
@@ -328,6 +346,33 @@ func (s *Server) restartPluginsAfterUnlock() {
 		s.closeHostTools()
 		s.ensureHostTools()
 	}()
+}
+
+// hostToolsServing reports whether host tools are currently served to Claude.
+func (s *Server) hostToolsServing() bool {
+	s.mu.Lock()
+	serving := s.hostTools != nil && s.hostTools.serving
+	s.mu.Unlock()
+	return serving
+}
+
+// syncHostToolsConfigNow immediately writes the MCP entry to all existing
+// Claude Code and Desktop profiles when host tools are active, so a newly
+// started Desktop sees the tools on its first launch without waiting for the
+// periodic refresh or requiring a restart.
+func (s *Server) syncHostToolsConfigNow(parent context.Context) {
+	if s.clientOnly || !s.hostToolsServing() {
+		return
+	}
+	token, err := s.hostToolsToken()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	if err = s.writeHostToolsConfig(ctx, token, "add"); err != nil {
+		diagnostics.Log("warn", "host-tools", fmt.Sprintf("sync error=%v", err))
+	}
 }
 
 // refreshHostToolsConfig gives the entry to profiles created while the
@@ -473,18 +518,26 @@ func (s *Server) restartProjectPlugins() <-chan struct{} {
 }
 
 // checkRestartedToolNames keeps a plugin that first started now from
-// offering a tool name another plugin already offers.
+// offering a tool or prompt name another plugin already offers.
 func (s *Server) checkRestartedToolNames(tools *hostTools, restarted *hostbridge.External) error {
 	taken := []string{"run_command", "command_job"}
+	takenPrompts := []string{hostCommandsPlugin}
 	for _, plugin := range tools.plugins {
 		if plugin != restarted {
 			taken = append(taken, plugin.Tools()...)
+			takenPrompts = append(takenPrompts, plugin.Prompts()...)
 		}
 	}
 	for _, tool := range restarted.Tools() {
 		if slices.Contains(taken, tool) {
 			restarted.Withdraw()
 			return fmt.Errorf("plugin %s: tool name %s is already in use", restarted.Manifest.Name, tool)
+		}
+	}
+	for _, prompt := range restarted.Prompts() {
+		if slices.Contains(takenPrompts, prompt) {
+			restarted.Withdraw()
+			return fmt.Errorf("plugin %s: prompt name %s is already in use", restarted.Manifest.Name, prompt)
 		}
 	}
 	return nil

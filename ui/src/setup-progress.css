@@ -1,9 +1,10 @@
 .setup-progress {
   margin: 24px auto 0;
-  padding: 20px 24px 16px;
+  padding: 22px 24px 18px;
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 16px;
+  box-shadow: var(--shadow-sm);
   text-align: left;
   min-width: 0;
 }
@@ -14,13 +15,14 @@
 .setup-stages li {
   border-top: 3px solid var(--line); padding-top: 8px;
   font-size: .8571rem; line-height: 1.4; color: var(--muted);
+  transition: border-color 180ms var(--ease-out), color 180ms var(--ease-out);
 }
 .setup-stages li[aria-current="step"] { color: var(--strong); font-weight: 600; border-color: var(--accent); }
 .setup-transfer { margin: 28px 0 20px; }
 .setup-transfer-heading { display: flex; align-items: center; gap: 12px; }
 .setup-transfer-icon {
-  width: 36px; height: 36px; display: grid; place-items: center; flex: none;
-  border-radius: 10px; color: var(--accent); background: var(--chrome);
+  width: 38px; height: 38px; display: grid; place-items: center; flex: none;
+  border-radius: 11px; color: var(--accent); background: var(--accent-soft, var(--chrome));
 }
 .setup-transfer-description { flex: 1; min-width: 0; }
 .setup-transfer-description h2 {

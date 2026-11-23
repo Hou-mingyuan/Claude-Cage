@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef } from "react";
+import { X } from "lucide-react";
 import { useTranslation } from "./interface-language.mjs";
 
 export function Modal({ title, children, onClose, wide = false, footer, anchor }) {
@@ -109,7 +110,7 @@ export function Modal({ title, children, onClose, wide = false, footer, anchor }
               aria-label={tr("关闭面板")}
               onClick={onClose}
             >
-              ×
+              <X size={17} />
             </button>
           )}
         </header>

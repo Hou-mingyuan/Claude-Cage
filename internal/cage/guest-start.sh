@@ -103,6 +103,7 @@ d['workspace']=os.environ['CAGE_WORKSPACE']
 yaml=Path(os.environ['CAGE_USER_HOME']) / '.config/claude-cage/code-server.yaml'
 d['editorPassword']=next(line.split(':',1)[1].strip() for line in yaml.read_text().splitlines() if line.startswith('password:'))
 atomic_write(p, json.dumps(d), 0o640, grp.getgrnam('cage-browser').gr_gid)
+atomic_write(p.with_name('desktop-downloads.json'), json.dumps({'workspace': d['workspace']}), 0o644)
 PYCONTROL
 sudo -u cage-browser env CAGE_LANGUAGE="$CAGE_LANGUAGE" python3 - <<'PYCODE'
 import json, os

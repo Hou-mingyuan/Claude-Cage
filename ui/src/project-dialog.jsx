@@ -201,7 +201,7 @@ export function ProjectDialog({
           </button>
           {sharing && <fieldset className="project-picker-list project-permissions" disabled={busy}>
             <legend>{tr("共享给")}{context.name || tr("当前云端 Cage")}</legend>
-            <p className="field-help">{tr("云端按需读取项目。凭据、Git 元数据和链接受限。断开连接后共享结束。")}</p>
+            <p className="field-help">{tr("云端按需读取项目。目录外访问和链接受限，断开连接后共享结束。")}</p>
             <label><input type="checkbox" checked={writeAccess} onChange={(e) => setWriteAccess(e.target.checked)} />{tr("允许云端修改和删除本机项目文件")}</label>
             <button type="button" onClick={share}>{tr("选择本机文件夹…")}</button>
           </fieldset>}

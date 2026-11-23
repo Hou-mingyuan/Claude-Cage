@@ -129,7 +129,7 @@ export function PasswordVaultSettings({ onConfirm, onDirty }) {
   return <section className="vault-settings">
     <div className="section-title"><h3>{tr("密码保险箱")}</h3><p>{tr("账号密码加密保存在这台设备，随 Cage 一起解锁和锁定。")}</p></div>
     <div className="vault-note"><ShieldCheck size={17} /><span>{tr("查看或复制密码需要再次验证 Cage 账户密码。填充后由你提交登录。")}</span></div>
-    {error && <p className="account-error" role="alert">{error}</p>}
+    {error && <p className="account-error" role="alert">{tr(error)}</p>}
     {message && <p role="status">{message}</p>}
     <div className="vault-toolbar"><label className="vault-search"><span><Search size={14} />{tr("搜索网站或账号")}</span>
       <input type="search" value={search} onChange={event => setSearch(event.target.value)} /></label>

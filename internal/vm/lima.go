@@ -413,16 +413,16 @@ func (l *Lima) Create(ctx context.Context, name, template string, s Settings, lo
 // All three locations must supply the exact release pinned by the embedded
 // template. In particular, never accept an unpinned daily image on fallback.
 func cageDebianImages(images []limatype.Image) ([]byte, error) {
-	const upstream = "https://cloud.debian.org/images/cloud/"
+	upstream := debianImageMirrors[0].base
 	var candidates []limatype.Image
 	for _, img := range images {
 		suffix, ok := strings.CutPrefix(img.Location, upstream)
 		if !ok || img.Variant != "genericcloud" || img.Digest.Validate() != nil || img.Digest.Algorithm() != "sha512" {
 			continue
 		}
-		for _, base := range []string{upstream, "https://mirrors.nju.edu.cn/debian-cdimage/cloud/", "https://mirrors.ustc.edu.cn/debian-cdimage/cloud/"} {
+		for _, mirror := range debianImageMirrors {
 			candidate := img
-			candidate.Location = base + suffix
+			candidate.Location = mirror.base + suffix
 			candidates = append(candidates, candidate)
 		}
 	}
@@ -739,6 +739,9 @@ func (l *Lima) Start(ctx context.Context, name string, log io.Writer) error {
 		settings.MemoryGiB, settings.CPUs, err = allocation.Limits()
 		if err != nil {
 			return err
+		}
+		if !allocation.Automatic && allocation.DiskGiB > 0 && int64(allocation.DiskGiB)<<30 > inst.Disk {
+			settings.DiskGiB = allocation.DiskGiB
 		}
 	}
 	if err := l.Edit(ctx, name, settings); err != nil {

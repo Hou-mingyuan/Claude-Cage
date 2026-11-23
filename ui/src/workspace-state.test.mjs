@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeBrowserTabs, mergeTabs, sameState } from "./workspace-state.mjs";
+import { mergeBrowserTabs, mergeTabs, sameState, shouldShowBrowserError } from "./workspace-state.mjs";
 
 test("sameState compares nested JSON values structurally without false negatives", () => {
   assert.equal(sameState(null, null), true);
@@ -45,4 +45,20 @@ test("mergeBrowserTabs preserves terminals and avoids replacing unchanged browse
   assert.notEqual(removed, previous);
   assert.deepEqual(removed, [previous[1]]);
   assert.equal(removed[0], previous[1]);
+});
+
+test("shouldShowBrowserError hides transient browser errors when the browser view is closed", () => {
+  const base = {
+    browserError: "读取浏览器标签页失败：连接在返回完整结果前中断。",
+    browserVisible: true,
+    managementPage: "",
+    running: true,
+    connectionError: "",
+  };
+  assert.equal(shouldShowBrowserError(base), true);
+  assert.equal(shouldShowBrowserError({ ...base, browserVisible: false }), false);
+  assert.equal(shouldShowBrowserError({ ...base, managementPage: "plugins" }), false);
+  assert.equal(shouldShowBrowserError({ ...base, running: false }), false);
+  assert.equal(shouldShowBrowserError({ ...base, connectionError: "连接中断" }), false);
+  assert.equal(shouldShowBrowserError({ ...base, browserError: "" }), false);
 });

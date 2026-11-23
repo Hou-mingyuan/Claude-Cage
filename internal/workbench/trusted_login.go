@@ -27,6 +27,24 @@ func (s *Server) hasTrustedView(r *http.Request) bool {
 	return err == nil && equalSecret(c.Value, trustedViewProof(s.token))
 }
 
+// remoteDesktopProof authenticates a desktop client that established its
+// session via SSH server-entry. Browsers and paired phones never receive it.
+func remoteDesktopProof(token string) string {
+	digest := sha256.Sum256([]byte("trusted remote desktop\x00" + token))
+	return hex.EncodeToString(digest[:])
+}
+
+func (s *Server) hasRemoteDesktopView(r *http.Request) bool {
+	c, err := r.Cookie(s.cookieName() + "-remote-desktop")
+	return err == nil && equalSecret(c.Value, remoteDesktopProof(s.token))
+}
+
+// hasPluginControlView reports whether r comes from the local desktop window or
+// an SSH-authenticated desktop client gateway.
+func (s *Server) hasPluginControlView(r *http.Request) bool {
+	return s.hasTrustedView(r) || s.hasRemoteDesktopView(r)
+}
+
 func validTrustedID(id string) bool {
 	if id == "" {
 		return true

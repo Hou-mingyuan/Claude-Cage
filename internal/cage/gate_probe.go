@@ -34,7 +34,7 @@ func ProbeExitIP(ctx context.Context, cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return probeExitIP(ctx, e)
+	return probeExitIP(ctx, e, exitProbeReachabilityURL)
 }
 
 // exitProbeService is a fixed public IPv4 echo endpoint. Each one is reached
@@ -49,30 +49,60 @@ type exitProbeService struct {
 // The proxy resolves the names remotely. IPv4-only endpoints measure the same
 // address family as the guest policy even when the proxy is dual-stack; the
 // trace endpoint is an IPv4 literal, so its "ip=" line is the IPv4 exit.
+// Services span distinct networks and operators (Cloudflare, AWS, Akamai,
+// IPv4 literal, ipify, GeoJS) so blocking or throttling one provider does not
+// prevent exit sampling.
 var exitProbeServices = []exitProbeService{
 	{id: "icanhazip", name: "主检测服务", endpoint: "https://ipv4.icanhazip.com/"},
-	{id: "ipify", name: "备用检测服务", endpoint: "https://api.ipify.org/"},
-	{id: "cftrace", name: "第三检测服务", endpoint: "https://1.1.1.1/cdn-cgi/trace", trace: true},
+	{id: "amazonaws", name: "AWS 备用服务", endpoint: "https://checkip.amazonaws.com/"},
+	{id: "akamai", name: "Akamai 备用服务", endpoint: "https://whatismyip.akamai.com/"},
+	{id: "cftrace", name: "IP 直连检测服务", endpoint: "https://1.1.1.1/cdn-cgi/trace", trace: true},
+	{id: "ipify", name: "ipify 备用服务", endpoint: "https://api.ipify.org/"},
+	{id: "geojs", name: "GeoJS 备用服务", endpoint: "https://ipv4.geojs.io/v1/ip"},
 }
 
-// A slow service does not hold back the next one. Each service starts when
-// every earlier one has failed or after this delay, whichever comes first.
-const exitProbeStagger = 1500 * time.Millisecond
+// exitProbeReachabilityURL is the fixed target of the node latency test. It is
+// requested only after every exit service timed out, to tell a node that
+// cannot reach the internet from one whose exit blocks the echo services; its
+// response never supplies an exit IP.
+const exitProbeReachabilityURL = "https://www.gstatic.com/generate_204"
 
-func probeExitIP(ctx context.Context, e *Egress) (string, error) {
+const (
+	// exitProbeRequestTimeout bounds each individual echo service attempt.
+	exitProbeRequestTimeout = 5 * time.Second
+	// A slow service does not hold back the next one. Each service starts when
+	// every earlier one has failed or after this delay, whichever comes first.
+	// Worst-case all-timeout duration across exitProbeServices stays under
+	// diagnosticProbeTimeout so guest/browser probes receive a 503 instead of
+	// timing out without a status.
+	exitProbeStagger = time.Second
+	// diagnosticProbeTimeout bounds one synthetic guest/browser diagnostic probe.
+	diagnosticProbeTimeout = 14 * time.Second
+)
+
+// An empty reachability URL skips the follow-up request after a timeout.
+func probeExitIP(ctx context.Context, e *Egress, reachability string) (string, error) {
 	transport := &http.Transport{Proxy: nil, DialContext: e.DialContext, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("probe redirect refused") }}
-	return probeExitIPServices(ctx, client, exitProbeServices, exitProbeStagger)
+	client := &http.Client{Transport: transport, Timeout: exitProbeRequestTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("probe redirect refused") }}
+	return probeExitIPServices(ctx, client, exitProbeServices, exitProbeStagger, reachability)
 }
 
 var (
 	// ErrProxyConnectFailed reports that every exit probe failed while connecting
 	// through the configured proxy (before TLS or HTTP response).
 	ErrProxyConnectFailed = errors.New("proxy connect failed")
+	// ErrTLSHandshakeFailed reports that every exit probe failed during TLS
+	// handshake after connecting through the configured proxy (for example EOF
+	// or timeout caused by large ClientHello packets on some proxy chains).
+	ErrTLSHandshakeFailed = errors.New("tls handshake failed")
 	// ErrExitProbeTimeout reports that every exit probe timed out waiting for a
 	// live exit IP measurement.
 	ErrExitProbeTimeout = errors.New("exit probe timed out")
+	// ErrExitProbeBlocked reports that every exit probe timed out while the
+	// same proxy reached the fixed reachability target, so the exit most
+	// likely blocks the echo services rather than the node being down.
+	ErrExitProbeBlocked = errors.New("exit probe services blocked by the proxy exit")
 )
 
 type exitProbeStageTiming struct {
@@ -81,6 +111,7 @@ type exitProbeStageTiming struct {
 	tlsMS      int64
 	ttfbMS     int64
 	proxyError bool
+	tlsError   bool
 }
 
 type exitProbeResult struct {
@@ -94,7 +125,7 @@ type exitProbeResult struct {
 // probeExitIPServices returns the first valid public IPv4 reported by any
 // service. Every request uses the same proxied client; no result is accepted
 // unless it passes the same validation, so a fallback never widens the check.
-func probeExitIPServices(ctx context.Context, client *http.Client, services []exitProbeService, stagger time.Duration) (string, error) {
+func probeExitIPServices(ctx context.Context, client *http.Client, services []exitProbeService, stagger time.Duration, reachability string) (string, error) {
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan exitProbeResult, len(services))
@@ -108,6 +139,7 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 	failures := make([]string, len(services))
 	allTimedOut := true
 	allProxyConnectFailed := true
+	allTLSHandshakeFailed := true
 	started, pending := 1, 1
 	start(0)
 	timer := time.NewTimer(stagger)
@@ -144,6 +176,9 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 		if !result.timing.proxyError {
 			allProxyConnectFailed = false
 		}
+		if !result.timing.tlsError {
+			allTLSHandshakeFailed = false
+		}
 		if pending == 0 && started < len(services) && ctx.Err() == nil {
 			start(started)
 			started, pending = started+1, pending+1
@@ -159,13 +194,73 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return "", usererror.Wrap("通过所选代理查询出口 IP", ctx.Err(), "外网保持关闭。")
 	}
+	if allTLSHandshakeFailed && !allTimedOut {
+		// The bundled core grants a SOCKS5 CONNECT before it dials the node,
+		// so a refused, unauthenticated or unroutable node also ends here as
+		// an EOF in the handshake. Only a proxy that reaches the plain
+		// connectivity address has a handshake problem.
+		if reachability != "" && ctx.Err() == nil {
+			if reached, _ := proxyReaches(ctx, client, reachability); !reached {
+				return "", usererror.New("代理节点无法连通", strings.Join(reported, "；"), "通过所选代理访问连通性检查地址也未成功，节点可能无法连通；请检查节点地址、端口、账号密码以及本机到节点的网络，或切换节点；外网保持关闭。", ErrProxyConnectFailed)
+			}
+		}
+		return "", usererror.New("TLS 握手失败", strings.Join(reported, "；"), "所选代理链路在 TLS 握手阶段中断（如返回 EOF），可尝试在“设置 → 网络与代理”开启“TLS ClientHello 分段传输兼容模式”或切换代理节点；外网保持关闭。", ErrTLSHandshakeFailed)
+	}
 	if allTimedOut {
-		return "", usererror.New("实时出口采样超时", strings.Join(reported, "；"), "实时出口采样超时，请稍后重试或切换更稳定的代理节点；外网保持关闭。", errors.Join(ErrExitProbeTimeout, context.DeadlineExceeded))
+		title := "实时出口采样超时"
+		next := "实时出口采样超时，请稍后重试或切换更稳定的代理节点；外网保持关闭。"
+		cause := errors.Join(ErrExitProbeTimeout, context.DeadlineExceeded)
+		if allTLSHandshakeFailed {
+			title = "TLS 握手超时"
+			next = "所选代理链路在 TLS 握手阶段超时，可尝试在“设置 → 网络与代理”开启“TLS ClientHello 分段传输兼容模式”或切换代理节点；外网保持关闭。"
+			cause = errors.Join(ErrTLSHandshakeFailed, cause)
+		}
+		if reachability != "" && ctx.Err() == nil {
+			// Through the bundled core a SOCKS5 CONNECT is granted before the
+			// node is dialed, so an unreachable node and an exit that blocks
+			// the echo services both end as response timeouts.
+			switch reached, timedOut := proxyReaches(ctx, client, reachability); {
+			case reached:
+				title = "实时出口采样超时"
+				next = "所选代理可以访问连通性检查地址，但出口 IP 检测服务均无响应，可能被节点出口按域名屏蔽；请更换节点，或请代理服务商放行 ipv4.icanhazip.com、checkip.amazonaws.com、whatismyip.akamai.com、1.1.1.1、api.ipify.org 或 ipv4.geojs.io 中的任一地址；外网保持关闭。"
+				cause = errors.Join(ErrExitProbeBlocked, cause)
+			case timedOut:
+				next = "通过所选代理访问连通性检查地址同样超时，节点可能无法连通；请检查节点地址、端口、账号密码以及本机到节点的网络，或切换节点；若代理链路在 TLS 握手阶段持续超时，也可尝试在“设置 → 网络与代理”开启“TLS ClientHello 分段传输兼容模式”；外网保持关闭。"
+			}
+		}
+		return "", usererror.New(title, strings.Join(reported, "；"), next, cause)
 	}
 	if allProxyConnectFailed {
 		return "", usererror.New("代理连接失败", strings.Join(reported, "；"), "未能通过所选代理建立连接，请检查代理核心与节点状态；外网保持关闭。", ErrProxyConnectFailed)
 	}
 	return "", errors.New("通过所选代理查询出口 IP 失败：" + strings.Join(reported, "；") + "。未能确认出口时，外网保持关闭。")
+}
+
+// proxyReaches reports whether one GET to endpoint returned HTTP 204 through
+// the client, and otherwise whether the request timed out.
+func proxyReaches(ctx context.Context, client *http.Client, endpoint string) (reached, timedOut bool) {
+	started := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return false, false
+	}
+	resp, err := client.Do(req)
+	if ctx.Err() != nil {
+		// The caller's deadline says nothing about the node.
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		return false, false
+	}
+	if err != nil {
+		var netErr net.Error
+		timedOut = errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr) && netErr.Timeout()
+		diagnostics.Log("warn", "exit-probe", fmt.Sprintf("service=reachability duration_ms=%d timeout=%t error=%v", time.Since(started).Milliseconds(), timedOut, usererror.Reason(err)))
+		return false, timedOut
+	}
+	_ = resp.Body.Close()
+	diagnostics.Log("info", "exit-probe", fmt.Sprintf("service=reachability duration_ms=%d status=%d", time.Since(started).Milliseconds(), resp.StatusCode))
+	return resp.StatusCode == http.StatusNoContent, false
 }
 
 func queryExitIP(ctx context.Context, client *http.Client, endpoint string) (string, error) {
@@ -184,10 +279,10 @@ func queryExitIPServiceTimed(ctx context.Context, client *http.Client, service e
 	// callbacks then run on that goroutine. Every field the callbacks touch is
 	// guarded, and the result is read as a snapshot under the same lock.
 	var (
-		mu                                                   sync.Mutex
-		timing                                               exitProbeStageTiming
-		connectStart, tlsStart, wroteRequest                 time.Time
-		connected, tlsDone, gotFirstByte, connectFailedEarly bool
+		mu                                                               sync.Mutex
+		timing                                                           exitProbeStageTiming
+		connectStart, tlsStart, wroteRequest                             time.Time
+		connected, tlsStarted, tlsDone, gotFirstByte, connectFailedEarly bool
 	)
 	timing.stage = "proxy_connect"
 	snapshot := func() exitProbeStageTiming {
@@ -212,12 +307,13 @@ func queryExitIPServiceTimed(ctx context.Context, client *http.Client, service e
 				return
 			}
 			connected = true
-			timing.stage = "tls"
+			timing.stage = "response"
 		},
 		TLSHandshakeStart: func() {
 			mu.Lock()
 			defer mu.Unlock()
 			tlsStart = time.Now()
+			tlsStarted = true
 			timing.stage = "tls"
 		},
 		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
@@ -235,7 +331,7 @@ func queryExitIPServiceTimed(ctx context.Context, client *http.Client, service e
 			mu.Lock()
 			defer mu.Unlock()
 			wroteRequest = time.Now()
-			if info.Err == nil && tlsDone {
+			if info.Err == nil && (!tlsStarted || tlsDone) {
 				timing.stage = "response"
 			}
 		},
@@ -267,8 +363,9 @@ func queryExitIPServiceTimed(ctx context.Context, client *http.Client, service e
 			if !timedOut {
 				result.proxyError = true
 			}
-		} else if !tlsDone && !gotFirstByte {
+		} else if tlsStarted && !tlsDone && !gotFirstByte {
 			result.stage = "tls"
+			result.tlsError = true
 		} else {
 			result.stage = "response"
 		}
@@ -361,8 +458,8 @@ func (g *EgressGate) dialDiagnostic(ctx context.Context) (net.Conn, error) {
 // body or headers. It is not a proxy to allowlisted shared CDN addresses.
 func (g *EgressGate) serveDiagnostic(parent context.Context, conn net.Conn, fault bool) {
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
-	ctx, cancel := context.WithTimeout(parent, 14*time.Second)
+	_ = conn.SetDeadline(time.Now().Add(diagnosticProbeTimeout + time.Second))
+	ctx, cancel := context.WithTimeout(parent, diagnosticProbeTimeout)
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
@@ -412,7 +509,9 @@ func (g *EgressGate) serveDiagnostic(parent context.Context, conn net.Conn, faul
 		writeDiagnostic(conn, 200, map[string]bool{"ok": true})
 		return
 	}
-	ip, err := probeExitIP(ctx, e)
+	// The guest diagnostic reports only availability, so it skips the
+	// follow-up reachability request that classifies a timeout.
+	ip, err := probeExitIP(ctx, e, "")
 	g.mu.Lock()
 	g.state.Counters.ProbeTCP++
 	if fault && err != nil {

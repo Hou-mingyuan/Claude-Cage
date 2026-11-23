@@ -265,11 +265,11 @@ func (s *Server) callHostTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// By what is running, not what the folder says now. A plugin on this
-	// computer acts on it; only this computer's window may drive one. A
+	// computer acts on it; only a trusted desktop window may drive one. A
 	// plugin inside the environment acts where any signed-in workbench
 	// already does.
-	if plugin.Manifest.Kind != hostbridge.KindGuest && !s.hasTrustedView(r) {
-		hostCallError(w, http.StatusForbidden, hostCallNotAllowed, "请在这台电脑上的窗口里使用这个页面")
+	if plugin.Manifest.Kind != hostbridge.KindGuest && !s.hasPluginControlView(r) {
+		hostCallError(w, http.StatusForbidden, hostCallNotAllowed, "请在受信任的 Cage 窗口里使用这个页面")
 		return
 	}
 	switch body.Method {

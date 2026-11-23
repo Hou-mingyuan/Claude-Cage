@@ -58,6 +58,75 @@ func TestLinuxClipboardCommandFitsWindowsProcessLimit(t *testing.T) {
 	}
 }
 
+func TestDesktopClipboardCommandIsScopedAndValidatesID(t *testing.T) {
+	s := testServer(t)
+	id := strings.Repeat("a", 24)
+	cmd, _, err := s.clipboardCommand(t.Context(), "stream", clipboardFileSelection{DesktopID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], " --desktop "+id) {
+		t.Fatal("desktop clipboard did not select the requested instance")
+	}
+	importCmd, _, err := s.clipboardCommand(t.Context(), "import", clipboardFileSelection{Session: "sess-1", DesktopID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(importCmd.Args[len(importCmd.Args)-1], " --import --session sess-1 --desktop "+id) {
+		t.Fatalf("desktop clipboard import missing scoped flags: %s", importCmd.Args[len(importCmd.Args)-1])
+	}
+	exportCmd, _, err := s.clipboardCommand(t.Context(), "export", clipboardFileSelection{User: "cage", Paths: []string{"/tmp/a.txt"}, DesktopID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(exportCmd.Args[len(exportCmd.Args)-1], " --export-user cage --paths-stdin --desktop "+id) {
+		t.Fatalf("desktop clipboard export missing scoped flags: %s", exportCmd.Args[len(exportCmd.Args)-1])
+	}
+	for _, invalid := range []string{"default", "../other", id + ";echo bad"} {
+		for _, op := range []string{"stream", "import", "export"} {
+			if _, _, err := s.clipboardCommand(t.Context(), op, clipboardFileSelection{User: "cage", DesktopID: invalid}); err == nil {
+				t.Fatalf("accepted invalid instance %q for %s", invalid, op)
+			}
+		}
+	}
+	// File selections are scoped by DesktopID so identical paths in separate PrivateTmp namespaces do not collide.
+	defaultSel := s.registerClipboardFiles([]string{"/tmp/shared.txt"}, "cage")
+	desktopSel := s.registerClipboardFiles([]string{"/tmp/shared.txt"}, "cage", id)
+	if defaultSel == desktopSel {
+		t.Fatal("file selection collided across default and isolated desktop instances")
+	}
+	if got := s.clipboardFileSelection(desktopSel); got.DesktopID != id {
+		t.Fatalf("desktop file selection lost DesktopID: %+v", got)
+	}
+}
+
+func TestClipboardSlotHandoffAcrossDesktopTargets(t *testing.T) {
+	s := testServer(t)
+	s.ready = true
+	ctx1, _, release1, ok := s.acquireClipboardSlot(t.Context(), "")
+	if !ok {
+		t.Fatal("expected initial default clipboard slot")
+	}
+	// Duplicate connection for the same target is rejected with conflict.
+	if _, _, _, dup := s.acquireClipboardSlot(t.Context(), ""); dup {
+		t.Fatal("duplicate default clipboard slot should be rejected")
+	}
+	// Switching to an account Desktop supersedes the outgoing default slot.
+	id := strings.Repeat("a", 24)
+	go func() {
+		<-ctx1.Done()
+		release1()
+	}()
+	ctx2, _, release2, ok := s.acquireClipboardSlot(t.Context(), id)
+	if !ok {
+		t.Fatal("expected account desktop clipboard slot to supersede default slot")
+	}
+	defer release2()
+	if ctx2.Err() != nil {
+		t.Fatalf("new slot context cancelled unexpectedly: %v", ctx2.Err())
+	}
+}
+
 func TestClipboardFileReleaseWaitsForArchiveReader(t *testing.T) {
 	s := testServer(t)
 	var released [][]string

@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 
 const historyLimit = 50;
 const activeLimit = 50;
+const recoverableLimit = 50;
 const guidPattern = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
 const terminalStates = new Set(["saved", "failed", "canceled"]);
 
@@ -27,6 +28,10 @@ export class DownloadManager {
     } catch { return false; }
   }
 
+  isRecoverable(record) {
+    return record.state === "failed" && record.sourceReady && this.sourceExists(record.id);
+  }
+
   restore() {
     try {
       if (!existsSync(this.manifest)) return;
@@ -40,7 +45,7 @@ export class DownloadManager {
         data = buffer.subarray(0, size);
       } finally { closeSync(fd); }
       const records = JSON.parse(data);
-      if (!Array.isArray(records) || records.length > activeLimit + historyLimit) throw new Error("Invalid download manifest");
+      if (!Array.isArray(records) || records.length > activeLimit + recoverableLimit + historyLimit) throw new Error("Invalid download manifest");
       for (const item of records) {
         if (!guidPattern.test(item.id) || typeof item.name !== "string" || item.name.length > 1024 || basename(item.name) !== item.name) continue;
         const record = { id: item.id, name: item.name, state: item.state,
@@ -68,7 +73,21 @@ export class DownloadManager {
   }
 
   prune() {
-    const finished = [...this.records.values()].filter(r => terminalStates.has(r.state));
+    // Keep failed downloads that still have a complete staged source separate
+    // from ordinary history so newer saves cannot orphan recoverable files.
+    const finished = [];
+    for (const record of this.records.values()) {
+      if (!terminalStates.has(record.state)) continue;
+      if (this.isRecoverable(record)) {
+        record.retryable = true;
+        continue;
+      }
+      if (record.state === "failed") {
+        record.retryable = false;
+        record.sourceReady = false;
+      }
+      finished.push(record);
+    }
     for (const record of finished.slice(0, Math.max(0, finished.length - historyLimit))) this.records.delete(record.id);
   }
 
@@ -103,11 +122,19 @@ export class DownloadManager {
 
   begin(id, name) {
     if (!guidPattern.test(id) || typeof name !== "string" || !name || name.length > 1024 || basename(name) !== name) return;
-    const active = [...this.records.values()].filter(r => !terminalStates.has(r.state)).length;
+    let active = 0, recoverable = 0;
+    for (const item of this.records.values()) {
+      if (!terminalStates.has(item.state)) active++;
+      else if (this.isRecoverable(item)) recoverable++;
+    }
     const record = { id, name, state: "downloading", receivedBytes: 0, totalBytes: 0, retryable: false, sourceReady: false };
     if (active >= activeLimit) {
       record.state = "canceled";
       record.error = "同时下载的文件过多，请等待部分下载完成后重试。";
+      void Promise.resolve(this.cancel(id)).catch(() => {});
+    } else if (recoverable >= recoverableLimit) {
+      record.state = "canceled";
+      record.error = "待处理的失败下载过多，请先重试、另存为或丢弃现有失败下载后再试。";
       void Promise.resolve(this.cancel(id)).catch(() => {});
     }
     this.records.set(id, record);
@@ -147,6 +174,34 @@ export class DownloadManager {
     return { ok: true };
   }
 
+  touch(record) {
+    this.records.delete(record.id);
+    this.records.set(record.id, record);
+  }
+
+  discard(id) {
+    const record = guidPattern.test(id) ? this.records.get(id) : undefined;
+    if (!record) throw new Error("下载记录不存在。");
+    if (record.state === "downloading" || record.state === "saving") {
+      throw new Error("当前下载正在进行，暂时无法丢弃。");
+    }
+    if (record.state !== "failed") {
+      throw new Error("仅支持丢弃保存失败的暂存下载。");
+    }
+    if (this.sourceExists(id)) {
+      try { unlinkSync(join(this.directory, "Downloads", id)); } catch (error) {
+        if (error?.code !== "ENOENT") throw new Error("无法移除暂存的下载文件。");
+      }
+    }
+    record.sourceReady = false;
+    record.retryable = false;
+    record.state = "canceled";
+    record.error = "已手动丢弃暂存的下载文件。";
+    this.touch(record);
+    this.publish(record);
+    return { ok: true };
+  }
+
   enqueue(record) {
     if (!this.sourceExists(record.id)) {
       record.state = "failed";
@@ -155,6 +210,7 @@ export class DownloadManager {
       this.publish(record);
       return;
     }
+    this.touch(record);
     record.state = "saving";
     record.retryable = false;
     delete record.error;

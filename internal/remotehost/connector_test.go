@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/sylvinus/agent-vm/internal/host"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -52,7 +53,7 @@ func newFixture(t *testing.T, handler http.Handler, extraHostKeys ...ssh.Signer)
 	clientSigner, _ := ssh.NewSignerFromKey(clientPrivate)
 	keyBytes, _ := x509.MarshalPKCS8PrivateKey(clientPrivate)
 	keyPath := filepath.Join(t.TempDir(), "identity")
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes}), 0600); err != nil {
+	if err := host.CreatePrivateFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes})); err != nil {
 		t.Fatal(err)
 	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")

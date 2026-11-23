@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "./api";
 import { InlineSelect } from "./inline-select";
-import { useTranslation } from "./interface-language.mjs";
+import { activeInterfaceLanguage, useTranslation } from "./interface-language.mjs";
 import { cookieEditable, cookieForm, cookieFromForm, newCookieForm, siteHostname } from "./browser-cookie-form.mjs";
 
 // The value field is masked until shown and is never logged; the form is
@@ -138,7 +138,7 @@ export function BrowserCookies({ tab, onClose }) {
     </div>}
     {editor && <CookieEditor key={editor.key || "new"} editor={editor} busy={busy} onChange={form => setEditor({ ...editor, form })}
       onCancel={() => setEditor(null)} onSave={() => run("set", editor.key || undefined, { cookie: cookieFromForm(editor.form) })} />}
-    {error && <p className="cookie-error" role="alert">{error}</p>}
+    {error && <p className="cookie-error" role="alert">{tr(error)}</p>}
     <div className="cookie-list" aria-busy={busy || loading}>
       {loading ? <p>{tr("正在读取 Cookie…")}</p> : data?.cookies.length === 0 ? <p>{tr("没有匹配的 Cookie。")}</p> : data?.cookies.map(cookie =>
         <article className="cookie-record" key={cookie.key}>
@@ -163,7 +163,7 @@ export function BrowserCookies({ tab, onClose }) {
               title={cookie.partitionKeyOpaque ? tr("此分区 Cookie 需要清空所有网站") : tr("删除此 Cookie")}
               onClick={() => run("delete", cookie.key)}><Trash2 size={14} /></button></div>
           <div className="cookie-metadata">{cookie.domain} · {tr("路径 {0}", cookie.path)} · {cookie.size} B</div>
-          <div className="cookie-metadata">{cookie.session ? tr("会话结束时过期") : tr("过期：{0}", (new Date(cookie.expires * 1000).toLocaleString()))}
+          <div className="cookie-metadata">{cookie.session ? tr("会话结束时过期") : tr("过期：{0}", (new Date(cookie.expires * 1000).toLocaleString(activeInterfaceLanguage())))}
             {cookie.secure && " · Secure"}{cookie.httpOnly && " · HttpOnly"}{cookie.sameSite && ` · SameSite=${cookie.sameSite}`}
             {(cookie.partitionKey || cookie.partitionKeyOpaque) && " · " + tr("分区：{0}", cookie.partitionKey?.topLevelSite || tr("不透明"))}</div>
           {value?.key === cookie.key && <pre className="cookie-value">{value.value || tr("（空值）")}</pre>}

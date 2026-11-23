@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { PanelLeft } from "lucide-react";
 import { api, writeClipboard } from "./api";
+import { clientStorageKey } from "./client-context.mjs";
 import { createPluginViewHost, ProtocolError, ERRORS } from "./plugin-view-host.mjs";
 import "./plugin-view.css";
 import { useTranslation } from "./interface-language.mjs";
@@ -20,7 +21,7 @@ function currentTheme() {
 
 // A page's saved state is a convenience for this viewer only, like a
 // webview's state in VS Code: it may be missing, and the page must cope.
-const stateKey = (plugin, view) => `plugin-view-state:${plugin}/${view}`;
+const stateKey = (plugin, view) => clientStorageKey(`plugin-view-state:${plugin}/${view}`);
 function loadState(key) {
   try { const value = localStorage.getItem(key); return value === null ? null : JSON.parse(value); } catch { return null; }
 }

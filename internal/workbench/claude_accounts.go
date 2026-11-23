@@ -67,13 +67,15 @@ type claudeGuestSnapshot struct {
 }
 
 type claudeAccountList struct {
-	PendingDesktop   string            `json:"pending_desktop,omitempty"`
-	DesktopRedirects map[string]string `json:"desktop_redirects,omitempty"`
-	PendingProxyNode string            `json:"pending_proxy_node,omitempty"`
-	LastNumber       uint32            `json:"last_number,omitempty"`
-	Accounts         []claudeAccount   `json:"accounts"`
-	PendingLogin     string            `json:"pending_login,omitempty"`
-	Scheduling       claudeScheduling  `json:"scheduling"`
+	PendingDesktop    string            `json:"pending_desktop,omitempty"`
+	DesktopRedirects  map[string]string `json:"desktop_redirects,omitempty"`
+	DesktopLabels     map[string]string `json:"desktop_labels,omitempty"`
+	DismissedDefaults []string          `json:"dismissed_defaults,omitempty"`
+	PendingProxyNode  string            `json:"pending_proxy_node,omitempty"`
+	LastNumber        uint32            `json:"last_number,omitempty"`
+	Accounts          []claudeAccount   `json:"accounts"`
+	PendingLogin      string            `json:"pending_login,omitempty"`
+	Scheduling        claudeScheduling  `json:"scheduling"`
 }
 
 type claudeScheduling struct {
@@ -131,6 +133,24 @@ func validClaudeID(id string) bool {
 	return len(id) == 24 && err == nil && strings.ToLower(id) == id
 }
 
+func validClaudeSubject(subject string) bool {
+	return len(subject) == 64 && strings.Trim(subject, "0123456789abcdef") == ""
+}
+
+func (list *claudeAccountList) dismissDefault(subject string) {
+	if !validClaudeSubject(subject) || slices.Contains(list.DismissedDefaults, subject) {
+		return
+	}
+	list.DismissedDefaults = append(list.DismissedDefaults, subject)
+}
+
+func (list *claudeAccountList) undismissDefault(subject string) {
+	if subject == "" || len(list.DismissedDefaults) == 0 {
+		return
+	}
+	list.DismissedDefaults = slices.DeleteFunc(list.DismissedDefaults, func(item string) bool { return item == subject })
+}
+
 func (s *Server) loadClaudeAccounts() (claudeAccountList, error) {
 	list := claudeAccountList{Accounts: []claudeAccount{}, Scheduling: (claudeScheduling{}).defaults()}
 	data, err := os.ReadFile(filepath.Join(s.profile, "claude-accounts.json"))
@@ -164,6 +184,11 @@ func (s *Server) loadClaudeAccounts() (claudeAccountList, error) {
 	}
 	if list.PendingLogin != "" && (!validClaudeID(list.PendingLogin) || ids[list.PendingLogin] || profiles[list.PendingLogin]) {
 		return list, errors.New("Claude 登录记录损坏，请恢复备份")
+	}
+	for _, subject := range list.DismissedDefaults {
+		if !validClaudeSubject(subject) {
+			return list, errors.New("Claude 账号文件含无效的已移除记录，请从备份恢复")
+		}
 	}
 	if err := list.validateDesktopBindings(); err != nil {
 		return list, err
@@ -229,6 +254,10 @@ func (list claudeAccountList) find(id string) *claudeAccount {
 
 func validClaudeLabel(label string) bool {
 	return label != "" && utf8.RuneCountInString(label) <= 64 && strings.IndexFunc(label, unicode.IsControl) < 0
+}
+
+func validDesktopLabel(label string) bool {
+	return label != "" && utf8.ValidString(label) && utf8.RuneCountInString(label) <= 100 && strings.IndexFunc(label, unicode.IsControl) < 0
 }
 
 func (list *claudeAccountList) change(input claudeAccountInput) error {

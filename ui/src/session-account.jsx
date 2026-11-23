@@ -39,7 +39,7 @@ export function SessionAccount({ id, request, onChanged, compact = false, defaul
   if(!view) {
     if(!defaultOpen)return null;
     return <section className="session-account" aria-label={tr("会话账号")}><div className="session-account-options">
-      {error?<p role="alert">{error}</p>:<p>{tr("正在读取会话…")}</p>}
+      {error?<p role="alert">{tr(error)}</p>:<p>{tr("正在读取会话…")}</p>}
     </div></section>;
   }
   if(!view.supported) {
@@ -79,7 +79,7 @@ export function SessionAccount({ id, request, onChanged, compact = false, defaul
       {switching && sw.phase!=="starting" && <button disabled={busy} onClick={()=>change({action:"switch",request_id:sw.id,source_id:view.source_id,target,confirm:true})}>{tr("重试账号交接")}</button>}
       {switching && sw.phase==="preparing" && <button disabled={busy} onClick={()=>change({action:"cancel",request_id:sw.id})}>{tr("取消交接，保留原账号")}</button>}
       {switching && sw.phase==="starting" && <p>{tr("正在等待目标账号连接。请保留当前页面，或从会话列表重新打开。")}</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{tr(error)}</p>}
     </div>}
   </section>;
 }

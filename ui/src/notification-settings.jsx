@@ -319,7 +319,7 @@ export function NotificationSettings({ onUpdated }) {
 
       {error && (
         <p className="error-message" role="alert">
-          {error}
+          {tr(error)}
         </p>
       )}
     </section>

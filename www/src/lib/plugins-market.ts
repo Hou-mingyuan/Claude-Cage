@@ -33,12 +33,18 @@ export interface RawContributes {
   views?: RawPluginView[];
 }
 
+export interface RawLocalizedText {
+  displayName?: string;
+  description?: string;
+}
+
 export interface RawMarketEntry {
   name: string;
   displayName?: string;
   version: string;
   description: string;
   author?: RawMarketAuthor;
+  i18n?: Record<string, RawLocalizedText>;
   platforms?: string[];
   permissions?: string[];
   categories?: string[];
@@ -185,6 +191,16 @@ function sanitizeAuthor(author: RawMarketAuthor | undefined): RawMarketAuthor | 
   return { name, official: Boolean(author.official) };
 }
 
+function localizedZhText(i18n: Record<string, RawLocalizedText> | undefined): RawLocalizedText | undefined {
+  if (!i18n || typeof i18n !== 'object') return undefined;
+  const candidate = i18n['zh-CN'] || i18n['zh-cn'] || i18n['zh'];
+  if (!candidate || typeof candidate !== 'object') return undefined;
+  const displayName = typeof candidate.displayName === 'string' ? candidate.displayName.trim().slice(0, 80) : '';
+  const description = typeof candidate.description === 'string' ? candidate.description.trim().slice(0, 600) : '';
+  if (!displayName && !description) return undefined;
+  return { displayName: displayName || undefined, description: description || undefined };
+}
+
 const LOCAL_PLUGIN_ICONS = new Set([
   'blender',
   'browser',
@@ -297,13 +313,14 @@ export function normalizeMarketIndex(raw: unknown, baseUrl = '/'): MarketPlugin[
     const hasMcp = entry.contributes ? mcpServers.length > 0 : true;
     const hasView = views.length > 0;
     const description = typeof entry.description === 'string' ? entry.description.trim() : '';
+    const zh = localizedZhText(entry.i18n);
 
     grouped.set(entry.name, {
       name: entry.name,
-      title: (typeof entry.displayName === 'string' && entry.displayName.trim()) || fallbackTitle(entry.name),
+      title: zh?.displayName || (typeof entry.displayName === 'string' && entry.displayName.trim()) || fallbackTitle(entry.name),
       version: entry.version,
       description,
-      summary: KNOWN_ZH_SUMMARIES[entry.name] || description,
+      summary: zh?.description || KNOWN_ZH_SUMMARIES[entry.name] || description,
       kind,
       categories,
       permissions,

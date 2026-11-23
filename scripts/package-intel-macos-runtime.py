@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import urllib.request
@@ -81,13 +82,22 @@ for name in ("edk2-x86_64-code.fd", "edk2-i386-vars.fd", "bios-256k.bin", "kvmva
 provenance = {"qemu": "11.1.3", "dependencies": [], "sources": []}
 
 
+def https_context():
+    # python.org 安装的 Python 自带独立的 OpenSSL，没运行 Install Certificates.command
+    # 时一张 CA 都没有；此时改用 macOS 自带的 /etc/ssl/cert.pem，仍然校验证书。
+    context = ssl.create_default_context()
+    if context.cert_store_stats()["x509_ca"] == 0 and Path("/etc/ssl/cert.pem").is_file():
+        context.load_verify_locations("/etc/ssl/cert.pem")
+    return context
+
+
 def source_archive(name, url, digest=None):
     target = licenses / "sources" / name
     cached = cache / "downloads" / name
     if not cached.exists():
         if not url.startswith("https://"):
             raise RuntimeError("Source archive requires HTTPS")
-        with urllib.request.urlopen(url, timeout=60) as response, cached.open("xb") as output:
+        with urllib.request.urlopen(url, timeout=60, context=https_context()) as response, cached.open("xb") as output:
             shutil.copyfileobj(response, output)
     with cached.open("rb") as stream:
         actual = hashlib.file_digest(stream, "sha256").hexdigest()

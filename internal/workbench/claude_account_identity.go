@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -80,6 +81,11 @@ func (s *Server) archiveCodeReading(ctx context.Context, list *claudeAccountList
 			return empty, err
 		}
 		dest = list.bySubject(subject)
+		if dest == nil {
+			// The user deleted this account and keeps using the environment's
+			// own login. It runs as the default client without a record.
+			return claudeSelection{GuestID: "default", Subject: subject}, nil
+		}
 	} else {
 		for i := range list.Accounts {
 			owner := &list.Accounts[i]
@@ -123,6 +129,7 @@ func (s *Server) archiveCodeReading(ctx context.Context, list *claudeAccountList
 		if err := list.observe(dest.ID, reading, now); err != nil {
 			return empty, err
 		}
+		list.undismissDefault(subject)
 	}
 	if list.PendingLogin == guest {
 		if dest.ProxyNodeID == "" {
@@ -140,7 +147,7 @@ func (s *Server) archiveCodeReading(ctx context.Context, list *claudeAccountList
 }
 
 func (list *claudeAccountList) observeDefault(reading claudeGuestSnapshot, now time.Time) error {
-	if subject := reading.subject(); subject != "" {
+	if subject := reading.subject(); subject != "" && !slices.Contains(list.DismissedDefaults, subject) {
 		a := list.bySubject(subject)
 		if a == nil {
 			list.Accounts = append(list.Accounts, claudeAccount{ID: randomToken()[:24], Label: reading.email(), Source: "default"})
@@ -164,8 +171,9 @@ func (list *claudeAccountList) observeDefault(reading claudeGuestSnapshot, now t
 // using the default slot, with a fresh subject check at terminal admission.
 func (s *Server) archiveDefaultIfAvailable(ctx context.Context, list *claudeAccountList, reading claudeGuestSnapshot, now time.Time, retry bool) error {
 	subject := reading.subject()
+	dismissed := subject != "" && slices.Contains(list.DismissedDefaults, subject)
 	previous := list.bySubject(subject)
-	archive := subject != "" && (previous == nil || previous.CodeUnlinked || retry && previous.Source == "default")
+	archive := subject != "" && !dismissed && (previous == nil || previous.CodeUnlinked || retry && previous.Source == "default")
 	if err := list.observeDefault(reading, now); err != nil {
 		return err
 	}

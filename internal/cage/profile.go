@@ -51,6 +51,9 @@ func (c Config) Fingerprint() string {
 		h.Write([]byte{'\n'})
 		h.Write(extra)
 	}
+	if c.TLSClientHelloSplit {
+		h.Write([]byte("\ntls_client_hello_split=1"))
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 

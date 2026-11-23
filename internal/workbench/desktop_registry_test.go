@@ -104,3 +104,70 @@ func TestDuplicateDesktopReturnsToPreviouslyAuthorizedDefault(t *testing.T) {
 		t.Fatal("original default data and identity must be preserved", list)
 	}
 }
+
+func TestDesktopRenameAndDeletePreserveAccountState(t *testing.T) {
+	account := claudeAccount{
+		ID: strings.Repeat("a", 24), Source: "managed", Number: 4, Label: "工作账号",
+		Status: "ready", Enabled: true, Email: "work@example.org", Organization: "4491e880-4322-4cf7-8c34-c3ea9fc835e9",
+		ProxyNodeID: strings.Repeat("c", 24),
+	}
+	list := claudeAccountList{Accounts: []claudeAccount{account}}
+	pending, err := list.createDesktop("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamedPending, err := list.renameDesktop(pending.ID, "  临时测试桌面  ")
+	if err != nil || renamedPending.Label != "临时测试桌面" {
+		t.Fatalf("rename pending: %+v %v", renamedPending, err)
+	}
+	// Custom label stays with the instance after login binds it to the account.
+	changed, dest, _ := list.bindDesktop(pending.ID, claudeGuestSnapshot{LoggedIn: true, Email: account.Email, Organization: account.Organization})
+	if !changed || dest != pending.ID || list.desktopEntry(pending.ID).Label != "临时测试桌面" || list.Accounts[0].Label != "工作账号" {
+		t.Fatalf("binding must preserve custom desktop label without mutating account label: %+v", list)
+	}
+	// Renaming default desktop works independently.
+	renamedDefault, err := list.renameDesktop("default", "主桌面")
+	if err != nil || renamedDefault.Label != "主桌面" {
+		t.Fatalf("rename default: %+v %v", renamedDefault, err)
+	}
+	// Duplicate redirect cleans up the retired duplicate's custom label.
+	dup, _ := list.createDesktop("")
+	if _, err := list.renameDesktop(dup.ID, "重复实例"); err != nil {
+		t.Fatal(err)
+	}
+	list.bindDesktop(dup.ID, claudeGuestSnapshot{LoggedIn: true, Email: account.Email, Organization: account.Organization})
+	if list.DesktopRedirects[dup.ID] != pending.ID || list.DesktopLabels[dup.ID] != "" {
+		t.Fatalf("redirect should drop retired custom label: %+v", list)
+	}
+	if err := list.validateDesktopBindings(); err != nil {
+		t.Fatalf("valid bindings rejected: %v", err)
+	}
+	// Validation rejects control characters and untrimmed labels.
+	if _, err := list.renameDesktop(pending.ID, "   "); err == nil {
+		t.Fatal("expected empty rename error")
+	}
+	if _, err := list.renameDesktop(pending.ID, "line1\nline2"); err == nil {
+		t.Fatal("expected control char rename error")
+	}
+	if _, err := list.renameDesktop(pending.ID, strings.Repeat("桌", 101)); err == nil {
+		t.Fatal("expected overly long rename error")
+	}
+	if list.deleteDesktop("default") {
+		t.Fatal("default desktop must not be deletable")
+	}
+	if !list.deleteDesktop(pending.ID) {
+		t.Fatal("expected bound desktop deletion to succeed")
+	}
+	if list.Accounts[0].DesktopInstanceID != "" || list.Accounts[0].DesktopStatus != "" {
+		t.Fatalf("desktop binding not cleared: %+v", list.Accounts[0])
+	}
+	if list.Accounts[0].Label != "工作账号" || list.Accounts[0].Status != "ready" || !list.Accounts[0].Enabled || list.Accounts[0].ProxyNodeID != account.ProxyNodeID {
+		t.Fatalf("deleting desktop mutated account data: %+v", list.Accounts[0])
+	}
+	if list.DesktopLabels[pending.ID] != "" || len(list.DesktopRedirects) != 0 {
+		t.Fatalf("stale desktop metadata remained: %+v", list)
+	}
+	if err := list.validateDesktopBindings(); err != nil {
+		t.Fatalf("bindings invalid after delete: %v", err)
+	}
+}

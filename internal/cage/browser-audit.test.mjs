@@ -127,3 +127,67 @@ test("local browser audit uses a syntactically valid async probe in the regular 
   assert.equal(result.device.webgl.state, "unavailable");
   assert.equal(closed, true);
 });
+
+test("settings audit falls back to a minimized window when no normal browser window is open", async () => {
+  const excluded = new Set(), createParams = [];
+  let closed = false;
+  const observation = { timezone: "America/New_York", expected_timezone: "America/New_York", language: "en-US", languages: ["en-US"], platform: "Linux x86_64" };
+  const cdp = async (method, params) => {
+    if (method === "Target.createTarget") {
+      assert.ok(excluded.has(params.url), "audit URL must be excluded before target creation");
+      createParams.push(params);
+      if (params.newWindow === false) {
+        throw new Error("Failed to open new tab - no browser is open");
+      }
+      return { targetId: "minimized-probe" };
+    }
+    if (method === "Target.attachToTarget") {
+      assert.equal(params.targetId, "minimized-probe");
+      return { sessionId: "minimized-session" };
+    }
+    if (method === "Runtime.evaluate") return { result: { value: observation } };
+    if (method === "Target.closeTarget") {
+      assert.equal(params.targetId, "minimized-probe");
+      closed = true;
+      return { success: true };
+    }
+    throw new Error("Unexpected command: " + method);
+  };
+  const result = await auditBrowser(cdp, excluded, false, "America/New_York");
+  assert.deepEqual(result, observation);
+  assert.equal(createParams.length, 2);
+  assert.equal(createParams[0].newWindow, false);
+  assert.equal(createParams[0].background, true);
+  assert.equal(createParams[1].newWindow, true);
+  assert.equal(createParams[1].background, true);
+  assert.equal(createParams[1].windowState, "minimized");
+  assert.equal(createParams[1].url, createParams[0].url);
+  assert.equal(closed, true);
+  assert.equal(excluded.size, 0);
+});
+
+test("settings audit cleans up exclusions if minimized window fallback fails", async () => {
+  const excluded = new Set();
+  let calls = 0;
+  const cdp = async (method, params) => {
+    assert.equal(method, "Target.createTarget");
+    calls++;
+    if (params.newWindow === false) throw new Error("Failed to open new tab - no browser is open");
+    throw new Error("window creation failed");
+  };
+  await assert.rejects(auditBrowser(cdp, excluded, false, "UTC"), /window creation failed/);
+  assert.equal(calls, 2);
+  assert.equal(excluded.size, 0);
+});
+
+test("settings audit does not open a new window on unrelated createTarget errors", async () => {
+  const excluded = new Set();
+  let calls = 0;
+  const cdp = async () => {
+    calls++;
+    throw new Error("Browser command timed out: Target.createTarget");
+  };
+  await assert.rejects(auditBrowser(cdp, excluded, false, "UTC"), /timed out/);
+  assert.equal(calls, 1);
+  assert.equal(excluded.size, 0);
+});

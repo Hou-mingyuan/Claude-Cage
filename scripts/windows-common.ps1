@@ -1,4 +1,4 @@
-# Shared build helpers. PowerShell 7 runs these scripts on Windows, macOS and Linux.
+﻿# Shared build helpers. PowerShell 7 runs these scripts on Windows, macOS and Linux.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
@@ -82,8 +82,10 @@ function Get-WindowsWorkbenchStorageError {
     param([string]$Profile)
     if (-not $Profile) { return }
     # Only include the fixed sharing errors in public build diagnostics.
-    $storageErrors = @('此目录包含或属于凭据、用户资料或版本控制数据，无法共享',
-        'Cage 配置、环境存储及备份不能共享')
+    $storageErrors = @('请选择具体项目，不要共享主目录、Cage 配置或包含配置的上级目录',
+        '请选择项目根目录，不要共享 Git 等版本控制元数据目录',
+        'Cage 配置、环境存储及备份不能共享',
+        'Cage 配置、环境存储、迁移备份及其上级目录不能共享给虚拟机')
     foreach ($relative in @('logs/events.jsonl', 'desktop-entry/logs/events.jsonl')) {
         $log = Join-Path $Profile $relative
         foreach ($line in (Get-Content -LiteralPath $log -Tail 64 -ErrorAction SilentlyContinue)) {
@@ -255,7 +257,12 @@ function Get-VerifiedDependency {
         # The shared fetcher resumes with HTTP Range after each interruption and
         # only publishes a file whose pinned digest matches.
         New-Item -ItemType Directory -Path $Cache -Force | Out-Null
-        Invoke-BuildTool $node @($fetcher, $Dependency.url, $Dependency.hash, $path)
+        try {
+            Invoke-BuildTool $node @($fetcher, $Dependency.url, $Dependency.hash, $path)
+        } catch {
+            if (-not $IsWindows) { throw }
+            Write-Warning "Shared curl downloader failed for $($Dependency.file); falling back to Invoke-WebRequest with HTTPS and checksum verification: $($_.Exception.Message)"
+        }
     }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         New-Item -ItemType Directory -Path $Cache -Force | Out-Null

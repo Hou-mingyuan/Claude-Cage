@@ -424,6 +424,21 @@ printf '%s\\n' "$@"
                                 cwd=self.home, text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout)["email"], self.email)
 
+    def test_default_drops_an_inherited_config_dir_naming_home_claude(self):
+        # The session channel exports CLAUDE_CONFIG_DIR, through a symlink,
+        # for the default ~/.claude; Claude must still read ~/.claude.json (#662).
+        home_config = self.home / ".claude"
+        home_config.mkdir()
+        link = self.home / "runtime-paths"
+        link.symlink_to(home_config)
+        capture = self.home / "captured-env"
+        for inherited in (str(link), str(home_config)):
+            env = {**self.env, "CLAUDE_CONFIG_DIR": inherited, "TEST_CAPTURE_ENV": str(capture)}
+            result = self.run_helper("run", "default", env=env, check=False)
+            self.assertEqual(result.returncode, 0, (inherited, result.stderr))
+            seen = dict(line.split("=", 1) for line in capture.read_text().splitlines() if "=" in line)
+            self.assertNotIn("CLAUDE_CONFIG_DIR", seen, inherited)
+
     def test_default_reuses_the_existing_configuration_and_pin(self):
         home_config = self.home / ".claude"
         self.assertEqual(json.loads(self.run_helper("snapshot", "default").stdout), {"logged_in": False})

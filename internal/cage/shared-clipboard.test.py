@@ -17,6 +17,96 @@ clipboard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(clipboard)
 
 
+class DesktopSelectionTests(unittest.TestCase):
+    def test_scoped_bridge_joins_mount_namespace_in_parent_and_keeps_worker_scoped(self):
+        with patch.object(clipboard, 'desktop_display', return_value=(':0', '/run/test/Xauthority')), \
+             patch.object(clipboard, 'enter_desktop_mount_namespace', return_value=123) as enter_mnt, \
+             patch.object(clipboard.os, 'open', return_value=11) as open_ns, \
+             patch.object(clipboard.os, 'close') as close, \
+             patch.object(clipboard, 'bridge') as bridge:
+            clipboard.bridge_desktop('a' * 24)
+            enter_mnt.assert_called_once_with('a' * 24)
+            open_ns.assert_called_once_with('/proc/123/ns/net', clipboard.os.O_RDONLY)
+            self.assertEqual(bridge.call_args.kwargs['displays'], ((':0', 'cage'),))
+            self.assertEqual(bridge.call_args.kwargs['authorities'], {':0': '/run/test/Xauthority'})
+            self.assertEqual(bridge.call_args.kwargs['namespace_fds'], (11,))
+            close.assert_called_once_with(11)
+            display_exists = bridge.call_args.kwargs['display_exists']
+            with patch.object(clipboard.Path, 'is_dir', return_value=True):
+                self.assertTrue(display_exists(':0'))
+            with patch.object(clipboard.Path, 'is_dir', return_value=False):
+                self.assertFalse(display_exists(':0'))
+
+    def test_enter_desktop_mount_namespace_validates_id_and_resets_tempdir(self):
+        with self.assertRaises(ValueError):
+            clipboard.enter_desktop_mount_namespace('../bad')
+        previous_tempdir = clipboard.tempfile.tempdir
+        clipboard.tempfile.tempdir = '/tmp/stale'
+        try:
+            with patch.object(clipboard.subprocess, 'run') as command, \
+                 patch.object(clipboard.os, 'open', return_value=17) as open_ns, \
+                 patch.object(clipboard.os, 'setns', create=True) as setns, \
+                 patch.object(clipboard.os, 'close') as close:
+                command.return_value.stdout = '456\n'
+                self.assertEqual(clipboard.enter_desktop_mount_namespace('c' * 24), 456)
+                open_ns.assert_called_once_with('/proc/456/ns/mnt', clipboard.os.O_RDONLY)
+                setns.assert_called_once_with(17, 0)
+                close.assert_called_once_with(17)
+                self.assertIsNone(clipboard.tempfile.tempdir)
+        finally:
+            clipboard.tempfile.tempdir = previous_tempdir
+
+    def test_import_and_export_cli_enter_desktop_mount_namespace(self):
+        instance = 'd' * 24
+        with patch.object(clipboard, 'enter_desktop_mount_namespace') as enter_mnt, \
+             patch.object(clipboard, 'import_files', return_value=['/tmp/cage-clipboard-1/a.txt']) as do_import, \
+             patch('builtins.print') as printed:
+            clipboard.main(['--import', '--session', 'sess-1', '--desktop', instance])
+            enter_mnt.assert_called_once_with(instance)
+            do_import.assert_called_once_with(clipboard.sys.stdin.buffer, 'sess-1')
+            printed.assert_called_once_with(json.dumps({'paths': ['/tmp/cage-clipboard-1/a.txt']}))
+
+        fake_stdin = type('FakeStdin', (), {'buffer': io.BytesIO(json.dumps(['/tmp/a.txt']).encode())})()
+        fake_stdout = type('FakeStdout', (), {'buffer': io.BytesIO()})()
+        fake_account = type('FakePwd', (), {'pw_name': 'cage', 'pw_uid': 1000, 'pw_gid': 1000})()
+        with patch.object(clipboard, 'enter_desktop_mount_namespace') as enter_mnt, \
+             patch.object(clipboard.sys, 'stdin', fake_stdin), \
+             patch.object(clipboard.sys, 'stdout', fake_stdout), \
+             patch.object(clipboard, 'CacheRegistry') as registry_cls, \
+             patch('pwd.getpwnam', return_value=fake_account), \
+             patch.object(clipboard.os, 'initgroups'), \
+             patch.object(clipboard.os, 'setgid'), \
+             patch.object(clipboard.os, 'setuid'), \
+             patch.object(clipboard, 'export_files') as do_export:
+            clipboard.main(['--export-user', 'cage', '--paths-stdin', '--desktop', instance])
+            enter_mnt.assert_called_once_with(instance)
+            registry_cls.return_value.reading.assert_called_once_with(['/tmp/a.txt'])
+            do_export.assert_called_once_with(['/tmp/a.txt'], fake_stdout.buffer)
+
+        with self.assertRaises(ValueError):
+            clipboard.main(['--import', '--unknown'])
+
+    def test_only_requested_display_is_selected(self):
+        with tempfile.TemporaryDirectory() as base:
+            instance = 'a' * 24
+            root = Path(base) / ('desktop-' + instance)
+            root.mkdir()
+            (root / 'display').write_text('0\n')
+            (root / 'Xauthority').write_bytes(b'test')
+            self.assertEqual(clipboard.desktop_display(instance, Path(base)), (':0', str(root / 'Xauthority')))
+
+    def test_invalid_instance_and_display_are_rejected(self):
+        with self.assertRaises(ValueError):
+            clipboard.desktop_display('../cage-desktop')
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base) / ('desktop-' + 'b' * 24)
+            root.mkdir()
+            (root / 'display').write_text('remote:0')
+            (root / 'Xauthority').write_bytes(b'test')
+            with self.assertRaises(ValueError):
+                clipboard.desktop_display('b' * 24, Path(base))
+
+
 class ContentChoiceTests(unittest.TestCase):
     def test_a_rich_text_copy_with_a_rendered_picture_is_text(self):
         self.assertTrue(clipboard.copies_rich_text(['TARGETS', 'text/rtf', 'UTF8_STRING', 'image/png']))

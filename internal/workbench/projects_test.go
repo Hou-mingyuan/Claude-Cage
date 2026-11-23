@@ -299,3 +299,71 @@ func TestProjectActionsUseExplicitDirectoryWithoutSwitchingProject(t *testing.T)
 		t.Fatal("rejected requests changed existing sessions")
 	}
 }
+
+func TestPrepareEnvironmentRestoresCurrentProjectFromSavedProjects(t *testing.T) {
+	s := testServer(t)
+	t.Cleanup(func() { _ = os.RemoveAll(cage.DefaultEnvironmentDir(s.profile)) })
+	project, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := writePrivate(filepath.Join(s.profile, "projects.json"), sharedProjects{Paths: []string{project}}); err != nil {
+		t.Fatal(err)
+	}
+	s.preferences.Workspace = ""
+	if err := s.prepareEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	if s.workspace() != project {
+		t.Fatalf("expected prepareEnvironment to restore workspace %q, got %q", project, s.workspace())
+	}
+	var saved Preferences
+	data, err := os.ReadFile(filepath.Join(s.profile, "workbench.json"))
+	if err != nil || json.Unmarshal(data, &saved) != nil || saved.Workspace != project {
+		t.Fatalf("restored workspace was not persisted to workbench.json: err=%v saved=%q", err, saved.Workspace)
+	}
+}
+
+func TestOpenProjectWithoutActivatePopulatesEmptyCurrentWorkspace(t *testing.T) {
+	s := testServer(t)
+	s.ready = true
+	a, _ := filepath.EvalSymlinks(t.TempDir())
+	b, _ := filepath.EvalSymlinks(t.TempDir())
+	s.projectShares = map[string]*projectShare{
+		a: {done: make(chan struct{})},
+		b: {done: make(chan struct{})},
+	}
+	s.preferences.Workspace = ""
+
+	body, _ := json.Marshal(map[string]any{"workspace": a, "add": true, "activate": false})
+	if w := request(s, "POST", "/api/projects/open", s.origin, string(body), true); w.Code != 200 {
+		t.Fatalf("first non-activating open failed: %d %s", w.Code, w.Body.String())
+	}
+	if s.workspace() != a {
+		t.Fatalf("expected empty workspace to adopt first opened project %q, got %q", a, s.workspace())
+	}
+
+	body, _ = json.Marshal(map[string]any{"workspace": b, "add": true, "activate": false})
+	if w := request(s, "POST", "/api/projects/open", s.origin, string(body), true); w.Code != 200 {
+		t.Fatalf("second non-activating open failed: %d %s", w.Code, w.Body.String())
+	}
+	if s.workspace() != a {
+		t.Fatalf("second non-activating open overwrote existing workspace %q with %q", a, s.workspace())
+	}
+}
+
+func TestRestoreProjectSharesPopulatesEmptyCurrentWorkspace(t *testing.T) {
+	s := testServer(t)
+	project, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := writePrivate(filepath.Join(s.profile, "projects.json"), sharedProjects{Paths: []string{project}}); err != nil {
+		t.Fatal(err)
+	}
+	s.projectShares = map[string]*projectShare{project: {done: make(chan struct{})}}
+	s.preferences.Workspace = ""
+	s.restoreProjectShares()
+	if s.workspace() != project {
+		t.Fatalf("expected restoreProjectShares to adopt restored project %q, got %q", project, s.workspace())
+	}
+	var saved Preferences
+	data, err := os.ReadFile(filepath.Join(s.profile, "workbench.json"))
+	if err != nil || json.Unmarshal(data, &saved) != nil || saved.Workspace != project {
+		t.Fatalf("restored workspace was not persisted: err=%v saved=%q", err, saved.Workspace)
+	}
+}

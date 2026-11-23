@@ -89,6 +89,7 @@ export function AppearanceProvider({ children }) {
       appearance.pointerCursors ? "pointer" : "default",
     );
     root.dataset.theme = variant;
+    root.dataset.preset = theme.preset || "custom";
     root.dataset.translucent = String(!theme.opaqueWindows);
     root.dataset.fontSmoothing = String(appearance.fontSmoothing);
     root.dataset.reducedMotion = String(
@@ -102,6 +103,13 @@ export function AppearanceProvider({ children }) {
         variant,
         background: variables["--sidebar"],
         foreground: variables["--sidebar-ink"],
+        menuBackground: variables["--chrome"],
+        menuForeground: variables["--ink"],
+        muted: variables["--muted"],
+        border: variables["--line"],
+        hover: variables["--hover"],
+        selected: variables["--selected"],
+        danger: variables["--danger"],
         translucent: !theme.opaqueWindows,
       }).catch(() =>
         setError("外观已应用到工作台，原生窗口未能同步，请重新打开 Cage。"),

@@ -30,7 +30,8 @@ func Parse(data []byte, sourceID string) ([]Node, error) {
 	return nodes, err
 }
 
-// Node-only import keeps remote files from changing listeners, routes, or file paths.
+// Node import keeps remote files from changing listeners, routes, or file paths.
+// Store.Import separately adopts the bounded source-specific node resolver list.
 func parseNodes(data []byte, sourceID string) ([]Node, []NodeIssue, error) {
 	if len(data) == 0 || len(data) > MaxImport {
 		return nil, nil, errors.New("配置为空或超过 8 MiB")

@@ -72,7 +72,16 @@ func CorePath() (string, error) {
 			return filepath.Clean(p), nil
 		}
 	}
-	return "", errors.New("Cage 随附代理核心缺失，请重新安装完整应用；开发构建请运行 scripts/fetch-proxy-core.sh")
+	return "", missingCoreError(name, runtime.GOOS)
+}
+
+// missingCoreError names where CorePath looks, without the host path.
+func missingCoreError(name, goos string) error {
+	build := "源码构建请运行 make cage-core"
+	if goos == "windows" {
+		build = "源码构建请运行 scripts/build-windows.ps1"
+	}
+	return fmt.Errorf("Cage 随附代理核心缺失：%s 应与 cage 可执行文件位于同一目录，或位于其上级目录的 proxy-core 中；请重新安装完整应用，%s", name, build)
 }
 func Validate(ctx context.Context, profile string, s Store) error {
 	core, err := CorePath()
@@ -176,7 +185,34 @@ func DelayError(err error) error {
 }
 
 func Running(ctx context.Context, profile string, s Store) bool {
-	return checkRunning(ctx, profile, s) == nil
+	return RunningStage(ctx, profile, s) == ""
+}
+
+// RunningStage reports a fixed diagnostic stage code when the managed proxy
+// core is not ready for the selected route. It never includes node addresses,
+// credentials, headers, or host paths.
+func RunningStage(ctx context.Context, profile string, s Store) string {
+	return runningStageError(checkRunning(ctx, profile, s))
+}
+
+func runningStageError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var core *coreError
+	if errors.As(err, &core) && core.stage != "" {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return core.stage + ".timeout"
+		}
+		return core.stage
+	}
+	if errors.Is(err, ErrLocalProxyNode) {
+		return "route.local_node"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	return "route"
 }
 
 func checkRunning(ctx context.Context, profile string, s Store) error {
@@ -270,8 +306,7 @@ func Start(ctx context.Context, profile string, s Store) error {
 		return err
 	}
 	path := filepath.Join(Dir(profile), "config.yaml")
-	bound, _ := BoundInterface(path)
-	if bound == name && Running(ctx, profile, s) {
+	if BindingMatches(path, name) && Running(ctx, profile, s) {
 		return nil
 	}
 	if err := Validate(ctx, profile, s); err != nil {

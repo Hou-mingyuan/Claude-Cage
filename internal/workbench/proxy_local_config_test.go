@@ -128,3 +128,45 @@ func TestImportLocalConfigTrustStalenessValidationAndIdempotency(t *testing.T) {
 		t.Fatal("modified original client configuration")
 	}
 }
+
+func TestImportLocalConfigSurfacesAndRejectsEncryptedClient(t *testing.T) {
+	s := testServer(t)
+	oixRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(oixRoot, "profiles"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oixRoot, "config.yaml"), []byte("mixed-port: 7890\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oixRoot, "profiles", "enc.yaml"), []byte("age-encryption.org/v1\n-> X25519 secret-ciphertext\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	oldDiscover := discoverProxyConfigs
+	t.Cleanup(func() { discoverProxyConfigs = oldDiscover })
+	discoverProxyConfigs = func(key []byte) ([]proxyimport.Config, error) {
+		return proxyimport.Scan([]proxyimport.Location{{Client: "FlClash for oixCloud", Directory: oixRoot, Layout: proxyimport.OixCloud}}, key), nil
+	}
+	w := configImportRequest(s, "GET", "/api/proxy/local-configs", "", true)
+	if w.Code != 200 || strings.Contains(w.Body.String(), oixRoot) || strings.Contains(w.Body.String(), "secret-ciphertext") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var result struct {
+		Configs []proxyimport.Config `json:"configs"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Configs) != 1 {
+		t.Fatal(err, w.Body.String())
+	}
+	entry := result.Configs[0]
+	if entry.Client != "FlClash for oixCloud" || entry.Nodes != 0 || !strings.Contains(entry.Error, "age") {
+		t.Fatalf("unexpected local config entry: %+v", entry)
+	}
+	before, _ := managedproxy.Load(s.profile)
+	configImportRequest(s, "POST", "/api/proxy/import-local", `{"id":"`+entry.ID+`"}`, true)
+	if job := awaitJobIdle(t, &s.jobs); !strings.Contains(job.Error, "age") {
+		t.Fatalf("expected encrypted rejection error, got %+v", job)
+	}
+	after, _ := managedproxy.Load(s.profile)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("encrypted local config import modified store")
+	}
+}

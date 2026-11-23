@@ -265,3 +265,38 @@ func TestStoppedVMSkipsPhysicalInterfaceProbe(t *testing.T) {
 		t.Fatalf("running VM was not observed: probes=%d", probes)
 	}
 }
+
+func TestNodeRouteInterfaceDriftRevokesGateAndRebinds(t *testing.T) {
+	prevPhysical, prevMatches := physicalProxyInterface, proxyBindingMatches
+	t.Cleanup(func() {
+		physicalProxyInterface = prevPhysical
+		proxyBindingMatches = prevMatches
+	})
+	s, gate := interfaceMonitorServer(t)
+	grantTestGate(t, gate)
+	// Physical interface stays en0, while the per-node route interface (e.g.
+	// Tailscale) has drifted out of sync with config.yaml.
+	physicalProxyInterface = func(context.Context) (string, error) { return "en0", nil }
+	proxyBindingMatches = func(string, string) bool { return false }
+
+	observed := s.observeProxyInterface(context.Background())
+	s.op.Lock()
+	s.applyProxyInterfaceObservation(observed)
+	s.mu.Lock()
+	queued := s.jobs.snapshot().Kind == "proxy-network" && s.jobs.snapshot().Running
+	s.mu.Unlock()
+	status := gate.Status()
+	finished := make(chan struct{})
+	s.launch(httptest.NewRecorder(), "stop", func() error { close(finished); return nil })
+	s.op.Unlock()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("stop could not cancel route-interface recovery")
+	}
+	s.op.Lock()
+	s.op.Unlock()
+	if !queued || status.Mode != cage.GateClosed || !strings.Contains(status.Reason, "路由接口") {
+		t.Fatalf("queued=%v gate=%+v", queued, status)
+	}
+}

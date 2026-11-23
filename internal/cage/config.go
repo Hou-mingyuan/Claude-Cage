@@ -31,6 +31,9 @@ type Config struct {
 	ExitPolicy      ExitPolicy            `json:"exit_policy"`
 	// DNS holds backup and bootstrap resolvers from dns.json beside this file.
 	DNS DNSOptions `json:"-"`
+	// TLSClientHelloSplit is loaded from workbench.json beside this file so
+	// older versions with DisallowUnknownFields on config.json stay compatible.
+	TLSClientHelloSplit bool `json:"-"`
 }
 
 func DefaultConfig() Config {
@@ -60,8 +63,20 @@ func Load(path string) (Config, error) {
 	if c.DNS, err = loadDNSOptions(filepath.Dir(path)); err != nil {
 		return c, err
 	}
+	c.TLSClientHelloSplit = loadTLSClientHelloSplit(filepath.Dir(path))
 	c.GuestProfile, err = guestprofile.Load(filepath.Dir(path))
 	return c, err
+}
+
+func loadTLSClientHelloSplit(dir string) bool {
+	var prefs struct {
+		TLSClientHelloSplit bool `json:"tls_client_hello_split"`
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "workbench.json"))
+	if err != nil || len(data) > 1<<20 || json.Unmarshal(data, &prefs) != nil {
+		return false
+	}
+	return prefs.TLSClientHelloSplit
 }
 
 func (c Config) Validate() error {

@@ -130,9 +130,9 @@ Si aad u hesho tusmada buuxda, eeg [Tusmada dhokumentiyada](docs/README.md).
 
 Mashruucu si xawli ah ayuu u socdaa. Ku biir kooxda bulshada si aad ula wadaagto jawaab celinta; ilaaliyayaasha bulshada waa la soo dhawaynayaa.
 
-| QQ group · 273237690 | WeChat |
+| QQ group · 112745758 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

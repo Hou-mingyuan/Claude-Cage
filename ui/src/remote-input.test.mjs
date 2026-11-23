@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { webcrypto } from "node:crypto";
+import { translate } from "./message-catalog.mjs";
 import { caretPollDelay, caretPollFast, caretFreshFor } from "./caret-poll.mjs";
 const source = readFileSync(
   new URL("./remote-input.js", import.meta.url),
@@ -72,6 +73,7 @@ function fixture(native = false, browserComposition = false, options = {}) {
     caretPollDelay,
     caretPollFast,
     caretFreshFor,
+    translate,
     Promise,
     Map,
     Set,
@@ -121,6 +123,8 @@ function fixture(native = false, browserComposition = false, options = {}) {
     {
       mode: () => mode,
       systemClipboard: () => systemClipboard,
+      clipboardActive: options.clipboardActive,
+      syncClipboard: options.syncClipboard,
       preparePaste: options.preparePaste,
       copyText: options.copyText,
       onStatus: (t) => statuses.push(t),
@@ -277,6 +281,18 @@ test("a private browser clipboard uses its surface path while OS sharing is acti
     const context = f.armCopy();
     await f.controller.receiveCopy({ id: "tab-1", text: "private browser copy", context });
     assert.deepEqual(f.writes, ["private browser copy"]);
+  } finally { f.controller.dispose(); }
+});
+
+test("a desktop uses its scoped clipboard and preserves held Control during paste", async () => {
+  let synced = 0;
+  const f = fixture(true, false, { clipboardActive: () => true, syncClipboard: async () => { synced++; } });
+  try {
+    f.key("keydown", "Control", "ControlLeft", { ctrlKey: true });
+    await f.controller.readAndPaste();
+    assert.equal(synced, 1);
+    assert.equal(f.reads(), 0);
+    assert.ok(!f.keys.some(([sym, , down]) => sym === 0xffe3 && down === false));
   } finally { f.controller.dispose(); }
 });
 
@@ -1065,5 +1081,41 @@ test('remote hover shape updates even without an editable focus and rejects arbi
       await clock.advance(2500);
       assert.ok(readings > before);
     } finally { f.controller.dispose(); }
+  });
+
+  test("copy succeeds while Windows native input owns focus and document.hasFocus is false", async () => {
+    const clock = fakeClock();
+    const nativeWrites = [];
+    let hasFocus = true;
+    const f = fixture(true, true, {
+      ...clock,
+      surface: {
+        width: 800,
+        height: 600,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+      },
+      caretRect: async () => ({ available: true, context: "b".repeat(32), rect: [240, 120, 0, 24] }),
+      native: async (name, value) => {
+        if (name === "clipboardRevision") return 7;
+        if (name === "clipboardSyncWrite") { nativeWrites.push(value); return { revision: 8 }; }
+        return true;
+      },
+    });
+    f.doc.hasFocus = () => hasFocus;
+    f.doc.visibilityState = "visible";
+    f.win.cageNativeIMEAvailable = true;
+    try {
+      f.rfb.focus();
+      await clock.advance(0);
+      // Native Win32 IME box now owns focus, so WebView2 reports document.hasFocus() === false.
+      hasFocus = false;
+      const context = f.armCopy();
+      assert.ok(context);
+      await f.controller.receiveCopy({ id: "tab-1", text: "windows native copy", context });
+      assert.equal(nativeWrites.length, 1);
+      assert.equal(nativeWrites[0].text, "windows native copy");
+    } finally {
+      f.controller.dispose();
+    }
   });
 }

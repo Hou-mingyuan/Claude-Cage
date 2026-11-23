@@ -130,9 +130,9 @@ Pour l'index complet, voir [Index des documents](docs/README.md).
 
 Le projet évolue rapidement. Rejoignez le groupe communautaire pour partager vos commentaires ; les responsables de la communauté sont les bienvenus.
 
-| QQ group · 273237690 | WeChat |
+| QQ group · 112745758 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

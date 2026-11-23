@@ -130,9 +130,9 @@ macOS နှင့် လက်မှတ်ထိုးထားသော Window
 
 ပရောဂျက်က အရှိန်အဟုန်နဲ့ တိုးတက်နေတယ်။ တုံ့ပြန်ချက်မျှဝေရန် ကွန်မြူနတီအဖွဲ့သို့ ဝင်ရောက်ပါ။ ရပ်ရွာထိန်းသိမ်းသူ များကို ကြိုဆိုပါတယ်။
 
-| QQ group · 273237690 | WeChat |
+| QQ group · 112745758 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

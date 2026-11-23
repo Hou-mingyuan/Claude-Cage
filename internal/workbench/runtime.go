@@ -399,11 +399,11 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 			_ = s.closeProxyGate(e.Error())
 			return e
 		}
-		bound, _ := managedproxy.BoundInterface(filepath.Join(managedproxy.Dir(s.profile), "config.yaml"))
+		configPath := filepath.Join(managedproxy.Dir(s.profile), "config.yaml")
 		// DNS settings saved since the core started reach it here: the save
 		// already restarts the environment, so reloading the core now adds no
 		// further outage and its resolvers match guest DNS and the check.
-		if bound != name || proxyDNSOutdated(p, cfg) || !managedproxy.Running(s.operationContext(), s.profile, p) {
+		if !managedproxy.BindingMatches(configPath, name) || proxyDNSOutdated(p, cfg) || !managedproxy.Running(s.operationContext(), s.profile, p) {
 			// Every core start changes the report generation, including recovery.
 			if e = s.activateProxy(p, cfg); e != nil {
 				return e

@@ -283,8 +283,8 @@ func TestRefreshIdentityAndInvalidUpdatePreserveNodes(t *testing.T) {
 }
 func TestSubscriptionFetchAndMetadata(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.UserAgent() != "clash.meta/Cage" {
-			t.Error("incorrect subscription user agent")
+		if ua := r.UserAgent(); ua != subscriptionUserAgent || strings.Contains(strings.ToLower(ua), "cage") {
+			t.Errorf("incorrect subscription user agent: %q", ua)
 		}
 		w.Header().Set("Subscription-Userinfo", "upload=2; download=3; total=100; expire=123; secret=credential")
 		io.WriteString(w, testNodes)

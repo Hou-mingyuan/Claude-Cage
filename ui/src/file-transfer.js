@@ -4,13 +4,13 @@ export const shellFilePaths = (paths) => paths.map(path => `'${path.replaceAll("
 
 // Both native selection handles and browser File objects use the same guest
 // upload window. A failed batch is canceled before it can be delivered.
-export async function sendFiles(content, target, id, { valid = () => true, onProgress, windowTarget } = {}) {
+export async function sendFiles(content, target, id, { valid = () => true, onProgress, windowTarget, desktop } = {}) {
   const check = () => { if (!valid()) throw new Error("文件接收目标已切换，请返回原位置重试"); };
   check();
   const files = content.files || [];
   if (!content.fileSelection && (!files.length || files.length > 100 || files.some(file => file.size > 2 * 1024 ** 3)))
     throw new Error("每个文件不能超过 2 GB；一次最多 100 个文件。");
-  const request = await api("/input/files/start", { target, id, kind: content.kind || "paste", x: content.x, y: content.y, pid: windowTarget?.pid, window: windowTarget?.window, surface: windowTarget?.surface });
+  const request = await api("/input/files/start", { target, id, ...(desktop ? { desktop } : {}), kind: content.kind || "paste", x: content.x, y: content.y, pid: windowTarget?.pid, window: windowTarget?.window, surface: windowTarget?.surface });
   const paths = [];
   try {
     check();

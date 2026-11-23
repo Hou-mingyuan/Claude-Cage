@@ -198,3 +198,82 @@ func TestDesktopLocalAuthenticatedViewAndIdleExit(t *testing.T) {
 		t.Fatalf("released controller record still exists: %v", err)
 	}
 }
+
+func TestDesktopLocalReleaseIdleStandaloneRestartsOnlyNonDesktopIdleController(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		launchID  string
+		wantAdopt bool
+	}{
+		{"standalone-empty-launch-id", "", true},
+		{"desktop-owned-launch-id", "desktop-launch-123", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := filepath.Join(t.TempDir(), "local")
+			config := filepath.Join(profile, "config.json")
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, exe, "-test.run=^TestServeShutdownHandoff$", "-test.timeout=25s")
+			env := append(os.Environ(), "CAGE_TEST_SHUTDOWN_CONFIG="+config)
+			if tc.launchID != "" {
+				env = append(env, "CAGE_DESKTOP_START_ID="+tc.launchID)
+			}
+			cmd.Env = env
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan struct{})
+			var waitErr error
+			go func() { waitErr = cmd.Wait(); close(done) }()
+			t.Cleanup(func() {
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(3 * time.Second):
+				}
+			})
+			d := NewDesktopLocalController(config, exe).(*desktopLocal)
+			d.adoptIdleStandalone = true
+			var st DesktopLocalStatus
+			for {
+				st, err = d.Status(ctx)
+				if err == nil && st.Known && st.ServiceRunning {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("controller did not start")
+				case <-done:
+					t.Fatal("controller exited", waitErr)
+				case <-time.After(50 * time.Millisecond):
+				}
+			}
+			adopted, err := d.releaseIdleStandalone(ctx, st)
+			if err != nil || adopted != tc.wantAdopt {
+				t.Fatalf("releaseIdleStandalone = (%v, %v), want (%v, nil)", adopted, err, tc.wantAdopt)
+			}
+			if tc.wantAdopt {
+				<-done
+				if waitErr != nil {
+					t.Fatal(waitErr)
+				}
+				if _, err := os.Stat(filepath.Join(profile, "control.json")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("released standalone record still exists: %v", err)
+				}
+			} else {
+				after, err := d.Status(ctx)
+				if err != nil || !after.ServiceRunning || after.ControllerID != st.ControllerID {
+					t.Fatalf("desktop-launched controller was unexpectedly released: %+v %v", after, err)
+				}
+				if err := d.Release(ctx, after, false); err != nil {
+					t.Fatal(err)
+				}
+				<-done
+			}
+		})
+	}
+}

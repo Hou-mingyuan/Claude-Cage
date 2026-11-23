@@ -69,6 +69,8 @@ cage agent host.inspect
 
 `init` 仅创建缺失的默认配置；已有有效配置会保留，损坏配置会报错。`service.start` 只启动缺失的本机后台，复用同一构建的现有后台，拒绝替换不匹配的构建。它不启动虚拟机。`doctor` 只读取当前状态，不启动服务、不更改网络或应用修复。
 
+`service.start` 继承调用者进程所在的权限与沙箱上下文，无法脱离调用者沙箱运行；在受限的 Agent 沙箱中仅放开 Cage 配置目录的写入权限不足以调用系统虚拟化接口或运行虚拟机。若 Agent 运行在受限沙箱内，请在宿主普通环境中启动原生 Cage 桌面应用，让后台服务在沙箱外运行后再由 Agent 连接操作。`host.inspect` 是在当前 CLI 进程内执行的本地探测：在 macOS 受限沙箱中读取 `kern.hv_support` 可能返回权限错误（如 `Operation not permitted`），这只说明当前调用上下文无权检测，不代表主机缺乏虚拟化或已运行的原生桌面后台不可用；不要据此触发重建、重装或误判主机不兼容，应在普通终端运行 `sysctl kern.hv_support` 核对，或结合已运行原生后台的 `status`、`guest.options` 判断状态（`guest.options` 返回 `available: false` 也反映当前环境就绪状态，而非硬件虚拟化检测结果）。
+
 账户存在且已解锁时继续下一步。否则让用户在 Cage 中创建或解锁；用户选择通过 Agent 提供密码时，可用下面的私有输入格式调用 `account.create` 或 `account.unlock`。命令行参数不接受密码。账户创建只适用于真正空白的 profile。
 
 ```json
@@ -113,6 +115,8 @@ cage agent call proxy.status
 
 节点内容使用网络指南中的[完整 SOCKS5 YAML 示例](network.md#把原客户端的代理链迁到-cage)或用户自己的兼容配置；不要将 YAML 文件直接作为 `--input` 的 JSON 输入。两种导入方式择一使用，避免重复创建来源。
 
+`proxy.import` 必须带 `name`（1–100 字节），以及 `content`（整份配置或分享链接文本）或 `url`（HTTPS 订阅链接）之一。它不按 `id` 导入：`GET /api/proxy/local-configs` 列出的本机配置只能在这台电脑的 Cage 窗口中导入，Agent 需要自行读取用户指定的文件并放入 `content`。缺少字段、字段类型错误、未知字段或随附代理核心缺失时，请求直接返回 4xx 并说明字段或原因，不会创建作业；来源或节点 ID 是否存在、配置能否通过核心校验，仍以作业结果为准。
+
 从返回的来源和节点列表选择用户要求的出口；不要把订阅中的第一个节点当成用户已经同意的出口。
 
 ```json
@@ -124,7 +128,7 @@ cage agent call proxy.select --input /private/path/selection.json --wait 2m
 cage agent call proxy.status
 ```
 
-链式代理使用 `proxy.route`，输入 `{"node_ids":["入口ID","最终出口ID"]}`，顺序为入口到出口。只传一个节点时与 `proxy.select` 相同，保留该节点在订阅中自带的 `dialer-proxy` 中转。`proxy.select` 总是把路由替换为所选的单个节点：已有链会被清除，所选节点即使原本在链中也可以。节点无效、配置验证或核心启动失败时保留原路由；路由保存后的网络检查仍可能失败，应以 `proxy.status` 返回的当前路由为准。要保留或重建多跳链，请重新调用 `proxy.route`。更新订阅使用 `proxy.refresh` 和已有来源 `id`；本地来源没有订阅链接，`proxy.refresh` 需同时提供新的 `content`，按节点名称保留节点 ID、选择和出口规则。`proxy.edit-node` 输入来源 `id`、`node_id`、`server`、`server_port`，只修改本地节点的地址与端口；`proxy.import` 每次创建来源，不能盲目重试。
+`proxy.select` 只接受 `node_id`（可选 `port`）；请求体可以带与路径相同的 `"action":"select"`，其他取值会被拒绝。链式代理使用 `proxy.route`，输入 `{"node_ids":["入口ID","最终出口ID"]}`，顺序为入口到出口。只传一个节点时与 `proxy.select` 相同，保留该节点在订阅中自带的 `dialer-proxy` 中转。`proxy.select` 总是把路由替换为所选的单个节点：已有链会被清除，所选节点即使原本在链中也可以。节点无效、配置验证或核心启动失败时保留原路由；路由保存后的网络检查仍可能失败，应以 `proxy.status` 返回的当前路由为准。要保留或重建多跳链，请重新调用 `proxy.route`。更新订阅使用 `proxy.refresh` 和已有来源 `id`；本地来源没有订阅链接，`proxy.refresh` 需同时提供新的 `content`，按节点名称保留节点 ID、选择和出口规则。`proxy.edit-node` 输入来源 `id`、`node_id`、`server`、`server_port`，只修改本地节点的地址与端口；`proxy.import` 每次创建来源，不能盲目重试。
 
 仅切换节点或代理链（包括跨国家切换）会保留运行中的环境和终端。旧网络连接和检查授权会被撤销，完整检查通过后才恢复联网。首次启用内置代理、修改代理端口或环境设置仍可能需要重启环境。
 
@@ -170,7 +174,7 @@ cage agent call initialization.status
 cage agent call network.check --wait 5m
 ```
 
-以 `status.ready`、`vm_running` 以及 `safety` 中当前配置对应的网络检查与授权共同判断可用性；`proxy.status.network_open` 可辅助检查外网是否已放行。网络暂停时保持用户的暂停意图，只有用户要求恢复联网才运行 `network.check`。完成首次引导使用 `initialization.set` 的 `{"action":"complete"}`，后台会再次核对环境与网络状态。
+以 `status.ready`、`vm_running` 以及 `safety` 中当前配置对应的网络检查与授权共同判断可用性；`status.network_open` 表示当前授权是否仍放行虚拟机外网，`status.network_paused` 表示用户已手动暂停联网，`proxy.status.network_open` 只说明代理本身是否就绪。外网未放行时虚拟机内的连接会被拒绝，`doctor` 会报告 `network_paused`、`network_checking` 或 `network_closed`，而不是 `environment_ready`；`cage run`、`cage shell` 和 `cage claude` 也会在 stderr 提示。网络暂停时保持用户的暂停意图，只有用户要求恢复联网才运行 `network.check`。完成首次引导使用 `initialization.set` 的 `{"action":"complete"}`，后台会再次核对环境与网络状态。
 
 换网络或睡眠唤醒后，后台会在需要时重新绑定物理网卡，并重新检查出口。恢复任务失败后保留待恢复状态，至少等待 15 秒再试；停止环境后不再排队恢复，手动暂停期间不会自动放行外网。最近一次保存的检查报告不能代替当前配置和当前运行实例的有效授权。
 
@@ -219,6 +223,7 @@ cage agent job 012345abcdef --wait 30m
 | `config_path_mismatch` | 同一目录的后台使用了另一个配置文件名；改用原后台的绝对配置路径，保留所有现有文件。 |
 | `account_missing` | 这份配置还没有账户：由用户在 Cage 创建，或通过私有输入调用 `account.create`；不要调用 `account.unlock`。 |
 | `account_locked` | 用户在 Cage 解锁，或通过私有输入调用 `account.unlock`。 |
+| `proxy_core_missing` | 随附代理核心缺失，`proxy.status` 的 `core_error` 说明期望位置；代理导入、选择和重启会直接返回 `state_conflict`。重新安装完整应用；源码构建在 macOS 和 Linux 运行 `make cage-core`，Windows 使用 `scripts/build-windows.ps1`。 |
 | `request_rejected`、`invalid_input` | 读取本构建能力与错误说明，修正字段或节点/来源 ID；不要重复原请求。 |
 | `state_conflict`、`service_busy` | 读取当前任务和系统状态；有在途任务时等待原任务完成。 |
 | `unsupported_operation` | 检查当前平台的能力，使用对应版本指南。 |

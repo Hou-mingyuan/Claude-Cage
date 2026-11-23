@@ -66,6 +66,7 @@ IBus.init()
 active = None
 engines = []
 probe_key = 0xffd5  # F24: consumed by this engine to refresh Chromium's caret.
+probe_wait = 0.3  # Longest wait for the probe key before a field counts as unavailable.
 
 
 def prepare_probe():
@@ -314,16 +315,27 @@ class Handler(socketserver.StreamRequestHandler):
                                  value.get('mode') in ('phone-status', 'phone-text', 'phone-char'))
                 ordinary_probe = value.get('mode') in ('status', 'begin') and engine is not None and engine.purpose not in (8, 9)
                 if probe_ready and engine is not None and (desktop_probe or ordinary_probe):
-                    engine.probing = True
-                    engine.probe_seen = False
-                    subprocess.Popen(['xdotool', 'key', '--delay', '0', 'F24'],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # Overlapping requests share one probe: a second F24 must
+                    # not reset the answer the first one is waiting for.
+                    if not engine.probing:
+                        engine.probing = True
+                        engine.probe_seen = False
+                        engine.probe_deadline = time.monotonic() + probe_wait
+                        subprocess.Popen(['xdotool', 'key', '--delay', '0', 'F24'],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                     def finish():
-                        engine.probing = False
-                        engine.reachable = engine.probe_seen and engine is active
-                        return dispatch()
-                    GLib.timeout_add(45, finish)
+                        # Answer as soon as the key arrives. A busy guest can
+                        # take longer than a fixed delay to deliver it, which
+                        # reported a focused field as unavailable.
+                        if engine.probing:
+                            if not engine.probe_seen and engine is active and time.monotonic() < engine.probe_deadline:
+                                return True
+                            engine.probing = False
+                            engine.reachable = engine.probe_seen and engine is active
+                        dispatch()
+                        return False
+                    GLib.timeout_add(15, finish)
                 else:
                     dispatch()
                 return False

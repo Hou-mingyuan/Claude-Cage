@@ -130,9 +130,9 @@ macOS و نسخه‌های امضاشدهٔ Windows از پراکسی انتخا
 
 این پروژه به سرعت در حال پیشرفت است. برای به اشتراک گذاشتن بازخورد به گروه جامعه بپیوندید. از نگهبانان جامعه استقبال می شود.
 
-| QQ group · 273237690 | WeChat |
+| QQ group · 112745758 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 273237690" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

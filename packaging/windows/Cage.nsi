@@ -335,7 +335,14 @@ Function CheckDestination
   IfFileExists "$INSTDIR\Cage.install-id" existing
   ; IfFileExists with a wildcard also matches an empty directory.
   ${DirState} "$INSTDIR" $0
-  StrCmp $0 1 foreign done
+  ${If} $0 == 1
+    Goto foreign
+  ${EndIf}
+  ${If} $0 == -1
+  ${AndIf} ${FileExists} "$INSTDIR"
+    Goto foreign
+  ${EndIf}
+  Goto done
   existing:
     FileOpen $0 "$INSTDIR\Cage.install-id" r
     FileRead $0 $1
@@ -450,6 +457,9 @@ Section "Cage" Main
   SetOutPath "$PLUGINSDIR"
   File /oname=installation-files.ps1 "installation-files.ps1"
   File /oname=verified-file-deletion.cs "verified-file-deletion.cs"
+  ; PowerShell 5.1 Add-Type must not resolve NSIS's native System.dll as a
+  ; managed compiler reference from the plugin working directory.
+  SetOutPath "$TEMP"
   DetailPrint "$(CageSetupDetail6)"
   !insertmacro InstallPhase "preparing_file_transaction"
   ; CageData is the default storage of a packaged Windows installation. It
@@ -461,12 +471,10 @@ Section "Cage" Main
   Call WriteInstallDiagnostic
   DetailPrint "$1"
   ${If} $0 != 0
-    SetOutPath "$TEMP"
     RMDir /r "$StageDir"
     SetErrorLevel 2
     Abort "$(CageSetupDetail7)"
   ${EndIf}
-  SetOutPath "$TEMP"
   ${If} $ExistingInstall == "1"
     !insertmacro InstallPhase "moving_previous_application"
     ; The installation folder itself stays; only its program and personal
@@ -505,7 +513,10 @@ Section "Cage" Main
   !insertmacro InstallPhase "publishing_application"
   ClearErrors
   ${If} $BackupDir != ""
+  ${OrIf} ${FileExists} "$INSTDIR\*.*"
     ; The kept installation folder receives the staged entries one by one.
+    ; A pre-created empty folder whose handle is held by another process
+    ; stays in place after RMDir and is populated the same way.
     nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\installation-files.ps1" -Operation attach -Target "$INSTDIR" -Source "$StageDir" $DiagnosticArguments'
     Pop $0
     Pop $1

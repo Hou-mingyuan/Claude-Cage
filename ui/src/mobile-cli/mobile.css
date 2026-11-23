@@ -49,11 +49,13 @@ button:disabled { opacity: .48; cursor: default; }
 .top-actions a { text-decoration: none; color: var(--ink); }
 .icon-button, .action {
   justify-content: center; gap: 7px; border: 1px solid transparent; background: transparent;
-  border-radius: 9px; min-height: 44px; padding: 0 10px; font-size: 14px; font-weight: 560;
+  border-radius: 10px; min-height: 44px; padding: 0 12px; font-size: 14px; font-weight: 560;
+  transition: background-color 130ms ease, border-color 130ms ease, transform 90ms ease;
 }
+.icon-button:active:not(:disabled), .action:active:not(:disabled) { transform: scale(0.97); }
 .icon-button { width: 44px; padding: 0; flex: none; }
 .icon-button:hover, .action:hover { background: var(--soft); }
-.action.primary { background: var(--ink); color: var(--button-ink); }
+.action.primary { background: var(--ink); color: var(--button-ink); box-shadow: 0 1px 3px rgb(0 0 0 / 0.14); }
 .action.secondary { border-color: var(--line); }
 .page-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 24px; }
 .mobile-session-settings { display: flex; flex-direction: column; gap: 22px; }
@@ -116,8 +118,8 @@ h2 { font-size: 17px; line-height: 1.45; font-weight: 620; }
 .approval pre { margin: 8px 0; padding: 10px; border-radius: 6px; background: var(--soft); font: 13px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: min(15rem, 32vh); }
 .approval-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .compose { flex: none; border-top: 1px solid var(--line); padding: 10px 16px max(10px, var(--safe-bottom, env(safe-area-inset-bottom))); }
-.composer-field { display: flex; align-items: center; gap: 8px; min-height: 56px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); padding: 5px 5px 5px 18px; }
-.composer-field:focus-within { border-color: var(--focus); }
+.composer-field { display: flex; align-items: center; gap: 8px; min-height: 54px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); padding: 5px 5px 5px 18px; box-shadow: 0 2px 8px rgb(0 0 0 / 0.05); transition: border-color 140ms ease, box-shadow 140ms ease; }
+.composer-field:focus-within { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent); }
 .compose textarea { display: block; flex: 1; min-width: 0; width: 100%; height: 24px; resize: none; background: transparent; border: 0; border-radius: 0; outline: none; font-size: 16px; line-height: 24px; padding: 0; }
 .compose textarea::placeholder { color: var(--muted); }
 .composer-action { display: flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: var(--ink); color: var(--button-ink); }

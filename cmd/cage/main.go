@@ -26,6 +26,7 @@ import (
 	"github.com/sylvinus/agent-vm/internal/hostproxy"
 	"github.com/sylvinus/agent-vm/internal/limaembed"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
+	"github.com/sylvinus/agent-vm/internal/paths"
 	"github.com/sylvinus/agent-vm/internal/uilocale"
 	"github.com/sylvinus/agent-vm/internal/workbench"
 	"io"
@@ -531,7 +532,7 @@ func run() int {
 		if location.Custom {
 			// Resolve the profile prefix once, as Lima did before migration.
 			// Keep state itself logical so its original disk and socket paths survive.
-			realProfile, err := filepath.EvalSymlinks(profile)
+			realProfile, err := paths.Resolve(profile)
 			if err != nil {
 				return fail(err)
 			}
@@ -632,7 +633,11 @@ func run() int {
 		if resourceErr != nil {
 			return fail(resourceErr)
 		}
-		args = append([]string{"setup", "--memory", fmt.Sprint(memory), "--cpus", fmt.Sprint(cpus), "--disk", "24", "--preinstall=node,python,chromium,gh,claude,code-server"}, requireWorkbenchTools(args[1:])...)
+		disk, diskErr := cage.ConfiguredDiskLimit(path)
+		if diskErr != nil {
+			return fail(diskErr)
+		}
+		args = append([]string{"setup", "--memory", fmt.Sprint(memory), "--cpus", fmt.Sprint(cpus), "--disk", fmt.Sprint(disk), "--preinstall=node,python,chromium,gh,claude,code-server"}, requireWorkbenchTools(args[1:])...)
 	}
 	if args[0] == "up" || args[0] == "login" {
 		return startEnvironment(args[0], startArgs, cli.Stdio(), cli.Main, func() error {
@@ -654,6 +659,9 @@ func run() int {
 	allowed := map[string]bool{"setup": true, "run": true, "shell": true, "claude": true, "stop": true, "list": true, "doctor": true, "info": true, "name": true}
 	if !allowed[args[0]] {
 		return fail(fmt.Errorf("unknown cage command %q; see cage help", args[0]))
+	}
+	if args[0] == "run" || args[0] == "shell" || args[0] == "claude" {
+		warnClosedNetwork(path, os.Stderr)
 	}
 	return cli.Main(args, cli.Stdio())
 }
@@ -692,7 +700,7 @@ func startEnvironment(command string, args []string, stdio cli.IO, invoke func([
 	if err := startServices(); err != nil {
 		return fail(err)
 	}
-	fmt.Fprintln(stdio.Stdout, "Cage local services are ready. Open Cage or run cage desktop to complete the required network checks. External networking stays closed until the workbench approves this VM; no local access password is required.")
+	fmt.Fprintln(stdio.Stdout, "Cage local services are ready. Open Cage, run cage desktop or run 'cage agent call network.check --wait 5m' to complete the required network checks. External networking stays closed until the workbench approves this VM; no local access password is required.")
 	if command == "login" {
 		return invoke([]string{"run", "--tty", "bash", "-lc", "source /etc/profile.d/claude-cage.sh; exec claude auth login"}, stdio)
 	}

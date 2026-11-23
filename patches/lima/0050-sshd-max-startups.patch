@@ -1,0 +1,87 @@
+Raise sshd MaxStartups in the guest.
+
+The host opens many short SSH sessions at once while an instance starts:
+port forwards, file sharing, plugins and readiness checks. With the default
+MaxStartups 10:30:100, sshd randomly drops new connections once ten are
+unauthenticated, and the host sees exit status 255. A boot script sets
+MaxStartups 64:30:128 and reloads sshd when the value differs.
+
+diff --git a/pkg/cidata/cidata.TEMPLATE.d/boot.Linux/12-sshd-max-startups.sh b/pkg/cidata/cidata.TEMPLATE.d/boot.Linux/12-sshd-max-startups.sh
+new file mode 100644
+index 00000000..ff92260f
+--- /dev/null
++++ b/pkg/cidata/cidata.TEMPLATE.d/boot.Linux/12-sshd-max-startups.sh
+@@ -0,0 +1,34 @@
++#!/bin/sh
++
++# SPDX-FileCopyrightText: Copyright The Lima Authors
++# SPDX-License-Identifier: Apache-2.0
++
++# The host opens many short SSH sessions at once when an instance starts
++# (port forwards, file sharing, plugins and readiness checks). With the
++# default MaxStartups 10:30:100, sshd randomly drops new connections once ten
++# are unauthenticated, and the host sees "exit status 255".
++
++set -eux
++
++[ -d /etc/ssh/sshd_config.d ] || exit 0
++
++conf=/etc/ssh/sshd_config.d/10-max-startups.conf
++want="MaxStartups 64:30:128"
++if [ "$(cat "$conf" 2>/dev/null)" = "$want" ]; then
++	exit 0
++fi
++echo "$want" >"$conf"
++
++if [ -f /sbin/openrc-run ]; then
++	if [ -f /etc/init.d/ssh ]; then
++		rc-service --ifstarted ssh reload
++	elif [ -f /etc/init.d/sshd ]; then
++		rc-service --ifstarted sshd reload
++	fi
++elif command -v systemctl >/dev/null 2>&1; then
++	if systemctl -q is-active ssh; then
++		systemctl reload ssh
++	elif systemctl -q is-active sshd; then
++		systemctl reload sshd
++	fi
++fi
+diff --git a/pkg/cidata/template_test.go b/pkg/cidata/template_test.go
+index c7d5fb94..d68738dd 100644
+--- a/pkg/cidata/template_test.go
++++ b/pkg/cidata/template_test.go
+@@ -369,3 +369,34 @@ func TestExecuteTemplateWindowsISO(t *testing.T) {
+ 		})
+ 	}
+ }
++
++// The host opens many SSH sessions at once while an instance starts; the
++// boot script raises sshd's MaxStartups so they are not dropped.
++func TestTemplateRaisesSSHDMaxStartups(t *testing.T) {
++	args := &TemplateArgs{
++		Name:       "default",
++		User:       "foo",
++		UID:        501,
++		Home:       "/home/foo.guest",
++		Shell:      "/bin/bash",
++		SSHPubKeys: []string{"ssh-rsa dummy foo@example.com"},
++		MountType:  "reverse-sshfs",
++		CACerts:    CACerts{RemoveDefaults: &defaultRemoveDefaults},
++	}
++	layout, err := ExecuteTemplateCIDataISO(args)
++	assert.NilError(t, err)
++	for _, f := range layout {
++		if f.Path != "boot/12-sshd-max-startups.sh" && f.Path != "boot.Linux/12-sshd-max-startups.sh" {
++			continue
++		}
++		b, err := io.ReadAll(f.Reader)
++		assert.NilError(t, err)
++		assert.Assert(t, strings.Contains(string(b), "MaxStartups 64:30:128"))
++		return
++	}
++	var paths []string
++	for _, f := range layout {
++		paths = append(paths, f.Path)
++	}
++	t.Fatalf("sshd MaxStartups boot script missing from %v", paths)
++}

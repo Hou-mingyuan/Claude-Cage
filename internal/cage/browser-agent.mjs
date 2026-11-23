@@ -11,6 +11,7 @@ import { LoginBrowser, isClaudeSignIn } from "./browser-login.mjs";
 import { PrivateBrowser } from "./browser-private.mjs";
 import { browserCookies, AccountLoginCookies } from "./browser-cookies.mjs";
 import { BrowserExtensions, extensionUploadLimit } from "./browser-extensions.mjs";
+import { BrowserHistory } from "./browser-history.mjs";
 import { BrowserClipboard } from "./browser-clipboard.mjs";
 import { BrowserVisibility, rememberOpener, targetAfterClose } from "./browser-visibility.mjs";
 import { BrowserWheel, createActivitySignal, createPointerProbe } from "./browser-wheel.mjs";
@@ -106,6 +107,7 @@ const auditCreations = new Set(), deferredTargetInfo = new Map();
 const loginBrowser = new LoginBrowser(cdp, new AccountLoginCookies("/home/cage-browser/LoginProfiles"));
 const privateBrowser = new PrivateBrowser(cdp, downloadPath);
 const browserExtensions = new BrowserExtensions({ directory: "/home/cage-browser", cdp, control: splitController, protectedID: extensionId });
+const browserHistory = new BrowserHistory({ cdp, control: splitController });
 const pending = new Map(),
   targets = new Map(),
   sessions = new Map();
@@ -142,7 +144,7 @@ function canHideBrowser() {
   browserVNCViewers = false;
   return true;
 }
-const visibility = new BrowserVisibility(cdp, () => [...targets.keys()], canHideBrowser);
+const visibility = new BrowserVisibility(cdp, () => [...targets.keys()], canHideBrowser, () => activeId);
 let checkingBrowserViewers = false;
 setInterval(() => {
   if (!ready || visibility.visible || checkingBrowserViewers) return;
@@ -150,7 +152,7 @@ setInterval(() => {
   try { canHideBrowser(); } catch { return; }
   if (previous === browserVNCViewers) return;
   checkingBrowserViewers = true;
-  void visibility.set(false).catch(() => {}).finally(() => { checkingBrowserViewers = false; });
+  void visibility.sync().catch(() => {}).finally(() => { checkingBrowserViewers = false; });
 }, 1000).unref();
 const browserClipboard = new BrowserClipboard(cdp, ({ id, text, context }) => {
   if (id !== activeId || !targets.has(id)) return;
@@ -229,8 +231,8 @@ function updateTargetInfo(t) {
   if (!activeId) activeId = t.targetId;
   if (ready && fresh && t.openerId)
     void activate(t.targetId, true).catch(() => {});
-  else if (ready && fresh && !visibility.visible)
-    void visibility.set(false).catch(() => {});
+  else if (ready && fresh)
+    void visibility.sync().catch(() => {});
 }
 
 function restoreHomepage(id) {
@@ -536,7 +538,16 @@ async function activate(id, focus = false) {
   if (!targets.has(id)) throw new Error("Tab no longer exists");
   // Restored background tabs may have no live renderer until activated.
   // Page.enable must not block the command that wakes that renderer.
-  await visibility.activate(id);
+  try {
+    await visibility.activate(id);
+  } catch (error) {
+    if (!focus) throw error;
+    // A newly focused tab (such as a login page opened while the browser view
+    // is hidden) must still open and navigate even if Openbox lags on window
+    // state sync; the subsequent /visibility call re-syncs fullscreen state.
+    console.error("Browser visibility sync deferred during focus:", error?.message || error);
+    await cdp("Target.activateTarget", { targetId: id }).catch(() => {});
+  }
   await session(id);
   activeId = id;
   void refreshNavigation();
@@ -868,12 +879,13 @@ const server = http.createServer(async (req, res) => {
       catch (error) { res.writeHead(error.status || 503); res.end("{}"); }
       return;
     }
-    if (["/phone-browser/open", "/phone-browser/action", "/phone-browser/frame", "/phone-browser/close"].includes(req.url)) {
+    if (["/phone-browser/open", "/phone-browser/action", "/phone-browser/frame", "/phone-browser/close", "/phone-browser/history"].includes(req.url)) {
       // Load only for a phone operation, keeping desktop startup independent.
       const { PhoneBrowser } = await import("./browser-phone.mjs");
       phoneBrowser ??= new PhoneBrowser({ binary: browserBinary });
       try {
-        res.end(JSON.stringify(await phoneBrowser.run(req.url.slice("/phone-browser/".length), input)));
+        const op = req.url.slice("/phone-browser/".length);
+        res.end(JSON.stringify(op === "history" ? await phoneBrowser.history(input) : await phoneBrowser.run(op, input)));
       } catch (error) {
         res.writeHead([403, 409, 410, 503].includes(error.status) ? error.status : 400);
         res.end(JSON.stringify({ error: error.message }));
@@ -898,6 +910,10 @@ const server = http.createServer(async (req, res) => {
     if (req.url === "/upload-cancel") { uploads.cancel(input.id); res.end('{"ok":true}'); return; }
     if (req.url === "/download-retry") {
       res.end(JSON.stringify(downloads.retry(input.id)));
+      return;
+    }
+    if (req.url === "/download-discard") {
+      res.end(JSON.stringify(downloads.discard(input.id)));
       return;
     }
     if (req.url === "/audit") {
@@ -942,6 +958,7 @@ const server = http.createServer(async (req, res) => {
         const { product, protocolVersion } = await cdp("Browser.getVersion");
         return { product, protocolVersion };
       }
+      if (req.url === "/history") return browserHistory.request(input);
       if (req.url === "/extensions") {
         const result = await browserExtensions.request(input);
         if (input.mode === "options" && result.url) {

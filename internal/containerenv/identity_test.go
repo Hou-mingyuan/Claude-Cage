@@ -41,7 +41,7 @@ func TestGuestIdentityCreationAndLoopbackValidation(t *testing.T) {
 		container.Config.Labels = map[string]string{guestIdentityLabel: label}
 		container.HostConfig.NetworkMode, container.HostConfig.IpcMode, container.HostConfig.CgroupnsMode = "none", "private", "private"
 		container.HostConfig.ExtraHosts = []string{flags["--add-host"]}
-		if err := checkContainerConfiguration(container); err != nil {
+		if err := checkCreatedContainer(container, identity); err != nil {
 			t.Fatal(err)
 		}
 		restored, err := containerIdentity(container)
@@ -56,6 +56,43 @@ func TestGuestIdentityCreationAndLoopbackValidation(t *testing.T) {
 		if _, err := containerIdentity(container); err == nil {
 			t.Fatal("accepted mismatched hostname")
 		}
+	}
+}
+
+func TestLegacyAndCreatedContainerHostnameValidation(t *testing.T) {
+	// Legacy container without an identity label and with hostname "cage" stays valid.
+	legacy := &engineContainer{}
+	legacy.Config.Hostname = legacyContainerHostname
+	legacy.HostConfig.NetworkMode, legacy.HostConfig.IpcMode, legacy.HostConfig.CgroupnsMode = "none", "private", "private"
+	legacy.HostConfig.ExtraHosts = []string{legacyContainerHostname + ":127.0.1.1"}
+	if err := checkContainerConfiguration(legacy); err != nil {
+		t.Fatalf("legacy container rejected: %v", err)
+	}
+
+	// An unlabelled container with an explicit non-empty hostname must match its
+	// own hostname rather than falling back to "cage".
+	custom := &engineContainer{}
+	custom.Config.Hostname = "DESKTOP-7K2M9Q"
+	custom.HostConfig.NetworkMode, custom.HostConfig.IpcMode, custom.HostConfig.CgroupnsMode = "none", "private", "private"
+	custom.HostConfig.ExtraHosts = []string{"DESKTOP-7K2M9Q:127.0.1.1"}
+	if err := checkContainerConfiguration(custom); err != nil {
+		t.Fatalf("custom hostname container rejected: %v", err)
+	}
+	custom.HostConfig.ExtraHosts = []string{legacyContainerHostname + ":127.0.1.1"}
+	if checkContainerConfiguration(custom) == nil {
+		t.Fatal("unlabelled container with custom hostname accepted cage loopback alias")
+	}
+
+	// Newly created containers must always persist their randomized guest identity.
+	identity, err := guestidentity.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkCreatedContainer(legacy, identity) == nil {
+		t.Fatal("newly created container without guestidentity label was accepted")
+	}
+	if checkCreatedContainer(nil, identity) == nil {
+		t.Fatal("nil created container was accepted")
 	}
 }
 

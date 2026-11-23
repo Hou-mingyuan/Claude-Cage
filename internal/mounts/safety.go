@@ -45,8 +45,6 @@ type Ref struct {
 // SelfRef is the What of the Ref to agent-vm's own folder.
 const SelfRef = "agent-vm itself"
 
-const homeRef = "your home directory"
-
 // Refs are the locations no share may reach: the home folder (dotfiles,
 // SSH keys, every other project), agent-vm itself (the host runs its
 // files), agent-vm's state (every VM's env) and Lima's homes, agent-vm's
@@ -127,112 +125,10 @@ func GitDirShare(dir string) (string, bool) {
 	return "", false
 }
 
-// credentialRel are the places under the home folder where credentials and
-// applications' data live: keys, cloud and cluster logins, password managers,
-// browser profiles, keyrings. None is a project; one shared with a VM, read
-// or write, is a secret given away. A project may be anywhere else in the
-// home folder, so these are named. Lowercase-folded where case is ignored.
-var credentialRel = []string{
-	".ssh", ".aws", ".gnupg", ".pki", ".kube", ".docker", ".azure", ".oci", ".terraform.d",
-	".config", ".password-store", ".1password", ".op", ".mozilla", ".thunderbird", ".var", "snap",
-	".local/share/keyrings", ".local/share/gnome-keyring", ".local/share/kwalletd",
-	"Library", "AppData",
-}
-
-// cloudRel are the cloud drives the system puts under ~/Library: the file
-// providers' folders and iCloud Drive. They hold the user's own files,
-// movable nowhere else, so the Library rule lets them through. below marks
-// the ones a project may only be below: ~/Library/CloudStorage itself is
-// every account's drive in one folder.
-var cloudRel = []struct {
-	rel   string
-	below bool
-}{
-	{"Library/CloudStorage", true},
-	{"Library/Mobile Documents/com~apple~CloudDocs", false},
-}
-
-// credentialAbs are the environment variables naming a folder of that kind
-// outside the home folder's defaults.
-var credentialAbs = []string{"APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME"}
-
-// CredentialLocation says why dir must not be shared with a VM: it is,
-// contains or is inside a folder of credentials or applications' data under
-// the home folder (see credentialRel), found in refs; except the cloud
-// drives the system puts under ~/Library (see cloudRel), the user's own
-// files. Those folders resolved through their links count too, as dir does.
-func CredentialLocation(dir string, refs []Ref) (string, bool) {
-	home := ""
-	for _, r := range refs {
-		if r.What == homeRef {
-			home = r.Path
-		}
-	}
-	if home == "" {
-		return "", false
-	}
-	if p, err := paths.Real(dir); err == nil {
-		dir = p
-	}
-	d := strings.TrimSuffix(paths.Fold(dir), "/") + "/"
-	check := func(shown, p string) (string, bool) {
-		for _, c := range []string{p, realOr(p)} {
-			c = strings.TrimSuffix(paths.Fold(c), "/") + "/"
-			if strings.HasPrefix(d, c) || strings.HasPrefix(c, d) {
-				return "is, contains or is inside " + shown + ", which holds credentials or applications' data", true
-			}
-		}
-		return "", false
-	}
-	for _, rel := range credentialRel {
-		if rel == "Library" && cloudDrive(d, home) {
-			continue
-		}
-		if why, ok := check("~/"+rel, strings.TrimSuffix(home, "/")+"/"+rel); ok {
-			return why, true
-		}
-	}
-	for _, v := range credentialAbs {
-		if p := paths.Host(os.Getenv(v)); p != "" && paths.IsAbs(p) {
-			if why, ok := check(p, p); ok {
-				return why, true
-			}
-		}
-	}
-	return "", false
-}
-
-// realOr is p with its links resolved when it exists, else p.
-func realOr(p string) string {
-	if r, err := paths.Real(p); err == nil {
-		return r
-	}
-	return p
-}
-
-// cloudDrive says whether d, already folded and ending in /, is one of the
-// cloud drives of cloudRel under home: itself, unless below, or below it;
-// the root and its resolved self both count, as dir is already resolved.
-func cloudDrive(d, home string) bool {
-	for _, c := range cloudRel {
-		root := strings.TrimSuffix(home, "/") + "/" + c.rel
-		for _, r := range []string{root, realOr(root)} {
-			r = strings.TrimSuffix(paths.Fold(r), "/") + "/"
-			if strings.HasPrefix(d, r) && !(c.below && d == r) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // UnsafeProject says why the project dir must not be shared: see
-// UnsafeLocation, CredentialLocation and GitDirShare.
+// UnsafeLocation and GitDirShare.
 func UnsafeProject(dir string, refs []Ref) (string, bool) {
 	if why, ok := UnsafeLocation(dir, refs); ok {
-		return why, true
-	}
-	if why, ok := CredentialLocation(dir, refs); ok {
 		return why, true
 	}
 	return GitDirShare(dir)

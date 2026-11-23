@@ -16,11 +16,13 @@ export function assertConnection(connectionID) {
 }
 
 export function connectionHeaders(path, context = current) {
-  if (path === "/session" || (path.startsWith("/client/") && !isProjectSharesPath(path))) return {};
+  if (path === "/session" || (path.startsWith("/client/") && !isClientSessionPath(path))) return {};
   return { "X-Cage-Connection": context.connection_id || "disconnected" };
 }
 
 export const isProjectSharesPath = (path) => path === "/client/project-shares" || path.startsWith("/client/project-shares/");
+export const isClientSessionPath = (path) =>
+  isProjectSharesPath(path) || path === "/client/plugins/sync" || path === "/client/plugins/bridge";
 
 export function runtimeURL(path, context = current) {
   const url = new URL("/api" + path, globalThis.location?.origin || "http://localhost");

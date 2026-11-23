@@ -81,6 +81,20 @@ function luminance(hex) {
     .map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
   return r * 0.2126 + g * 0.7152 + b * 0.0722;
 }
+function contrastBetween(a, b) {
+  const left = luminance(a),
+    right = luminance(b);
+  return (Math.max(left, right) + 0.05) / (Math.min(left, right) + 0.05);
+}
+function deriveMuted(ink, surface) {
+  const baseContrast = contrastBetween(ink, surface);
+  if (baseContrast <= 5.2) return mix(ink, surface, 0.14);
+  for (const weight of [0.34, 0.28, 0.22, 0.16, 0.12, 0.08]) {
+    const candidate = mix(ink, surface, weight);
+    if (contrastBetween(candidate, surface) >= 4.6) return candidate;
+  }
+  return mix(ink, surface, 0.08);
+}
 export function themeVariables(theme, variant) {
   const { surface, ink, accent, contrast } = theme;
   const chrome = mix(surface, ink, 0.025 + contrast * 0.00055);
@@ -91,14 +105,14 @@ export function themeVariables(theme, variant) {
     "--chrome-dark": mix(surface, ink, 0.1),
     "--ink": ink,
     "--strong": mix(ink, variant === "light" ? "#000000" : "#ffffff", 0.15),
-    "--muted": mix(ink, surface, 0.15),
+    "--muted": deriveMuted(ink, surface),
     "--accent": accent,
     "--focus": accent,
     "--input": surface,
     "--line": line,
-    "--hover": mix(surface, ink, 0.09),
-    "--selected": mix(surface, ink, 0.13),
-    "--selection": mix(surface, accent, 0.32),
+    "--hover": mix(surface, ink, 0.065),
+    "--selected": mix(surface, ink, 0.105),
+    "--selection": mix(surface, accent, 0.28),
     "--button": ink,
     "--button-ink": surface,
     "--link": accent,

@@ -10,9 +10,6 @@ import {
   Sun,
   Upload,
   RotateCcw,
-  CircleCheck,
-  TriangleAlert,
-  CircleX,
 } from "lucide-react";
 import { api, native, nativeAvailable } from "./api";
 import { useAppearance } from "./appearance";
@@ -93,7 +90,7 @@ function FontSizeInput({ label, value, min, onChange }) {
     </div>
   );
 }
-function ColorField({ theme, name, value, onChange, onReset }) {
+function ColorField({ theme, name, value, onChange, onReset, compact = false }) {
   const tr = useTranslation();
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
@@ -101,6 +98,45 @@ function ColorField({ theme, name, value, onChange, onReset }) {
   const commit = () => {
     if (!invalid && text !== value) onChange(text.toLowerCase());
   };
+  if (compact) {
+    return (
+      <div className="theme-swatch-item">
+        <label className="theme-swatch-chip" title={`${name} ${value}`}>
+          <input
+            type="color"
+            aria-label={tr("选取{0}的{1}", theme, name)}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <span>{name}</span>
+        </label>
+        <input
+          type="text"
+          className="theme-swatch-hex"
+          aria-label={tr("{0}的{1}", theme, name)}
+          aria-invalid={invalid}
+          value={text}
+          maxLength={7}
+          spellCheck={false}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            }
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setText(value);
+            }
+          }}
+        />
+        {invalid && (
+          <small className="theme-color-error">{tr("请输入 # 加六位十六进制颜色")}</small>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="theme-color-field">
       <span>{name}</span>
@@ -156,6 +192,9 @@ function ThemeCard({ variant, value, active, onChange, codeFonts }) {
   const patch = (delta) => onChange({ ...value, preset: "custom", ...delta });
   const vars = themeVariables(value, variant);
   const terminal = terminalTheme(value, variant);
+  const presetDesc = presetInfo[value.preset]?.description
+    ? tr(presetInfo[value.preset].description)
+    : tr("自定义配色，可另存为主题以便下次使用。");
   const setColor = (field, key, color) => {
     const next = { ...value[field] };
     if (color === undefined) delete next[key];
@@ -167,9 +206,37 @@ function ThemeCard({ variant, value, active, onChange, codeFonts }) {
       className={`appearance-theme-card ${active ? "current" : ""}`}
       aria-label={label}
     >
-      <div className="theme-card-heading">
+      <div
+        className="theme-miniature"
+        aria-hidden="true"
+        title={presetDesc}
+        style={{ ...vars, background: value.surface, color: value.ink }}
+      >
+        <div className="mini-sidebar" style={{ background: vars["--sidebar"] }}>
+          <div className="mini-status-dots">
+            <em style={{ background: vars["--danger"] }} />
+            <em style={{ background: vars["--warning"] }} />
+            <em style={{ background: vars["--success"] }} />
+          </div>
+          <i />
+          <i />
+          <i />
+        </div>
+        <div className="mini-content">
+          {active && <span className="theme-active-badge">{tr("当前使用")}</span>}
+          <span className="mini-bar mini-bar--title" style={{ background: vars["--strong"] }} />
+          <span className="mini-bar mini-bar--sub" />
+          <div
+            className="mini-input"
+            style={{ borderColor: vars["--line"], background: vars["--input"] }}
+          >
+            <i />
+            <b style={{ background: value.accent }} />
+          </div>
+        </div>
+      </div>
+      <div className="theme-card-heading" title={presetDesc}>
         <strong>{label}</strong>
-        {active && <small>{tr("当前使用")}</small>}
         <InlineSelect
           aria-label={tr("{0}预设", label)}
           value={value.preset}
@@ -195,53 +262,7 @@ function ThemeCard({ variant, value, active, onChange, codeFonts }) {
           )}
         </InlineSelect>
       </div>
-      <div
-        className="theme-miniature"
-        aria-hidden="true"
-        style={{ ...vars, background: value.surface, color: value.ink }}
-      >
-        <div className="mini-sidebar" style={{ background: vars["--sidebar"] }}>
-          <i />
-          <i />
-          <i />
-        </div>
-        <div className="mini-content">
-          <span style={{ background: vars["--strong"] }} />
-          <span />
-          <div
-            style={{ borderColor: vars["--line"], background: vars["--input"] }}
-          >
-            <i />
-            <b style={{ background: value.accent }} />
-          </div>
-        </div>
-      </div>
-      <div className="theme-preset-summary">
-        <p>
-          {presetInfo[value.preset]?.description
-            ? tr(presetInfo[value.preset].description)
-            : tr("自定义配色，可另存为主题以便下次使用。")}
-        </p>
-        <div
-          className="theme-status-preview"
-          aria-label={tr("{0}状态配色预览", label)}
-          style={{ background: value.surface }}
-        >
-          <span style={{ color: vars["--success"] }}>
-            <CircleCheck size={13} />
-            {tr("成功")}
-          </span>
-          <span style={{ color: vars["--warning"] }}>
-            <TriangleAlert size={13} />
-            {tr("警告")}
-          </span>
-          <span style={{ color: vars["--danger"] }}>
-            <CircleX size={13} />
-            {tr("错误")}
-          </span>
-        </div>
-      </div>
-      <div className="theme-base-colors">
+      <div className="theme-swatch-bar">
         {[
           ["accent", tr("强调色")],
           ["surface", tr("背景")],
@@ -249,6 +270,7 @@ function ThemeCard({ variant, value, active, onChange, codeFonts }) {
         ].map(([key, name]) => (
           <ColorField
             key={key}
+            compact
             theme={label}
             name={name}
             value={value[key]}
@@ -510,10 +532,7 @@ function ThemeLibrary({ appearance, update, saving, onError }) {
   return (
     <section className="theme-library" aria-label={tr("我的主题")}>
       <div className="theme-library-heading">
-        <div>
-          <h4>{tr("我的主题")}</h4>
-          <p>{tr("保存浅色、深色两套配色与字体，随时切换或分享。")}</p>
-        </div>
+        <h4>{tr("我的主题")}</h4>
         <div className="theme-file-actions">
           <button disabled={busy || saving} onClick={importFile}>
             <Upload size={14} />
@@ -659,44 +678,50 @@ export function AppearanceSettings() {
   };
   return (
     <div className="appearance-settings">
-      <div className="section-title">
+      <div className="section-title appearance-title-row">
         <h3>{tr("外观")}</h3>
-        <p>{tr("更改自动保存并即时生效，无需重启项目。")}</p>
+        <div className="appearance-save-state" role="status">
+          {saving ? (
+            <>
+              <LoaderCircle size={13} className="spin" />
+              {tr("正在保存…")}
+            </>
+          ) : error ? (
+            <>
+              <span>{tr("未保存")}</span>
+              <button className="text-button" onClick={retry}>
+                {tr("重试保存")}
+              </button>
+            </>
+          ) : (
+            <>
+              <Check size={13} />
+              {synced ? tr("已同步 Codex 外观") : tr("更改自动保存，即时生效")}
+            </>
+          )}
+        </div>
       </div>
       <fieldset disabled={loading || syncing} className="appearance-fields">
-        <SettingRow
-          label={tr("主题")}
-          description={tr("跟随系统，或固定使用浅色、深色外观。")}
-        >
-          <div className="appearance-mode" role="group" aria-label={tr("主题模式")}>
-            {[
-              ["light", "浅色", Sun],
-              ["dark", "深色", Moon],
-              ["system", "跟随系统", Monitor],
-            ].map(([mode, label, Icon]) => (
-              <button
-                key={mode}
-                aria-pressed={appearance.mode === mode}
-                onClick={() => patch({ mode })}
-              >
-                <Icon size={15} />
-                {tr(label)}
-              </button>
-            ))}
-          </div>
-        </SettingRow>
-        <ThemeLibrary
-          key={String(loading)}
-          appearance={appearance}
-          update={update}
-          saving={saving}
-          onError={setThemeError}
-        />
-        {themeError && (
-          <div className="error-message" role="alert">
-            {tr(themeError)}
-          </div>
-        )}
+        <div className="settings-card">
+          <SettingRow label={tr("主题")}>
+            <div className="appearance-mode" role="group" aria-label={tr("主题模式")}>
+              {[
+                ["light", "浅色", Sun],
+                ["dark", "深色", Moon],
+                ["system", "跟随系统", Monitor],
+              ].map(([mode, label, Icon]) => (
+                <button
+                  key={mode}
+                  aria-pressed={appearance.mode === mode}
+                  onClick={() => patch({ mode })}
+                >
+                  <Icon size={15} />
+                  {tr(label)}
+                </button>
+              ))}
+            </div>
+          </SettingRow>
+        </div>
         <div className="theme-card-grid">
           {["light", "dark"].map((key) => (
             <ThemeCard
@@ -709,115 +734,103 @@ export function AppearanceSettings() {
             />
           ))}
         </div>
+        <ThemeLibrary
+          key={String(loading)}
+          appearance={appearance}
+          update={update}
+          saving={saving}
+          onError={setThemeError}
+        />
+        {themeError && (
+          <div className="error-message" role="alert">
+            {tr(themeError)}
+          </div>
+        )}
         <h4>{tr("字体")}</h4>
-        <SettingRow
-          label={tr("界面字号")}
-          description={tr("调整导航、标签和设置中的文字大小。")}
-        >
-          <FontSizeInput
-            label={tr("界面字号")}
-            value={appearance.uiFontSize}
-            min={12}
-            onChange={(value) => patch({ uiFontSize: value })}
-          />
-        </SettingRow>
-        <SettingRow
-          label={tr("代码字号")}
-          description={tr("调整内置终端与代码预览的文字大小。")}
-        >
-          <FontSizeInput
-            label={tr("代码字号")}
-            value={appearance.codeFontSize}
-            min={10}
-            onChange={(value) => patch({ codeFontSize: value })}
-          />
-        </SettingRow>
-        <div
-          className="appearance-sample"
-          style={{ fontFamily: theme.fonts.ui || systemUIFont }}
-        >
-          <span>{tr("在熟悉的工作区，专注下一步。")}</span>
-          <code
-            style={{
-              fontFamily: theme.fonts.code || systemCodeFont,
-              fontSize: appearance.codeFontSize,
-            }}
+        <div className="settings-card">
+          <SettingRow label={tr("界面字号")}>
+            <FontSizeInput
+              label={tr("界面字号")}
+              value={appearance.uiFontSize}
+              min={12}
+              onChange={(value) => patch({ uiFontSize: value })}
+            />
+          </SettingRow>
+          <SettingRow label={tr("代码字号")}>
+            <FontSizeInput
+              label={tr("代码字号")}
+              value={appearance.codeFontSize}
+              min={10}
+              onChange={(value) => patch({ codeFontSize: value })}
+            />
+          </SettingRow>
+          <div
+            className="appearance-sample"
+            style={{ fontFamily: theme.fonts.ui || systemUIFont }}
           >
-            const workspace = "Cage";
-          </code>
+            <span>{tr("在熟悉的工作区，专注下一步。")}</span>
+            <code
+              style={{
+                fontFamily: theme.fonts.code || systemCodeFont,
+                fontSize: appearance.codeFontSize,
+              }}
+            >
+              const workspace = "Cage";
+            </code>
+          </div>
         </div>
         <h4>{tr("显示与交互")}</h4>
-        <SettingRow
-          label={tr("使用指针光标")}
-          description={tr("悬停在按钮等可交互元素上时显示手形。")}
-        >
-          <label className="appearance-switch">
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label={tr("使用指针光标")}
-              checked={appearance.pointerCursors}
-              onChange={(e) => patch({ pointerCursors: e.target.checked })}
-            />
-          </label>
-        </SettingRow>
-        <SettingRow label={tr("字体平滑")}>
-          <label className="appearance-switch">
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label={tr("字体平滑")}
-              checked={appearance.fontSmoothing}
-              onChange={(e) => patch({ fontSmoothing: e.target.checked })}
-            />
-          </label>
-        </SettingRow>
-        <SettingRow label={tr("减少动态效果")}>
-          <InlineSelect
-            aria-label={tr("减少动态效果")}
-            value={appearance.reducedMotion}
-            onValueChange={(next) => patch({ reducedMotion: next })}
-          >
-            <option value="system">{tr("跟随系统")}</option>
-            <option value="on">{tr("开启")}</option>
-            <option value="off">{tr("关闭")}</option>
-          </InlineSelect>
-        </SettingRow>
-        <div className="appearance-import">
-          <div>
-            <strong>{tr("沿用 Codex 的外观")}</strong>
-            <p>{tr("导入本机 Codex 当前的主题、配色与字体偏好。")}</p>
+        <div className="settings-card">
+          <SettingRow label={tr("使用指针光标")}>
+            <label className="appearance-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={tr("使用指针光标")}
+                checked={appearance.pointerCursors}
+                onChange={(e) => patch({ pointerCursors: e.target.checked })}
+              />
+            </label>
+          </SettingRow>
+          <SettingRow label={tr("字体平滑")}>
+            <label className="appearance-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={tr("字体平滑")}
+                checked={appearance.fontSmoothing}
+                onChange={(e) => patch({ fontSmoothing: e.target.checked })}
+              />
+            </label>
+          </SettingRow>
+          <SettingRow label={tr("减少动态效果")}>
+            <InlineSelect
+              aria-label={tr("减少动态效果")}
+              value={appearance.reducedMotion}
+              onValueChange={(next) => patch({ reducedMotion: next })}
+            >
+              <option value="system">{tr("跟随系统")}</option>
+              <option value="on">{tr("开启")}</option>
+              <option value="off">{tr("关闭")}</option>
+            </InlineSelect>
+          </SettingRow>
+          <div className="appearance-row appearance-import">
+            <div>
+              <span>{tr("沿用 Codex 的外观")}</span>
+            </div>
+            <div className="appearance-control">
+              <button onClick={sync}>
+                {syncing ? (
+                  <LoaderCircle size={15} className="spin" />
+                ) : (
+                  <Download size={15} />
+                )}
+                {tr("从本机 Codex 同步")}
+              </button>
+            </div>
           </div>
-          <button onClick={sync}>
-            {syncing ? (
-              <LoaderCircle size={15} className="spin" />
-            ) : (
-              <Download size={15} />
-            )}
-            {tr("从本机 Codex 同步")}
-          </button>
         </div>
       </fieldset>
-      <div className="appearance-save-state" role="status">
-        {saving ? (
-          <>
-            <LoaderCircle size={13} className="spin" />
-            {tr("正在保存…")}
-          </>
-        ) : error ? (
-          <>
-            <span>{tr("未保存")}</span>
-            <button className="text-button" onClick={retry}>
-              {tr("重试保存")}
-            </button>
-          </>
-        ) : (
-          <>
-            <Check size={14} />
-            {synced ? tr("已同步 Codex 外观") : tr("更改自动保存，即时生效")}
-          </>
-        )}
-      </div>
       {(error || syncError) && (
         <div className="error-message" role="alert">
           {syncError || error}

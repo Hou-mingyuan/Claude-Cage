@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
+	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/containerenv"
 )
 
@@ -33,7 +34,7 @@ func (s *Server) accountDesktopsSupported() bool {
 
 func (s *Server) accountDesktop(w http.ResponseWriter, r *http.Request) {
 	id, action := r.PathValue("id"), r.PathValue("action")
-	if !validClaudeID(id) || !(r.Method == "GET" && (action == "vnc" || action == "vnc-credentials") || r.Method == "POST" && (action == "start" || action == "stop")) {
+	if !validClaudeID(id) || !(r.Method == "GET" && (action == "vnc" || action == "vnc-credentials" || action == "clipboard" || action == "input") || r.Method == "POST" && (action == "start" || action == "stop")) {
 		http.NotFound(w, r)
 		return
 	}
@@ -64,19 +65,27 @@ func (s *Server) accountDesktop(w http.ResponseWriter, r *http.Request) {
 	}
 	run := "/run/desktop-" + id
 	switch action {
+	case "input":
+		// The private HOME is chosen from the authorized instance, never from
+		// input text. Its IBus socket is outside the service's private /tmp.
+		s.streamDesktopCommand(w, r, `exec env HOME="$HOME/.local/share/desktop-profiles/`+id+`/home" /usr/local/bin/cage-native-input --relay`)
+		return
+	case "clipboard":
+		s.sharedDesktopClipboard(w, r, id)
+		return
 	case "vnc":
 		s.streamDesktopSocket(w, r, run+"/vnc.sock")
 		return
 	case "vnc-credentials":
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		b, err := s.guest(ctx, "systemctl is-active --quiet desktop-"+id+".service && cat "+run+"/password")
-		if err != nil || len(b) != 8 {
+		b, err := s.guest(ctx, "systemctl is-active --quiet desktop-"+id+".service && cat "+run+`/password && { if test -S "$HOME/.local/share/desktop-profiles/`+id+`/home/.cache/cage-input/input.sock"; then printf 1; else printf 0; fi; }`)
+		if err != nil || len(b) != 9 || (b[8] != '0' && b[8] != '1') {
 			http.Error(w, "此 Desktop 尚未启动", 409)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		jsonReply(w, map[string]string{"password": string(b)})
+		jsonReply(w, map[string]any{"password": string(b[:8]), "native_input": b[8] == '1'})
 		return
 	}
 	s.launchRequest(w, r, "desktop-instance-"+action, func() error {
@@ -113,8 +122,14 @@ func (s *Server) accountDesktop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) changeAccountDesktop(parent context.Context, instance string, account claudeAccount, action string) error {
+	if s.desktopAction != nil {
+		return s.desktopAction(parent, instance, account, action)
+	}
 	var err error
 	scope := "stop"
+	if action == "delete" {
+		scope = "delete"
+	}
 	var key []byte
 	if action == "start" {
 		scope = "shared"
@@ -132,18 +147,43 @@ func (s *Server) changeAccountDesktop(parent context.Context, instance string, a
 			return err
 		}
 		defer clear(key)
+		if err = s.runDesktopScript("set -euo pipefail\n"+cage.DesktopFileSupportScript(), 20*time.Second); err != nil {
+			return err
+		}
 	}
-	ctx, cancel := context.WithTimeout(parent, 100*time.Second)
-	defer cancel()
 	code := account.guestID()
 	if code == "" {
 		code = "default"
 	}
-	command := fmt.Sprintf("exec /bin/bash -c %s -- %s %s %s", shellescape.Quote(linuxAccountDesktop), instance, code, scope)
+	if action == "start" && validClaudeID(instance) && s.hostToolsServing() {
+		prep := fmt.Sprintf("umask 077\nmkdir -p \"$HOME/.local/share/desktop-profiles/%s/data\"", instance)
+		if code == "default" {
+			prep += fmt.Sprintf(" \"$HOME/.local/share/desktop-profiles/%s/code\"", instance)
+		}
+		if prepErr := s.runDesktopScript("set -euo pipefail\n"+prep+"\n", 15*time.Second); prepErr == nil {
+			s.syncHostToolsConfigNow(parent)
+		}
+	}
+	ctx, cancel := context.WithTimeout(parent, 100*time.Second)
+	defer cancel()
+	envPrefix := ""
+	if action == "start" && account.ProxyNodeID != "" {
+		tz, lang := s.accountRegionOverrides(account.ProxyNodeID)
+		if tz != "" {
+			envPrefix += "CAGE_ACCOUNT_TZ=" + shellescape.Quote(tz) + " "
+		}
+		if lang != "" {
+			envPrefix += "CAGE_ACCOUNT_LANGUAGE=" + shellescape.Quote(lang) + " "
+		}
+	}
+	command := fmt.Sprintf("exec env %s/bin/bash -c %s -- %s %s %s", envPrefix, shellescape.Quote(linuxAccountDesktop), instance, code, scope)
 	cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", command)
 	cmd.Stdin = bytes.NewReader(key)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if action == "delete" {
+			return errors.New("无法清理客机内的 Desktop 实例数据，暂未删除记录，请重试")
+		}
 		msg := "Desktop 操作失败，请确认已安装 Claude Desktop 并检查客机服务"
 		if bytes.Contains(output, []byte("专属网络尚未就绪")) {
 			msg = "此账号的专属网络尚未就绪"

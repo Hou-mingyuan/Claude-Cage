@@ -288,7 +288,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
               </div>
               {error && !editor && (
                 <div className="favorites-error" role="alert">
-                  {error}
+                  {tr(error)}
                   <button onClick={load}>{tr("重试读取")}</button>
                 </div>
               )}
@@ -472,7 +472,7 @@ export function BrowserFavorites({ current, ready, onOpen, shortcuts = true, men
                 )}
                 {error && (
                   <p role="alert" className="favorites-error">
-                    {error}
+                    {tr(error)}
                   </p>
                 )}
               </form>

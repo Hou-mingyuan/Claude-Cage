@@ -111,6 +111,10 @@ func selectPhysicalInterface(route, hardware, nwi string, usable map[string]bool
 
 // BindInterface changes only the core's host transport. MATCH routing and
 // proxy credentials remain intact; this does not create a guest direct route.
+// Direct proxy nodes whose literal server IP is routed via Tailscale or a
+// directly attached private subnet on another host interface get a per-node
+// interface-name so they follow the host's route to that node while DNS and
+// public proxy nodes remain pinned to the physical uplink.
 func BindInterface(data []byte, name string) ([]byte, error) {
 	if name == "" {
 		return nil, errors.New("缺少物理网卡，不能启动代理")
@@ -123,10 +127,15 @@ func BindInterface(data []byte, name string) ([]byte, error) {
 	// Older imports may carry a node-level binding, which overrides the global.
 	// This pass writes the runtime copy of every node, so nodes imported by
 	// earlier versions also get their SSH host key algorithms here.
+	var resolver *nodeInterfaceResolver
 	if nodes, ok := config["proxies"].([]any); ok {
 		for _, item := range nodes {
 			if node, ok := item.(map[string]any); ok {
-				if _, bound := node["interface-name"]; bound {
+				server, _ := node["server"].(string)
+				dialerProxy, _ := node["dialer-proxy"].(string)
+				if routed := resolveNodeInterface(server, dialerProxy, name, &resolver); routed != "" {
+					node["interface-name"] = routed
+				} else if _, bound := node["interface-name"]; bound {
 					node["interface-name"] = name
 				}
 				pinSSHHostKeyAlgorithms(node)
@@ -157,4 +166,44 @@ func BoundInterface(path string) (string, error) {
 		}
 	}
 	return config.Interface, nil
+}
+
+// BindingMatches reports whether the runtime config at path matches both the
+// expected physical uplink and any per-node host route interfaces (such as
+// Tailscale or directly attached private subnets) for direct proxy nodes.
+func BindingMatches(path, physical string) bool {
+	if physical == "" {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var config struct {
+		Interface string `yaml:"interface-name"`
+		Proxies   []struct {
+			Server      string `yaml:"server"`
+			DialerProxy string `yaml:"dialer-proxy"`
+			Interface   string `yaml:"interface-name"`
+		} `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil || config.Interface != physical {
+		return false
+	}
+	local := newLocalServers()
+	var resolver *nodeInterfaceResolver
+	for _, proxy := range config.Proxies {
+		if local.contains(proxy.Server) {
+			return false
+		}
+		want := resolveNodeInterface(proxy.Server, proxy.DialerProxy, physical, &resolver)
+		have := proxy.Interface
+		if have == physical {
+			have = ""
+		}
+		if have != want {
+			return false
+		}
+	}
+	return true
 }

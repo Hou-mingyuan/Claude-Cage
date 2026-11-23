@@ -96,6 +96,9 @@ func TestDownloadResumesAndRejectsWrongRange(t *testing.T) {
 	for _, wrong := range []bool{false, true} {
 		t.Run(fmt.Sprint(wrong), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if ua := r.UserAgent(); ua != downloadUserAgent || strings.Contains(strings.ToLower(ua), "cage") {
+					t.Errorf("unexpected download user agent: %q", ua)
+				}
 				if r.Header.Get("Range") != "bytes=3-" {
 					t.Error("did not request resume")
 				}

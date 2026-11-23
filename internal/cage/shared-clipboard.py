@@ -13,6 +13,7 @@ from pathlib import Path
 import queue
 import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -330,10 +331,68 @@ def pixel_signature(width, height, rowstride, channels, pixels):
     return digest.digest()
 
 
-def clipboard_worker(name, connection):
+def valid_desktop_instance(instance):
+    if not isinstance(instance, str) or len(instance) != 24 or any(c not in '0123456789abcdef' for c in instance):
+        raise ValueError('Invalid desktop instance')
+    return instance
+
+
+def desktop_display(instance, runtime_root=Path('/run')):
+    valid_desktop_instance(instance)
+    directory = runtime_root / ('desktop-' + instance)
+    display_file, authority = directory / 'display', directory / 'Xauthority'
+    if directory.is_symlink() or display_file.is_symlink() or authority.is_symlink():
+        raise ValueError('Invalid desktop runtime')
+    number = display_file.read_text().strip()
+    if not number.isascii() or not number.isdigit() or len(number) > 5 or not authority.is_file():
+        raise ValueError('Invalid desktop display')
+    return ':' + number, str(authority)
+
+
+def desktop_pid(instance):
+    valid_desktop_instance(instance)
+    result = subprocess.run(['systemctl', 'show', 'desktop-' + instance + '.service',
+                             '--property=MainPID', '--value'],
+                            check=True, capture_output=True, text=True, timeout=5)
+    pid = int(result.stdout.strip())
+    if pid <= 1:
+        raise ValueError('Desktop instance is not running')
+    return pid
+
+
+def enter_desktop_mount_namespace(instance):
+    pid = desktop_pid(instance)
+    descriptor = os.open('/proc/' + str(pid) + '/ns/mnt', os.O_RDONLY)
+    try:
+        os.setns(descriptor, 0)
+    finally:
+        os.close(descriptor)
+    # Re-evaluate /tmp after entering the service's PrivateTmp mount namespace.
+    tempfile.tempdir = None
+    return pid
+
+
+def bridge_desktop(instance):
+    display, authority = desktop_display(instance)
+    # Join the instance's PrivateTmp mount namespace in the parent so file
+    # imports, exports, and CacheRegistry receipts stay isolated per instance
+    # while remaining visible to the X11 worker and Claude Desktop.
+    pid = enter_desktop_mount_namespace(instance)
+    net_fd = os.open('/proc/' + str(pid) + '/ns/net', os.O_RDONLY)
+    try:
+        bridge(displays=((display, 'cage'),), authorities={display: authority},
+               namespace_fds=(net_fd,),
+               display_exists=lambda _name: Path('/proc/' + str(pid)).is_dir())
+    finally:
+        os.close(net_fd)
+
+
+def clipboard_worker(name, connection, authority=None):
     os.environ['NO_AT_BRIDGE'] = '1'
     os.environ['DISPLAY'] = name
-    if name == ':78':
+    if authority:
+        os.environ['XAUTHORITY'] = authority
+    elif name == ':78':
         os.environ['XAUTHORITY'] = '/run/cage-desktop/Xauthority'
     else:
         os.environ.pop('XAUTHORITY', None)
@@ -558,7 +617,8 @@ def bridge_wait_timeout(worker_count, total_displays, cleanup_ready, cache_retry
 
 
 def bridge(displays=((':77', 'cage-browser'), (':78', 'cage')), stdin_fd=None, stdout=None,
-           registry=None, spawn_worker=None, display_exists=None, materialize=materialize_guest_files):
+           registry=None, spawn_worker=None, display_exists=None, materialize=materialize_guest_files,
+           authorities=None, namespace_fds=()):
     # GTK's providers use a default display. Keep one small worker per X11
     # session, under that application's UID, and merge only clipboard events.
     import multiprocessing
@@ -591,11 +651,14 @@ def bridge(displays=((':77', 'cage-browser'), (':78', 'cage')), stdin_fd=None, s
             selected.extend(value.get('files', []))
         return selected
     def run_worker(name, connection, uid, gid, home):
+        for descriptor in namespace_fds:
+            os.setns(descriptor, 0)
+            os.close(descriptor)
         os.initgroups(pwd.getpwuid(uid).pw_name, gid)
         os.setgid(gid)
         os.setuid(uid)
         os.environ['HOME'] = home
-        clipboard_worker(name, connection)
+        clipboard_worker(name, connection, (authorities or {}).get(name))
     context = None if spawn_worker is not None else multiprocessing.get_context('fork')
     if spawn_worker is None:
         def spawn_worker(name, user):
@@ -626,7 +689,9 @@ def bridge(displays=((':77', 'cage-browser'), (':78', 'cage')), stdin_fd=None, s
         nonlocal announced
         for name, user in displays:
             previous = workers.get(name)
-            if previous and not previous[0].is_alive():
+            if previous and (not previous[0].is_alive() or not display_exists(name)):
+                if previous[0].is_alive():
+                    previous[0].terminate()
                 remove_worker(name)
             if name not in workers and display_exists(name):
                 process, parent = spawn_worker(name, user)
@@ -760,25 +825,63 @@ def bridge(displays=((':77', 'cage-browser'), (':78', 'cage')), stdin_fd=None, s
                 process.kill(); process.join()
 
 
-if __name__ == '__main__':
-    if sys.argv[1:] == ['--import'] or len(sys.argv) == 4 and sys.argv[1:3] == ['--import', '--session']:
-        print(json.dumps({'paths': import_files(sys.stdin.buffer, sys.argv[3] if len(sys.argv) == 4 else '')}))
-    elif len(sys.argv) == 4 and sys.argv[1] == '--export-user' and sys.argv[2] in ('cage', 'cage-browser') and sys.argv[3] == '--paths-stdin':
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args:
+        bridge()
+        return
+    if len(args) == 2 and args[0] == '--desktop':
+        bridge_desktop(args[1])
+        return
+    if args[0] == '--import':
+        session = ''
+        desktop = ''
+        index = 1
+        while index < len(args):
+            flag = args[index]
+            if flag == '--session' and index + 1 < len(args) and not session:
+                session = args[index + 1]
+                index += 2
+            elif flag == '--desktop' and index + 1 < len(args) and not desktop:
+                desktop = args[index + 1]
+                index += 2
+            else:
+                raise ValueError('Invalid clipboard import arguments')
+        if desktop:
+            enter_desktop_mount_namespace(desktop)
+        print(json.dumps({'paths': import_files(sys.stdin.buffer, session)}))
+        return
+    if len(args) in (3, 5) and args[0] == '--export-user' and args[1] in ('cage', 'cage-browser') and args[2] == '--paths-stdin':
+        desktop = ''
+        if len(args) == 5:
+            if args[3] != '--desktop':
+                raise ValueError('Invalid clipboard export arguments')
+            desktop = args[4]
         import pwd
+        if desktop:
+            enter_desktop_mount_namespace(desktop)
         selection = sys.stdin.buffer.read((1 << 20) + 1)
         if len(selection) > 1 << 20:
             raise ValueError('file selection exceeded its limit')
         paths = json.loads(selection)
         with CacheRegistry().reading(paths):
-            account = pwd.getpwnam(sys.argv[2])
+            # Keep this spelling: the guest profile rewrites it to map the
+            # stable role name to the environment's own user name.
+            user = args[1]
+            account = pwd.getpwnam(user)
             os.initgroups(account.pw_name, account.pw_gid)
             os.setgid(account.pw_gid)
             os.setuid(account.pw_uid)
             export_files(paths, sys.stdout.buffer)
-    elif len(sys.argv) == 3 and sys.argv[1] == '--export':
-        selection = sys.stdin.buffer.read((1 << 20) + 1) if sys.argv[2] == '--paths-stdin' else sys.argv[2]
+        return
+    if len(args) == 2 and args[0] == '--export':
+        selection = sys.stdin.buffer.read((1 << 20) + 1) if args[1] == '--paths-stdin' else args[1]
         if len(selection) > 1 << 20:
             raise ValueError('file selection exceeded its limit')
         export_files(json.loads(selection), sys.stdout.buffer)
-    else:
-        bridge()
+        return
+    raise ValueError('Invalid clipboard arguments')
+
+
+if __name__ == '__main__':
+    main()

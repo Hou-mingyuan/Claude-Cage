@@ -24,14 +24,42 @@ function UsageCurve({ series, mode, metric }) {
     connected = true;
     return command;
   }).join(" ");
+  const areaPath = useMemo(() => {
+    const segments = [];
+    let current = [];
+    const base = y(0);
+    for (let i = 0; i < series.length; i++) {
+      if (series[i].value === null) {
+        if (current.length > 1) segments.push(current);
+        current = [];
+      } else {
+        current.push([x(i), y(series[i].value)]);
+      }
+    }
+    if (current.length > 1) segments.push(current);
+    return segments
+      .map((pts) =>
+        `M${pts[0][0]},${base} ` +
+        pts.map(([px, py]) => `L${px},${py}`).join(" ") +
+        ` L${pts.at(-1)[0]},${base} Z`,
+      )
+      .join(" ");
+  }, [series, max]);
   const point = hover === null ? null : series[hover];
   const label = tr(tokenMetrics.find(([key])=>key===metric)?.[1]);
   return <>
     <div className="token-curve-scroll"><svg className="token-curve" viewBox={`0 0 ${width} ${height}`} role="group" aria-label={mode === "weekly" ? tr("每周{0}曲线", label) : mode === "cumulative" ? tr("累计{0}曲线", label) : tr("每日{0}曲线", label)}>
+      <defs>
+        <linearGradient id="token-curve-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--success)" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="var(--success)" stopOpacity="0.01" />
+        </linearGradient>
+      </defs>
       {[0,.5,1].map(fraction => <g key={fraction}>
         <line x1={left} x2={width-16} y1={y(max*fraction)} y2={y(max*fraction)} className="token-grid-line" />
         <text x={left-12} y={y(max*fraction)+4} textAnchor="end">{compactTokens(max*fraction)}</text>
       </g>)}
+      {areaPath && <path d={areaPath} fill="url(#token-curve-fill)" />}
       <path d={path} className="token-curve-line" />
       {series.map((point,index) => point.value === null ? null : <circle key={point.date}
         cx={x(index)} cy={y(point.value)} r={hover===index ? 5 : 2.5} tabIndex={0}
@@ -113,27 +141,14 @@ export function TokenUsagePanel({ onConfirm }) {
     if (await onConfirm({title:tr("清除本地用量统计？"),body:tr("清除已保存的 Token 计数，并从现在起重新统计。Claude Code 原始会话、登录和项目保留。"),confirm:tr("清除统计"),danger:true})) await load({action:"clear"});
   };
   return <section className="token-usage" aria-label={tr("Claude 本地用量")}>
-    <div className="token-page-heading"><div><h2>{tr("Token 活动")}</h2><p>{tr("Claude Code 与 Desktop Code · 本地记录汇总")}</p></div>
-      <button className="token-refresh" disabled={busy || !data?.enabled || !data?.available} onClick={()=>load({action:"refresh"})}><RefreshCw size={15} className={busy?"token-spinning":""}/> {busy?tr("正在读取…"):tr("刷新统计")}</button></div>
-    {error && <p className="token-error" role="alert">{error}<button disabled={busy} onClick={()=>load(data?.enabled && data?.available?{action:"refresh"}:undefined)}>{tr("重试")}</button></p>}
-    {!data && <p role="status">{tr("正在读取本地统计…")}</p>}
+    {!data && error && <p className="token-error" role="alert">{tr(error)}<button disabled={busy} onClick={()=>load(undefined)}>{tr("重试")}</button></p>}
+    {!data && <p className="token-loading" role="status">{tr("正在读取本地统计…")}</p>}
     {data && <>
-      {!data.available && <p className="token-notice" role="status">{tr("环境尚未就绪，显示上次保存的统计。启动环境并完成组件更新后可刷新。")}</p>}
-      {!data.enabled && <p className="token-notice" role="status">{tr("统计已暂停，已保存的计数继续保留。")}</p>}
-      {snapshot?.pending && <p className="token-notice" role="status">{tr("部分记录尚未读完，将在后续采集中继续处理。")}</p>}
-      {snapshot?.invalid_records>0 && <p className="token-notice" role="status">{tr("有 {0} 条记录无法解析，当前统计可能不完整。", snapshot.invalid_records.toLocaleString())}</p>}
-      <div className="token-filters">
-        <label>{tr("年份")}<InlineSelect inline aria-label={tr("统计年份")} value={activeYear} onValueChange={setYear}>{years.map(value=><option key={value} value={value}>{tr("{0} 年", value)}</option>)}</InlineSelect></label>
-        <label>{tr("统计口径")}<InlineSelect inline aria-label={tr("统计口径")} value={metric} onValueChange={setMetric}>{tokenMetrics.map(([key,label])=><option key={key} value={key}>{tr(label)}</option>)}</InlineSelect></label>
-        {models.length>0 && <label>{tr("模型")}<InlineSelect inline aria-label={tr("筛选模型")} value={model} onValueChange={setModel}><option value="all">{tr("全部模型")}</option>{models.map(value=><option key={value} value={value}>{value}</option>)}</InlineSelect></label>}
-        {sources.length>0 && <label>{tr("日志来源")}<InlineSelect inline aria-label={tr("筛选日志来源")} value={source} onValueChange={setSource}><option value="all">{tr("全部来源")}</option>{sources.map(value=><option key={value} value={value}>{data.sources?.[value] || tr("未知配置")}</option>)}</InlineSelect></label>}
-        {clients.length>0 && <label>{tr("运行入口")}<InlineSelect inline aria-label={tr("筛选运行入口")} value={client} onValueChange={setClient}><option value="all">{tr("全部入口")}</option>{clients.map(([key,label])=><option key={key} value={key}>{tr(label)}</option>)}</InlineSelect></label>}
-      </div>
       <dl className="token-totals">
-        <div><dt>{tr("全年已记录 Token")}</dt><dd>{compactTokens(total)}</dd></div>
-        <div><dt>{tr("输出 Token")}</dt><dd>{compactTokens(sums.output_tokens)}</dd></div>
-        <div><dt>{tr("已记录请求")}</dt><dd>{sums.requests.toLocaleString()}</dd></div>
-        <div><dt>{tr("活跃天数")}</dt><dd>{activeDays}<small>{" " + tr("天")}</small></dd></div>
+        <div><dd>{compactTokens(total)}</dd><dt>{tr("全年已记录 Token")}</dt></div>
+        <div><dd>{compactTokens(sums.output_tokens)}</dd><dt>{tr("输出 Token")}</dt></div>
+        <div><dd>{sums.requests.toLocaleString()}</dd><dt>{tr("已记录请求")}</dt></div>
+        <div><dd>{activeDays}<small>{" " + tr("天")}</small></dd><dt>{tr("活跃天数")}</dt></div>
       </dl>
       <section className="token-activity" aria-labelledby="token-heatmap-title">
         <div className="token-section-heading"><h3 id="token-heatmap-title">{tr("{0} 年活动", activeYear)}</h3><span>{tr(tokenMetrics.find(([key])=>key===metric)?.[1])}</span></div>
@@ -145,10 +160,33 @@ export function TokenUsagePanel({ onConfirm }) {
             aria-pressed={chosen===item.date} disabled={item.date>today} tabIndex={chosen===item.date || !calendar.some(day=>day.date===chosen)&&index===0?0:-1}
             onClick={()=>setSelected(item.date)} onFocus={()=>setSelected(item.date)} onKeyDown={event=>moveCell(event,index)}/>;})}
         </div></div>
-        <div className="token-heat-legend"><span><i className="token-cell level--1"/>{tr("无记录")}</span><span>{tr("少")}{[0,1,2,3,4].map(level=><i key={level} className={`token-cell level-${level}`}/>)}{tr("多")}</span></div>
-        <div className="token-day-detail" aria-live="polite"><strong>{chosen}</strong>{chosenDay ? <><span>{metricValue(chosenDay,metric).toLocaleString()} Token</span><span>{tr("{0} 次请求", chosenDay.requests.toLocaleString())}</span></> : <span>{tr("无记录")}</span>}</div>
+        <div className="token-activity-footer">
+          <div className="token-day-detail" aria-live="polite"><strong>{chosen}</strong>{chosenDay ? <><span>{metricValue(chosenDay,metric).toLocaleString()} Token</span><span>{tr("{0} 次请求", chosenDay.requests.toLocaleString())}</span></> : <span>{tr("无记录")}</span>}</div>
+          <div className="token-heat-legend"><span><i className="token-cell level--1"/>{tr("无记录")}</span><span>{tr("少")}{[0,1,2,3,4].map(level=><i key={level} className={`token-cell level-${level}`}/>)}{tr("多")}</span></div>
+        </div>
       </section>
-      {rows.length===0 && <p className="token-empty">{tr("尚无可统计的 Token 记录。运行 Claude Code 或 Desktop Code 后刷新；已有历史会从仍保留的日志中读取。")}</p>}
+      <section className="token-trend" aria-labelledby="token-trend-title">
+        <div className="token-section-heading"><h3 id="token-trend-title">{tr("用量趋势")}</h3><div className="token-segments" role="group" aria-label={tr("曲线周期")}>{[["daily",tr("每天")],["weekly",tr("每周")],["cumulative",tr("累计总量")]].map(([key,label])=><button key={key} aria-pressed={mode===key} onClick={()=>setMode(key)}>{label}</button>)}</div></div>
+        <UsageCurve key={chartKey} series={series} mode={mode} metric={metric}/>
+      </section>
+      <div className="token-controls-section">
+        <div className="token-controls-bar">
+          <div className="token-filters">
+            <label>{tr("年份")}<InlineSelect inline aria-label={tr("统计年份")} value={activeYear} onValueChange={setYear}>{years.map(value=><option key={value} value={value}>{tr("{0} 年", value)}</option>)}</InlineSelect></label>
+            <label>{tr("统计口径")}<InlineSelect inline aria-label={tr("统计口径")} value={metric} onValueChange={setMetric}>{tokenMetrics.map(([key,label])=><option key={key} value={key}>{tr(label)}</option>)}</InlineSelect></label>
+            {models.length>0 && <label>{tr("模型")}<InlineSelect inline aria-label={tr("筛选模型")} value={model} onValueChange={setModel}><option value="all">{tr("全部模型")}</option>{models.map(value=><option key={value} value={value}>{value}</option>)}</InlineSelect></label>}
+            {sources.length>0 && <label>{tr("日志来源")}<InlineSelect inline aria-label={tr("筛选日志来源")} value={source} onValueChange={setSource}><option value="all">{tr("全部来源")}</option>{sources.map(value=><option key={value} value={value}>{data.sources?.[value] || tr("未知配置")}</option>)}</InlineSelect></label>}
+            {clients.length>0 && <label>{tr("运行入口")}<InlineSelect inline aria-label={tr("筛选运行入口")} value={client} onValueChange={setClient}><option value="all">{tr("全部入口")}</option>{clients.map(([key,label])=><option key={key} value={key}>{tr(label)}</option>)}</InlineSelect></label>}
+          </div>
+          <button className="token-refresh" disabled={busy || !data?.enabled || !data?.available} onClick={()=>load({action:"refresh"})}><RefreshCw size={14} className={busy?"token-spinning":""}/> {busy?tr("正在读取…"):tr("刷新统计")}</button>
+        </div>
+        {error && <p className="token-error" role="alert">{tr(error)}<button disabled={busy} onClick={()=>load(data?.enabled && data?.available?{action:"refresh"}:undefined)}>{tr("重试")}</button></p>}
+        {!data.available && <p className="token-notice" role="status">{tr("环境尚未就绪，显示上次保存的统计。启动环境并完成组件更新后可刷新。")}</p>}
+        {!data.enabled && <p className="token-notice" role="status">{tr("统计已暂停，已保存的计数继续保留。")}</p>}
+        {snapshot?.pending && <p className="token-notice" role="status">{tr("部分记录尚未读完，将在后续采集中继续处理。")}</p>}
+        {snapshot?.invalid_records>0 && <p className="token-notice" role="status">{tr("有 {0} 条记录无法解析，当前统计可能不完整。", snapshot.invalid_records.toLocaleString())}</p>}
+        {rows.length===0 && <p className="token-empty">{tr("尚无可统计的 Token 记录。运行 Claude Code 或 Desktop Code 后刷新；已有历史会从仍保留的日志中读取。")}</p>}
+      </div>
       {breakdown.length>0 && <section className="token-breakdown" aria-labelledby="token-breakdown-title">
         <div className="token-section-heading"><h3 id="token-breakdown-title">{tr("按运行入口分布")}</h3><span>{tr("{0} 年", activeYear)} · {tr(tokenMetrics.find(([key])=>key===metric)?.[1])}</span></div>
         <table aria-label={tr("运行入口用量")}><thead><tr><th scope="col">{tr("入口")}</th><th scope="col">{tr("Token / 占比")}</th><th scope="col">{tr("请求")}</th></tr></thead>
@@ -157,11 +195,6 @@ export function TokenUsagePanel({ onConfirm }) {
             <td aria-label={tr("{0} Token，占比 {1}%", (item.value.toLocaleString()), (share.toFixed(1)))}>{compactTokens(item.value)}<small>{share.toFixed(1)}%</small></td><td>{item.requests.toLocaleString()}</td>
           </tr>;})}</tbody></table>
       </section>}
-      <p className="token-coverage">{tr("仅统计已保存的本地用量，不主动获取普通聊天与云端数据；Cowork 仅纳入标准日志中明确标识的记录。")}</p>
-      <section className="token-trend" aria-labelledby="token-trend-title">
-        <div className="token-section-heading"><h3 id="token-trend-title">{tr("用量趋势")}</h3><div className="token-segments" role="group" aria-label={tr("曲线周期")}>{[["daily",tr("每天")],["weekly",tr("每周")],["cumulative",tr("累计总量")]].map(([key,label])=><button key={key} aria-pressed={mode===key} onClick={()=>setMode(key)}>{label}</button>)}</div></div>
-        <UsageCurve key={chartKey} series={series} mode={mode} metric={metric}/>
-      </section>
       <details className="token-settings"><summary>{tr("统计范围与隐私")}</summary>
         <p>{tr("仅提取时间、模型、入口分类及四类 Token 计数，不保存对话、代码或密钥。总量包含输入、输出、缓存读取和缓存写入；它不能直接换算成订阅剩余额度或实际费用。")}</p>
         <p>{snapshot?.timezone ? tr("采集默认与托管账号配置中的标准会话记录，按运行环境的本地日期统计（{0}）。日志来源表示配置目录，不代表实际扣费账号。自定义配置、CCS、其他设备及已删除或未保存的日志暂不覆盖。", snapshot.timezone) : tr("采集默认与托管账号配置中的标准会话记录，按运行环境的本地日期统计。日志来源表示配置目录，不代表实际扣费账号。自定义配置、CCS、其他设备及已删除或未保存的日志暂不覆盖。")}</p>

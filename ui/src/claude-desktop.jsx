@@ -129,7 +129,8 @@ export function ClaudeDesktop({
 }) {
   const tr = useTranslation();
   const [closedChooser, setClosedChooser] = useState("");
-  const directoryRequest = uploads.find((item) => item.directory && item.id !== closedChooser);
+  const defaultUploads = uploads.filter((item) => !item.desktop || item.desktop === "default");
+  const directoryRequest = defaultUploads.find((item) => item.directory && item.id !== closedChooser);
   const [zoom, setZoom] = useDesktopZoom();
   const windowVisible = useWindowVisibility();
   const screenVisible = visible && windowVisible;
@@ -205,7 +206,7 @@ export function ClaudeDesktop({
   }, [status.job]);
   return (
     <section className="claude-desktop-view" aria-label="Claude Desktop">
-      {!nativeAvailable() && <BrowserUploads requests={uploads} onStatus={onStatus} />}
+      {!nativeAvailable() && <BrowserUploads requests={defaultUploads} onStatus={onStatus} />}
       {directoryRequest && <ProjectDialog
         key={directoryRequest.id}
         status={status}

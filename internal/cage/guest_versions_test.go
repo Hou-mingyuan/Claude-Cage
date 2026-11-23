@@ -835,9 +835,9 @@ func TestGuestStartRecoversFromTruncatedGuestFiles(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v %s", err, out)
 			}
-			// display-scale and browser-control.json: each rename is flushed.
-			if got := strings.Count(string(out), "dir-fsync "+etcDir+"\n"); got != 2 {
-				t.Fatalf("directory fsyncs %d, want 2: %s", got, out)
+			// display-scale, browser-control.json and desktop-downloads.json: each rename is flushed.
+			if got := strings.Count(string(out), "dir-fsync "+etcDir+"\n"); got != 3 {
+				t.Fatalf("directory fsyncs %d, want 3: %s", got, out)
 			}
 			raw, err := os.ReadFile(ctrlPath)
 			if err != nil {
@@ -857,8 +857,18 @@ func TestGuestStartRecoversFromTruncatedGuestFiles(t *testing.T) {
 			if tc.wantToken != "" && got.Token != tc.wantToken {
 				t.Fatalf("valid token replaced: got %q want %q", got.Token, tc.wantToken)
 			}
-			if entries, _ := os.ReadDir(etcDir); len(entries) != 2 {
+			if entries, _ := os.ReadDir(etcDir); len(entries) != 3 {
 				t.Fatalf("temp files left in etcDir: %v", entries)
+			}
+			downloadsRaw, err := os.ReadFile(filepath.Join(etcDir, "desktop-downloads.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var downloadsCfg struct {
+				Workspace string `json:"workspace"`
+			}
+			if json.Unmarshal(downloadsRaw, &downloadsCfg) != nil || downloadsCfg.Workspace != "/work" {
+				t.Fatalf("unexpected desktop-downloads.json: %q", downloadsRaw)
 			}
 		})
 	}

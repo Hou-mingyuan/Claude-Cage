@@ -12,8 +12,8 @@ import (
 
 // dialAgent connects to the explicit socket saved with the host, or to
 // SSH_AUTH_SOCK when none is saved. The explicit socket must be a Unix socket
-// owned by the current user that group and other users cannot write; Cage
-// never reads ssh_config or runs ssh -G to discover one.
+// owned by the current user that group and other users cannot write. The
+// connection code does not read ssh_config or run ssh -G to discover one.
 func dialAgent(ctx context.Context, explicit string) (net.Conn, error) {
 	path := explicit
 	if path == "" {

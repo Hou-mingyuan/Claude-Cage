@@ -131,6 +131,8 @@ func (s *Server) closeService() error {
 		// Closing PTYs first releases handlers blocked writing terminal input.
 		// The manager also rejects a terminal created by an already-admitted call.
 		s.terminals.close()
+		s.remoteApprovals.close()
+		s.clientBridge.close()
 		s.closeBackground()
 		s.activities.Wait()
 		s.op.Lock()

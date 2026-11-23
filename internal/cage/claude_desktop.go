@@ -48,18 +48,11 @@ func ClaudeDesktopInstallScript() string {
 	return ToolInstallPrelude() + claudeDesktopInstall + "\n" + ClaudeDesktopProvisionScript()
 }
 
-// Provisioning is independent of the browser and never restarts it. Desktop
-// services are deliberately not enabled at boot: the user opens the app.
-func ClaudeDesktopProvisionScript() string {
-	return "set -euo pipefail\n" + clientRuntimeScript() + sharedClipboardScript() + nativeInputScript() + fileInputScript() + displayGovernorScript() +
-		"sudo install -d -m 0755 /etc/claude-cage\n" +
-		"sudo tee /usr/local/lib/desktop-history.py >/dev/null <<'DESKTOP_HISTORY'\n" + desktopHistory + "\nDESKTOP_HISTORY\n" +
-		"sudo tee /usr/local/bin/cage-claude-session >/dev/null <<'CAGE_CLAUDE_SESSION'\n" + claudeDesktopSession + "\nCAGE_CLAUDE_SESSION\n" +
-		"sudo tee /usr/local/bin/cage-claude-open >/dev/null <<'CAGE_CLAUDE_OPEN'\n" + claudeDesktopOpen + "\nCAGE_CLAUDE_OPEN\n" +
-		"sudo tee /usr/local/bin/cage-claude-start >/dev/null <<'CAGE_CLAUDE_START'\n" + claudeDesktopStart + "\nCAGE_CLAUDE_START\n" +
-		"sudo chmod 0755 /usr/local/bin/cage-claude-session /usr/local/bin/cage-claude-open /usr/local/bin/cage-claude-start\n" + guestOpenScript() + `
-printf 'cage-browser ALL=(cage) NOPASSWD: /usr/local/bin/cage-claude-open *\n' | sudo tee /etc/sudoers.d/cage-claude-desktop >/dev/null
-sudo chmod 0440 /etc/sudoers.d/cage-claude-desktop
+// DesktopFileSupportScript installs the session FileChooser portal helper and
+// syncs the shared host transfer workspace for both default and account Desktops.
+func DesktopFileSupportScript() string {
+	return fileInputScript() + `
+sudo install -d -m 0755 /etc/claude-cage
 sudo python3 - <<'CAGE_DESKTOP_DOWNLOAD_CONFIG'
 import json, os
 from pathlib import Path
@@ -71,6 +64,21 @@ if source.exists():
     destination.write_text(json.dumps({'workspace': workspace}))
     os.chmod(destination, 0o644)
 CAGE_DESKTOP_DOWNLOAD_CONFIG
+`
+}
+
+// Provisioning is independent of the browser and never restarts it. Desktop
+// services are deliberately not enabled at boot: the user opens the app.
+func ClaudeDesktopProvisionScript() string {
+	return "set -euo pipefail\n" + clientRuntimeScript() + sharedClipboardScript() + nativeInputScript() + DesktopFileSupportScript() + displayGovernorScript() +
+		"sudo install -d -m 0755 /etc/claude-cage\n" +
+		"sudo tee /usr/local/lib/desktop-history.py >/dev/null <<'DESKTOP_HISTORY'\n" + desktopHistory + "\nDESKTOP_HISTORY\n" +
+		"sudo tee /usr/local/bin/cage-claude-session >/dev/null <<'CAGE_CLAUDE_SESSION'\n" + claudeDesktopSession + "\nCAGE_CLAUDE_SESSION\n" +
+		"sudo tee /usr/local/bin/cage-claude-open >/dev/null <<'CAGE_CLAUDE_OPEN'\n" + claudeDesktopOpen + "\nCAGE_CLAUDE_OPEN\n" +
+		"sudo tee /usr/local/bin/cage-claude-start >/dev/null <<'CAGE_CLAUDE_START'\n" + claudeDesktopStart + "\nCAGE_CLAUDE_START\n" +
+		"sudo chmod 0755 /usr/local/bin/cage-claude-session /usr/local/bin/cage-claude-open /usr/local/bin/cage-claude-start\n" + guestOpenScript() + `
+printf 'cage-browser ALL=(cage) NOPASSWD: /usr/local/bin/cage-claude-open *\n' | sudo tee /etc/sudoers.d/cage-claude-desktop >/dev/null
+sudo chmod 0440 /etc/sudoers.d/cage-claude-desktop
 sudo tee /etc/claude-cage/desktop-openbox.xml >/dev/null <<'CAGE_CLAUDE_WINDOWS'
 <?xml version="1.0" encoding="UTF-8"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">

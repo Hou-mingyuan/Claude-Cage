@@ -54,7 +54,7 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
       <form className="remote-host-form" onSubmit={save}>
         {error && (
           <p className="error-message" role="alert">
-            {error}
+            {tr(error)}
           </p>
         )}
         <fieldset disabled={busy}>
@@ -181,7 +181,7 @@ export function HostForm({ initial, platform, onSaved, onClose }) {
               <small>
                 {platform === "windows"
                   ? tr("留空时使用 SSH_AUTH_SOCK 或 Windows OpenSSH agent。使用其他 agent 时，填写以 \\\\.\\pipe\\ 开头的命名管道。")
-                  : tr("留空时使用 SSH_AUTH_SOCK。密码管理器提供独立 agent 时，填写其套接字的绝对路径。Cage 不读取 SSH 配置文件。")}
+                  : tr("留空时使用 SSH_AUTH_SOCK。密码管理器提供独立 agent 时，填写其套接字的绝对路径。")}
               </small>
             </label>
           )}

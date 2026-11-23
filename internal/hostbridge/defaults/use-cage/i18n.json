@@ -1,0 +1,62 @@
+{
+  "zh-CN": {
+    "displayName": "控制 Cage",
+    "description": "让 Claude 在受控边界内查看 Cage 状态、调整外观与显示偏好，并在你逐次确认后启停或重载扩展插件。"
+  },
+  "zh-TW": {
+    "displayName": "控制 Cage",
+    "description": "讓 Claude 在受控邊界內查看 Cage 狀態、調整外觀與顯示偏好，並在你逐次確認後啟停或重載擴充外掛。"
+  },
+  "ru": {
+    "displayName": "Управление Cage",
+    "description": "Позволяет Claude безопасно просматривать состояние Cage, менять тему и настройки отображения, а также управлять плагинами с вашим подтверждением."
+  },
+  "ar": {
+    "displayName": "التحكم بـ Cage",
+    "description": "يتيح لـ Claude عرض حالة Cage وتعديل المظهر وتفضيلات العرض وإدارة الإضافات ضمن حدود آمنة وبموافقتك."
+  },
+  "fa": {
+    "displayName": "کنترل Cage",
+    "description": "به Claude امکان می‌دهد در محدوده‌ای امن وضعیت Cage را ببیند، ظاهر و تنظیمات نمایش را تغییر دهد و افزونه‌ها را با تأیید شما مدیریت کند."
+  },
+  "ko": {
+    "displayName": "Cage 제어",
+    "description": "Claude가 안전한 범위 내에서 Cage 상태를 확인하고 테마·표시 설정을 변경하며 확인 후 플러그인을 관리할 수 있게 합니다."
+  },
+  "es": {
+    "displayName": "Usar Cage",
+    "description": "Permite a Claude consultar el estado de Cage, ajustar la apariencia y preferencias de visualización y gestionar complementos bajo límites seguros."
+  },
+  "my": {
+    "displayName": "Cage ထိန်းချုပ်မှု",
+    "description": "Claude သည် လုံခြုံသောကန့်သတ်ချက်အတွင်း Cage အခြေအနေကြည့်ခြင်း၊ အသွင်အပြင်နှင့် ပြသမှုဆက်တင်များပြောင်းခြင်းနှင့် ပလပ်အင်များ စီမံနိုင်စေသည်။"
+  },
+  "be": {
+    "displayName": "Кіраванне Cage",
+    "description": "Дазваляе Claude праглядаць стан Cage, змяняць тэму і налады адлюстравання, а таксама кіраваць плагінамі з пацвярджэннем."
+  },
+  "ps": {
+    "displayName": "د Cage کنټرول",
+    "description": "Claude ته اجازه ورکوي چې په خوندي حدودو کې د Cage حالت وګوري، بڼه او د ښودنې غوره توبونه بدل کړي او ستاسو په تایید سره پلګینونه اداره کړي."
+  },
+  "prs": {
+    "displayName": "کنترول Cage",
+    "description": "به Claude اجازه می‌دهد در محدوده امن وضعیت Cage را ببیند، ظاهر و تنظیمات نمایش را تغییر دهد و با تأیید شما افزونه‌ها را مدیریت کند."
+  },
+  "am": {
+    "displayName": "Cage መቆጣጠሪያ",
+    "description": "Claude በተጠበቀ ወሰን ውስጥ የCage ሁኔታን እንዲያይ፣ ገጽታና የማሳያ ምርጫዎችን እንዲቀይር እና በፈቃድዎ ተሰኪዎችን እንዲያስተዳድር ያስችላል።"
+  },
+  "so": {
+    "displayName": "Isticmaal Cage",
+    "description": "Wuxuu u oggolaadaa Claude inuu arko xaaladda Cage, beddelo muuqaalka iyo doorbidyada, oo maamulo ku-xirayaasha isagoo ku jira xuduudo ammaan ah."
+  },
+  "ti": {
+    "displayName": "Cage ምቁጽጻር",
+    "description": "Claude ብውሑስ ደረት ኩነታት Cage ክርኢ፣ ትርኢትን ምርጫታትን ከዐሪ ከምኡውን ብፍቓድካ ተሰኪታት ከመሓድር የኽእል።"
+  },
+  "fr": {
+    "displayName": "Contrôler Cage",
+    "description": "Permet à Claude de consulter l’état de Cage, d’ajuster l’apparence et les préférences d’affichage, et de gérer les plugins dans un cadre sécurisé."
+  }
+}

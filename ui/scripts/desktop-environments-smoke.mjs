@@ -132,12 +132,12 @@ const click = (name) => page.getByRole("button", { name, exact: true }).click();
 const visible = (name) =>
   page.getByText(name, { exact: true }).first().waitFor();
 try {
-  await page.getByRole("heading", { name: "先启动 Cage 环境" }).waitFor();
+  await page.getByRole("heading", { name: "Claude Cage" }).waitFor();
   assert.equal(view.mode, "local");
   assert.equal(state.requests.some(r => r.path === "/start"), false);
   await click("SSH 主机");
   // The working surface survives opening the sidebar and a failed candidate.
-  await page.getByRole("heading", { name: "先启动 Cage 环境" }).waitFor();
+  await page.getByRole("heading", { name: "Claude Cage" }).waitFor();
   await click("返回工作台侧栏");
   await page.getByRole("navigation", { name: "主导航" }).waitFor();
   await click("SSH 主机");

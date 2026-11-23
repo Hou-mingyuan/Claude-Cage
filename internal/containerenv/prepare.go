@@ -92,6 +92,9 @@ func (r *Runtime) Prepare(ctx context.Context, log io.Writer) error {
 		return err
 	}
 	identity.Hostname = profile.Hostname
+	if err := identity.Validate(); err != nil {
+		return err
+	}
 	if _, err := r.output(ctx, r.createArguments(identity)...); err != nil {
 		return err
 	}
@@ -99,10 +102,7 @@ func (r *Runtime) Prepare(ctx context.Context, log io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if container == nil {
-		return errors.New("容器创建后未能验证身份")
-	}
-	if err := checkContainerConfiguration(container); err != nil {
+	if err := checkCreatedContainer(container, identity); err != nil {
 		return err
 	}
 	if err := r.recordStorage(ctx, container.ID); err != nil {

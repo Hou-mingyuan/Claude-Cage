@@ -1,3 +1,19 @@
+import { formatMessage } from "./message-catalog.mjs";
+import { localizeBackendMessage } from "./backend-message.mjs";
+
+export const errorText = {
+  http: "{0}失败（HTTP {1}）：{2}",
+  connection: "{0}失败：工作台与 Cage 后台的连接已中断。请点击重新连接；若刚才正在保存或上传，恢复后先核对结果再重试。",
+  native: "{0}失败：{1}。请重新连接 Cage；仍失败时在设置中导出诊断包。",
+  invalidResponse: "{0}失败：后台返回的结果格式无效。请重新连接；仍出现时在设置中导出诊断包。",
+};
+
+// An untranslated template uses its source-language fragments together.
+export function localizeFailure(localize, template, ...values) {
+  if (localize(template) === template) return formatMessage(template, ...values);
+  return localize(template, ...values.map(value => typeof value === "string" ? localize(value) : value));
+}
+
 export function operationName(path = "", method = "GET") {
   const reading = method === "GET";
   if (path === "/client/about") return reading ? "读取软件版本" : "检测应用更新";
@@ -31,6 +47,7 @@ export function operationName(path = "", method = "GET") {
   if (path.startsWith("/projects")) return "连接项目目录";
   if (path.startsWith("/account")) return "处理账户操作";
   if (path.startsWith("/claude-desktop")) return "操作 Claude Desktop";
+  if (path.startsWith("/desktop-instances")) return reading ? "读取 Desktop 实例" : "操作 Desktop 实例";
   if (path === "/token-usage") return reading ? "读取本地用量统计" : "更新本地用量统计";
   if (path.startsWith("/terminals")) return "连接终端";
   if (path === "/start") return "启动环境";
@@ -38,13 +55,15 @@ export function operationName(path = "", method = "GET") {
   return "连接 Cage 工作台";
 }
 
-export function httpErrorMessage(path, status, text = "", contentType = "", method = "GET") {
+export function httpErrorMessage(path, status, text = "", contentType = "", method = "GET", localize = formatMessage) {
   // Proxy HTML pages, stack traces and untranslated runtime errors are not UI
   // explanations. Preserve short Chinese messages supplied by Cage itself.
   const message = text.trim();
-  if (contentType.startsWith("text/plain") && message.length <= 2000 && /\p{Script=Han}/u.test(message) && !/<(?:html|body|script|!doctype)\b/i.test(message)) return message;
+  if (contentType.startsWith("text/plain") && message.length <= 2000 && /\p{Script=Han}/u.test(message) && !/<(?:html|body|script|!doctype)\b/i.test(message)) {
+    return localizeBackendMessage(message, localize);
+  }
   if (path === "/settings" && method === "POST" && status === 503) {
-    return "暂时无法确认设置是否已保存（HTTP 503）。请在连接恢复后核对设置和操作详情，再决定是否重新保存。";
+    return localize("暂时无法确认设置是否已保存（HTTP 503）。请在连接恢复后核对设置和操作详情，再决定是否重新保存。");
   }
   const action = operationName(path, method);
   const reasons = {
@@ -61,15 +80,18 @@ export function httpErrorMessage(path, status, text = "", contentType = "", meth
     503: "后台服务尚未就绪或正在重启。请等待连接恢复后再操作。",
     504: "等待后台响应超时。请检查环境负载，恢复连接后核对操作是否已生效。",
   };
-  return `${action}失败（HTTP ${status}）：${reasons[status] || "尚未取得可识别的原因。请在设置中导出诊断包。"}`;
+  return localizeFailure(localize, errorText.http, action, status, reasons[status] || "尚未取得可识别的原因。请在设置中导出诊断包。");
 }
 
-export function connectionErrorMessage(path, method = "GET") {
-  return `${operationName(path, method)}失败：工作台与 Cage 后台的连接已中断。请点击重新连接；若刚才正在保存或上传，恢复后先核对结果再重试。`;
+export function connectionErrorMessage(path, method = "GET", localize = formatMessage) {
+  return localizeFailure(localize, errorText.connection, operationName(path, method));
 }
 
-export function nativeFailureMessage(action, message = "") {
-  if (/\p{Script=Han}/u.test(message) && !["文件操作失败", "原生操作超时，请重试", "操作失败"].includes(message)) return message;
+export function nativeFailureMessage(action, message = "", localize = formatMessage) {
+  if (/\p{Script=Han}/u.test(message) && !["文件操作失败", "原生操作超时，请重试", "操作失败"].includes(message)) {
+    return localizeBackendMessage(message, localize);
+  }
   const names = { chooseFolder: "选择本机文件夹", chooseUploadFiles: "选择上传文件", uploadHostFiles: "上传本机文件", openHostPath: "打开本机文件", exportDiagnostics: "导出诊断包", appUpdate: "检查或安装应用更新", clipboardRead: "读取剪贴板", clipboardWrite: "写入剪贴板", refreshSession: "恢复工作台登录会话", notificationStatus: "读取系统通知状态", requestNotificationPermission: "请求系统通知权限", showNotification: "发送系统通知", openNotificationSettings: "打开系统通知设置" };
-  return `${names[action] || "执行本机操作"}失败：${/timeout|超时/i.test(message) ? "等待本机组件响应超时" : "本机组件没有返回可识别的原因"}。请重新连接 Cage；仍失败时在设置中导出诊断包。`;
+  const reason = /timeout|超时/i.test(message) ? "等待本机组件响应超时" : "本机组件没有返回可识别的原因";
+  return localizeFailure(localize, errorText.native, names[action] || "执行本机操作", reason);
 }

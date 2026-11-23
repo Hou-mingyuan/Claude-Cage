@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sylvinus/agent-vm/internal/paths"
 	"github.com/sylvinus/agent-vm/internal/transfermeta"
 	"github.com/sylvinus/agent-vm/internal/usererror"
 )
@@ -157,7 +158,7 @@ func (s *Server) guestDownloadInfo(ctx context.Context, token, id string) (brows
 			data, err = s.guestAPI(ctx, token, "GET", "/tabs", nil)
 		} else {
 			var result map[string]any
-			result, err = s.guestFiles(ctx, "desktop", "GET", "/requests", nil, "")
+			result, err = s.pollAllDesktopFiles(ctx)
 			if err == nil {
 				data, err = json.Marshal(result)
 			}
@@ -244,11 +245,12 @@ func openDownloadedFile(path string) (*os.File, error) {
 	if err != nil || !before.Mode().IsRegular() {
 		return nil, errors.New("下载文件不可用")
 	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	dir := filepath.Clean(filepath.Dir(path))
+	parent, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return nil, err
 	}
-	if filepath.Clean(parent) != filepath.Clean(filepath.Dir(path)) {
+	if !paths.Equal(paths.Host(filepath.Clean(parent)), paths.Host(dir)) {
 		return nil, errors.New("下载目录已被替换")
 	}
 	file, err := os.Open(path)

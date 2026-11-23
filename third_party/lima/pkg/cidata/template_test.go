@@ -369,3 +369,34 @@ func TestExecuteTemplateWindowsISO(t *testing.T) {
 		})
 	}
 }
+
+// The host opens many SSH sessions at once while an instance starts; the
+// boot script raises sshd's MaxStartups so they are not dropped.
+func TestTemplateRaisesSSHDMaxStartups(t *testing.T) {
+	args := &TemplateArgs{
+		Name:       "default",
+		User:       "foo",
+		UID:        501,
+		Home:       "/home/foo.guest",
+		Shell:      "/bin/bash",
+		SSHPubKeys: []string{"ssh-rsa dummy foo@example.com"},
+		MountType:  "reverse-sshfs",
+		CACerts:    CACerts{RemoveDefaults: &defaultRemoveDefaults},
+	}
+	layout, err := ExecuteTemplateCIDataISO(args)
+	assert.NilError(t, err)
+	for _, f := range layout {
+		if f.Path != "boot/12-sshd-max-startups.sh" && f.Path != "boot.Linux/12-sshd-max-startups.sh" {
+			continue
+		}
+		b, err := io.ReadAll(f.Reader)
+		assert.NilError(t, err)
+		assert.Assert(t, strings.Contains(string(b), "MaxStartups 64:30:128"))
+		return
+	}
+	var paths []string
+	for _, f := range layout {
+		paths = append(paths, f.Path)
+	}
+	t.Fatalf("sshd MaxStartups boot script missing from %v", paths)
+}

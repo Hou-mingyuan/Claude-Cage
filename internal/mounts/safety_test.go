@@ -82,118 +82,39 @@ func TestUnsafeLocationNoCase(t *testing.T) {
 	}
 }
 
-// Folders of credentials and applications' data under the home folder are
-// refused as projects, from inside, equal or above, through links, with the
-// case a case-ignoring file system gives them; the other folders of the home
-// folder are not.
-func TestCredentialLocation(t *testing.T) {
+// Subdirectories of the home folder containing credentials or application data
+// may be explicitly shared as projects; the home folder itself, Cage/agent-vm
+// state and git metadata directories remain refused.
+func TestCredentialDirectoriesAllowed(t *testing.T) {
 	s := newSandbox(t)
-	for _, d := range []string{".ssh/keys", ".config/gcloud", "Library/Keychains", ".local/share/keyrings", ".local/src", ".sshx", "work/.ssh-notes", ".mozilla",
-		"Library/CloudStorage/OneDrive-personal/proj", "Library/CloudStorage/provider",
-		"Library/Mobile Documents/com~apple~CloudDocs/proj", "Library/Mobile Documents/iCloud~com~vendor~app/Documents",
-		"Library/CloudStorage2/x", "Library/Mobile Documents/com~apple~CloudDocs-old/x"} {
+	for _, d := range []string{".ssh/keys", ".aws", ".config/gcloud", "Library/Keychains", ".local/share/keyrings", ".mozilla", "AppData/Local/proj"} {
 		os.MkdirAll(filepath.Join(s.home, d), 0o755)
 	}
 	os.MkdirAll(filepath.Join(s.root, "appdata", "app"), 0o755)
 	t.Setenv("APPDATA", filepath.Join(s.root, "appdata"))
-	t.Setenv("LOCALAPPDATA", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	// Without symlinks the link cases are left out and reported as a skip,
-	// so a missing link is not mistaken for a guard letting it through.
-	var linkErr error
-	symlink := func(oldname, newname string) bool {
-		err := os.Symlink(oldname, newname)
-		if err != nil && linkErr == nil {
-			linkErr = err
-		}
-		return err == nil
-	}
-	linked := symlink(s.home+"/.ssh", s.proj+"/lnk")
+	t.Setenv("LOCALAPPDATA", filepath.Join(s.home, "AppData", "Local"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(s.home, ".config"))
 	refs := s.refs()
-	for _, c := range []struct {
-		dir string
-		bad bool
-	}{
-		{s.home + "/.ssh", true},
-		{s.home + "/.ssh/keys", true},
-		{s.home + "/.config", true},
-		{s.home + "/.config/gcloud", true},
-		{s.home + "/Library/Keychains", true},
-		{s.home + "/.mozilla", true},
-		{s.home + "/.local", true},
-		{s.home + "/.local/share", true},
-		{s.home + "/.local/share/keyrings", true},
-		{s.proj + "/lnk", true},
-		{s.root + "/appdata/app", true},
-		// The cloud drives under ~/Library go through; ~/Library itself,
-		// its aggregates and its other folders do not.
-		{s.home + "/Library/CloudStorage/OneDrive-personal/proj", false},
-		{s.home + "/Library/CloudStorage/provider", false},
-		{s.home + "/Library/Mobile Documents/com~apple~CloudDocs", false},
-		{s.home + "/Library/Mobile Documents/com~apple~CloudDocs/sub", false},
-		{s.home + "/Library/CloudStorage", true},
-		{s.home + "/Library", true},
-		{s.home + "/Library/Mobile Documents", true},
-		{s.home + "/Library/Mobile Documents/iCloud~com~vendor~app/Documents", true},
-		{s.home + "/Library/CloudStorage2/x", true},
-		{s.home + "/Library/Mobile Documents/com~apple~CloudDocs-old/x", true},
-		{s.proj, false},
-		{s.proj + "/sub", false},
-		{s.home + "/.local/src", false},
-		{s.home + "/.sshx", false},
-		{s.home + "/work/.ssh-notes", false},
-		{s.root + "/data/a", false},
+	for _, dir := range []string{
+		s.home + "/.ssh",
+		s.home + "/.ssh/keys",
+		s.home + "/.aws",
+		s.home + "/.config",
+		s.home + "/.config/gcloud",
+		s.home + "/Library/Keychains",
+		s.home + "/.mozilla",
+		s.home + "/.local",
+		s.home + "/.local/share/keyrings",
+		s.home + "/AppData/Local/proj",
+		s.root + "/appdata/app",
 	} {
-		if c.dir == s.proj+"/lnk" && !linked {
-			continue
-		}
-		why, bad := CredentialLocation(c.dir, refs)
-		if bad != c.bad {
-			t.Errorf("%s: %q %v", c.dir, why, bad)
-		}
-		if _, bad := UnsafeProject(c.dir, refs); c.bad && !bad {
-			t.Errorf("UnsafeProject lets %s through", c.dir)
+		if why, bad := UnsafeProject(dir, refs); bad {
+			t.Errorf("UnsafeProject(%s) = %q, want allowed", dir, why)
 		}
 	}
-	if why, _ := CredentialLocation(s.home+"/.ssh", refs); !strings.Contains(why, "~/.ssh") {
-		t.Errorf("why: %q", why)
-	}
-	// A credentials folder that is a link to another: that one counts too.
-	os.RemoveAll(s.home + "/.aws")
-	os.MkdirAll(s.root+"/dotfiles/aws", 0o755)
-	if symlink(s.root+"/dotfiles/aws", s.home+"/.aws") {
-		if _, bad := CredentialLocation(s.root+"/dotfiles/aws", refs); !bad {
-			t.Error("the target of ~/.aws was let through")
+	for _, dir := range []string{s.home, s.root, s.state, s.state + "/sub", s.root + "/bare.git", s.root + "/repo/.git"} {
+		if _, bad := UnsafeProject(dir, refs); !bad {
+			t.Errorf("UnsafeProject(%s) = allowed, want refused", dir)
 		}
-	}
-	// A cloud drive reached through a link counts, as dir is resolved.
-	if symlink(s.home+"/Library/CloudStorage/OneDrive-personal", s.home+"/OneDrive") {
-		if _, bad := CredentialLocation(s.home+"/OneDrive/proj", refs); bad {
-			t.Error("a link to a cloud drive was refused")
-		}
-	}
-	// A cloud drive's name on a link elsewhere: the Library rule holds.
-	os.MkdirAll(s.home+"/Library/Keychains/proj", 0o755)
-	if symlink(s.home+"/Library/Keychains", s.home+"/CloudStorage") {
-		if _, bad := CredentialLocation(s.home+"/CloudStorage/proj", refs); !bad {
-			t.Error("a link named CloudStorage, to Keychains, was let through")
-		}
-	}
-	// Other capitals, where the file system ignores case.
-	old := paths.NoCase
-	paths.NoCase = func() bool { return true }
-	t.Cleanup(func() { paths.NoCase = old })
-	refs = s.refs()
-	if _, bad := CredentialLocation(strings.ToUpper(s.home)+"/.SSH", refs); !bad {
-		t.Error("~/.SSH let through where case is ignored")
-	}
-	if _, bad := CredentialLocation(strings.ToUpper(s.home+"/Library/CloudStorage/OneDrive-personal/proj"), refs); bad {
-		t.Error("a cloud drive in capitals refused where case is ignored")
-	}
-	if _, bad := CredentialLocation(strings.ToUpper(s.home+"/Library/Keychains"), refs); !bad {
-		t.Error("Keychains in capitals let through where case is ignored")
-	}
-	if linkErr != nil {
-		t.Skip("symlink unavailable, the link cases were not checked: " + linkErr.Error())
 	}
 }

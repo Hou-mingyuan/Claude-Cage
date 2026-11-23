@@ -179,3 +179,18 @@ test("remote keyboard defaults follow the client and a saved choice does not alt
   assert.equal(clientKeyboard("native", { ...mac, instance_id: "other-server" }), "mac");
   assert.equal(clientKeyboard("native", { mode: "local", client_platform: "darwin" }), "native");
 });
+
+test("remote plugin sync and bridge endpoints bind to the active connection header", async (t) => {
+  environment(t);
+  const headers = [];
+  globalThis.fetch = async (path, options) => {
+    headers.push([path, options.headers["X-Cage-Connection"]]);
+    return Response.json({ state: "done" });
+  };
+  await api("/client/plugins/sync");
+  await api("/client/plugins/bridge", { plugin: "clock", shared: true });
+  assert.deepEqual(headers, [
+    ["/api/client/plugins/sync", "first"],
+    ["/api/client/plugins/bridge", "first"],
+  ]);
+});
