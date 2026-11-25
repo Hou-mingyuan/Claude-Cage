@@ -122,6 +122,7 @@ function fixture(native = false, browserComposition = false, options = {}) {
     container,
     {
       mode: () => mode,
+      claudeDesktop: options.claudeDesktop,
       systemClipboard: () => systemClipboard,
       clipboardActive: options.clipboardActive,
       syncClipboard: options.syncClipboard,
@@ -456,6 +457,36 @@ function fakeClock() {
     },
   };
 }
+
+test("Windows Claude Desktop keeps WebView focus across successive Pinyin compositions", async () => {
+  const clock = fakeClock();
+  const calls = [];
+  const f = fixture(true, true, {
+    ...clock,
+    claudeDesktop: true,
+    surface: {
+      width: 800, height: 600,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    },
+    native: async (name, value) => { calls.push({ name, value }); return true; },
+  });
+  try {
+    f.win.chrome = { webview: {} };
+    f.win.cageNativeIMEAvailable = true;
+    f.rfb.focus();
+    await clock.advance(0);
+    for (const [pinyin, word] of [["wo", "我"], ["jintian", "今天"]]) {
+      inputEvent(f, "compositionstart");
+      f.target.value = pinyin;
+      inputEvent(f, "input", { data: pinyin, inputType: "insertCompositionText", isComposing: true });
+      inputEvent(f, "compositionend", { data: word });
+      await new Promise(resolve => setImmediate(resolve));
+      await clock.advance(caretPollFast);
+    }
+    assert.equal(calls.some(({ name }) => name === "remoteInput"), false);
+    assert.deepEqual(f.compositions.filter(e => e.mode === "commit").map(e => e.text), ["我", "今天"]);
+  } finally { f.controller.dispose(); }
+});
 
 test("releasing native input cancels the active composition before its late end event", async () => {
   const clock = fakeClock();

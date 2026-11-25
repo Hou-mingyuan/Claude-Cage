@@ -544,6 +544,7 @@ export function DesktopList({ model, disabled, selected, defaultRunning = false,
 // application uses it too, with its own address and labels.
 export function DesktopPane({
   account,
+  claudeDesktop = false,
   path: instancePath = entry(account.id),
   heading,
   inputLabel = "Claude Desktop 输入",
@@ -679,6 +680,7 @@ export function DesktopPane({
             },
             container,
             {
+              claudeDesktop,
               systemClipboard: () => current.current.systemClipboard,
               clipboardActive: () => clipboardReady.current,
               syncClipboard: async () => {
@@ -757,7 +759,7 @@ export function DesktopPane({
       rfb.current = null;
       client?.disconnect();
     };
-  }, [account.id, account.generation, screenVisible, attempt, instancePath]);
+  }, [account.id, account.generation, screenVisible, attempt, instancePath, claudeDesktop]);
   return (
     <section
       className="account-desktop-pane"
@@ -888,6 +890,7 @@ export const DesktopPanes = forwardRef(function DesktopPanes(
         <DesktopPane
           key={a.id}
           account={a}
+          claudeDesktop
           ready={ready}
           visible={visible}
           windowVisible={windowVisible}

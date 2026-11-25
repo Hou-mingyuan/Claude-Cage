@@ -136,6 +136,7 @@ export const RemoteView = forwardRef(function RemoteView(
             runKeyAction: action => client.cageRunInput(action),
           }, container, {
             systemClipboard: () => current.current.systemClipboard,
+            claudeDesktop: desktop,
             copyText: !desktop
               ? (_sendCopy, valid, { id, context, key }) => {
                 if (current.current.systemClipboard !== false) return undefined;

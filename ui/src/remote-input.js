@@ -14,7 +14,7 @@ import {
 export function installRemoteInput(
   transport,
   container,
-  { mode, systemClipboard = () => true, clipboardActive = () => window.cageSharedClipboardActive,
+  { mode, claudeDesktop = false, systemClipboard = () => true, clipboardActive = () => window.cageSharedClipboardActive,
     syncClipboard = () => window.cageSyncClipboard(), onStatus, onFallback, isActive,
     insertText, insertComposition, caretRect, surface, inputLabel = "Cage 网页输入", tabId: getTargetId = () => "", pasteContent, preparePaste, setCopyContext, copyText },
 ) {
@@ -120,6 +120,9 @@ export function installRemoteInput(
     });
   };
   const updateNative = (rect) => {
+    // Moving focus from WebView2 to the Win32 edit control can drop the
+    // initial Pinyin keystroke in Claude Desktop. Keep composing in the textarea.
+    if (claudeDesktop && window.chrome?.webview) return;
     if (nativeFailed || !window.cageNativeIMEAvailable || !nativeAvailable() || !focused()) return;
     if (!nativeOwned && composing) return;
     const operation = nativeOwned ? "caret" : "activate";
