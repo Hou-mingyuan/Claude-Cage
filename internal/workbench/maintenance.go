@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -31,16 +32,17 @@ var maintenanceOrigins = map[string]bool{
 }
 
 type maintenanceProxy struct {
-	token       string
-	ctx         context.Context
-	dial        func(context.Context, string, string) (net.Conn, error)
-	transport   *http.Transport
-	mu          sync.Mutex
-	connections map[net.Conn]bool
-	closed      bool
+	token             string
+	installHTTPSHosts []string
+	ctx               context.Context
+	dial              func(context.Context, string, string) (net.Conn, error)
+	transport         *http.Transport
+	mu                sync.Mutex
+	connections       map[net.Conn]bool
+	closed            bool
 }
 
-func maintenanceDestination(address string, connect bool) bool {
+func (p *maintenanceProxy) allowsDestination(address string, connect bool) bool {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return false
@@ -56,7 +58,7 @@ func maintenanceDestination(address string, connect bool) bool {
 	case "mirrors.nju.edu.cn", "mirrors.ustc.edu.cn", "cdn.npmmirror.com", "api.snapcraft.io", "storage.snapcraftcontent.com", "canonical-lgw01.cdn.snapcraftcontent.com", "canonical-lcy01.cdn.snapcraftcontent.com", "canonical-lcy02.cdn.snapcraftcontent.com", "canonical-bos01.cdn.snapcraftcontent.com", "cloudfront.cdn.snapcraftcontent.com", "codeload.github.com":
 		return connect
 	}
-	return maintenanceOrigins[host]
+	return maintenanceOrigins[host] || (connect && slices.Contains(p.installHTTPSHosts, host))
 }
 func (p *maintenanceProxy) track(conn net.Conn) bool {
 	p.mu.Lock()
@@ -85,7 +87,7 @@ func (p *maintenanceProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodConnect {
-		if !maintenanceDestination(r.Host, true) {
+		if !p.allowsDestination(r.Host, true) {
 			http.Error(w, "Not a Cage software source", 403)
 			return
 		}
@@ -133,7 +135,7 @@ func (p *maintenanceProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Port() == "" {
 		address = net.JoinHostPort(r.URL.Hostname(), "80")
 	}
-	if r.URL.Scheme != "http" || r.URL.User != nil || !maintenanceDestination(address, false) {
+	if r.URL.Scheme != "http" || r.URL.User != nil || !p.allowsDestination(address, false) {
 		http.Error(w, "Not a Cage software source", 403)
 		return
 	}
@@ -213,18 +215,22 @@ func StartGuestServices(ctx context.Context, configPath string, stdout, stderr i
 	if err != nil {
 		return err
 	}
-	return runMaintenanceScript(ctx, configPath, cfg, "export CAGE_DISPLAY_SCALE="+scale+"\n"+themePrefix+cfg.StartScript(), stdout, stderr)
+	return runMaintenanceScript(ctx, configPath, cfg, "export CAGE_DISPLAY_SCALE="+scale+"\n"+themePrefix+cfg.StartScript(), nil, stdout, stderr)
 }
 
 func RunMaintenanceScript(ctx context.Context, configPath, script string, stdout, stderr io.Writer) error {
+	return runInstallMaintenanceScript(ctx, configPath, script, nil, stdout, stderr)
+}
+
+func runInstallMaintenanceScript(ctx context.Context, configPath, script string, httpsHosts []string, stdout, stderr io.Writer) error {
 	cfg, err := cage.Load(configPath)
 	if err != nil {
 		return err
 	}
-	return runMaintenanceScript(ctx, configPath, cfg, cfg.GuestProfile.Linux(script), stdout, stderr)
+	return runMaintenanceScript(ctx, configPath, cfg, cfg.GuestProfile.Linux(script), httpsHosts, stdout, stderr)
 }
 
-func runMaintenanceScript(ctx context.Context, configPath string, cfg cage.Config, script string, stdout, stderr io.Writer) error {
+func runMaintenanceScript(ctx context.Context, configPath string, cfg cage.Config, script string, httpsHosts []string, stdout, stderr io.Writer) error {
 	profile := filepath.Dir(configPath)
 	if err := cfg.RequireManagedProxy(profile); err != nil {
 		return err
@@ -241,7 +247,7 @@ func runMaintenanceScript(ctx context.Context, configPath string, cfg cage.Confi
 	if err != nil {
 		return err
 	}
-	proxy := &maintenanceProxy{token: randomToken(), ctx: ctx, dial: egress.DialContext, connections: make(map[net.Conn]bool)}
+	proxy := &maintenanceProxy{token: randomToken(), installHTTPSHosts: httpsHosts, ctx: ctx, dial: egress.DialContext, connections: make(map[net.Conn]bool)}
 	proxy.transport = &http.Transport{Proxy: nil, DialContext: egress.DialContext, DisableKeepAlives: true}
 	server := &http.Server{Handler: proxy, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = server.Serve(listener) }()
