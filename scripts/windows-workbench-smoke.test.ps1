@@ -40,6 +40,28 @@ try {
         catch { $rejected = $_.Exception.Message -match 'Set RUNNER_TEMP' }
         Assert-SmokeContract $rejected 'Smoke preflight accepted a checkout under AppData.'
     }
+    if ($IsWindows) {
+        # No exFAT volume is needed: the file system probe is replaced, and the
+        # preflight never creates this path outside AppData.
+        $probe = ${function:Get-WindowsBuildFileSystem}
+        $outside = Join-Path ($env:SystemDrive + '\') ('cage-fs-probe-' + [guid]::NewGuid().ToString('N'))
+        try {
+            Assert-WindowsWorkbenchTestBase $outside
+            foreach ($fileSystem in @('exFAT', 'FAT32')) {
+                Set-Item function:Get-WindowsBuildFileSystem ([scriptblock]::Create("'$fileSystem'"))
+                $rejected = $false
+                try { Assert-WindowsWorkbenchTestBase $outside }
+                catch { $rejected = $_.Exception.Message -match "on a $fileSystem volume" -and $_.Exception.Message -match 'NTFS' -and $_.Exception.Message -match 'Set RUNNER_TEMP' }
+                Assert-SmokeContract $rejected "Smoke preflight accepted a $fileSystem test directory."
+            }
+            foreach ($fileSystem in @('NTFS', 'ReFS', $null)) {
+                Set-Item function:Get-WindowsBuildFileSystem ([scriptblock]::Create($(if ($fileSystem) { "'$fileSystem'" } else { '$null' })))
+                Assert-WindowsWorkbenchTestBase $outside
+            }
+        } finally { Set-Item function:Get-WindowsBuildFileSystem $probe }
+        Assert-SmokeContract ((Get-WindowsBuildFileSystem $directory) -eq [IO.DriveInfo]::new([IO.Path]::GetPathRoot($directory)).DriveFormat) 'File system probe misread a local drive.'
+        Assert-SmokeContract ($null -eq (Get-WindowsBuildFileSystem '\\server\share\checkout')) 'File system probe queried a UNC path.'
+    }
     $report = Join-Path $directory 'smoke.json'
     $fixture = Join-Path $directory 'fixture.json'
     $profile = Join-Path $directory 'profile'
