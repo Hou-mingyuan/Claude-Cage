@@ -83,11 +83,24 @@ func StartPreflight(ctx context.Context, profile string, s Store) (*PreflightPro
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
 
-	workDir, err := os.MkdirTemp("", "cage-proxy-preflight-*")
+	// The config holds node credentials: keep it in the private profile, where
+	// SweepPreflight finds it if this process dies before cleanup.
+	if err := host.EnsurePrivateDir(Dir(profile)); err != nil {
+		return nil, err
+	}
+	workDir, err := os.MkdirTemp(Dir(profile), preflightDirPrefix+"*")
 	if err != nil {
 		return nil, err
 	}
-	cleanupWork := func() { _ = os.RemoveAll(workDir) }
+	owner, err := lockPreflightDir(workDir)
+	if err != nil {
+		_ = os.RemoveAll(workDir)
+		return nil, err
+	}
+	cleanupWork := func() {
+		_ = owner.Close()
+		_ = os.RemoveAll(workDir)
+	}
 	if err := host.EnsurePrivateDir(workDir); err != nil {
 		cleanupWork()
 		return nil, err
@@ -152,6 +165,9 @@ func StartPreflight(ctx context.Context, profile string, s Store) (*PreflightPro
 		_ = logStream.Close()
 		cleanupFiles()
 		return nil, err
+	}
+	if err := recordPreflightCore(workDir, cmd.Process.Pid); err != nil {
+		diagnostics.Log("warn", "proxy", "preflight core record failed: "+err.Error())
 	}
 
 	done := make(chan struct{})
