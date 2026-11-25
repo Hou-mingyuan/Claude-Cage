@@ -424,3 +424,9 @@ func TestAgentReleasesDesktopOnboardingWithoutQuittingWindow(t *testing.T) {
 		t.Fatalf("agent start during reclaimed onboarding: %v", err)
 	}
 }
+
+func TestAgentAuthenticationFailureOpensDesktop(t *testing.T) {
+	if e := agentHTTPError(401); e.Code != "authentication_failed" || e.NextAction != "open_desktop" {
+		t.Fatalf("rejected session points at a controller restart: %+v", e)
+	}
+}
