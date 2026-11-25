@@ -516,6 +516,36 @@ try {
         Check (!(Test-Path -LiteralPath $receipt)) 'A temporary folder outside the ANSI code page kept the receipt.'
     }
     if ($windows) {
+        # csc.exe treats a missing LIB search path as an error even for the
+        # managed-only verified-deletion type, so an unrelated SDK LIB left in
+        # the installer's environment must not stop the helper (#958).
+        $scenario = Join-Path $root 'missing-lib'
+        $stage = Join-Path $scenario 'installed'; $receipt = Join-Path $scenario 'receipt.json'
+        $missing = Join-Path $scenario 'missing-sdk\lib'
+        $entry = Join-Path $scenario 'helper-keeps-lib.ps1'
+        App $stage 'new'
+        Write-File $entry @'
+$ErrorActionPreference = 'Stop'
+$expected = $env:LIB
+$remaining = @($args | Select-Object -Skip 1)
+& $args[0] @remaining
+if ($env:LIB -ne $expected) { exit 3 }
+'@
+        $savedLib = $env:LIB
+        try {
+            $env:LIB = $missing
+            foreach ($operation in @('prepare','complete')) {
+                try {
+                    $ErrorActionPreference = 'Continue'
+                    $output = & $HelperShell -NoProfile -File $entry $helper -Operation $operation -Target $stage -Receipt $receipt 2>&1 | Out-String
+                } finally { $ErrorActionPreference = 'Stop' }
+                Check ($LASTEXITCODE -eq 0) "A missing LIB search path stopped $operation ($LASTEXITCODE). $output"
+            }
+        } finally {
+            $env:LIB = $savedLib
+        }
+        Check (!(Test-Path -LiteralPath $receipt)) 'A missing LIB search path kept the receipt.'
+    }    if ($windows) {
         & $HelperShell -NoProfile -File (Join-Path $PSScriptRoot 'test-windows-verified-file-deletion.ps1')
         if ($LASTEXITCODE -ne 0) { throw 'Verified-handle deletion regression failed.' }
     }

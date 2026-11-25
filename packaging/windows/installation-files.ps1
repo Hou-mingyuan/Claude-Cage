@@ -135,11 +135,13 @@ function Initialize-VerifiedDeletion {
     $code = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'verified-file-deletion.cs'), [Text.Encoding]::UTF8)
     $folder = Compiler-TemporaryFolder
     $workDir = if ($env:SystemRoot -and [IO.Directory]::Exists($env:SystemRoot)) { $env:SystemRoot } elseif ($folder) { $folder.path } else { $null }
-    if (!$folder -and !$workDir) { Add-Type -TypeDefinition $code; return }
-    $saved = $env:TMP, $env:TEMP
+    $saved = $env:TMP, $env:TEMP, $env:LIB
     $savedDirectory = [Environment]::CurrentDirectory
     $pushed = $false
     try {
+        # csc.exe treats a LIB search path that does not exist as an error;
+        # this managed-only type needs no native SDK library path.
+        $env:LIB = $null
         if ($folder) { $env:TMP = $env:TEMP = $folder.path }
         if ($workDir) {
             Push-Location -LiteralPath $workDir
@@ -150,7 +152,7 @@ function Initialize-VerifiedDeletion {
     } finally {
         if ($pushed) { Pop-Location }
         [Environment]::CurrentDirectory = $savedDirectory
-        $env:TMP, $env:TEMP = $saved
+        $env:TMP, $env:TEMP, $env:LIB = $saved
         if ($folder -and $folder.created) {
             # A standard user cannot list the system temporary folder, so the
             # private folder is removed directly rather than with Remove-Item.
