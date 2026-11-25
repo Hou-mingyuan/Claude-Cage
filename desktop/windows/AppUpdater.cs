@@ -200,6 +200,7 @@ internal sealed class AppUpdater : IDisposable
         {
             // Validate the destination before stopping a running environment.
             UpdatePolicy.PlainPath(prepared.Target);
+            UpdateRecovery.EnsureNoPendingTransaction(prepared.Target);
             if (prepared.UnsignedSource && !string.Equals(prepared.Publisher, Authenticode.OfficialPublisherKey, StringComparison.Ordinal))
                 throw new IOException("安装计划发布者不匹配");
             Directory.CreateDirectory(Root); UpdatePolicy.PlainPath(Root);
