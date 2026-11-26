@@ -38,10 +38,16 @@ func PrivateSocketDir(profile string, room int, create bool) (string, error) {
 		return "", fmt.Errorf("Cage 找不到可用于本机控制通道的私有目录：配置目录与用户目录需位于本地 NTFS 等支持权限设置的磁盘、路径不超过约 %d 个字符，并在含中文等非英文字符时提供 8.3 短文件名；系统盘根目录下的备用目录也无法使用。可通过 CLAUDE_CAGE_CONFIG 改用英文路径下的配置（%w）", windowsSocketPathLimit-room, err)
 	}
 	if dir == system {
+		// The socket is reopened by name. The parent must protect the name
+		// even after ownedPrivateDir releases its handle to the child.
+		root := filepath.Dir(system)
+		if err := checkSocketParent(root); err != nil {
+			return "", fmt.Errorf("Cage 无法确认系统盘 %s 的权限能保护本机控制通道，请通过 CLAUDE_CAGE_CONFIG 指定仅当前用户可访问的英文配置路径：%w", root, err)
+		}
 		if err := openSharedSocketDir(dir, fs, create); errors.Is(err, errSocketDirNotCreated) {
 			return "", err
 		} else if err != nil {
-			return "", fmt.Errorf("Cage 无法使用系统盘上的本机控制通道备用目录 %s：它须由当前用户创建且仅当前用户可访问。若该目录并非 Cage 为你创建，请由管理员确认后删除再重试（%w）", dir, err)
+			return "", fmt.Errorf("Cage 无法使用系统盘上的本机控制通道备用目录 %s：它须支持当前用户创建私有目录。可通过 CLAUDE_CAGE_CONFIG 指定仅当前用户可访问的英文配置路径（%w）", dir, err)
 		}
 	}
 	if create {
@@ -53,6 +59,54 @@ func PrivateSocketDir(profile string, room int, create bool) (string, error) {
 		return "", errSocketDirNotCreated
 	}
 	return dir, nil
+}
+
+func checkSocketParent(root string) error {
+	sd, err := windows.GetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	return checkSocketParentDescriptor(sd)
+}
+
+// Other users may create their own entries in the drive root, but may not
+// replace this entry or change the permissions that protect it.
+func checkSocketParentDescriptor(sd *windows.SECURITY_DESCRIPTOR) error {
+	user, err := privateSID()
+	if err != nil {
+		return err
+	}
+	trusted := func(sid *windows.SID) bool {
+		const trustedInstaller = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+		return sid != nil && (windows.EqualSid(sid, user) || sid.IsWellKnown(windows.WinLocalSystemSid) ||
+			sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) || sid.String() == trustedInstaller)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil || !trusted(owner) {
+		return errors.New("untrusted socket parent owner")
+	}
+	acl, _, err := sd.DACL()
+	if err != nil || acl == nil {
+		return errors.New("socket parent has no access restrictions")
+	}
+	const fileDeleteChild = 0x0040 // FILE_DELETE_CHILD in winnt.h
+	const controlChildren = fileDeleteChild | windows.WRITE_DAC | windows.WRITE_OWNER | windows.GENERIC_ALL
+	for i := uint32(0); i < uint32(acl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, i, &ace); err != nil {
+			return err
+		}
+		if ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0 || ace.Header.AceType == windows.ACCESS_DENIED_ACE_TYPE {
+			continue
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			return errors.New("unsupported socket parent access rule")
+		}
+		if ace.Mask&controlChildren != 0 && !trusted((*windows.SID)(unsafe.Pointer(&ace.SidStart))) {
+			return errors.New("socket parent allows another principal to change its permissions or delete children")
+		}
+	}
+	return nil
 }
 
 // systemSocketDir is the profile's WindowsSystemSocketDir for the current

@@ -151,10 +151,7 @@ func WindowsSocketDirCandidates(profile, home, id string) []string {
 
 // WindowsSystemSocketDir is the last candidate, for a user directory with no
 // ASCII spelling, not even through 8.3 aliases (#1037): a directory directly
-// in the root of the system drive, one per user and profile. Its parent is
-// the drive root, whose default ACL lets other users create entries but not
-// delete or rename those of others, so only the directory itself has to be
-// trusted (see openSharedSocketDir).
+// in the root of the system drive, one per user and profile.
 func WindowsSystemSocketDir(systemDrive, user, profile string) string {
 	sum := sha256.Sum256([]byte(user + "\x00" + profile))
 	return systemDrive + `\CageRun-` + hex.EncodeToString(sum[:8])
