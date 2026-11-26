@@ -16,6 +16,7 @@ import (
 	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/hostimage"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
+	"github.com/sylvinus/agent-vm/internal/usererror"
 	"io"
 	"io/fs"
 	"log"
@@ -911,7 +912,8 @@ func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := v.Config.RequireManagedProxy(s.profile); err != nil {
+	p, err := managedproxy.Applied(s.profile, v.Config.ProxyURL, v.Config.ProxyRevision)
+	if err != nil {
 		requestError(w, err)
 		return
 	}
@@ -920,7 +922,16 @@ func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 		requestError(w, err)
 		return
 	}
-	if p, loadErr := s.proxyStore.Load(s.profile); loadErr != nil || !needsBootstrapPreflight(old, v.Config, p) {
+	if !needsBootstrapPreflight(old, v.Config, p) {
+		if !s.vmRunning() {
+			checkCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			ready := proxyInterfaceCoreRunning(checkCtx, s.profile, p)
+			cancel()
+			if !ready {
+				requestError(w, usererror.New("验证代理出口", proxyNotReadyReason, "请先启动环境", nil))
+				return
+			}
+		}
 		if err := s.ensureProxyInterfaceBeforeUse(r.Context()); err != nil {
 			requestError(w, err)
 			return
