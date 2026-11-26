@@ -113,7 +113,9 @@ $env:CAGE_MSYS2_ROOT = 'C:\msys64'
 
 首次构建会下载并校验 QEMU 源码，再编译 `qemu-system-x86_64.exe` 和 `qemu-img.exe`。QEMU 配置阶段所需的 pip、setuptools、wheel 与 packaging 由 [dependencies.json](../packaging/windows/dependencies.json) 固定版本与 SHA-256，下载校验后放在依赖缓存的 `qemu-python-wheels` 目录，配置时不访问 PyPI。这些包只用于构建，不随安装包分发。源码优先使用项目发行页上的归档，下载失败时回退到 Git。两种方式都校验源码 tar 文件的 SHA-256。MSYS2 的 tar 会将归档里的相对链接展开为普通文件或目录，普通账户即可解包。QEMU 在独立的短路径目录下编译，默认尝试 MSYS2 的 `tmp`，Cage 仓库路径可以有空格和中文。如果该目录不可写，可设置 `$env:CAGE_QEMU_BUILD_ROOT = 'D:\CageBuildTemp'`，使用普通用户可写、无空格且仅含 ASCII 字符的路径。这个目录还要足够短：QEMU 配置阶段由 pip 在其下创建很深的临时路径，目录过长时会报 `The filename or extension is too long`，脚本会提前给出警告。用 `SUBST` 映射的短盘符无效，Python 会展开为原来的物理路径，须直接使用短的物理目录。
 
-QEMU 下载前会分别编译、链接并运行最小 C 和 C++ 程序。默认 GCC 和 G++ 的 `-B` 指向 MSYS2 的 `ucrt64/bin`，使汇编器和链接器从同一目录加载工具链 DLL。这能避开 `System32` 内旧版 `zlib1.dll` 与 GCC 默认子工具的冲突。如果设置了 `CC` 或 `CXX`，构建沿用对应的显式配置。预检失败时查看编译器输出。配置失败时，脚本会显示 `config.log` 和 `meson-logs/meson-log.txt` 所在目录。
+QEMU 下载前会分别编译、链接并运行最小 C 和 C++ 程序。默认 GCC 和 G++ 的 `-B` 指向 MSYS2 的 `ucrt64/bin`，使汇编器和链接器从同一目录加载工具链 DLL。这能避开 `System32` 内旧版 `zlib1.dll` 与 GCC 默认子工具的冲突。如果设置了 `CC` 或 `CXX`，构建沿用对应的显式配置。
+
+预检失败时，终端显示失败阶段、可取得的退出码和本地 `compiler-preflight.log` 的路径。详细编译器输出保存在这个日志里。若系统目录有 `zlib1.dll` 且日志出现 DLL 加载或汇编器错误，可先清除自定义的 `CC` 和 `CXX`，让构建使用默认工具目录后重试。如果失败发生在随后的 QEMU 配置阶段，脚本会显示 `config.log` 和 `meson-logs/meson-log.txt` 所在目录。[#403](https://github.com/Lee-xeo/Claude-Cage/issues/403)
 
 依赖默认缓存到 `_output/windows-deps`，可给构建和打包命令传入相同的 `-DependencyCache` 复用缓存。QEMU 按源码、构建脚本和 `CC`/`CXX` 分目录缓存。完整运行时通过加载及哈希校验后才写入缓存，失败后可以直接重试。云部署包的 Linux Mihomo 归档缓存在 `_output/linux-deps`，下载完成并通过 SHA-256 校验后才写入缓存。也可先运行 `.\scripts\fetch-windows-dependencies.ps1` 预取。若公司网络要求代理，在当前构建会话按需设置 `HTTPS_PROXY`、`HTTP_PROXY` 和获准使用的 `GOPROXY`，再重试 NuGet、Go 或构建依赖下载。保留原有证书与哈希校验。
 
@@ -134,7 +136,6 @@ Start-ScheduledTask CageBuildOnce   # 完成后 Unregister-ScheduledTask CageBui
 
 - **Go 编译进程（`compile.exe`）停在 0% CPU 且无报错挂起**：通常是第三方企业/高校同步盘（如 AnyShare 文件监控服务）或安全软件向子进程注入了 Hook DLL。可在 PowerShell 运行 `(Get-Process compile).Modules` 查看加载的非系统 DLL，并将 `go.exe`、`compile.exe`、`link.exe`、`vet.exe`、`asm.exe`、`cgo.exe`（以及运行期使用的 `cage.exe`、`Cage.exe`、`mihomo.exe`、`qemu-system-x86_64.exe`、`qemu-img.exe`、`ssh.exe`）加入其排除列表，或构建期间暂停该服务。
 - **低完整性（Low Mandatory Level / Low IL）检出目录导致 `verify-vm-assets` 报 `mkdir %TEMP%\cage-vm-assets-*: Access is denied`**：部分自动化 Agent 沙箱创建的目录带有 `Low Mandatory Level` 标签，从该目录启动的可执行文件继承低完整性级别，无法写入中等完整性的 `%TEMP%`。`build-windows.ps1` 会在开始前调用 `icacls` 与 `whoami /groups` 预检并提示。遇到此情况请将仓库复制到不带低完整性标签的普通本地目录（如 `C:\src\Claude-Cage`）再构建；若仅因默认 `%TEMP%` 对构建子进程不可写，也可在构建前设置 `$env:CAGE_TEMP`（或 `TEMP`/`TMP`）指向可写临时目录。
-- **QEMU 配置报 `ERROR: C compiler "cc" either does not exist or does not work`，或编译器预检报 `0xC0000135`**：常见原因是第三方软件在 `C:\Windows\System32` 放置了旧版 `zlib1.dll`（例如 1.2.3），GCC 调用的 `ucrt64/x86_64-w64-mingw32/bin/as.exe` 先加载了它，而不是 MSYS2 的 `ucrt64/bin/zlib1.dll`，因找不到入口点退出。构建默认给 GCC 和 G++ 加上指向 `ucrt64/bin` 的 `-B`；自行设置过 `CC` 或 `CXX` 时，清除这两个变量，或按实际 MSYS2 路径设置 `$env:CC = 'gcc -BC:/msys64/ucrt64/bin/'; $env:CXX = 'g++ -BC:/msys64/ucrt64/bin/'`。路径须写成带盘符的 Windows 路径，因为 Meson 通过原生 Python 调用 GCC。预检失败时脚本会显示编译器输出，检测到这种情况会给出上述设置。不要删除或替换 `System32` 中的 DLL，其他软件可能依赖它。[#403](https://github.com/Lee-xeo/Claude-Cage/issues/403)
 
 生成未签名安装包时，用仓库脚本安装校验过的 NSIS，再打包刚构建的应用。脚本先从 SourceForge 默认地址下载，失败或拿到的不是 ZIP 时依次改用几个指定镜像；每个地址只做少量重试且超时较短，所有地址都失败才报错。无论来自哪个地址，ZIP 都要通过固定的 SHA-256 校验才会解压使用。
 

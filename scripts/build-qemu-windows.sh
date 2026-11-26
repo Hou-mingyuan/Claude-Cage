@@ -39,16 +39,16 @@ for variable, suffix in (("CC", "c"), ("CXX", "cpp")):
     executable = directory / f"cage-compiler-check-{suffix}.exe"
     source.write_text("int main(void) { return 0; }\n", encoding="ascii")
     command = os.environ[variable]
-    try:
-        arguments = subprocess.list2cmdline([str(source), "-o", str(executable)])
-        for step in (f"{command} {arguments}", [str(executable)]):
-            result = subprocess.run(step, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
-            if result.returncode != 0:
-                sys.stderr.write(result.stdout)
-                status = result.returncode & 0xFFFFFFFF
-                raise RuntimeError(f"exit status {result.returncode} (0x{status:08X})")
-    except (ValueError, OSError, RuntimeError) as error:
-        sys.exit(f"MSYS2 UCRT64 compile/link/run check failed for {variable}={command}: {error}")
+    arguments = subprocess.list2cmdline([str(source), "-o", str(executable)])
+    for phase, step in (("compile/link", f"{command} {arguments}"), ("run", [str(executable)])):
+        try:
+            result = subprocess.run(step)
+        except (ValueError, OSError) as error:
+            print(error, file=sys.stderr)
+            sys.exit(f"Preflight: {variable} {phase} could not start.")
+        if result.returncode:
+            status = result.returncode & 0xFFFFFFFF
+            sys.exit(f"Preflight: {variable} {phase} exited with {result.returncode} (0x{status:08X}).")
 CAGE_COMPILER_CHECK
     exit
 fi

@@ -78,16 +78,18 @@ function Build-WindowsQemuRuntime {
         catch { throw 'Missing QEMU libraries in MSYS2 UCRT64. Install glib2, pixman and libslirp from the packages listed in docs/windows.md#windows-源码构建.' }
         # Capture the check so a failure can be explained; PowerShell 7.0 and 7.1
         # turn redirected native stderr into terminating errors under Stop.
-        $preflight = & {
+        $preflightLog = Join-Path $stage 'compiler-preflight.log'
+        $preflightExit = & {
             $ErrorActionPreference = 'Continue'
-            & $bash @($shell + @('preflight', $stage)) 2>&1 | ForEach-Object { "$_" }
+            $PSNativeCommandUseErrorActionPreference = $false
+            & $bash @($shell + @('preflight', $stage)) 2>&1 | ForEach-Object { "$_" } | Out-File -LiteralPath $preflightLog -Encoding utf8 -ErrorAction Stop
+            $LASTEXITCODE
         }
-        if ($LASTEXITCODE -ne 0) {
+        if ($preflightExit -ne 0) {
             $systemDirectory = [Environment]::SystemDirectory
-            throw (Get-WindowsCompilerPreflightError -Output $preflight -ExitCode $LASTEXITCODE -MsysDirectory $MsysDirectory `
+            throw (Get-WindowsCompilerPreflightError -LogPath $preflightLog -ExitCode $preflightExit -MsysDirectory $MsysDirectory `
                 -SystemDirectory $systemDirectory -SystemZlib (Test-Path -LiteralPath (Join-Path $systemDirectory 'zlib1.dll') -PathType Leaf))
         }
-        $preflight | Out-Host
         $archive = Get-VerifiedGitArchive $dependencies.qemuSource $DependencyCache
         $keymapArchive = Get-VerifiedDependency $dependencies.qemuKeycodemap $DependencyCache
         # QEMU's mkvenv bootstraps pip, setuptools and wheel. Supply the pinned

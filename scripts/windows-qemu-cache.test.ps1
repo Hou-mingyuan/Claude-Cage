@@ -55,26 +55,25 @@ try {
     } finally { $lock.Dispose() }
     (Enter-WindowsQemuOutputLock $cached).Dispose()
 
-    $systemDirectory = 'C:\Windows\System32'
-    $loader = Get-WindowsCompilerPreflightError -Output @("`e[31mgcc.exe: fatal error`e[0m", 'cage-compiler-check: exit status -1073741515 (0xC0000135)') `
-        -ExitCode 1 -MsysDirectory 'D:\msys64\' -SystemDirectory $systemDirectory -SystemZlib $false
-    if ($loader -notlike "*`$env:CC = 'gcc -BD:/msys64/ucrt64/bin/'; `$env:CXX = 'g++ -BD:/msys64/ucrt64/bin/'*" -or
-        $loader -notlike '*zlib1.dll from C:\Windows\System32*' -or $loader -match "`e" -or $loader -notlike '*exit code 1 *') {
-        throw "The compiler preflight did not explain the System32 zlib1.dll loader failure: $loader"
+    $log = Join-Path $root 'compiler-preflight.log'
+    $diagnostic = @{LogPath = $log; ExitCode = 1; MsysDirectory = 'D:\msys64\'; SystemDirectory = 'C:\Windows\System32'}
+    @('fake local compiler detail', 'Preflight: CC compile/link exited with 3221225781 (0xC0000135).') | Set-Content -LiteralPath $log
+    $loader = Get-WindowsCompilerPreflightError @diagnostic -SystemZlib $false
+    if ($loader -notlike '*CC compile/link exited with*0xC0000135*' -or $loader -notlike "*$log*" -or
+        $loader -like '*fake local compiler detail*' -or $loader -like '*zlib1.dll*') {
+        throw 'Missing-DLL diagnosis must show the status and log path without echoing compiler output or assuming zlib.'
     }
-    $assembler = Get-WindowsCompilerPreflightError -Output @('C:/msys64/ucrt64/x86_64-w64-mingw32/bin/as.exe returned 1 exit status') `
-        -ExitCode 1 -MsysDirectory 'C:\msys64' -SystemDirectory $systemDirectory -SystemZlib $true
-    if ($assembler -notlike "*'gcc -BC:/msys64/ucrt64/bin/'*") { throw 'An assembler failure beside a System32 zlib1.dll lacked the -B workaround.' }
-    $generic = Get-WindowsCompilerPreflightError -Output @('undefined reference to `missing''') -ExitCode 1 -MsysDirectory 'C:\msys64' `
-        -SystemDirectory $systemDirectory -SystemZlib $false
-    if ($generic -like '*zlib1.dll*' -or $generic -notlike '*undefined reference*') { throw 'A generic compiler failure reported the zlib1.dll conflict.' }
-    $shadow = Get-WindowsCompilerPreflightError -Output @('ld.exe: cannot find -lfoo') -ExitCode 1 -MsysDirectory 'C:\msys64' `
-        -SystemDirectory $systemDirectory -SystemZlib $true
-    if ($shadow -notlike '*C:\Windows\System32 contains zlib1.dll*' -or $shadow -like '*gcc -B*') { throw 'A System32 zlib1.dll was not mentioned as a possible cause.' }
-    $long = Get-WindowsCompilerPreflightError -Output @(('x' * 5000) + 'tail') -ExitCode 1 -MsysDirectory 'C:\msys64' -SystemDirectory $systemDirectory -SystemZlib $false
-    if ($long.Length -gt 3500 -or $long -notlike '*...*tail*') { throw 'Long compiler output was not truncated to its tail.' }
-    if ((Get-WindowsCompilerPreflightError -Output $null -ExitCode 1 -MsysDirectory 'C:\msys64' -SystemDirectory $systemDirectory -SystemZlib $false) -notlike '*(no output)*') {
-        throw 'An empty compiler output was not reported.'
+    $shadow = Get-WindowsCompilerPreflightError @diagnostic -SystemZlib $true
+    if ($shadow -notlike "*zlib1.dll from C:\Windows\System32*" -or $shadow -notlike "*'gcc -BD:/msys64/ucrt64/bin/'*") {
+        throw 'Possible System32 zlib conflict lacks the installation-specific workaround.'
+    }
+    'as.exe: returned 1 exit status' | Set-Content -LiteralPath $log
+    if ((Get-WindowsCompilerPreflightError @diagnostic -SystemZlib $true) -notlike "*'gcc -BD:/msys64/ucrt64/bin/'*") {
+        throw 'An assembler failure beside a System32 zlib1.dll lacked the -B workaround.'
+    }
+    'ld.exe: cannot find -lfoo' | Set-Content -LiteralPath $log
+    if ((Get-WindowsCompilerPreflightError @diagnostic -SystemZlib $true) -like '*zlib1.dll*') {
+        throw 'An unrelated compiler error should not be attributed to a system DLL.'
     }
     $downloads = Join-Path $root 'downloads'
     $script:downloadContent = 'truncated payload'
