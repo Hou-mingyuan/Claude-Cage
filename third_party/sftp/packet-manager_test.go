@@ -160,3 +160,111 @@ func TestPacketManagerSequential(t *testing.T) {
 	defer mu.Unlock()
 	assert.Equal(t, []uint32{1, 2, 3}, done)
 }
+
+func TestPacketManagerSequentialWrites(t *testing.T) {
+	sender := &_testSender{sent: make(chan encoding.BinaryMarshaler, 32)}
+	s := newPktMgr(sender)
+	s.sequentialWrites = true
+
+	var (
+		mu             sync.Mutex
+		inFlightReads  int
+		maxConcurrent  int
+		events         []string
+		readGate       = make(chan struct{})
+		readsEntered   = make(chan struct{}, 4)
+	)
+
+	runWorker := func(ch chan orderedRequest) {
+		go func() {
+			for pkt := range ch {
+				switch pkt.requestPacket.(type) {
+				case *sshFxpLstatPacket, *sshFxpStatPacket, *sshFxpReadPacket, *sshFxpFstatPacket:
+					mu.Lock()
+					inFlightReads++
+					if inFlightReads > maxConcurrent {
+						maxConcurrent = inFlightReads
+					}
+					events = append(events, fmt.Sprintf("read-start:%d", pkt.id()))
+					mu.Unlock()
+					if pkt.id() <= 4 {
+						readsEntered <- struct{}{}
+						<-readGate
+					}
+					mu.Lock()
+					inFlightReads--
+					events = append(events, fmt.Sprintf("read-end:%d", pkt.id()))
+					mu.Unlock()
+				default:
+					mu.Lock()
+					if inFlightReads != 0 {
+						t.Errorf("mutation %d started while %d reads were in flight", pkt.id(), inFlightReads)
+					}
+					events = append(events, fmt.Sprintf("mut-start:%d", pkt.id()))
+					mu.Unlock()
+					if pkt.id() == 5 {
+						time.Sleep(30 * time.Millisecond)
+					}
+					mu.Lock()
+					events = append(events, fmt.Sprintf("mut-end:%d", pkt.id()))
+					mu.Unlock()
+				}
+				s.readyPacket(s.newOrderedResponse(&sshFxpStatusPacket{ID: pkt.id()}, pkt.orderID()))
+			}
+		}()
+	}
+
+	pktChan := s.workerChan(runWorker)
+	packets := []requestPacket{
+		&sshFxpLstatPacket{ID: 1},
+		&sshFxpStatPacket{ID: 2},
+		&sshFxpReadPacket{ID: 3},
+		&sshFxpLstatPacket{ID: 4},
+		&sshFxpWritePacket{ID: 5},
+		&sshFxpFsetstatPacket{ID: 6},
+		&sshFxpFstatPacket{ID: 7},
+		&sshFxpLstatPacket{ID: 8},
+	}
+	for _, p := range packets {
+		pktChan <- s.newOrderedRequest(p)
+	}
+
+	// All 4 leading reads must run concurrently before we release the gate.
+	for range 4 {
+		select {
+		case <-readsEntered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("leading read packets did not run concurrently")
+		}
+	}
+	close(readGate)
+
+	var gotIDs []uint32
+	for range len(packets) {
+		pkt := <-sender.sent
+		gotIDs = append(gotIDs, pkt.(orderedResponse).id())
+	}
+	close(pktChan)
+
+	assert.Equal(t, []uint32{1, 2, 3, 4, 5, 6, 7, 8}, gotIDs)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.GreaterOrEqual(t, maxConcurrent, 4)
+
+	idx := func(ev string) int {
+		for i, got := range events {
+			if got == ev {
+				return i
+			}
+		}
+		return -1
+	}
+	// Mutation 5 must start after all 4 reads finish, and finish before mutation 6 starts.
+	for id := 1; id <= 4; id++ {
+		assert.Less(t, idx(fmt.Sprintf("read-end:%d", id)), idx("mut-start:5"))
+	}
+	assert.Less(t, idx("mut-end:5"), idx("mut-start:6"))
+	// Post-mutation reads 7 & 8 must start only after mutation 6 finishes.
+	assert.Less(t, idx("mut-end:6"), idx("read-start:7"))
+	assert.Less(t, idx("mut-end:6"), idx("read-start:8"))
+}
