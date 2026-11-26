@@ -650,6 +650,30 @@ func readWithin(root, relative string) ([]byte, error) {
 	return data, nil
 }
 
+// providerPath maps a proxy-provider cache path to a path relative to root.
+// Some clients, such as FlClash on Windows, record an absolute path; it is
+// accepted only when it lies under root, and readWithin still rejects links
+// that leave root.
+func providerPath(root, providers, path string) (string, bool) {
+	if filepath.IsLocal(path) {
+		return filepath.Join(providers, path), true
+	}
+	if !filepath.IsAbs(path) {
+		return "", false
+	}
+	if rel, err := filepath.Rel(root, path); err == nil && filepath.IsLocal(rel) {
+		return rel, true
+	}
+	// root has its links resolved, while the client may have recorded the
+	// same directory through a link or a Windows short name.
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, filepath.Join(dir, filepath.Base(path)))
+	return rel, err == nil && filepath.IsLocal(rel)
+}
+
 func nodeData(root, providers string, data []byte) ([]byte, string, error) {
 	var input struct {
 		DNS       yaml.Node        `yaml:"dns"`
@@ -682,11 +706,12 @@ func nodeData(root, providers string, data []byte) ([]byte, string, error) {
 	sort.Strings(names)
 	for i, name := range names {
 		provider := input.Providers[name]
-		if i >= 32 || !filepath.IsLocal(provider.Path) {
+		path, ok := providerPath(root, providers, provider.Path)
+		if i >= 32 || !ok {
 			missing++
 			continue
 		}
-		cached, err := readWithin(root, filepath.Join(providers, provider.Path))
+		cached, err := readWithin(root, path)
 		total += len(cached)
 		if err != nil || total > managedproxy.MaxImport {
 			missing++

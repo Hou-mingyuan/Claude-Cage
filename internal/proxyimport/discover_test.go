@@ -793,3 +793,45 @@ func TestScanClashXMetaOnMacOS(t *testing.T) {
 		}
 	}
 }
+
+func TestScanAbsoluteProviderPaths(t *testing.T) {
+	const cache = `proxies:
+  - {name: Residential, type: socks5, server: residential.example, port: 1080, password: private-provider-password}
+`
+	scan := func(t *testing.T, root, providerPath string) Config {
+		t.Helper()
+		writeConfig(t, root, "config.yaml", testNode+"proxy-providers:\n  demo: {path: '"+strings.ReplaceAll(providerPath, "'", "''")+"'}\n")
+		configs := Scan([]Location{{"FlClash", root, Plain, ""}}, []byte("session"))
+		if len(configs) != 1 || configs[0].Error != "" {
+			t.Fatalf("unexpected configs: %s", mustJSON(t, configs))
+		}
+		return configs[0]
+	}
+	t.Run("inside root", func(t *testing.T) {
+		root := t.TempDir()
+		writeConfig(t, root, "profiles/providers/demo/proxies/cache.yaml", cache)
+		c := scan(t, root, filepath.Join(root, "profiles", "providers", "demo", "proxies", "cache.yaml"))
+		if c.Nodes != 2 || c.Warning != "" || !strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("absolute provider path inside root not read: %s", mustJSON(t, c))
+		}
+	})
+	t.Run("outside root", func(t *testing.T) {
+		root, outside := t.TempDir(), t.TempDir()
+		writeConfig(t, outside, "cache.yaml", cache)
+		c := scan(t, root, filepath.Join(outside, "cache.yaml"))
+		if c.Nodes != 1 || c.Warning == "" || strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("absolute provider path outside root was read: %s", mustJSON(t, c))
+		}
+	})
+	t.Run("link escaping root", func(t *testing.T) {
+		root, outside := t.TempDir(), t.TempDir()
+		writeConfig(t, outside, "cache.yaml", cache)
+		if err := os.Symlink(outside, filepath.Join(root, "providers")); err != nil {
+			t.Skipf("cannot create symlink: %v", err)
+		}
+		c := scan(t, root, filepath.Join(root, "providers", "cache.yaml"))
+		if c.Nodes != 1 || c.Warning == "" || strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("provider cache read through escaping link: %s", mustJSON(t, c))
+		}
+	})
+}
