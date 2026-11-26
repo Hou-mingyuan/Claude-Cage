@@ -863,7 +863,7 @@ func relay(configPath, kind string) int {
 		return 2
 	}
 	configureRelayCommand(cmd)
-	cmd.Env = append(os.Environ(), cage.ConfigEnv+"="+configPath)
+	cmd.Env = relayEnv(kind, configPath, os.Environ())
 	store := diagnostics.New(filepath.Dir(configPath))
 	out := store.Stream(source, "info")
 	defer out.Close()
@@ -903,6 +903,15 @@ func relay(configPath, kind string) int {
 	}
 	diagnostics.Log("info", source, "process exited normally")
 	return 0
+}
+
+// The relay runs before the host proxy variables are cleared for VM
+// operations, so the proxy core would otherwise inherit them.
+func relayEnv(kind, configPath string, env []string) []string {
+	if kind == "proxy" {
+		env = managedproxy.WithoutHostProxyEnv(env)
+	}
+	return append(env, cage.ConfigEnv+"="+configPath)
 }
 
 func expectedRelayStop(err error, forwarded os.Signal) bool {

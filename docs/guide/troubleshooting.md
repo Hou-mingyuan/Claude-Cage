@@ -101,6 +101,16 @@ keywords: 错误 失败 白屏 断网 137 OOM 代理 账号 配对 SSH 损坏 �
 
 账号交接被阻止时，先处理未完成工具、审批、待发消息和后台任务，再核对接续分组、目标登录与额度。交接失败沿用原操作重试，准备阶段也可取消；不要重新发送旧消息来恢复历史。详细授权条件见[同一会话换账号](accounts.md#在同一会话中换账号)。
 
+### 网页登录停在哪一步
+
+| 页面上的现象 | 如何排查 |
+| --- | --- |
+| 人机验证框空白或加载报错 | 记下错误码。Cloudflare Turnstile 的 `200500` 表示验证组件未能加载，可检查浏览器或网络过滤日志中是否有对 `challenges.cloudflare.com` 的拦截记录。[Turnstile 错误码](https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/) |
+| 手动完成验证后又回到验证框 | 保持同一网络出口，在另一款受支持的最新版浏览器中打开站点登录首页作对照。若只有一个浏览器出现循环，检查它的 JavaScript 设置、扩展和缓存；若两边都循环，记录发生时间、浏览器版本和错误码，联系站点支持。[Cloudflare 验证排障](https://developers.cloudflare.com/cloudflare-challenges/troubleshooting/challenge-solve-issues/) |
+| 已返回 Claude 页面，随后出现地区或账号停用提示 | 保留 Claude 页面上的原始提示和出现时间，向 Claude 官方支持核实地区或账号状态。 |
+
+Cloudflare 验证页的 Ray ID 可帮助站点支持定位请求。公开 Issue 和截图中请遮盖完整 Ray ID，仅在联系站点官方支持时提供。
+
 ## 浏览器、Desktop 或文件上传异常
 
 浏览器白屏或待恢复时点“恢复浏览器”。整个界面中断时重开 App；异常页可“重新加载界面”或导出诊断。`localhost` 应在 Cage 内启动服务。
@@ -157,5 +167,7 @@ cage diagnostics --json /absolute/path/cage-diagnostics.zip
 ```
 
 macOS 命令在 `Cage.app/Contents/Resources/cage`，Windows 在安装目录 `resources\cage.exe`，Linux 位于应用目录。使用本机绝对输出路径；控制服务不可用时仍可导出本机日志。
+
+排查某次断网时，先记下故障的本地时间和时区，再按 UTC 在 `logs/events.jsonl` 的 `time` 字段中定位前后事件；较早的事件也可能在 `logs/events-*.jsonl` 中。若包内有 `safety/latest-report.json`，用其 `created_at` 核对最近一次已保存检查的时间。故障之后生成的报告只能说明后来检查时的状态。`manifest.json` 的 `created_at` 记录诊断包的导出时间。
 
 向 [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues)提供应用版本、操作系统、处理器架构、当前模式、复现步骤、期望结果与错误原文。分享前检查诊断和截图，遮盖账号、IP、路径、代理凭据和授权链接。不要上传整个配置目录、完整订阅或项目内容。

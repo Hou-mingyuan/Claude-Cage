@@ -688,16 +688,18 @@ ln -sf "${SSH_AUTH_SOCK}" /run/host-services/ssh-auth.sock`
 
 	hasGuestAgentDaemon := !*a.instConfig.Plain && *a.instConfig.OS == limatype.LINUX
 	var bootDone chan struct{}
+	var bootDeadline time.Time
 	if hasGuestAgentDaemon {
 		go a.watchGuestAgentEvents(ctx)
 		go a.startTimeSync(ctx)
 		if a.showProgress {
 			bootDone = make(chan struct{})
+			bootDeadline = time.Now().Add(cloudInitMonitorTimeout)
 			cloudInitDone := make(chan struct{})
 			go func() {
 				// Progress mode follows a first boot that may download packages
 				// for a long time; the caller's idle timeout detects a stall.
-				timeoutCtx, cancel := context.WithTimeout(ctx, cloudInitMonitorTimeout)
+				timeoutCtx, cancel := context.WithDeadline(ctx, bootDeadline)
 				defer cancel()
 
 				a.watchCloudInitProgress(timeoutCtx, bootDone)
@@ -729,12 +731,7 @@ ln -sf "${SSH_AUTH_SOCK}" /run/host-services/ssh-auth.sock`
 		}
 	}
 
-	finalRequirements := a.finalRequirements()
-	if *a.instConfig.OS == limatype.WINDOWS {
-		finalRequirements = a.finalWinRequirements()
-	}
-
-	if err := a.waitForRequirements("final", finalRequirements); err != nil {
+	if err := a.waitForFinalRequirements(ctx, bootDeadline); err != nil {
 		errs = append(errs, err)
 	} else if bootDone != nil {
 		close(bootDone)

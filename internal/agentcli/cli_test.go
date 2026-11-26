@@ -175,3 +175,73 @@ func TestAgentWaitTimeoutKeepsOriginalJobID(t *testing.T) {
 		t.Fatal(string(data), err)
 	}
 }
+
+func TestAgentDoctorAndCallPointAtRunnableCommands(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profile", "config.json")
+	run := func(args ...string) (int, map[string]any) {
+		t.Helper()
+		var output bytes.Buffer
+		code := Main(append(args, "--config", path), strings.NewReader(""), &output)
+		var reply map[string]any
+		if err := json.Unmarshal(output.Bytes(), &reply); err != nil {
+			t.Fatalf("not one protocol reply: %s", output.String())
+		}
+		return code, reply
+	}
+	checks := func() map[string]string {
+		t.Helper()
+		code, reply := run("doctor")
+		if code != 0 {
+			t.Fatalf("doctor exit %d: %v", code, reply)
+		}
+		next := map[string]string{}
+		for _, item := range reply["data"].(map[string]any)["checks"].([]any) {
+			check := item.(map[string]any)
+			next[check["code"].(string)] = check["next_action"].(string)
+		}
+		return next
+	}
+
+	empty := checks()
+	if empty["config_missing"] != "init" || empty["service_unavailable"] != "init" || empty["account_missing"] != "account.create" {
+		t.Fatalf("empty profile does not lead with init then account.create: %v", empty)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatal("doctor created the profile")
+	}
+
+	for _, name := range []string{"service.start", "init", "doctor", "host.inspect"} {
+		code, reply := run("call", name)
+		failure, _ := reply["error"].(map[string]any)
+		if code != 2 || failure["code"] != "unknown_operation" || failure["next_action"] != name || !strings.Contains(failure["message"].(string), "cage agent "+name) {
+			t.Fatalf("call %s did not point at the top-level command (exit %d): %v", name, code, reply)
+		}
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatal("call init created the profile")
+	}
+
+	if code, _ := run("init"); code != 0 {
+		t.Fatal(code)
+	}
+	initialized := checks()
+	if _, ok := initialized["config_missing"]; ok || initialized["service_unavailable"] != "service.start" || initialized["account_missing"] != "account.create" {
+		t.Fatalf("initialized profile without service: %v", initialized)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "account.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := checks()["account_missing"]; ok {
+		t.Fatal("an existing account file was reported missing without a controller")
+	}
+
+	code, reply := run("call", "account.status")
+	failure, _ := reply["error"].(map[string]any)
+	if code != 1 || failure["code"] != "service_unavailable" || !strings.Contains(failure["message"].(string), "cage agent service.start") {
+		t.Fatalf("service_unavailable does not name the top-level command: %v", reply)
+	}
+	_, capabilities := run("capabilities")
+	if note, _ := capabilities["data"].(map[string]any)["call"].(string); !strings.Contains(note, "operations") {
+		t.Fatalf("capabilities do not explain call names: %v", capabilities["data"])
+	}
+}

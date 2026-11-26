@@ -352,6 +352,69 @@ func TestScanFlClashForOixCloudEncryptedProfiles(t *testing.T) {
 	}
 }
 
+func TestScanWindowsFlClashForOixCloudFollowFlenContainer(t *testing.T) {
+	want := filepath.Join("/home/person", "AppData", "Roaming", "com.follow", "FlClash for oixCloud")
+	found := false
+	for _, loc := range Locations("windows", "/home/person", "", "") {
+		if loc.Directory == want {
+			found = loc.Client == "FlClash for oixCloud" && loc.Layout == OixCloud
+		}
+	}
+	if !found {
+		t.Fatal("missing com.follow FlClash for oixCloud location on windows")
+	}
+	for _, platform := range []string{"darwin", "linux"} {
+		for _, loc := range Locations(platform, "/home/person", "", "") {
+			if strings.HasSuffix(loc.Directory, "FlClash for oixCloud") {
+				t.Fatal("com.follow FlClash for oixCloud location outside windows:", loc)
+			}
+		}
+	}
+
+	const flen = "FLEN\x00\x01fictional-container-payload"
+	data := t.TempDir()
+	oixRoot := filepath.Join(data, "com.follow", "FlClash for oixCloud")
+	writeConfig(t, oixRoot, "config.yaml", flen)
+	writeConfig(t, oixRoot, "profiles/1001.yaml", flen)
+	writeConfig(t, filepath.Join(data, "com.follow", "FlClash"), "config.yaml", testNode)
+	configs := Scan(Locations("windows", t.TempDir(), data, ""), []byte("session"))
+	if len(configs) != 2 {
+		t.Fatalf("expected 1 importable FlClash config + 1 oixCloud notice, got %s", mustJSON(t, configs))
+	}
+	if configs[0].Client != "FlClash" || configs[0].Error != "" || configs[0].Nodes != 1 {
+		t.Fatalf("standard FlClash config broken or misordered: %s", mustJSON(t, configs[0]))
+	}
+	notice := configs[1]
+	if notice.Client != "FlClash for oixCloud" || notice.Name != "私有格式配置" || notice.Error != flenConfigError || notice.Nodes != 0 || len(notice.Data) != 0 || notice.Refreshable {
+		t.Fatalf("unexpected FLEN notice: %s", mustJSON(t, notice))
+	}
+	view := mustJSON(t, notice)
+	for _, secret := range []string{oixRoot, "fictional-container-payload", "1001.yaml", "config.yaml"} {
+		if strings.Contains(view, secret) {
+			t.Fatalf("display metadata leaked %q", secret)
+		}
+	}
+	locs := []Location{{"FlClash for oixCloud", oixRoot, OixCloud, ""}}
+	first := Scan(locs, []byte("session"))
+	if len(first) != 1 || first[0].ID != Scan(locs, []byte("session"))[0].ID || first[0].ID == Scan(locs, []byte("other-session"))[0].ID {
+		t.Fatal("FLEN notice handle not stable per session")
+	}
+
+	// age and FLEN files in one directory each keep their own reason.
+	writeConfig(t, oixRoot, "profiles/1002.yaml", "age-encryption.org/v1\n-> X25519 marker\n--- mac\npayload")
+	mixed := Scan(locs, []byte("session"))
+	if len(mixed) != 2 || mixed[0].Error != encryptedConfigError || mixed[1].Error != flenConfigError || mixed[0].SourceID == mixed[1].SourceID {
+		t.Fatalf("mixed age and FLEN files unexpected: %s", mustJSON(t, mixed))
+	}
+
+	// The marker is only meaningful inside oixCloud directories.
+	plainRoot := t.TempDir()
+	writeConfig(t, plainRoot, "config.yaml", flen)
+	plain := Scan([]Location{{"FlClash", plainRoot, Plain, ""}}, []byte("session"))
+	if len(plain) != 1 || plain[0].Error == flenConfigError || plain[0].Error == "" {
+		t.Fatalf("FLEN marker outside oixCloud changed the reason: %s", mustJSON(t, plain))
+	}
+}
 func TestScanWindowsSakuraCatPrivateConfig(t *testing.T) {
 	found := false
 	for _, loc := range Locations("windows", "/home/person", "", "") {
@@ -729,4 +792,46 @@ func TestScanClashXMetaOnMacOS(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestScanAbsoluteProviderPaths(t *testing.T) {
+	const cache = `proxies:
+  - {name: Residential, type: socks5, server: residential.example, port: 1080, password: private-provider-password}
+`
+	scan := func(t *testing.T, root, providerPath string) Config {
+		t.Helper()
+		writeConfig(t, root, "config.yaml", testNode+"proxy-providers:\n  demo: {path: '"+strings.ReplaceAll(providerPath, "'", "''")+"'}\n")
+		configs := Scan([]Location{{"FlClash", root, Plain, ""}}, []byte("session"))
+		if len(configs) != 1 || configs[0].Error != "" {
+			t.Fatalf("unexpected configs: %s", mustJSON(t, configs))
+		}
+		return configs[0]
+	}
+	t.Run("inside root", func(t *testing.T) {
+		root := t.TempDir()
+		writeConfig(t, root, "profiles/providers/demo/proxies/cache.yaml", cache)
+		c := scan(t, root, filepath.Join(root, "profiles", "providers", "demo", "proxies", "cache.yaml"))
+		if c.Nodes != 2 || c.Warning != "" || !strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("absolute provider path inside root not read: %s", mustJSON(t, c))
+		}
+	})
+	t.Run("outside root", func(t *testing.T) {
+		root, outside := t.TempDir(), t.TempDir()
+		writeConfig(t, outside, "cache.yaml", cache)
+		c := scan(t, root, filepath.Join(outside, "cache.yaml"))
+		if c.Nodes != 1 || c.Warning == "" || strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("absolute provider path outside root was read: %s", mustJSON(t, c))
+		}
+	})
+	t.Run("link escaping root", func(t *testing.T) {
+		root, outside := t.TempDir(), t.TempDir()
+		writeConfig(t, outside, "cache.yaml", cache)
+		if err := os.Symlink(outside, filepath.Join(root, "providers")); err != nil {
+			t.Skipf("cannot create symlink: %v", err)
+		}
+		c := scan(t, root, filepath.Join(root, "providers", "cache.yaml"))
+		if c.Nodes != 1 || c.Warning == "" || strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("provider cache read through escaping link: %s", mustJSON(t, c))
+		}
+	})
 }

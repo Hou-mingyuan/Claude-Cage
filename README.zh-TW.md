@@ -71,8 +71,10 @@ Claude Cage 在一個小型的 Debian 13 環境裡執行官方 Claude Code 和 C
 把這句話發給你的 agent（codex，dsh，workbuddy，反正不會是 claude code😁）
 
 ```markdown
-幫我拉取 https://github.com/Lee-xeo/Claude-Cage 的最新原始碼，打包安裝，並設定 Cage 的代理，透過我本機 Clash 的 xx 節點使用我的 xx IP 出口。全程盯著，有問題直接修復，必要時順手向專案提交 issue，幫助改善相容性。
+幫我拉取 https://github.com/Lee-xeo/Claude-Cage 的最新原始碼，打包安裝，將我匯出的上游節點設定 [檔案路徑] 匯入 Cage。若使用代理鏈，請依序設定中繼節點和出口節點。確認對外的公用 IP 為 [預期 IP]。全程盯著，有問題直接修復，必要時順手向專案提交 issue，幫助改善相容性。
 ```
+
+Clash/Mihomo 或 sing-box 在本機監聽的位址（如 `127.0.0.1:7890`）不能作為上游節點。 [遷移現有代理鏈](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 你唯一需要的，是一個靠譜的代理節點，本專案不做任何代理推廣，可以自行搜尋黑色錯誤網站解決。
 

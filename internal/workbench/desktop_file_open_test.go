@@ -1,12 +1,12 @@
 package workbench
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -41,28 +41,22 @@ func TestDesktopFilePathsStayInProjectGrants(t *testing.T) {
 	}
 }
 
-func TestDesktopFileCommandsPreservePathsAndRevealSemantics(t *testing.T) {
+func TestDesktopFileOpenCommandsPreservePaths(t *testing.T) {
 	path := "/tmp/项目/Word #+%; $(touch unsafe).docx"
 	for _, tc := range []struct {
-		platform, action string
-		directory        bool
-		want             []string
+		platform  string
+		directory bool
+		want      []string
 	}{
-		{"darwin", "open", false, []string{"/usr/bin/open", "--", path}},
-		{"darwin", "reveal", false, []string{"/usr/bin/open", "-R", "--", path}},
-		{"windows", "open", false, []string{"rundll32.exe", "url.dll,FileProtocolHandler", path}},
-		{"windows", "open", true, []string{"explorer.exe", path}},
-		{"windows", "reveal", false, []string{"explorer.exe", "/select," + path}},
-		{"linux", "open", false, []string{"gio", "open", path}},
+		{"darwin", false, []string{"/usr/bin/open", "--", path}},
+		{"windows", false, []string{"rundll32.exe", "url.dll,FileProtocolHandler", path}},
+		{"windows", true, []string{"explorer.exe", path}},
+		{"linux", false, []string{"gio", "open", path}},
 	} {
-		got := hostFileCommand(tc.platform, path, tc.action, tc.directory).Args
+		got := hostOpenCommand(context.Background(), tc.platform, path, tc.directory).Args
 		if !reflect.DeepEqual(got, tc.want) {
-			t.Fatalf("%s %s: %#v", tc.platform, tc.action, got)
+			t.Fatalf("%s: %#v", tc.platform, got)
 		}
-	}
-	args := hostFileCommand("linux", path, "reveal", false).Args
-	if args[0] != "gdbus" || !strings.Contains(strings.Join(args, " "), "ShowItems") || !strings.Contains(args[len(args)-2], "%23+%25") {
-		t.Fatal("Linux reveal lost selection or URI escaping", args)
 	}
 }
 

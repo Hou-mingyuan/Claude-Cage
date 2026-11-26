@@ -456,6 +456,7 @@ try {
             Check ((Get-Content (Join-Path $old 'program.txt') -Raw) -eq 'new') 'Cleanup of a held program file changed the new program.'
             if ($withUserFile) {
                 Check (Test-Path -LiteralPath $receipt) 'Cleanup completed while a user file stayed in the old folder.'
+                Check (!(Test-Path -LiteralPath (Join-Path $old 'Cage-preserved-files'))) 'Failed cleanup left an empty preserved-files folder.'
                 Check ((Get-Content (Join-Path $backup 'late-note.txt') -Raw) -eq 'written while installing') 'Failed cleanup lost a user file.'
                 Invoke-Helper @('-Operation','cleanup','-Source',$backup,'-Target',$old,'-Receipt',$receipt)
                 $late = @(Get-ChildItem (Join-Path $old 'Cage-preserved-files') -File -Recurse | Where-Object { (Get-Content $_.FullName -Raw) -eq 'written while installing' })
@@ -467,6 +468,26 @@ try {
             }
             Check (!(Test-Path -LiteralPath $receipt)) 'Cleanup kept its receipt after the old folder was resolved.'
         }
+
+        # The replaced program may also hold a file open with delete sharing.
+        # Cleanup verifies and deletes it, yet it stays listed, unopenable and
+        # pending deletion until that handle closes, and blocks the folder move.
+        $scenario = Join-Path $root 'cleanup-pending-deletion'
+        $old = Join-Path $scenario 'installed'; $stage = Join-Path $scenario 'staged'; $receipt = Join-Path $scenario 'receipt.json'
+        $backup = $old + '-backup'
+        App $old 'old'; App $stage 'new'
+        Prepare $old $stage $receipt
+        [IO.Directory]::Move($old, $backup)
+        Invoke-Helper @('-Operation','move','-Source',$backup,'-Target',$stage,'-Receipt',$receipt)
+        [IO.Directory]::Move($stage, $old)
+        $pending = [IO.File]::Open((Join-Path $backup 'resources/customizable.txt'), 'Open', 'Read', ([IO.FileShare]::Read -bor [IO.FileShare]::Delete))
+        $held = [IO.File]::Open((Join-Path $backup 'program.txt'), 'Open', 'Read', 'Read')
+        try { Invoke-Helper @('-Operation','cleanup','-Source',$backup,'-Target',$old,'-Receipt',$receipt) }
+        finally { $held.Dispose(); $pending.Dispose() }
+        Check (!(Test-Path -LiteralPath $receipt)) 'A file pending deletion kept the cleanup receipt.'
+        Check (!(Test-Path -LiteralPath (Join-Path $old 'Cage-preserved-files'))) 'Cleanup with a pending deletion left a preserved-files folder.'
+        Check ((Get-Content (Join-Path $old 'resources/customizable.txt') -Raw) -eq 'default-new') 'Cleanup with a pending deletion changed the new program.'
+        Check ((@(Get-ChildItem -LiteralPath $backup -Recurse -File).Name -join ',') -eq 'program.txt') 'The pending deletion did not complete once its handle closed.'
     }
     $scenario = Join-Path $root 'legacy-automatic-rollback'
     $old = Join-Path $scenario 'installed'; $stage = Join-Path $scenario 'restored'; $receipt = Join-Path $scenario 'receipt.json'
@@ -514,6 +535,37 @@ try {
             $env:TMP, $env:TEMP = $savedTemporary
         }
         Check (!(Test-Path -LiteralPath $receipt)) 'A temporary folder outside the ANSI code page kept the receipt.'
+    }
+    if ($windows) {
+        # csc.exe treats a missing LIB search path as an error even for the
+        # managed-only verified-deletion type, so an unrelated SDK LIB left in
+        # the installer's environment must not stop the helper (#958).
+        $scenario = Join-Path $root 'missing-lib'
+        $stage = Join-Path $scenario 'installed'; $receipt = Join-Path $scenario 'receipt.json'
+        $missing = Join-Path $scenario 'missing-sdk\lib'
+        $entry = Join-Path $scenario 'helper-keeps-lib.ps1'
+        App $stage 'new'
+        Write-File $entry @'
+$ErrorActionPreference = 'Stop'
+$expected = $env:LIB
+$remaining = @($args | Select-Object -Skip 1)
+& $args[0] @remaining
+if ($env:LIB -ne $expected) { exit 3 }
+'@
+        $savedLib = $env:LIB
+        try {
+            $env:LIB = $missing
+            foreach ($operation in @('prepare','complete')) {
+                try {
+                    $ErrorActionPreference = 'Continue'
+                    $output = & $HelperShell -NoProfile -File $entry $helper -Operation $operation -Target $stage -Receipt $receipt 2>&1 | Out-String
+                } finally { $ErrorActionPreference = 'Stop' }
+                Check ($LASTEXITCODE -eq 0) "A missing LIB search path stopped $operation ($LASTEXITCODE). $output"
+            }
+        } finally {
+            $env:LIB = $savedLib
+        }
+        Check (!(Test-Path -LiteralPath $receipt)) 'A missing LIB search path kept the receipt.'
     }
     if ($windows) {
         & $HelperShell -NoProfile -File (Join-Path $PSScriptRoot 'test-windows-verified-file-deletion.ps1')

@@ -33,8 +33,21 @@ func TestRedactBacktickQuotedLimaSocketPaths(t *testing.T) {
 	}
 }
 
+const setupHint = "run 'cage agent call network.check --wait 5m' Locale=en_US.UTF-8"
+
 func TestRedactProxyAddresses(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
+		{setupHint, setupHint},
+		{"cannot change locale (zh_CN.UTF-8)", "cannot change locale (zh_CN.UTF-8)"},
+		{"LANG=C.UTF-8 LC_ALL=C.UTF-8", "LANG=C.UTF-8 LC_ALL=C.UTF-8"},
+		{"LANG=C.UTF-8:443 LC_ALL=C.UTF-8.example dial C.UTF-8", "LANG=[host] LC_ALL=[host] dial [host]"},
+		{"call settings.probe then proxy.select", "call settings.probe then proxy.select"},
+		{"writing lima.yaml and setup.sh", "writing lima.yaml and setup.sh"},
+		{"panic at main.go:699", "panic at main.go:699"},
+		{"dial setup.sh and main.go:699", "dial [host] and [host]"},
+		{"cage agent call network.check.example:80 then proxy.select:443", "cage agent call [host] then [host]"},
+		{"worker.network.check en_US.UTF-8:443 en_US.UTF-8.example", "[host] [host] [host]"},
+		{"writing setup.sh.example at https://lima.yaml/secret", "writing [host] at [url]"},
 		{"static.example-provider.io:1337 api.github.com", "[host] [host]"},
 		{"STATIC.EXAMPLE-PROVIDER.IO:1337 xn--bcher-kva.example.", "[host] [host]"},
 		{"edge.xn--p1ai:443 _gateway.example:1337", "[host] [host]"},
@@ -187,7 +200,7 @@ func TestGuestRunnerRedactsProxyAddresses(t *testing.T) {
 	if err := os.WriteFile(script, []byte(GuestRunner()), 0600); err != nil {
 		t.Fatal(err)
 	}
-	input := proxyFailure + "\n[::ffff:192.0.2.8]:443 fe80::1%en0 0123456789abcdef01234567 token=private-token" +
+	input := setupHint + "\nLANG=C.UTF-8 LC_ALL=C.UTF-8.example\n" + proxyFailure + "\n[::ffff:192.0.2.8]:443 fe80::1%en0 0123456789abcdef01234567 token=private-token" +
 		"\nError: socket path `/Users/alice/deep folder/state/ssh.sock.1234` is too long: >= UNIX_PATH_MAX=104"
 	cmd := exec.Command("uv", "run", "--no-project", "python", script, "/bin/sh", "-c", `printf '%s\n' "$1"`, "sh", input)
 	var stderr bytes.Buffer

@@ -71,8 +71,10 @@ Claude Cage သည် terminal၊ browser၊ editor၊ တရားဝင် Cla
 ဤတောင်းဆိုချက်ကို သင်၏ AI အေးဂျင့် (codex၊ dsh၊ workbuddy — Claude Code ဖြစ်နိုင်သည် 😁) ။
 
 ```markdown
-https://github.com/Lee-xeo/Claude-Cage ၏ နောက်ဆုံး source code ကို ရယူပြီး build လုပ်၊ package ပြုလုပ်ကာ install လုပ်ပေးပါ။ Cage proxy ကို ကျွန်ုပ်၏ local Clash ရှိ xx node မှတစ်ဆင့် ကျွန်ုပ်၏ xx IP ဖြင့် ထွက်နိုင်အောင် သတ်မှတ်ပေးပါ။ လုပ်ငန်းစဉ်တစ်လျှောက် စောင့်ကြည့်ပြီး ပြဿနာများကို တိုက်ရိုက်ပြင်ဆင်ပါ။ လိုအပ်ပါက compatibility ပိုကောင်းစေရန် project တွင် issue တင်ပေးပါ။
+https://github.com/Lee-xeo/Claude-Cage ၏ နောက်ဆုံး source code ကို ရယူပြီး build လုပ်၊ package ပြုလုပ်ကာ install လုပ်ပေးပါ။ ကျွန်ုပ် export လုပ်ထားသော node configuration ကို [ဖိုင်လမ်းကြောင်း] မှ Cage သို့ import လုပ်ပေးပါ။ Proxy chain သုံးပါက relay node နှင့် exit node ကို အစဉ်လိုက် သတ်မှတ်ပေးပါ။ အပြင်သို့ထွက်သည့် public IP သည် [မျှော်မှန်းထားသော IP] နှင့် ကိုက်ညီကြောင်း စစ်ဆေးပေးပါ။ လုပ်ငန်းစဉ်တစ်လျှောက် စောင့်ကြည့်ပြီး ပြဿနာများကို တိုက်ရိုက်ပြင်ဆင်ပါ။ လိုအပ်ပါက compatibility ပိုကောင်းစေရန် project တွင် issue တင်ပေးပါ။
 ```
+
+Clash/Mihomo သို့မဟုတ် sing-box ၏ local listener လိပ်စာ (ဥပမာ `127.0.0.1:7890`) ကို upstream node အဖြစ် အသုံးမပြုနိုင်ပါ။ [Proxy chain ကို Cage သို့ ပြောင်းရွှေ့နည်း](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 သင်လိုအပ်သည်မှာ ယုံကြည်စိတ်ချရသော ကွန်ရက် proxy အဆုံးမှတ်တစ်ခုဖြစ်သည်။ ဤပရောဂျက်သည် မည်သည့်ပရောက်စီဝန်ဆောင်မှုပေးသူကိုမျှ မြှင့်တင်မည်မဟုတ်ပါ။ ဥပမာအားဖြင့် Black Error ဝဘ်ဆိုက်ကို ရှာဖွေခြင်းဖြင့် ပံ့ပိုးပေးသူကို သင်ကိုယ်တိုင် ရှာဖွေနိုင်သည်။
 
