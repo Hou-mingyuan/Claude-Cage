@@ -51,6 +51,16 @@ type socksHandshaker interface {
 // before one of them tries the primary first again.
 var dnsPrimaryRetryInterval = 5 * time.Minute
 
+// The guest resolver (glibc) waits 5s per UDP query, and the forwarder passes
+// no deadline. While an untried endpoint remains, an attempt gets
+// dnsFailoverAttemptTimeout so a silently dropped endpoint leaves time for the
+// next one to answer inside that window; revisiting an endpoint keeps the
+// longer dnsAttemptTimeout for slow proxies.
+const (
+	dnsAttemptTimeout         = 6 * time.Second
+	dnsFailoverAttemptTimeout = 2500 * time.Millisecond
+)
+
 // dnsStart returns the endpoint a query tries first: the one that answered
 // last, or, once dnsPrimaryRetryInterval has passed since the switch to a
 // backup, the primary. Only the query that claims the retry slot tries the
@@ -275,7 +285,14 @@ func (e *Egress) ExchangeDNS(ctx context.Context, q *dns.Msg) (*dns.Msg, error) 
 			break
 		}
 		cursor = (index + 1) % len(endpoints)
-		attemptCtx, done := context.WithTimeout(ctx, 6*time.Second)
+		// Each of the first len(endpoints) attempts reaches a different
+		// endpoint, so another untried endpoint follows this one.
+		failover := attempt+1 < len(endpoints)
+		attemptTimeout := dnsAttemptTimeout
+		if failover {
+			attemptTimeout = dnsFailoverAttemptTimeout
+		}
+		attemptCtx, done := context.WithTimeout(ctx, attemptTimeout)
 		answer, retry, reason, attemptErr := e.exchangeDNSOnce(attemptCtx, endpoints[index], q.Id, wire)
 		done()
 		if attemptErr == nil {
@@ -306,7 +323,7 @@ func (e *Egress) ExchangeDNS(ctx context.Context, q *dns.Msg) (*dns.Msg, error) 
 			continue
 		}
 		e.client.CloseIdleConnections()
-		if attempt < 2 && attempt+1 < attempts {
+		if attempt < 2 && attempt+1 < attempts && !failover {
 			select {
 			case <-ctx.Done():
 				err = e.dnsUnavailable(ctx.Err())

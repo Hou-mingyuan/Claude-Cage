@@ -25,6 +25,7 @@ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath (Join-Path $OutputDirectory 'Uninstall.exe')) { throw 'Do not build over an installed application. Choose a separate output directory and use the installer to upgrade.' }
 Assert-NoCageDataInBuildOutput $OutputDirectory
 Assert-WindowsWorkbenchTestBase
+Assert-WindowsInteractiveDesktop
 Assert-WindowsBuildDirectoryIntegrity $repository
 if (Test-Path -LiteralPath $OutputDirectory) { Assert-WindowsBuildDirectoryIntegrity $OutputDirectory }
 $version = Get-CageVersion $repository

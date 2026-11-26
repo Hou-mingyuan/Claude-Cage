@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -146,4 +147,55 @@ func TestDesktopAppInstallerRefusesAnUnexpectedKey(t *testing.T) {
 
 func strconvQuote(text string) string {
 	return "'" + strings.ReplaceAll(text, "'", `\'`) + "'"
+}
+
+// A plugin application's display follows its viewer like a Desktop
+// instance's, behind the same origin, size and environment checks.
+func TestDesktopAppResizeHTTP(t *testing.T) {
+	s := testServer(t)
+	dir := filepath.Join(s.hostPluginDir(), "workshop")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workshop","version":"1.0.0","description":"Runs a vendor application.","engines":{"cage":">=0.2.1"},"kind":"guest","permissions":[],
+		"contributes":{"desktopApps":[{"id":"repo-app","title":"Repo App",
+		"source":{"type":"apt","repository":"https://downloads.example.com/apt","suite":"stable","components":["main"],
+		"key":"https://downloads.example.com/key.asc","fingerprint":"31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE","package":"repo-app"},
+		"command":["/usr/bin/repo-app"]}]}}`
+	if err := os.WriteFile(filepath.Join(dir, hostbridge.ManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/desktop-apps/workshop/repo-app/resize"
+	if w := request(s, "POST", path, "https://claude.ai", `{"width":1000,"height":800}`, true); w.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin resize: %d", w.Code)
+	}
+	if w := request(s, "GET", path, s.origin, "", true); w.Code != http.StatusNotFound {
+		t.Fatalf("resize by GET: %d", w.Code)
+	}
+	for _, body := range []string{
+		`{"width":100,"height":800}`,
+		`{"width":1000,"height":9000}`,
+		`{"width":1000,"height":800,"scale":5}`,
+		`{"width":1000,"height":800,"scale":"2;reboot"}`,
+		`{"width":1000,"height":800,"display":":0"}`,
+	} {
+		if w := request(s, "POST", path, s.origin, body, true); w.Code != http.StatusBadRequest {
+			t.Fatalf("invalid resize %s: %d", body, w.Code)
+		}
+	}
+	// The route exists: a valid size reaches the environment check.
+	if w := request(s, "POST", path, s.origin, `{"width":1000,"height":800}`, true); w.Code != http.StatusConflict {
+		t.Fatalf("resize with a stopped environment: %d %s", w.Code, w.Body.String())
+	}
+	for _, other := range []string{"/api/desktop-apps/workshop/other-app/resize", "/api/desktop-apps/other/repo-app/resize"} {
+		if w := request(s, "POST", other, s.origin, `{"width":1000,"height":800}`, true); w.Code != http.StatusNotFound {
+			t.Fatalf("resize of %s: %d", other, w.Code)
+		}
+	}
+	s.mu.Lock()
+	s.preferences.HostPluginsOff = "workshop"
+	s.mu.Unlock()
+	if w := request(s, "POST", path, s.origin, `{"width":1000,"height":800}`, true); w.Code != http.StatusNotFound {
+		t.Fatalf("resize of a disabled plugin's application: %d", w.Code)
+	}
 }

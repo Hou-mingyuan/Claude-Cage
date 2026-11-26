@@ -145,7 +145,7 @@ func runAgent(args []string, stdin io.Reader, stdout io.Writer, clientOnly bool)
 		response, err := workbench.AgentRequest(ctx, path, workbench.AgentTarget{Scope: *scope, Connection: *connection}, "GET", "/api/agent/routes", nil, "", "")
 		return finish(response.Data, err)
 	case "help", "--help", "capabilities":
-		return finish(map[string]any{"platform": runtime.GOOS, "arch": runtime.GOARCH, "commands": []string{"capabilities", "doctor", "init", "service.start", "host.inspect", "call NAME", "request METHOD /api/PATH", "socket /api/PATH", "routes", "job ID", "diagnostics"}, "operations": workbench.AgentOperations(), "routes": "agent routes reads the actual registered routes from the chosen live listener", "exit_codes": map[string]int{"completed_or_accepted": 0, "operation_failed": 1, "invalid_input": 2, "user_action_required": 3, "wait_timeout": 4}, "guide": "https://claude-cage.com/docs/agent/", "scope": "local: owning workload; desktop: client configuration; selected: explicit desktop connection generation; client: lightweight client listener", "request": map[string]any{"methods": []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}, "path": "relative /api/ endpoint from the UI", "binary": "--input FILE --content-type application/octet-stream; --output ABSOLUTE_NEW_FILE", "native": "call native.submit --scope desktop; request GET /api/agent/native/ID --scope desktop; use the same native action and connection_id as the open window"}, "job_retention": "the latest job and the job it replaced (initiator records agent/desktop/setup; canceled_by and superseded_by name the cancellation source and replacement job when a running job is canceled or replaced by a stop); query promptly and never resubmit an unknown mutation automatically"}, nil)
+		return finish(map[string]any{"platform": runtime.GOOS, "arch": runtime.GOARCH, "commands": []string{"capabilities", "doctor", "init", "service.start", "host.inspect", "call NAME", "request METHOD /api/PATH", "socket /api/PATH", "routes", "job ID", "diagnostics"}, "operations": workbench.AgentOperations(), "call": "call NAME accepts only names listed in operations; the other commands run directly as cage agent COMMAND", "routes": "agent routes reads the actual registered routes from the chosen live listener", "exit_codes": map[string]int{"completed_or_accepted": 0, "operation_failed": 1, "invalid_input": 2, "user_action_required": 3, "wait_timeout": 4}, "guide": "https://claude-cage.com/docs/agent/", "scope": "local: owning workload; desktop: client configuration; selected: explicit desktop connection generation; client: lightweight client listener", "request": map[string]any{"methods": []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}, "path": "relative /api/ endpoint from the UI", "binary": "--input FILE --content-type application/octet-stream; --output ABSOLUTE_NEW_FILE", "native": "call native.submit --scope desktop; request GET /api/agent/native/ID --scope desktop; use the same native action and connection_id as the open window"}, "job_retention": "the latest job and the job it replaced (initiator records agent/desktop/setup; canceled_by and superseded_by name the cancellation source and replacement job when a running job is canceled or replaced by a stop); query promptly and never resubmit an unknown mutation automatically"}, nil)
 	case "init":
 		if _, err := os.Stat(path); err == nil {
 			if _, err := cage.Load(path); err != nil {
@@ -251,6 +251,9 @@ func runAgent(args []string, stdin io.Reader, stdout io.Writer, clientOnly bool)
 		return finish(result, err)
 	case "call", "job":
 		var data json.RawMessage
+		if command == "call" && directCommand(operand) {
+			return finish(nil, &workbench.AgentError{Code: "unknown_operation", Message: operand + " is a top-level command, not a call operation. Run cage agent " + operand + " without call.", NextAction: operand})
+		}
 		if command == "call" {
 			body := []byte("{}")
 			// Input is read only with --input. Data already waiting on stdin
@@ -413,13 +416,30 @@ func environmentCheck(state json.RawMessage) (code, status, next string) {
 	return "environment_ready", "ok", ""
 }
 
+// directCommand reports top-level commands that agents sometimes pass to call
+// because next_action names them.
+func directCommand(name string) bool {
+	for _, op := range workbench.AgentOperations() {
+		if op.Name == name {
+			return false
+		}
+	}
+	switch name {
+	case "capabilities", "doctor", "init", "service.start", "host.inspect", "routes", "diagnostics":
+		return true
+	}
+	return false
+}
+
 func agentDoctor(ctx context.Context, path string, clientOnly bool) map[string]any {
 	result := map[string]any{"note": "Read-only snapshot. No repairs were applied; missing services were not started."}
 	checks := []map[string]any{}
 	add := func(code, status, next string) {
 		checks = append(checks, map[string]any{"code": code, "status": status, "next_action": next})
 	}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	_, err := os.Stat(path)
+	configMissing := os.IsNotExist(err)
+	if configMissing {
 		add("config_missing", "blocked", "init")
 	} else if _, err := cage.Load(path); err != nil {
 		add("config_invalid", "blocked", "diagnostics")
@@ -444,11 +464,19 @@ func agentDoctor(ctx context.Context, path string, clientOnly bool) map[string]a
 	}
 	data, err := workbench.AgentCall(ctx, path, "account.status", nil)
 	if err != nil {
+		code, next := "service_unavailable", "service.start"
 		var ae *workbench.AgentError
 		if errors.As(err, &ae) {
-			add(ae.Code, "blocked", ae.NextAction)
-		} else {
-			add("service_unavailable", "blocked", "service.start")
+			code, next = ae.Code, ae.NextAction
+		}
+		if code == "service_unavailable" && configMissing {
+			// service.start cannot load a configuration that init has not
+			// created yet.
+			next = "init"
+		}
+		add(code, "blocked", next)
+		if _, err := os.Lstat(filepath.Join(profile, "account.json")); code == "service_unavailable" && !clientOnly && os.IsNotExist(err) {
+			add("account_missing", "blocked", "account.create")
 		}
 	} else {
 		var account struct {

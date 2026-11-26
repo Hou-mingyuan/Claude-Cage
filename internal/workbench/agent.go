@@ -180,8 +180,11 @@ func agentHTTPError(code int) *AgentError {
 	e := &AgentError{Code: "request_rejected", Message: "Cage rejected the operation. Check the input and run doctor.", NextAction: "doctor", HTTPStatus: code}
 	switch code {
 	case 401:
+		// service.start reuses a running controller, so it cannot renew a
+		// rejected session.
 		e.Code = "authentication_failed"
-		e.NextAction = "service.start"
+		e.Message = "The controller rejected this session. Reopen the workbench from the Cage app, then retry."
+		e.NextAction = "open_desktop"
 	case 423:
 		e.Code = "account_locked"
 		e.Message = "Unlock Cage before configuring the environment."
@@ -255,7 +258,7 @@ func agentCheckController(c *controllerClient, configPath string) error {
 func agentConnect(ctx context.Context, configPath string) (*controllerClient, error) {
 	c, err := connectController(filepath.Dir(configPath))
 	if err != nil {
-		return nil, &AgentError{Code: "service_unavailable", Message: "The local Cage controller is unavailable. Run service.start or doctor.", NextAction: "service.start"}
+		return nil, &AgentError{Code: "service_unavailable", Message: "The local Cage controller is unavailable. Run the top-level command cage agent service.start (not call), open the Cage app, or run doctor.", NextAction: "service.start"}
 	}
 	fail := func(err error) (*controllerClient, error) { c.close(); return nil, err }
 	if err := agentCheckController(c, configPath); err != nil {

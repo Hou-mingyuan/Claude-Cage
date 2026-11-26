@@ -71,8 +71,10 @@ Claude Cage wuxuu terminalka, biraawsarka, tafatiraha, Claude Desktop-ka rasmiga
 U dir codsigan wakiilkaaga AI (codex, dsh, workbuddy - malaha maaha Claude Code 😁):
 
 ```markdown
-Soo qaado koodhkii ugu dambeeyay ee https://github.com/Lee-xeo/Claude-Cage, dhis, xirmo ka samee oo rakib. U habee proxy-ga Cage inuu isticmaalo node-ka xx ee Clash-kayga maxalliga ah oo uu ka baxo IP-gayga xx. La soco hawsha oo dhan, si toos ah u sax dhibaatooyinka, haddii loo baahdana issue u gudbi mashruuca si loo wanaajiyo iswaafajinta.
+Soo qaado koodhkii ugu dambeeyay ee https://github.com/Lee-xeo/Claude-Cage, dhis, xirmo ka samee oo rakib. Cage ku soo geli habaynta node-ka aan ku dhoofiyay [jidka faylka]. Haddii aan isticmaalo silsilad proxy, marka hore habee node-ka dhexdhexaadka ah, ka dibna kan bixitaanka. Hubi in IP-ga guud ee bixitaanku yahay [IP-ga la filayo]. La soco hawsha oo dhan, si toos ah u sax dhibaatooyinka, haddii loo baahdana issue u gudbi mashruuca si loo wanaajiyo iswaafajinta.
 ```
+
+Cinwaanka maxalliga ah ee Clash/Mihomo ama sing-box ku qaabilo xiriirrada, sida `127.0.0.1:7890`, looma adeegsan karo node-ka sare. [U soo wareeji silsiladda proxy-ga](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 Waxa kaliya ee aad u baahan tahay waa barta ugu dambeysa ee wakiil shabakad la isku halayn karo. Mashruucani ma dalacsiinayo bixiye wakiil; Waxaad heli kartaa bixiye laftaada, tusaale ahaan adoo raadiya shabakada qaladka madow.
 

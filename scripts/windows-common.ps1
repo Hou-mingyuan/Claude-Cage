@@ -35,6 +35,15 @@ function Resolve-WindowsBuildDirectory {
     return $resolved
 }
 
+# Returns the file system of a drive-letter path, or nothing for UNC paths and
+# drives that cannot be queried.
+function Get-WindowsBuildFileSystem {
+    param([string]$Directory)
+    $root = [IO.Path]::GetPathRoot($Directory)
+    if (-not $root -or $root.StartsWith('\\')) { return $null }
+    try { return [IO.DriveInfo]::new($root).DriveFormat } catch { return $null }
+}
+
 function Assert-WindowsWorkbenchTestBase {
     param([string]$Directory = (Get-WindowsWorkbenchTestBase -WorkbenchProfile))
     if (-not $IsWindows) { return }
@@ -47,6 +56,39 @@ function Assert-WindowsWorkbenchTestBase {
         if ($path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw 'The workbench smoke test directory resolves inside AppData or another private configuration directory. Set RUNNER_TEMP to a writable local directory outside it, such as D:\CageBuildTemp.'
         }
+    }
+    # Cage rejects private records that are not owned by the current user, and
+    # FAT-family volumes store no owner or ACL, so the workbench never starts
+    # and acceptance only ends at its timeout.
+    $fileSystem = Get-WindowsBuildFileSystem $path
+    if ($fileSystem -in @('exFAT', 'FAT', 'FAT32')) {
+        throw "The workbench smoke test directory is on a $fileSystem volume, which cannot keep the owner and permissions Cage requires for its private files. Set RUNNER_TEMP to a writable local directory on an NTFS volume outside AppData, such as C:\CageBuildTemp."
+    }
+}
+
+function Get-WindowsNonInteractiveSessionText {
+    param(
+        [int]$SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId,
+        [bool]$UserInteractive = [Environment]::UserInteractive
+    )
+    # WebView2 cannot create the smoke window without a visible window
+    # station; Win32-OpenSSH and services run in session 0 and fail late with
+    # 0x80070578 (invalid window handle).
+    if ($SessionId -eq 0) { return '当前在会话 0（SSH / 服务）中运行' }
+    if (-not $UserInteractive) { return "当前进程在会话 $SessionId 中没有可见的交互式桌面" }
+    return $null
+}
+
+function Assert-WindowsInteractiveDesktop {
+    param(
+        [int]$SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId,
+        [bool]$UserInteractive = [Environment]::UserInteractive,
+        [bool]$Windows = $IsWindows
+    )
+    if (-not $Windows) { return }
+    $session = Get-WindowsNonInteractiveSessionText -SessionId $SessionId -UserInteractive $UserInteractive
+    if ($session) {
+        throw "工作台自检需要已登录用户的交互式桌面；$session。请在桌面会话中运行，或用交互式登录的一次性计划任务运行构建与打包。参见 docs/windows.md#windows-源码构建。"
     }
 }
 
@@ -186,7 +228,11 @@ function Assert-WindowsWorkbenchReport {
     Write-Host ('Cage smoke diagnostic: ' + ($safe | ConvertTo-Json -Depth 6 -Compress))
     if ($failed) {
         $reason = $safe['controllerError'] ?? $safe.nativeStatus
-        throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $reason. Diagnostics: $Report"
+        $hint = ''
+        if ($safe.nativeStatus -match '(?i)0x80070578') {
+            $hint = ' 0x80070578 表示无法创建工作台窗口，常见于会话 0（SSH / 服务）等非交互会话；工作台自检需要已登录用户的交互式桌面。参见 docs/windows.md#windows-源码构建。'
+        }
+        throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $reason. Diagnostics: $Report$hint"
     }
 }
 
