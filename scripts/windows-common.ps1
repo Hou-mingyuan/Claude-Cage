@@ -455,6 +455,24 @@ function Get-VerifiedGitArchive {
     return $archive
 }
 
+function Get-WindowsCompilerPreflightError {
+    param([string]$LogPath, [int]$ExitCode, [string]$MsysDirectory, [string]$SystemDirectory, [bool]$SystemZlib)
+    $message = "The MSYS2 UCRT64 compiler preflight failed with exit code $ExitCode."
+    # The compiler may print local paths or flags. Only echo our own status line.
+    $last = Get-Content -LiteralPath $LogPath -Tail 1
+    if ($last -cmatch '^Preflight: (CC|CXX) (compile/link|run) (could not start|exited with -?\d+ \(0x[0-9A-F]{8}\))\.$') {
+        $message += " $last"
+    }
+    $loader = Select-String -Quiet -LiteralPath $LogPath -Pattern '\b(0xC000013[59]|322122578[15]|107374151[15])\b'
+    if ($SystemZlib -and ($loader -or (Select-String -Quiet -LiteralPath $LogPath -Pattern '\bas\.exe\b|\bassembler\b|\bzlib1\.dll\b'))) {
+        $bin = ($MsysDirectory -replace '\\', '/').TrimEnd('/') + '/ucrt64/bin/'
+        $message += "`nCheck whether the compiler tools load zlib1.dll from $SystemDirectory. Clear CC and CXX to use the default -B prefix, or set `$env:CC = 'gcc -B$bin' and `$env:CXX = 'g++ -B$bin'."
+    } elseif ($loader) {
+        $message += "`nCheck the UCRT64 tools and their DLLs. Windows reports a missing DLL as 0xC0000135 and a missing entry point as 0xC0000139."
+    }
+    return $message + "`nCompiler log: $LogPath`nSee docs/windows.md#windows-源码构建."
+}
+
 function Invoke-WindowsQemuProbe {
     param([string]$Executable, [string[]]$Arguments)
     $start = [Diagnostics.ProcessStartInfo]::new([IO.Path]::GetFullPath($Executable))

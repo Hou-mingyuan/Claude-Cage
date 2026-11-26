@@ -55,6 +55,26 @@ try {
     } finally { $lock.Dispose() }
     (Enter-WindowsQemuOutputLock $cached).Dispose()
 
+    $log = Join-Path $root 'compiler-preflight.log'
+    $diagnostic = @{LogPath = $log; ExitCode = 1; MsysDirectory = 'D:\msys64\'; SystemDirectory = 'C:\Windows\System32'}
+    @('fake local compiler detail', 'Preflight: CC compile/link exited with 3221225781 (0xC0000135).') | Set-Content -LiteralPath $log
+    $loader = Get-WindowsCompilerPreflightError @diagnostic -SystemZlib $false
+    if ($loader -notlike '*CC compile/link exited with*0xC0000135*' -or $loader -notlike "*$log*" -or
+        $loader -like '*fake local compiler detail*' -or $loader -like '*zlib1.dll*') {
+        throw 'Missing-DLL diagnosis must show the status and log path without echoing compiler output or assuming zlib.'
+    }
+    $shadow = Get-WindowsCompilerPreflightError @diagnostic -SystemZlib $true
+    if ($shadow -notlike "*zlib1.dll from C:\Windows\System32*" -or $shadow -notlike "*'gcc -BD:/msys64/ucrt64/bin/'*") {
+        throw 'Possible System32 zlib conflict lacks the installation-specific workaround.'
+    }
+    'as.exe: returned 1 exit status' | Set-Content -LiteralPath $log
+    if ((Get-WindowsCompilerPreflightError @diagnostic -SystemZlib $true) -notlike "*'gcc -BD:/msys64/ucrt64/bin/'*") {
+        throw 'An assembler failure beside a System32 zlib1.dll lacked the -B workaround.'
+    }
+    'ld.exe: cannot find -lfoo' | Set-Content -LiteralPath $log
+    if ((Get-WindowsCompilerPreflightError @diagnostic -SystemZlib $true) -like '*zlib1.dll*') {
+        throw 'An unrelated compiler error should not be attributed to a system DLL.'
+    }
     $downloads = Join-Path $root 'downloads'
     $script:downloadContent = 'truncated payload'
     # Exercise the built-in download path offline: without Node on the lookup,
@@ -103,5 +123,5 @@ try {
             throw 'Get-VerifiedDependency did not fall back to Invoke-WebRequest after shared downloader failure.'
         }
     }
-    Write-Output 'PASS: QEMU cache locking, rollback, interrupted rebuild recovery, custom output ownership, and dependency retry.'
+    Write-Output 'PASS: QEMU cache locking, rollback, interrupted rebuild recovery, custom output ownership, compiler preflight diagnosis, and dependency retry.'
 } finally { Remove-Item -LiteralPath $root -Recurse -Force }
