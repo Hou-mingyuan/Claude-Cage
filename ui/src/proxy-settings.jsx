@@ -45,11 +45,9 @@ import {
   hopsEqual,
   isMultiNodeHop,
   moveNodeInRelayHop,
-  nextHopPickerAfterExitPick,
   nodeHop,
   nodesClaimedByOtherHops,
   relayHop,
-  resolveHopPickerIndex,
   sanitizeRelayHopAfterExitChange,
   savedHopsFromProxy,
   serializeHopsForAPI,
@@ -115,7 +113,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
   const [manual, setManual] = useState(emptyManual);
   const [routeDraft, setRouteDraft] = useState(null);
   const [preferredMode, setPreferredMode] = useState(null);
-  const [pickerHop, setPickerHop] = useState(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [hostRefresh, setHostRefresh] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -247,7 +244,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
         setManual(emptyManual);
         if (action === "route" || action === "select") {
           setRouteDraft(null);
-          setPickerHop(null);
         }
         const importedSource =
           action === "import"
@@ -499,7 +495,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
       !active
     ) {
       setRouteDraft([relayHop(), nodeHop(firstSavedExitID)]);
-      setPickerHop(0);
     }
   }, [initializing, preferredMode, allNodes.length, routeDraft, savedHops.length, firstSavedExitID, active]);
   useEffect(() => {
@@ -578,16 +573,12 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
         return "";
     }
   };
-  const activePickerHop = resolveHopPickerIndex(route, pickerHop, sources, usableIDs);
-  const activeHop = route[activePickerHop];
-  const isMultiSelectPicking = activeHop?.kind === "relay";
-  const claimedForActivePicker = nodesClaimedByOtherHops(route, activePickerHop, sources, usableIDs);
+  const isChainMode = route.length > 1;
   const updateExitHop = (id) => {
     const exitIdx = route.length - 1;
     let nextRoute = route.map((current, i) => (i === exitIdx ? nodeHop(id) : current));
     nextRoute = sanitizeRelayHopAfterExitChange(nextRoute, id);
     setRouteDraft(nextRoute);
-    setPickerHop(nextHopPickerAfterExitPick(nextRoute, sources, usableIDs));
   };
   const updateRelayHop = (index, updater) => {
     const nextRoute = route.map((current, i) => {
@@ -601,55 +592,32 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
   };
   const selectSingleMode = () => {
     setPreferredMode("single");
-    setPickerHop(null);
     if (route.length > 1) setRouteDraft(singleHopFromRoute(route));
   };
   const selectChainMode = () => {
     setPreferredMode("chain");
     if (allNodes.length > 0 && route.length === 1) {
-      const next = [relayHop(), route[0]];
-      setRouteDraft(next);
-      setPickerHop(0);
-    } else {
-      setPickerHop(null);
+      setRouteDraft([relayHop(), route[0]]);
     }
   };
-  const focusHopForPicking = (index) => {
-    setPickerHop(index);
+  const scrollToNodeList = () => {
     nodeListSectionRef.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
   };
-  const savedFixedTransitIDs = new Set();
   const savedActiveRelayIDs = new Set();
-  const savedRelayCandidateIDs = new Set();
-  if (active) {
+  if (active && proxy.running) {
     savedHops.forEach((hop, idx) => {
       if (idx === savedHops.length - 1) return;
-      const singleID = singleNodeIDOfHop(hop);
-      if (singleID) {
-        savedFixedTransitIDs.add(singleID);
-      } else if (isMultiNodeHop(hop)) {
-        for (const id of hopCandidateIDs(hop, savedHops, sources, usableIDs)) {
-          savedRelayCandidateIDs.add(id);
-        }
+      if (isMultiNodeHop(hop)) {
         const liveID = savedRouteMeta[idx]?.active_node_id;
-        if (proxy.running && liveID) savedActiveRelayIDs.add(liveID);
+        if (liveID) savedActiveRelayIDs.add(liveID);
       }
     });
   }
   const draftExitID = route.at(-1)?.kind === "node" ? route.at(-1).node_id : "";
-  const draftFixedTransitIDs = new Set();
-  const draftRelayCandidateIDs = new Set();
-  route.forEach((hop, idx) => {
-    if (idx === route.length - 1) return;
-    const singleID = singleNodeIDOfHop(hop);
-    if (singleID) {
-      draftFixedTransitIDs.add(singleID);
-    } else if (isMultiNodeHop(hop)) {
-      for (const id of hopCandidateIDs(hop, route, sources, usableIDs)) {
-        draftRelayCandidateIDs.add(id);
-      }
-    }
-  });
+  const transitCandidateSets = route.slice(0, -1).map(
+    (hop) => new Set(hopCandidateIDs(hop, route, sources, usableIDs)),
+  );
+  const hop0Claimed = isChainMode ? nodesClaimedByOtherHops(route, 0, sources, usableIDs) : new Map();
   const baseNodes = allNodes.filter(
     (n) =>
       (!source || n.sourceID === source) &&
@@ -666,105 +634,140 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
   const showGroupedList = !activeRegion && regionGroups.length > 1;
   const measurable = nodes.filter((node) => !node.blocked_reason);
   const firstMissingHop = routeValidation.firstInvalidHop;
-  const eligibleMultiSelectNodes = isMultiSelectPicking
-    ? nodes.filter((n) => !n.blocked_reason && !claimedForActivePicker.has(n.id))
+  const hop0EligibleVisible = isChainMode
+    ? nodes.filter((n) => !n.blocked_reason && !hop0Claimed.has(n.id))
     : [];
-  const activeRelaySelectedIDs = isMultiSelectPicking
-    ? hopCandidateIDs(activeHop, route, sources, usableIDs)
-    : [];
-  const activeCustomSelectedSet = isMultiSelectPicking ? new Set(activeRelaySelectedIDs) : null;
-  const allVisibleSelected =
-    isMultiSelectPicking &&
-    eligibleMultiSelectNodes.length > 0 &&
-    eligibleMultiSelectNodes.every((n) => activeCustomSelectedSet.has(n.id));
+  const hop0AllVisibleSelected =
+    isChainMode &&
+    hop0EligibleVisible.length > 0 &&
+    hop0EligibleVisible.every((n) => transitCandidateSets[0].has(n.id));
   const renderNodeRow = (n) => {
-    const usedInOtherHopIndex = claimedForActivePicker.has(n.id) ? claimedForActivePicker.get(n.id) : -1;
-    const usedInOtherHop = usedInOtherHopIndex >= 0;
-    const isTargetSelected =
-      !n.blocked_reason &&
-      (isMultiSelectPicking
-        ? activeCustomSelectedSet.has(n.id)
-        : activeHop?.kind === "node" && n.id === activeHop.node_id);
     const isDraftExit = !n.blocked_reason && n.id === draftExitID;
-    const isDraftTransit = !n.blocked_reason && draftFixedTransitIDs.has(n.id);
-    const isDraftRelayCandidate = !n.blocked_reason && draftRelayCandidateIDs.has(n.id);
-    const isSavedExit = active && n.id === proxy.selected;
-    const isSavedActiveRelay = active && (savedFixedTransitIDs.has(n.id) || savedActiveRelayIDs.has(n.id));
-    const isSavedRelayCandidate = active && savedRelayCandidateIDs.has(n.id);
-    const roleBadge = !routeChanged && isSavedExit
-      ? { text: tr("当前出口"), tone: "is-exit" }
-      : !routeChanged && isSavedActiveRelay
-        ? { text: tr("当前中转"), tone: savedActiveRelayIDs.has(n.id) ? "is-relay-live" : "is-relay" }
-        : !routeChanged && isSavedRelayCandidate
-          ? { text: tr("中转候选"), tone: "is-relay-candidate" }
-          : isDraftExit
-            ? { text: isSavedExit ? tr("当前出口") : tr("待应用出口"), tone: "is-exit" }
-            : isDraftTransit
-              ? { text: isSavedActiveRelay ? tr("当前中转") : tr("待应用中转"), tone: "is-relay" }
-              : isDraftRelayCandidate
-                ? { text: tr("中转候选"), tone: "is-relay-candidate" }
-                : isSavedExit
-                  ? { text: tr("当前出口"), tone: "is-saved" }
-                  : isSavedActiveRelay
-                    ? { text: tr("当前中转"), tone: "is-saved" }
-                    : null;
-    const atRelayCap = isMultiSelectPicking && !isTargetSelected && activeRelaySelectedIDs.length >= MAX_RELAY_NODES;
-    const disabledTitle = n.blocked_reason
-      ? localizeBackendMessage(n.blocked_reason, tr)
-      : usedInOtherHop
-        ? usedInOtherHopIndex === route.length - 1
-          ? tr("此节点已用作最终出口")
-          : tr("此节点已用作中转")
-        : atRelayCap
-          ? tr("自选节点池最多包含 300 个候选节点")
-          : isMultiSelectPicking
-            ? isTargetSelected
-              ? tr("点击移出「{0}」", hopLabel(activePickerHop))
-              : tr("点击加入「{0}」", hopLabel(activePickerHop))
-            : route.length > 1
-              ? tr("点击选择{0}", hopLabel(activePickerHop))
-              : tr("选为最终出口，点击应用代理后生效");
+    const inAnyTransit = !n.blocked_reason && transitCandidateSets.some((set) => set.has(n.id));
+    const isLiveRelay = !routeChanged && active && proxy.running && savedActiveRelayIDs.has(n.id);
+    if (!isChainMode) {
+      const isSavedExit = active && n.id === proxy.selected;
+      const roleBadge = !routeChanged && isSavedExit
+        ? { text: tr("当前出口"), tone: "is-exit" }
+        : isDraftExit
+          ? { text: isSavedExit ? tr("当前出口") : tr("待应用出口"), tone: "is-exit" }
+          : isSavedExit
+            ? { text: tr("当前出口"), tone: "is-saved" }
+            : null;
+      const disabledTitle = n.blocked_reason
+        ? localizeBackendMessage(n.blocked_reason, tr)
+        : tr("选为最终出口，点击应用代理后生效");
+      return (
+        <div
+          className={`proxy-node ${isDraftExit ? "selected" : ""}`}
+          key={n.id}
+        >
+          <button
+            className="proxy-node-choice"
+            disabled={busy || Boolean(n.blocked_reason) || !proxy.core_available}
+            title={disabledTitle}
+            onClick={() => updateExitHop(n.id)}
+            aria-pressed={isDraftExit}
+            aria-label={tr("选择节点 {0}", n.name)}
+          >
+            <span className="proxy-radio">
+              {isDraftExit && <Check size={12} />}
+            </span>
+            <span>
+              <strong>{n.blocked_reason ? tr("{0}（需迁移）", n.name) : n.name}</strong>
+              <small>
+                {n.source} · {n.type.toUpperCase()}
+              </small>
+            </span>
+          </button>
+          {roleBadge && (
+            <span className={`proxy-node-role ${roleBadge.tone}`}>
+              {roleBadge.text}
+            </span>
+          )}
+          <span className="proxy-delay" title={n.blocked_reason ? undefined : (delayReasons.current[n.id] ? localizeBackendMessage(delayReasons.current[n.id], tr) : undefined)}>
+            {!n.blocked_reason && (delays[n.id] ? tr(delays[n.id]) : tr("未测速"))}
+          </span>
+          <button
+            aria-label={tr("测速 {0}", (n.name))}
+            title={tr("检测此节点到 www.gstatic.com 的 HTTP 往返延迟，通常不含建连开销，不代表网页首开耗时")}
+            disabled={busy || !proxy.running || Boolean(n.blocked_reason)}
+            onClick={() => measure([n.id])}
+          >
+            <Activity size={14} />
+          </button>
+        </div>
+      );
+    }
+    const blockedReason = n.blocked_reason ? localizeBackendMessage(n.blocked_reason, tr) : "";
     return (
       <div
-        className={`proxy-node ${isTargetSelected ? "selected" : ""}${isDraftTransit || isDraftRelayCandidate ? " is-relay-node" : ""}`}
+        className={`proxy-node proxy-node--chain${isDraftExit ? " selected" : ""}${inAnyTransit ? " is-relay-node" : ""}`}
         key={n.id}
       >
-        <button
-          className="proxy-node-choice"
-          disabled={
-            busy || Boolean(n.blocked_reason) ||
-            !proxy.core_available ||
-            usedInOtherHop ||
-            atRelayCap
-          }
-          title={disabledTitle}
-          onClick={() =>
-            isMultiSelectPicking
-              ? toggleRelayHopNode(activePickerHop, n.id)
-              : updateExitHop(n.id)
-          }
-          aria-pressed={isTargetSelected}
-          aria-label={
-            isMultiSelectPicking
-              ? tr("勾选候选节点 {0}", n.name)
-              : tr("选择节点 {0}", n.name)
-          }
-        >
-          <span className={isMultiSelectPicking ? "proxy-checkbox" : "proxy-radio"}>
-            {isTargetSelected && <Check size={12} />}
-          </span>
-          <span>
+        <div className="proxy-node-info">
+          <div className="proxy-node-title-line">
             <strong>{n.blocked_reason ? tr("{0}（需迁移）", n.name) : n.name}</strong>
-            <small>
-              {n.source} · {n.type.toUpperCase()}
-            </small>
-          </span>
-        </button>
-        {roleBadge && (
-          <span className={`proxy-node-role ${roleBadge.tone}`}>
-            {roleBadge.text}
-          </span>
-        )}
+            {isLiveRelay && (
+              <span className="proxy-node-live-pill">
+                <span className="proxy-relay-live-dot" aria-hidden="true" />
+                {tr("当前中转")}
+              </span>
+            )}
+          </div>
+          <small>
+            {n.source} · {n.type.toUpperCase()}
+          </small>
+        </div>
+        <div className="proxy-node-push-actions">
+          {transitCandidateSets.map((candSet, hopIdx) => {
+            const inThisHop = !n.blocked_reason && candSet.has(n.id);
+            const inOtherTransit = transitCandidateSets.some((other, j) => j !== hopIdx && other.has(n.id));
+            const atCap = !inThisHop && candSet.size >= MAX_RELAY_NODES;
+            const disabledPush =
+              busy || Boolean(n.blocked_reason) || !proxy.core_available || isDraftExit || inOtherTransit || atCap;
+            const pushTitle = blockedReason
+              || (isDraftExit ? tr("此节点已用作最终出口")
+                : inOtherTransit ? tr("此节点已用作其他中转")
+                  : atCap ? tr("自选节点池最多包含 300 个候选节点")
+                    : inThisHop ? tr("点击移出「{0}」", hopLabel(hopIdx))
+                      : tr("点击加入「{0}」", hopLabel(hopIdx)));
+            const btnText = transitCandidateSets.length === 1
+              ? tr("中转")
+              : tr("中转 {0}", hopIdx + 1);
+            return (
+              <button
+                key={hopIdx}
+                type="button"
+                className={`proxy-node-push-btn is-relay${inThisHop ? " is-active" : ""}`}
+                disabled={disabledPush}
+                aria-pressed={inThisHop}
+                aria-label={
+                  transitCandidateSets.length === 1
+                    ? inThisHop ? tr("移出中转 {0}", n.name) : tr("设为中转 {0}", n.name)
+                    : inThisHop ? tr("移出中转 {0} {1}", hopIdx + 1, n.name) : tr("设为中转 {0} {1}", hopIdx + 1, n.name)
+                }
+                title={pushTitle}
+                onClick={() => toggleRelayHopNode(hopIdx, n.id)}
+              >
+                {inThisHop ? <Check size={12} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+                <span>{btnText}</span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            className={`proxy-node-push-btn is-exit${isDraftExit ? " is-active" : ""}`}
+            disabled={busy || Boolean(n.blocked_reason) || !proxy.core_available}
+            aria-pressed={isDraftExit}
+            aria-label={tr("设为出口 {0}", n.name)}
+            title={blockedReason || (isDraftExit ? tr("当前最终出口") : tr("设为最终出口"))}
+            onClick={() => updateExitHop(n.id)}
+          >
+            {isDraftExit && <Check size={12} aria-hidden="true" />}
+            <span>{isDraftExit ? tr("出口") : tr("设为出口")}</span>
+          </button>
+        </div>
         <span className="proxy-delay" title={n.blocked_reason ? undefined : (delayReasons.current[n.id] ? localizeBackendMessage(delayReasons.current[n.id], tr) : undefined)}>
           {!n.blocked_reason && (delays[n.id] ? tr(delays[n.id]) : tr("未测速"))}
         </span>
@@ -1244,7 +1247,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                   const final = index === route.length - 1;
                   const label = hopLabel(index);
                   const multiNode = !final && isMultiNodeHop(hop);
-                  const isActiveTarget = route.length > 1 && activePickerHop === index;
                   const hopClaimed = nodesClaimedByOtherHops(route, index, sources, usableIDs);
                   const hopIssue = hopIssueMessage(routeValidation.issuesByHop[index], index);
                   const liveActiveID = liveActiveNodeForHop(index, hop);
@@ -1256,7 +1258,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                   return (
                     <li
                       key={index}
-                      className={`proxy-route-hop ${final ? "is-exit" : "is-relay"}${isActiveTarget ? " is-target" : ""}`}
+                      className={`proxy-route-hop ${final ? "is-exit" : "is-relay"}`}
                     >
                       <span className="proxy-hop-number" aria-hidden="true">
                         {index + 1}
@@ -1267,19 +1269,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                           <span className={`proxy-hop-role-tag ${final ? "is-exit" : "is-relay"}`}>
                             {final ? tr("对外 IP") : index === 0 ? tr("本机先连") : tr("经上一跳")}
                           </span>
-                          {route.length > 1 && (
-                            <button
-                              type="button"
-                              className={`proxy-hop-pick-btn${isActiveTarget ? " is-active" : ""}`}
-                              disabled={busy}
-                              aria-pressed={isActiveTarget}
-                              onClick={() => focusHopForPicking(index)}
-                            >
-                              {isActiveTarget
-                                ? final ? tr("正在从下方列表点选") : tr("正在下方列表勾选")
-                                : tr("从下方列表选")}
-                            </button>
-                          )}
                         </div>
                         {final ? (
                           <>
@@ -1334,12 +1323,11 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                               routeName={routeName}
                               sourceName={sourceName}
                               disabled={busy}
-                              onSelectSource={(srcID) => {
+                              onSelectSource={(srcID) =>
                                 updateRelayHop(index, (cur) =>
                                   relayHop({ strategy: cur.strategy, source_id: srcID }),
-                                );
-                                if (!route.at(-1)?.node_id) setPickerHop(route.length - 1);
-                              }}
+                                )
+                              }
                               onToggleNode={(nid) => toggleRelayHopNode(index, nid)}
                               onMoveNode={(nid, delta) =>
                                 setRouteDraft(moveNodeInRelayHop(route, index, nid, delta))
@@ -1378,7 +1366,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                           onClick={() => {
                             const next = route.filter((_, i) => i !== index);
                             setRouteDraft(next);
-                            setPickerHop(null);
                           }}
                         >
                           <X size={15} />
@@ -1398,7 +1385,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                       onClick={() => {
                         const next = [...route.slice(0, -1), relayHop(), route.at(-1)];
                         setRouteDraft(next);
-                        setPickerHop(next.length - 2);
                       }}
                     >
                       <Plus size={14} />
@@ -1411,7 +1397,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                       disabled={busy}
                       onClick={() => {
                         setRouteDraft(swapTwoHopRoute(route));
-                        setPickerHop(null);
                       }}
                     >
                       <ArrowUpDown size={14} />
@@ -1468,7 +1453,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                           type="button"
                           className={`proxy-flow-chip is-empty ${final ? "is-exit" : "is-relay"}`}
                           disabled={busy}
-                          onClick={() => focusHopForPicking(index)}
+                          onClick={scrollToNodeList}
                         >
                           {tr("点击选择{0}", hopLabel(index))}
                         </button>
@@ -1497,7 +1482,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                       disabled={busy}
                       onClick={() => {
                         setRouteDraft(null);
-                        setPickerHop(null);
                       }}
                     >
                       {tr("撤销修改")}
@@ -1546,96 +1530,6 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
               </button>
             </div>
           )}
-          {allNodes.length > 0 && route.length > 1 && (
-            <div className="proxy-pick-bar" role="group" aria-label={tr("当前点击下方节点将填入：")}>
-              <span className="proxy-pick-bar-label">
-                {isMultiSelectPicking
-                  ? tr("正在勾选「{0}」（可多选）：", hopLabel(activePickerHop))
-                  : tr("当前点击下方节点将填入：")}
-              </span>
-              <div className="proxy-pick-bar-pills">
-                {route.map((hop, index) => {
-                  const final = index === route.length - 1;
-                  const selectedSlot = activePickerHop === index;
-                  const singleID = singleNodeIDOfHop(hop);
-                  const count = hopCandidateIDs(hop, route, sources, usableIDs).length;
-                  const pillDetail = final
-                    ? hop.node_id && usableIDs.has(hop.node_id) ? routeName(hop.node_id) : tr("未选")
-                    : hop.source_id
-                      ? tr("{0} · {1} 节点", sourceName(hop.source_id), count)
-                      : singleID
-                        ? routeName(singleID)
-                        : count > 0
-                          ? tr("已选 {0} 个", count)
-                          : tr("未选");
-                  return (
-                    <button
-                      key={index}
-                      type="button"
-                      className={`proxy-pick-pill ${final ? "is-exit" : "is-relay"}`}
-                      aria-pressed={selectedSlot}
-                      disabled={busy}
-                      onClick={() => setPickerHop(index)}
-                    >
-                      <span className="proxy-pick-pill-num">{index + 1}</span>
-                      <strong>{hopLabel(index)}</strong>
-                      <small>{pillDetail}</small>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {allNodes.length > 0 && isMultiSelectPicking && (
-            <div className="proxy-bulk-bar">
-              <span className="proxy-bulk-bar-info">
-                <strong>
-                  {activeHop.source_id
-                    ? tr("当前为整份订阅：{0}（{1} 节点）", sourceName(activeHop.source_id), activeRelaySelectedIDs.length)
-                    : tr("已选 {0} 个中转节点", activeRelaySelectedIDs.length)}
-                </strong>
-                {activeRelaySelectedIDs.length === 1 && <span>{tr("（继续勾选可自动切换）")}</span>}
-              </span>
-              <div className="proxy-bulk-bar-actions">
-                {eligibleMultiSelectNodes.length > 0 && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      setRouteDraft(
-                        bulkToggleNodesInRelayHop(
-                          route,
-                          activePickerHop,
-                          eligibleMultiSelectNodes.map((n) => n.id),
-                          !allVisibleSelected,
-                          sources,
-                          usableIDs,
-                          MAX_RELAY_NODES,
-                        ),
-                      )
-                    }
-                  >
-                    {allVisibleSelected
-                      ? tr("取消当前筛选")
-                      : tr("全选当前筛选（{0}）", eligibleMultiSelectNodes.length)}
-                  </button>
-                )}
-                {activeRelaySelectedIDs.length > 0 && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      updateRelayHop(activePickerHop, (cur) =>
-                        relayHop({ strategy: cur.strategy, source_id: "", node_ids: [] }),
-                      )
-                    }
-                  >
-                    {tr("清空")}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
           {allNodes.length > 0 && (
             <div className="proxy-toolbar">
               <div className="proxy-search">
@@ -1669,6 +1563,30 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                 <Activity size={14} />
                 {tr("测速")}
               </button>
+              {isChainMode && (search || source || activeRegion) && hop0EligibleVisible.length > 0 && (
+                <button
+                  type="button"
+                  disabled={busy || !proxy.core_available}
+                  onClick={() =>
+                    setRouteDraft(
+                      bulkToggleNodesInRelayHop(
+                        route,
+                        0,
+                        hop0EligibleVisible.map((n) => n.id),
+                        !hop0AllVisibleSelected,
+                        sources,
+                        usableIDs,
+                        MAX_RELAY_NODES,
+                      ),
+                    )
+                  }
+                >
+                  {hop0AllVisibleSelected ? <Check size={14} /> : <Plus size={14} />}
+                  {transitCandidateSets.length === 1
+                    ? hop0AllVisibleSelected ? tr("移出中转") : tr("全选当前为中转")
+                    : hop0AllVisibleSelected ? tr("移出中转 1") : tr("全选当前为中转 1")}
+                </button>
+              )}
               {fastest && fastest !== draftExitID && allNodes.some((n) => n.id === fastest) && (
                 <button
                   disabled={busy}
@@ -1797,13 +1715,13 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
               {showGroupedList ? (
                 regionGroups.map((group) => {
                   const collapsed = Boolean(collapsedRegions[group.code]);
-                  const regionEligible = isMultiSelectPicking
-                    ? group.nodes.filter((n) => !n.blocked_reason && !claimedForActivePicker.has(n.id))
+                  const regionEligible = isChainMode
+                    ? group.nodes.filter((n) => !n.blocked_reason && !hop0Claimed.has(n.id))
                     : [];
                   const regionAllSelected =
-                    isMultiSelectPicking &&
+                    isChainMode &&
                     regionEligible.length > 0 &&
-                    regionEligible.every((n) => activeCustomSelectedSet.has(n.id));
+                    regionEligible.every((n) => transitCandidateSets[0].has(n.id));
                   return (
                     <div className="proxy-region-group" key={group.code}>
                       <div className="proxy-region-group-bar">
@@ -1823,16 +1741,16 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                           <span className="proxy-region-count">{group.nodes.length}</span>
                           <ChevronDown size={14} className={`proxy-region-chevron ${collapsed ? "collapsed" : ""}`} />
                         </button>
-                        {isMultiSelectPicking && regionEligible.length > 0 && (
+                        {isChainMode && regionEligible.length > 0 && (
                           <button
                             type="button"
                             className={`proxy-region-select-btn${regionAllSelected ? " is-selected" : ""}`}
-                            disabled={busy}
+                            disabled={busy || !proxy.core_available}
                             onClick={() =>
                               setRouteDraft(
                                 bulkToggleNodesInRelayHop(
                                   route,
-                                  activePickerHop,
+                                  0,
                                   regionEligible.map((n) => n.id),
                                   !regionAllSelected,
                                   sources,
@@ -1842,7 +1760,9 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                               )
                             }
                           >
-                            {regionAllSelected ? tr("取消本区") : tr("全选本区")}
+                            {transitCandidateSets.length === 1
+                              ? regionAllSelected ? tr("移出中转") : tr("全选为中转")
+                              : regionAllSelected ? tr("移出中转 1") : tr("全选为中转 1")}
                           </button>
                         )}
                       </div>

@@ -3452,5 +3452,21 @@
   "+ 可继续添加备用": "+ ku dar kayd",
   "整份订阅（自动切换）": "Isdiiwaangelinta oo dhan (toos)",
   "超过 300 上限": "ka badan xadka 300",
-  "{0} 节点": "{0} noodh"
+  "{0} 节点": "{0} noodh",
+  "此节点已用作其他中转": "Node-kan waxaa hore loogu isticmaalay gudbiye kale",
+  "中转 {0}": "Gudbiye {0}",
+  "移出中转 {0}": "Ka saar gudbiyaha: {0}",
+  "设为中转 {0}": "Ku dar gudbiyaha: {0}",
+  "移出中转 {0} {1}": "Ka saar gudbiye {0}: {1}",
+  "设为中转 {0} {1}": "Ku dar gudbiye {0}: {1}",
+  "设为出口 {0}": "U deji bixitaan: {0}",
+  "当前最终出口": "Bixitaanka kama dambaysta ah ee hadda",
+  "设为最终出口": "U deji bixitaanka kama dambaysta ah",
+  "设为出口": "U deji bixitaan",
+  "移出中转": "Ka saar gudbiye",
+  "全选当前为中转": "Dhammaan kuwa muuqda u deji gudbiye",
+  "移出中转 1": "Ka saar gudbiye 1",
+  "全选当前为中转 1": "Dhammaan kuwa muuqda u deji gudbiye 1",
+  "全选为中转": "Dhammaan u deji gudbiye",
+  "全选为中转 1": "Dhammaan u deji gudbiye 1"
 }

@@ -3452,5 +3452,21 @@
   "+ 可继续添加备用": "+ ajouter un secours",
   "整份订阅（自动切换）": "Tout l'abonnement (bascule auto)",
   "超过 300 上限": "limite de 300 dépassée",
-  "{0} 节点": "{0} nœuds"
+  "{0} 节点": "{0} nœuds",
+  "此节点已用作其他中转": "Ce nœud est déjà utilisé dans un autre relais",
+  "中转 {0}": "Relais {0}",
+  "移出中转 {0}": "Retirer du relais : {0}",
+  "设为中转 {0}": "Ajouter au relais : {0}",
+  "移出中转 {0} {1}": "Retirer du relais {0} : {1}",
+  "设为中转 {0} {1}": "Ajouter au relais {0} : {1}",
+  "设为出口 {0}": "Définir comme sortie : {0}",
+  "当前最终出口": "Sortie finale actuelle",
+  "设为最终出口": "Définir comme sortie finale",
+  "设为出口": "Définir en sortie",
+  "移出中转": "Retirer du relais",
+  "全选当前为中转": "Tout ajouter au relais",
+  "移出中转 1": "Retirer du relais 1",
+  "全选当前为中转 1": "Tout ajouter au relais 1",
+  "全选为中转": "Tout en relais",
+  "全选为中转 1": "Tout en relais 1"
 }
