@@ -545,7 +545,8 @@ if ($env:LIB -ne $expected) { exit 3 }
             $env:LIB = $savedLib
         }
         Check (!(Test-Path -LiteralPath $receipt)) 'A missing LIB search path kept the receipt.'
-    }    if ($windows) {
+    }
+    if ($windows) {
         & $HelperShell -NoProfile -File (Join-Path $PSScriptRoot 'test-windows-verified-file-deletion.ps1')
         if ($LASTEXITCODE -ne 0) { throw 'Verified-handle deletion regression failed.' }
     }
