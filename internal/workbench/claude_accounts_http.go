@@ -375,7 +375,7 @@ func (s *Server) pollClaudeAccounts(list claudeAccountList) {
 	var oldest time.Time
 	for _, a := range list.Accounts {
 		attempt := m.attempted[a.ID]
-		if m.usageActive[claudeIdentityHash(a.Email, a.Organization)] == nil && a.Source != "default" && a.Enabled && now.Sub(attempt) >= time.Minute && (id == "" || attempt.Before(oldest)) {
+		if m.usageActive[claudeIdentityHash(a.Email, a.Organization)] == nil && a.Source != "default" && !a.CodeUnlinked && a.Enabled && now.Sub(attempt) >= time.Minute && (id == "" || attempt.Before(oldest)) {
 			id, oldest = a.ID, attempt
 		}
 	}

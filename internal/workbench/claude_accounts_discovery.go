@@ -206,7 +206,7 @@ func (s *Server) claudePanelView(ctx context.Context) (claudePanel, claudeAccoun
 	for i := range view.Accounts {
 		view.Accounts[i].claudeAccount = list.Accounts[i]
 		a := &view.Accounts[i]
-		a.UsageChecking = m.usageActive[claudeIdentityHash(a.Email, a.Organization)] != nil
+		a.UsageChecking = !a.CodeUnlinked && m.usageActive[claudeIdentityHash(a.Email, a.Organization)] != nil
 		a.Notices = notices[a.guestID()]
 	}
 	return view, list, nil
