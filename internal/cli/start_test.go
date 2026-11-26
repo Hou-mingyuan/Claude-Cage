@@ -76,7 +76,6 @@ func newStartEnv(t *testing.T, answers ...string) *startEnv {
 	// On Windows the temporary folder is under LOCALAPPDATA, which no project may be in.
 	t.Setenv("APPDATA", "")
 	t.Setenv("LOCALAPPDATA", "")
-	t.Setenv("AGENT_VM_UNSAFE_WRITABLE_GIT", "")
 	t.Setenv("AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS", "")
 	t.Setenv("AGENT_VM_SSHFS_CACHE", "")
 	t.Setenv("TERM", "")
@@ -117,13 +116,15 @@ func TestCageProjectGitWritesAndStoppedMountMigration(t *testing.T) {
 	se := newStartEnv(t)
 	se.base()
 	if code := se.run("run", "true"); code != 0 {
-		t.Fatalf("initial protected mount: %d %s", code, se.out())
+		t.Fatalf("initial start: %d %s", code, se.out())
 	}
 	name := vmname.Name(se.proj)
 	inst := se.fake.VMs[name]
-	if inst == nil || len(inst.Mounts) != 1 || unprotected(inst, nil) != "" {
-		t.Fatal("initial mount did not protect Git")
+	if inst == nil || len(inst.Mounts) != 1 || len(inst.Mounts[0].SSHFS.ReadonlyNames) != 0 {
+		t.Fatal("initial mount unexpectedly set readonly names")
 	}
+	// Simulate an older stopped VM whose lima.yaml still carries readonlyNames.
+	inst.Mounts[0].SSHFS.ReadonlyNames = []string{".git", ".hg", ".sl", ".jj"}
 	inst.Status = vm.Stopped
 	configPath := filepath.Join(se.home, "cage-config.json")
 	data, err := json.Marshal(cage.DefaultConfig())
@@ -141,10 +142,8 @@ func TestCageProjectGitWritesAndStoppedMountMigration(t *testing.T) {
 	if len(inst.Mounts) != 1 || !inst.Mounts[0].Writable || vm.Confined(inst) != nil {
 		t.Fatal("Cage lost the writable, confined project mount")
 	}
-	for _, n := range inst.Mounts[0].SSHFS.ReadonlyNames {
-		if n == ".git" {
-			t.Fatal("Cage retained Git write protection")
-		}
+	if len(inst.Mounts[0].SSHFS.ReadonlyNames) != 0 {
+		t.Fatalf("Cage retained legacy readonly names: %v", inst.Mounts[0].SSHFS.ReadonlyNames)
 	}
 	if code := se.run("run", "true"); code != 0 {
 		t.Fatalf("Cage reuse required confirmation: %d %s", code, se.out())
@@ -239,7 +238,7 @@ func TestStartNewVM(t *testing.T) {
 	}
 	v := se.fake.VMs[name]
 	if v.Status != vm.Running || v.MountType != vm.ReverseSSHFS || len(v.Mounts) != 1 || !v.Mounts[0].Writable ||
-		v.Mounts[0].SSHFS == nil || strings.Join(v.Mounts[0].SSHFS.ReadonlyNames, ",") != ".git,.hg,.sl,.jj" || v.Mounts[0].SSHFS.Cache == nil || *v.Mounts[0].SSHFS.Cache {
+		v.Mounts[0].SSHFS == nil || len(v.Mounts[0].SSHFS.ReadonlyNames) != 0 || v.Mounts[0].SSHFS.Cache == nil || *v.Mounts[0].SSHFS.Cache {
 		t.Errorf("VM: %+v %+v", v, v.Mounts)
 	}
 	if len(se.g.payloads) != 1 || se.g.payloads[0] != "TOKEN='x'\n" {
@@ -517,8 +516,8 @@ func TestStartReadonly(t *testing.T) {
 	}
 }
 
-// beforeBoot holds every check that applies: --readonly with .git
-// protected refuses a protected share left writable.
+// beforeBoot holds every check that applies: --readonly refuses a share left
+// writable.
 func TestBeforeBootAll(t *testing.T) {
 	se := newStartEnv(t)
 	se.base()
@@ -527,9 +526,9 @@ func TestBeforeBootAll(t *testing.T) {
 	}
 	name := vmname.Name(se.proj)
 	se.fake.VMs[name].Status = vm.Stopped
-	s := &start{app: se.app, ctx: context.Background(), name: name, opts: VMOpts{ReadOnly: true}, protect: true, names: []string{".git", ".hg"}}
+	s := &start{app: se.app, ctx: context.Background(), name: name, opts: VMOpts{ReadOnly: true}}
 	if s.beforeBoot() == nil || !strings.Contains(se.stderr.String(), "a writable share of "+se.proj) {
-		t.Errorf("--readonly, protected, writable: %s", se.out())
+		t.Errorf("--readonly, writable: %s", se.out())
 	}
 	s.opts.ReadOnly = false
 	if s.beforeBoot() != nil {
@@ -537,29 +536,20 @@ func TestBeforeBootAll(t *testing.T) {
 	}
 }
 
-// The verdicts on a VM's shares: confined first, then the names or the
-// read-only mode.
+// The verdicts on a VM's shares: confined first, then read-only mode.
 func TestShareVerdicts(t *testing.T) {
-	b := func(names ...string) *vm.SSHFS { return &vm.SSHFS{SFTPDriver: "builtin", ReadonlyNames: names} }
+	b := func() *vm.SSHFS { return &vm.SSHFS{SFTPDriver: "builtin"} }
 	inst := func(mt string, ms ...vm.Mount) *vm.Instance { return &vm.Instance{MountType: mt, Mounts: ms} }
 	rs := vm.ReverseSSHFS
 	for _, c := range []struct {
-		inst          *vm.Instance
-		names         []string
-		unprot, notRO string
+		inst  *vm.Instance
+		notRO string
 	}{
-		{inst(rs, vm.Mount{Location: "/p", SSHFS: b(".git", ".hg")}), []string{".git"}, "", ""},
-		{inst(rs, vm.Mount{Location: "/p", SSHFS: b(".git", ".hg", "tools")}), []string{".git", ".hg"}, "", ""},
-		{inst(rs, vm.Mount{Location: "/p", SSHFS: b(".git")}), []string{".git", "tools"}, "lacks the read-only names", ""},
-		{inst(rs, vm.Mount{Location: "/p", SSHFS: b()}), nil, "lacks the read-only names", ""},
-		{inst(rs, vm.Mount{Location: "/p", Writable: true, SSHFS: b(".git", ".hg", ".sl", ".jj")}), nil, "", "a writable share of /p"},
-		{inst(rs, vm.Mount{Location: "/p", SSHFS: b("tools")}), nil, "lacks the read-only names", ""},
-		{inst(rs, vm.Mount{Location: "/p", SSHFS: &vm.SSHFS{ReadonlyNames: []string{".git"}}}), nil, "not served by the builtin SFTP server", "not served by the builtin SFTP server"},
-		{inst("9p", vm.Mount{Location: "/p", SSHFS: b(".git")}), nil, "the mount type", "the mount type"},
+		{inst(rs, vm.Mount{Location: "/p", SSHFS: b()}), ""},
+		{inst(rs, vm.Mount{Location: "/p", Writable: true, SSHFS: b()}), "a writable share of /p"},
+		{inst(rs, vm.Mount{Location: "/p", SSHFS: &vm.SSHFS{}}), "not served by the builtin SFTP server"},
+		{inst("9p", vm.Mount{Location: "/p", SSHFS: b()}), "the mount type"},
 	} {
-		if got := unprotected(c.inst, c.names); c.unprot == "" && got != "" || !strings.Contains(got, c.unprot) {
-			t.Errorf("unprotected %+v %v: %q", c.inst.Mounts, c.names, got)
-		}
 		if got := notReadOnly(c.inst); c.notRO == "" && got != "" || !strings.Contains(got, c.notRO) {
 			t.Errorf("notReadOnly %+v: %q", c.inst.Mounts, got)
 		}
@@ -592,47 +582,15 @@ func TestStartLimaConfig(t *testing.T) {
 	}
 }
 
-// More of the hooks and config questions at start.
-func TestStartHooksCases(t *testing.T) {
+// sshfs's cache: on with AGENT_VM_SSHFS_CACHE=1, off again without; a
+// running VM differing only by it is left alone.
+func TestStartSSHFSCache(t *testing.T) {
 	se := newStartEnv(t)
 	se.base()
 	name := vmname.Name(se.proj)
-	git := func(args ...string) { exec.Command("git", append([]string{"-C", se.proj}, args...)...).Run() }
-	git("init", "-q")
-	names := func() string { return strings.Join(se.fake.VMs[name].Mounts[0].SSHFS.ReadonlyNames, ",") }
-
-	// A plain name, no terminal: protected (yes by default), started.
-	git("config", "core.hooksPath", "tools/hooks")
-	if se.run("run", "true") != 0 || names() != ".git,.hg,.sl,.jj,tools" {
-		t.Errorf("plain name, no terminal: %s", se.out())
+	if se.run("run", "true") != 0 {
+		t.Fatalf("first run: %s", se.out())
 	}
-	// A name the shares cannot carry: aborted without a terminal, nothing
-	// touched; running, only warned.
-	git("config", "core.hooksPath", `a"b/x`)
-	se.fake.VMs[name].Status = vm.Stopped
-	if se.run("run", "true") != 1 || !strings.Contains(se.out(), "Aborted.") || se.fake.CallLog() != "" {
-		t.Errorf("bad name: %s\n%s", se.out(), se.fake.CallLog())
-	}
-	se.fake.VMs[name].Status = vm.Running
-	if se.run("run", "true") != 0 || !strings.Contains(se.out(), "Warning: git's core.hooksPath is") || strings.Contains(se.fake.CallLog(), "stop") {
-		t.Errorf("bad name, running: %s\n%s", se.out(), se.fake.CallLog())
-	}
-	// --readonly: nothing asked, the hooks names still given.
-	git("config", "core.hooksPath", "tools/hooks")
-	git("config", "core.fsmonitor", "./mon.sh")
-	se.fake.VMs[name].Status = vm.Stopped
-	if se.run("--readonly", "run", "true") != 0 || strings.Contains(se.out(), "Warning: git on this machine uses these") || names() != ".git,.hg,.sl,.jj,tools" {
-		t.Errorf("--readonly: %s %s", se.out(), names())
-	}
-	// A config risk alone: aborted without a terminal, nothing touched.
-	git("config", "--unset", "core.hooksPath")
-	se.fake.VMs[name].Status = vm.Stopped
-	if se.run("run", "true") != 1 || !strings.Contains(se.out(), "core.fsmonitor = ./mon.sh") || se.fake.CallLog() != "" {
-		t.Errorf("config risk: %s\n%s", se.out(), se.fake.CallLog())
-	}
-	git("config", "--unset", "core.fsmonitor")
-	// sshfs's cache: on with AGENT_VM_SSHFS_CACHE=1, off again without; a
-	// running VM differing only by it is left alone.
 	cache := func() bool { c := se.fake.VMs[name].Mounts[0].SSHFS.Cache; return c == nil || *c }
 	t.Setenv("AGENT_VM_SSHFS_CACHE", "1")
 	se.fake.VMs[name].Status = vm.Stopped
@@ -646,56 +604,6 @@ func TestStartHooksCases(t *testing.T) {
 	se.fake.VMs[name].Status = vm.Stopped
 	if se.run("run", "true") != 0 || cache() {
 		t.Errorf("cache off: %s", se.out())
-	}
-}
-
-// Hooks in a writable volume inside the project: no name covers them, so a
-// risk to accept, not a name.
-func TestStartHooksInVolume(t *testing.T) {
-	se := newStartEnv(t)
-	se.base()
-	exec.Command("git", "-C", se.proj, "init", "-q").Run()
-	exec.Command("git", "-C", se.proj, "config", "core.hooksPath", ".husky/_").Run()
-	os.MkdirAll(filepath.Join(se.proj, ".husky", "_"), 0o755)
-	os.WriteFile(se.state.Path("volumes"), []byte(filepath.Join(se.proj, ".husky")+":/mnt/husky:rw\n"), 0o644)
-	if se.run("run", "true") != 1 || !strings.Contains(se.out(), "core.hooksPath is '.husky/_', which the VM can write, and no read-only name covers it") ||
-		!strings.Contains(se.out(), "Aborted.") {
-		t.Errorf("hooks in a volume: %s", se.out())
-	}
-}
-
-func TestStartHooksQuestions(t *testing.T) {
-	se := newStartEnv(t)
-	se.base()
-	exec.Command("git", "-C", se.proj, "init", "-q").Run()
-	exec.Command("git", "-C", se.proj, "config", "core.hooksPath", ".").Run()
-	if se.run("run", "true") != 1 || !strings.Contains(se.out(), "core.hooksPath is the project directory itself") || !strings.Contains(se.out(), "Aborted.") {
-		t.Errorf("hooks '.': %s", se.out())
-	}
-	if se.fake.CallLog() != "" {
-		t.Errorf("touched before the abort: %s", se.fake.CallLog())
-	}
-	if se.run("--unsafe-disable-security-prompts", "run", "true") != 0 || !strings.Contains(se.out(), "Continuing: --unsafe-disable-security-prompts.") {
-		t.Errorf("prompts off: %s", se.out())
-	}
-	// A plain name, asked; a yes protects it.
-	exec.Command("git", "-C", se.proj, "config", "core.hooksPath", "tools/hooks").Run()
-	se.fake.VMs[vmname.Name(se.proj)].Status = vm.Stopped
-	se3 := &startEnv{testEnv: newTestEnv(t, se.fake, "y\n"), g: se.g, home: se.home, proj: se.proj}
-	se3.state = se.state
-	if se3.run("run", "true") != 0 || strings.Join(se.fake.VMs[vmname.Name(se.proj)].Mounts[0].SSHFS.ReadonlyNames, ",") != ".git,.hg,.sl,.jj,tools" {
-		t.Errorf("tools: %s %+v", se3.out(), se.fake.VMs[vmname.Name(se.proj)].Mounts)
-	}
-	if !strings.Contains(se3.out(), "Making .git, .hg, .sl, .jj, tools read-only for VM") || !strings.Contains(se3.out(), "every 'tools' in the project is read-only") {
-		t.Errorf("not said: %s", se3.out())
-	}
-	// Declined: what is under tools is a risk again, said with the hooks.
-	exec.Command("git", "-C", se.proj, "config", "core.fsmonitor", "tools/fsmon.sh").Run()
-	se.fake.VMs[vmname.Name(se.proj)].Status = vm.Stopped
-	se4 := &startEnv{testEnv: newTestEnv(t, se.fake, "n\n", "y\n", "n\n"), g: se.g, home: se.home, proj: se.proj}
-	se4.state = se.state
-	if se4.run("run", "true") != 1 || !strings.Contains(se4.out(), "'tools' stays writable") || !strings.Contains(se4.out(), "core.fsmonitor = tools/fsmon.sh") {
-		t.Errorf("declined: %s", se4.out())
 	}
 }
 
@@ -730,100 +638,6 @@ func TestStartRepairsLostShare(t *testing.T) {
 	}
 	if !strings.Contains(se.fake.CallLog(), "stop "+vmname.Name(se.proj)) {
 		t.Errorf("not restarted: %s", se.fake.CallLog())
-	}
-}
-
-func TestStartOlderNames(t *testing.T) {
-	se := newStartEnv(t)
-	se.base()
-	se.run("run", "true")
-	exec.Command("git", "-C", se.proj, "init", "-q").Run()
-	exec.Command("git", "-C", se.proj, "config", "core.hooksPath", ".husky/_").Run()
-	// Running, no terminal: a risk to accept, refused by default.
-	if se.run("run", "true") != 1 || !strings.Contains(se.out(), "runs with an older list of read-only names (it needs .git, .hg, .sl, .jj, .husky)") {
-		t.Errorf("older names: %s", se.out())
-	}
-	se2 := &startEnv{testEnv: newTestEnv(t, se.fake, "y\n"), g: se.g, home: se.home, proj: se.proj}
-	se2.state = se.state
-	if se2.run("run", "true") != 0 || strings.Join(se.fake.VMs[vmname.Name(se.proj)].Mounts[0].SSHFS.ReadonlyNames, ",") != ".git,.hg,.sl,.jj,.husky" {
-		t.Errorf("restarted: %s %s", se2.out(), se.fake.CallLog())
-	}
-}
-
-// A VM whose shares leave .git writable: protected before it boots when
-// stopped; when running, a restart offered (stop, edit, start, in that
-// order), refused without a terminal.
-func TestStartGitStale(t *testing.T) {
-	se := newStartEnv(t)
-	se.base()
-	name := vmname.Name(se.proj)
-	se.run("run", "true")
-	unprotect := func() {
-		for i := range se.fake.VMs[name].Mounts {
-			se.fake.VMs[name].Mounts[i].SSHFS.ReadonlyNames = nil
-		}
-	}
-	unprotect()
-	if se.run("run", "true") != 1 || !strings.Contains(se.out(), "is running with .git writable") || !strings.Contains(se.out(), "Aborted. 'agent-vm stop'") ||
-		strings.Contains(se.fake.CallLog(), "stop") {
-		t.Errorf("running, no terminal: %s\n%s", se.out(), se.fake.CallLog())
-	}
-	if se.run("--unsafe-disable-security-prompts", "run", "true") != 0 || !strings.Contains(se.out(), "Continuing") || strings.Contains(se.fake.CallLog(), "stop") {
-		t.Errorf("running, prompts off: %s\n%s", se.out(), se.fake.CallLog())
-	}
-	se2 := &startEnv{testEnv: newTestEnv(t, se.fake, "y\n"), g: se.g, home: se.home, proj: se.proj}
-	se2.state = se.state
-	if se2.run("run", "true") != 0 || !strings.HasPrefix(se.fake.CallLog(), "stop "+name+"\nedit "+name+"\nstart "+name) {
-		t.Errorf("running, restarted: %s\n%s", se2.out(), se.fake.CallLog())
-	}
-	// Stopped: protected before its one start.
-	unprotect()
-	se.fake.VMs[name].Status = vm.Stopped
-	if se.run("run", "true") != 0 || !strings.Contains(se.out(), "Making every .git read-only for VM") ||
-		!strings.HasPrefix(se.fake.CallLog(), "edit "+name+"\nstart "+name) || strings.Count(se.fake.CallLog(), "start ") != 1 {
-		t.Errorf("stopped: %s\n%s", se.out(), se.fake.CallLog())
-	}
-}
-
-// Left writable on purpose: a warning on every start, the shares still the
-// confined server's, without the names. Only "1" counts.
-func TestStartWritableGit(t *testing.T) {
-	se := newStartEnv(t)
-	se.base()
-	name := vmname.Name(se.proj)
-	se.run("run", "true")
-	// Running and protected: kept so until it stops.
-	if se.run("--unsafe-writable-git", "run", "true") != 0 || !strings.Contains(se.out(), "WARNING: --unsafe-writable-git") ||
-		!strings.Contains(se.out(), "keeps .git read-only until it stops") || strings.Contains(se.fake.CallLog(), "stop") {
-		t.Errorf("running: %s\n%s", se.out(), se.fake.CallLog())
-	}
-	se.fake.VMs[name].Status = vm.Stopped
-	t.Setenv("AGENT_VM_UNSAFE_WRITABLE_GIT", "1")
-	if se.run("run", "true") != 0 || !strings.Contains(se.out(), "WARNING: AGENT_VM_UNSAFE_WRITABLE_GIT=1") || !strings.Contains(se.out(), "Making .git writable for VM") {
-		t.Errorf("stopped: %s", se.out())
-	}
-	m := se.fake.VMs[name].Mounts[0]
-	if se.fake.VMs[name].MountType != vm.ReverseSSHFS || m.SSHFS == nil || m.SSHFS.SFTPDriver != "builtin" || len(m.SSHFS.ReadonlyNames) != 0 {
-		t.Errorf("shares: %+v %+v", se.fake.VMs[name], m.SSHFS)
-	}
-	// Anything but 1: protected again (stopped, so no question).
-	t.Setenv("AGENT_VM_UNSAFE_WRITABLE_GIT", "yes")
-	se.fake.VMs[name].Status = vm.Stopped
-	if se.run("run", "true") != 0 || strings.Contains(se.out(), "WARNING") || len(se.fake.VMs[name].Mounts[0].SSHFS.ReadonlyNames) == 0 {
-		t.Errorf("yes: %s", se.out())
-	}
-	t.Setenv("AGENT_VM_UNSAFE_WRITABLE_GIT", "")
-	// The prompts switch, likewise: "yes" still asks (no terminal: no).
-	exec.Command("git", "-C", se.proj, "init", "-q").Run()
-	exec.Command("git", "-C", se.proj, "config", "core.hooksPath", ".").Run()
-	se.fake.VMs[name].Status = vm.Stopped
-	t.Setenv("AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS", "yes")
-	if se.run("run", "true") != 1 || !strings.Contains(se.out(), "Aborted.") {
-		t.Errorf("prompts yes: %s", se.out())
-	}
-	t.Setenv("AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS", "1")
-	if se.run("run", "true") != 0 {
-		t.Errorf("prompts 1: %s", se.out())
 	}
 }
 

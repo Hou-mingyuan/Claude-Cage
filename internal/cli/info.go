@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/sylvinus/agent-vm/internal/env"
-	"github.com/sylvinus/agent-vm/internal/gitguard"
 	"github.com/sylvinus/agent-vm/internal/mounts"
 	"github.com/sylvinus/agent-vm/internal/paths"
 	"github.com/sylvinus/agent-vm/internal/state"
@@ -38,20 +37,7 @@ func (e *app) entries(dir string, warn io.Writer) []mounts.Entry {
 	return mounts.Entries(e.state.Path("volumes"), dir, paths.Home(), e.refs(), warn)
 }
 
-// scan is the git scan of the project dir's writable shares (see
-// gitguard.Scan), the volumes read quietly.
-func (e *app) scan(ctx context.Context, dir string) *gitguard.Result {
-	shares := gitguard.Shares(dir, mounts.RWDirs(e.entries(dir, io.Discard)))
-	return gitguard.Scan(ctx, shares, paths.Home())
-}
-
-// Cage projects support Git writes by default. Standalone agent-vm requires
-// an explicit host-side opt-out.
-func writableGitOptOut(flag bool) bool {
-	return cageWritableGit() || flag || os.Getenv("AGENT_VM_UNSAFE_WRITABLE_GIT") == "1"
-}
-
-func cageWritableGit() bool { return os.Getenv("CLAUDE_CAGE_CONFIG") != "" }
+func isCageMode() bool { return os.Getenv("CLAUDE_CAGE_CONFIG") != "" }
 
 // tristate is a key's value: 1, 0, or unknown when the backend could not be
 // asked, never a confident 0.
@@ -122,29 +108,8 @@ func (e *app) infoCmd(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintf(w, "ssh_config=%s\n", cfg)
 
-	var questions []string
-	protected := "1"
-	if writableGitOptOut(false) {
-		protected = "0"
-	} else {
-		scan := e.scan(ctx, dir)
-		for _, h := range scan.Hooks {
-			rel, inRepo, _ := strings.Cut(h, "\t")
-			if _, ok := gitguard.HooksName(inRepo); rel != "" && !ok {
-				questions = append(questions, "hooks")
-				break
-			}
-		}
-		if len(scan.Risks(scan.Names())) > 0 {
-			questions = append(questions, "git-config")
-		}
-	}
-	fmt.Fprintf(w, "git_protected=%s\n", protected)
-	q := strings.Join(questions, ",")
-	if q == "" {
-		q = "none"
-	}
-	fmt.Fprintf(w, "security_questions=%s\n", q)
+	fmt.Fprintf(w, "git_protected=0\n")
+	fmt.Fprintf(w, "security_questions=none\n")
 	return 0
 }
 

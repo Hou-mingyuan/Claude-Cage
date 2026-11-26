@@ -11,12 +11,11 @@ import (
 type VMOpts struct {
 	Disk, Memory, CPUs int // 0: not given
 	SSHPort            int // -1: not given; 0 gives the port back to Lima
-	Reset              bool
-	ReadOnly           bool
-	Scratch            bool
-	UnsafeWritableGit  bool
-	UnsafeNoPrompts    bool
-	RM                 bool // --rm: delete the VM after the command
+	Reset           bool
+	ReadOnly        bool
+	Scratch         bool
+	UnsafeNoPrompts bool
+	RM              bool // --rm: delete the VM after the command
 }
 
 func newVMOpts() VMOpts {
@@ -47,9 +46,6 @@ func (o *VMOpts) take(args []string) (int, error) {
 		return 1, nil
 	case "--scratch":
 		o.Scratch = true
-		return 1, nil
-	case "--unsafe-writable-git", "--unsafe-writable-git=1":
-		o.UnsafeWritableGit = true
 		return 1, nil
 	case "--unsafe-disable-security-prompts":
 		o.UnsafeNoPrompts = true

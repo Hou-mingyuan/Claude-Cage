@@ -107,7 +107,6 @@ func run() int {
 	// configured to relax agent-vm's protections.
 	for _, name := range []string{
 		"AGENT_VM_UNSAFE_OPEN_NETWORK",
-		"AGENT_VM_UNSAFE_WRITABLE_GIT",
 		"AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS",
 	} {
 		os.Unsetenv(name)

@@ -34,9 +34,6 @@ func TestDoctor(t *testing.T) {
 		"  ok    base is ready, built ",
 		"  ok    " + vmname.Name(se.proj) + " exists",
 		"  ok    running; the project share is enforced on the host (--readonly works)",
-		"  ok    its shares keep every .git read-only",
-		"  ok    git runs hooks from .husky/_ (core.hooksPath): every '.husky' in the project is read-only for the VM",
-		"  ok    every .git is read-only for the VMs (sshfs.readonlyNames)",
 		"1 running, ",
 		" warning(s).\n",
 	} {
@@ -44,19 +41,11 @@ func TestDoctor(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, o)
 		}
 	}
-	// The VM's shares without a name the project needs now.
 	v := se.fake.VMs[vmname.Name(se.proj)]
-	v.Mounts[0].SSHFS.ReadonlyNames = []string{".git", ".hg", ".sl", ".jj"}
-	o = out()
-	if !strings.Contains(o, "  warn  its shares keep .git read-only, but not all of .git, .hg, .sl, .jj, .husky") ||
-		!strings.Contains(o, "  warn  git runs hooks from .husky/_ (core.hooksPath), which the VM can still write") {
-		t.Errorf("older names:\n%s", o)
-	}
-	// An env others can read; a leftover scratch VM; a config risk.
+	// An env others can read; a leftover scratch VM.
 	os.WriteFile(se.state.Path("env"), []byte("A=1\nB=2\nA=3\n"), 0o644)
 	os.Chmod(se.state.Path("env"), 0o644)
 	os.WriteFile(se.state.Marker(state.ScratchOf, "x-scratch-0000aaaa"), []byte("999999999\n"), 0o644)
-	exec.Command("git", "-C", se.proj, "config", "core.fsmonitor", "./mon.sh").Run()
 	o = out()
 	// Permission bits mean little on Windows (see doctor.go): only the
 	// count is said there.
@@ -67,7 +56,6 @@ func TestDoctor(t *testing.T) {
 	for _, want := range []string{
 		envReadable,
 		"  warn  scratch VM x-scratch-0000aaaa was left by a run that did not finish",
-		"        core.fsmonitor = ./mon.sh",
 	} {
 		if !strings.Contains(o, want) {
 			t.Errorf("missing %q in:\n%s", want, o)

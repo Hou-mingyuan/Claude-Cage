@@ -23,7 +23,7 @@ import (
 )
 
 // agent-vm as a user runs it, on real VMs: setup, then a command in a
-// project, its .git read-only. go test -tags e2e -run TestE2E ./internal/cli/
+// project. go test -tags e2e -run TestE2E ./internal/cli/
 // Slow without hardware acceleration: AGENT_VM_E2E_TIMEOUT (default 60m)
 // for each boot, and go test's -timeout.
 func TestE2E(t *testing.T) {
@@ -83,18 +83,18 @@ func TestE2E(t *testing.T) {
 	cfg, _ := os.ReadFile(filepath.Join(proj, ".git", "config"))
 	os.WriteFile(filepath.Join(home, ".agent-vm", "env"), []byte("SECRET='s3'\n"), 0o600)
 	code, out := run(proj, "run", "sh", "-c",
-		`echo hi > from-vm && printf 'a\n' >> from-vm && echo "secret=$SECRET" && (echo x >> .git/config && echo WROTE-GIT || echo REFUSED-GIT)`)
+		`echo hi > from-vm && printf 'a\n' >> from-vm && echo "secret=$SECRET" && (echo "# vm" >> .git/config && echo WROTE-GIT || echo REFUSED-GIT)`)
 	if code != 0 {
 		t.Fatalf("run: %d\n%s", code, out)
 	}
 	if !strings.Contains(out, "secret=s3") {
 		t.Errorf("the env did not reach the command:\n%s", out)
 	}
-	if !strings.Contains(out, "REFUSED-GIT") {
-		t.Errorf(".git was writable:\n%s", out)
+	if !strings.Contains(out, "WROTE-GIT") {
+		t.Errorf(".git was not writable:\n%s", out)
 	}
-	if b, _ := os.ReadFile(filepath.Join(proj, ".git", "config")); !bytes.Equal(b, cfg) {
-		t.Errorf(".git/config changed: %q", b)
+	if b, _ := os.ReadFile(filepath.Join(proj, ".git", "config")); bytes.Equal(b, cfg) {
+		t.Errorf(".git/config did not change: %q", b)
 	}
 	if b, _ := os.ReadFile(filepath.Join(proj, "from-vm")); string(b) != "hi\na\n" {
 		t.Errorf("on the host: %q", b)
@@ -102,7 +102,7 @@ func TestE2E(t *testing.T) {
 	// The run that started the VM is over and its context cancelled: the VM
 	// runs on (Lima once killed its hostagent then).
 	time.Sleep(2 * time.Second)
-	if code, out := run(proj, "info"); code != 0 || !strings.Contains(out, "vm_running=1") || !strings.Contains(out, "git_protected=1") {
+	if code, out := run(proj, "info"); code != 0 || !strings.Contains(out, "vm_running=1") || !strings.Contains(out, "git_protected=0") {
 		t.Errorf("info: %s", out)
 	}
 	// sshfs's cache off: a change on the host shows at once.

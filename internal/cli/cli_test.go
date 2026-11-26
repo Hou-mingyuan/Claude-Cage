@@ -50,7 +50,7 @@ func TestMainBash(t *testing.T) {
 		{"--disk"}, {"--disk", "10G", "claude"}, {"--disk=0", "shell"}, {"--memory", "-1"}, {"--ram=x"},
 		{"--cpus", "01"}, {"--ssh-port", "80"}, {"--ssh-port", "70000"}, {"--ssh-port=00"},
 		{"--readonly", "stop"}, {"--disk", "10", "--rm", "list"}, {"--rm", "version"}, {"--scratch", "help"},
-		{"--unsafe-writable-git=1", "name"}, {"--unsafe-disable-security-prompts", "doctor"},
+		{"--unsafe-disable-security-prompts", "doctor"},
 	}
 	// How to update depends on how each copy was installed.
 	update := regexp.MustCompile(`(?m)^  Update it:  .*$`)
@@ -106,15 +106,30 @@ func TestHelp(t *testing.T) {
 			_, after, _ := strings.Cut(rest, "Both files are read when a VM starts.\n\n")
 			s = before + after
 		}
-		before, _, _ := strings.Cut(s, "Every .git in the shared folders")
-		_, after, _ := strings.Cut(s, "A VM that already runs gets the warnings only")
-		return before + after
+		// .git read-only protection and --unsafe-writable-git were removed.
+		if before, rest, ok := strings.Cut(s, "  --unsafe-writable-git\n"); ok {
+			if _, after, ok := strings.Cut(rest, "  --unsafe-disable-security-prompts\n"); ok {
+				s = before + "  --unsafe-disable-security-prompts\n" + after
+			}
+		}
+		s = strings.Replace(s,
+			"                     Go on where a start would stop to ask about a security\n                     risk (below), without offering to change your git\n                     config; the warnings are still printed. For scripts\n                     with no terminal. Also\n",
+			"                     Go on where a start would stop to ask about a security\n                     risk, without prompting; the warnings are still printed.\n                     For scripts with no terminal. Also\n", 1)
+		if before, rest, ok := strings.Cut(s, "Every .git in the shared folders"); ok {
+			if _, after, ok := strings.Cut(rest, "The writable shares are served without sshfs's cache"); ok {
+				s = before + "The writable shares are served without sshfs's cache" + after
+			}
+		}
+		return s
 	}
 	if strip(helpText) != strip(want) {
 		t.Error("the help differs from 0.2's beyond the Lima paragraphs and install")
 	}
 	if strings.Contains(helpText, "Lima build") || strings.Contains(helpText, "agent-vm.sh") {
 		t.Error("the help still offers a Lima build or the clone")
+	}
+	if strings.Contains(helpText, "--unsafe-writable-git") || strings.Contains(helpText, "Every .git in the shared folders") {
+		t.Error("the help still documents removed .git read-only protection")
 	}
 }
 
@@ -146,8 +161,8 @@ func TestSplit(t *testing.T) {
 		{[]string{"--rm", "--tty", "htop"}, []string{"htop"}, true, VMOpts{RM: true, SSHPort: -1}},
 		{[]string{"--disk=5", "--", "--rm"}, []string{"--rm"}, false, VMOpts{Disk: 5, SSHPort: -1}},
 		{[]string{"--ssh-port", "0", "--ram", "4", "x"}, []string{"x"}, false, VMOpts{Memory: 4, SSHPort: 0}},
-		{[]string{"--readonly", "--scratch", "--reset", "--unsafe-writable-git", "--unsafe-disable-security-prompts"}, []string{}, false,
-			VMOpts{ReadOnly: true, Scratch: true, Reset: true, UnsafeWritableGit: true, UnsafeNoPrompts: true, SSHPort: -1}},
+		{[]string{"--readonly", "--scratch", "--reset", "--unsafe-disable-security-prompts"}, []string{}, false,
+			VMOpts{ReadOnly: true, Scratch: true, Reset: true, UnsafeNoPrompts: true, SSHPort: -1}},
 	} {
 		opts := newVMOpts()
 		cmd, tty, err := opts.split(c.in)

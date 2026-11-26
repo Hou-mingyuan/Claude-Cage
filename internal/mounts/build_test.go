@@ -30,9 +30,14 @@ func TestBuildBash(t *testing.T) {
 			t.Setenv("AGENT_VM_SSHFS_CACHE", cache)
 			var warn bytes.Buffer
 			mounts, files := Build(Shares{
-				VM: "t-00000000", Dir: gs.proj, Writable: writable, Names: []string{".git", ".hg"},
+				VM: "t-00000000", Dir: gs.proj, Writable: writable,
 				Entries: Entries(filepath.Join(gs.state, "volumes"), gs.proj, gs.home, gs.refs(), &warn), StateDir: gs.state, Warn: &warn,
 			})
+			for _, m := range mounts {
+				if m.SSHFS != nil && len(m.SSHFS.ReadonlyNames) > 0 {
+					t.Fatalf("unexpected readonly names on mount %q: %v", m.Location, m.SSHFS.ReadonlyNames)
+				}
+			}
 			w := "true"
 			if !writable {
 				w = "false"
@@ -49,6 +54,11 @@ func TestBuildBash(t *testing.T) {
 				for _, m := range ms {
 					m.Location = strings.ReplaceAll(m.Location, root, "ROOT")
 					m.MountPoint = strings.ReplaceAll(m.MountPoint, root, "ROOT")
+					if m.SSHFS != nil {
+						s := *m.SSHFS
+						s.ReadonlyNames = nil
+						m.SSHFS = &s
+					}
 					out = append(out, m)
 				}
 				return out

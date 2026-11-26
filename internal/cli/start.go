@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
@@ -49,26 +48,20 @@ func (s *start) running() bool {
 }
 
 // shares is what the VM gets now: the project and the volumes, writable or
-// not, with the read-only names when .git is protected; nothing for a
-// scratch VM. The mount type that goes with them is reverse-sshfs: with the
-// read-only names, it is what enforces them; without, the builtin SFTP
-// server still serves the shares alone.
+// not; nothing for a scratch VM. The mount type that goes with them is
+// reverse-sshfs, where the builtin SFTP server serves the shares alone.
 //
-// Built once per mode and names, so its warnings show once.
+// Built once per mode, so its warnings show once.
 func (s *start) shares(writable bool) ([]vm.Mount, []mounts.FileMount) {
 	if s.opts.Scratch {
 		return []vm.Mount{}, nil
 	}
-	n := s.names
-	if !s.protect {
-		n = []string{}
-	}
-	key := fmt.Sprint(writable, n)
+	key := fmt.Sprint(writable)
 	if s.built != nil && s.builtKey == key {
 		return s.built, s.builtFiles
 	}
 	s.built, s.builtFiles = mounts.Build(mounts.Shares{
-		VM: s.name, Dir: s.dir, Writable: writable, Names: n,
+		VM: s.name, Dir: s.dir, Writable: writable,
 		Entries: s.entries(s.dir, s.io.Stderr), StateDir: string(s.state), Warn: s.io.Stderr,
 	})
 	s.builtKey = key
@@ -148,43 +141,31 @@ func (s *start) resourcesDiffer(inst *vm.Instance) bool {
 	return false
 }
 
-// stopToChange stops the VM to change it, then asks what its start did not,
-// a running VM having been asked nothing.
+// stopToChange stops the VM so its settings can be updated before boot.
 func (s *start) stopToChange() error {
 	if !s.stopVM(s.ctx, s.name) {
 		s.warnf("Error: could not stop VM '%s': nothing was changed.", s.name)
 		return errStop
 	}
-	if s.vmUp {
-		s.vmUp = false
-		if !s.checks() {
-			s.warnf("VM '%s' is stopped.", s.name)
-			return errStop
-		}
-	}
+	s.vmUp = false
 	return nil
 }
 
 // beforeBoot fails unless what Lima would boot the stopped VM with is what
-// agent-vm set: every share with the read-only names when protected, no
-// share for a scratch VM.
+// agent-vm set: confined shares, read-only when asked, and no share for a
+// scratch VM.
 func (s *start) beforeBoot() error {
 	inst, err := s.get(s.name)
 	if err != nil || inst == nil {
 		s.warnf("Error: could not read Lima's config for VM '%s', so what it would boot with is not known.", s.name)
 		return errStop
 	}
-	// Each that applies, none in place of another: --readonly with .git
-	// protected must hold both.
 	var whys []string
 	if s.opts.Scratch && len(inst.Mounts) > 0 {
 		whys = append(whys, "a share, though a scratch VM gets none")
 	}
 	if err := vm.Confined(inst); err != nil {
 		whys = append(whys, err.Error())
-	}
-	if s.protect && !s.opts.Scratch {
-		whys = append(whys, unprotected(inst, s.names))
 	}
 	if s.opts.ReadOnly {
 		whys = append(whys, notReadOnly(inst))
@@ -234,24 +215,6 @@ func (s *start) limaOverridesOK() bool {
 // The verdicts on a VM's shares, "" when they hold. Each starts from
 // vm.Confined: only the builtin SFTP server over reverse-sshfs enforces
 // anything on the host.
-
-// unprotected says why inst's shares leave .git writable: not confined, or
-// a share without one of names (mounts.BaseNames when nil; more is no less
-// safe).
-func unprotected(inst *vm.Instance, names []string) string {
-	if err := vm.Confined(inst); err != nil {
-		return err.Error()
-	}
-	if names == nil {
-		names = mounts.BaseNames
-	}
-	for _, m := range inst.Mounts {
-		if slices.ContainsFunc(names, func(n string) bool { return !slices.Contains(m.SSHFS.ReadonlyNames, n) }) {
-			return "the share of " + m.Location + " lacks the read-only names"
-		}
-	}
-	return ""
-}
 
 // notReadOnly says why inst's shares are not all read-only on the host.
 func notReadOnly(inst *vm.Instance) string {
@@ -423,9 +386,6 @@ func (s *start) ensureRunningLocked() error {
 	}
 
 	s.vmUp = !o.Reset && s.running()
-	if !s.checks() {
-		return errStop
-	}
 	if !o.Reset && s.configErr(inst) {
 		return errStop
 	}
@@ -479,11 +439,6 @@ func (s *start) ensureRunningLocked() error {
 				s.dropNew()
 				return errStop
 			}
-		} else if s.protect {
-			// 0.1.0's bases have no sshfs for the protected shares.
-			s.warnf("Error: the base VM was built by agent-vm 0.1.0, without what the shares that keep .git read-only need. Run 'agent-vm setup' to build a new one.")
-			s.dropNew()
-			return errStop
 		}
 		// Configured before its first start. A clone that could not be holds
 		// nothing yet: it goes, and the next run starts over.
@@ -491,7 +446,6 @@ func (s *start) ensureRunningLocked() error {
 			s.dropNew()
 			return errStop
 		}
-		fmt.Fprint(s.io.Stdout, s.notes)
 		if marks.version != nil {
 			if err := s.state.Write(state.VersionOf+s.name, marks.version); err != nil {
 				s.warnf("Warning: could not record the base VM '%s' was cloned from: %v. Every start will say that the base has been updated.", s.name, err)
@@ -534,7 +488,7 @@ func (s *start) ensureRunningLocked() error {
 		return errStop
 	}
 	want, _ := s.shares(wantWritable)
-	if cageWritableGit() && wasRunning && !s.opts.Scratch {
+	if isCageMode() && wasRunning && !s.opts.Scratch {
 		currentRoot := false
 		for _, mount := range inst.Mounts {
 			currentRoot = currentRoot || paths.Equal(paths.Host(mount.Location), paths.Host(s.dir)) && mount.MountPoint == paths.Guest(s.dir)
@@ -544,45 +498,7 @@ func (s *start) ensureRunningLocked() error {
 			return errStop
 		}
 	}
-	wasProtected := len(inst.Mounts) > 0 && unprotected(inst, nil) == ""
-	gitStale := !o.Scratch && wasProtected != s.protect
-	namesStale := s.protect && wasProtected && unprotected(inst, s.names) != ""
-	stale := sharesDiffer(inst, want)
-	if !o.ReadOnly && wasRunning && s.protect && (gitStale || namesStale) {
-		if gitStale {
-			s.warnf("Warning: VM '%s' is running with .git writable, so the agent can still write .git.", s.name)
-		} else {
-			s.warnf("Warning: VM '%s' runs with an older list of read-only names (it needs %s), so the agent can still write the new ones.", s.name, strings.Join(s.names, ", "))
-		}
-		if _, off := s.promptsDisabledBy(); !off && s.ui.CanAsk() && s.ui.AskYN("Restart it now to apply them? Sessions using it are cut.", true) {
-			if err := s.stopToChange(); err != nil {
-				return err
-			}
-			wasRunning = false
-		} else if !s.confirmUnsafe() {
-			s.warnf("Aborted. 'agent-vm stop', then run again.")
-			return errStop
-		}
-	}
-	switch {
-	case gitStale && wasRunning && !s.protect:
-		s.warnf("Note: VM '%s' keeps .git read-only until it stops.", s.name)
-	case !wasRunning && stale:
-		switch {
-		case gitStale && s.protect:
-			fmt.Fprintf(s.io.Stdout, "Making every .git read-only for VM '%s'...\n", s.name)
-		case gitStale:
-			if cageWritableGit() {
-				fmt.Fprintf(s.io.Stdout, "Enabling Git writes in Cage projects for VM '%s'...\n", s.name)
-			} else {
-				s.warnf("Making .git writable for VM '%s' (%s)...", s.name, map[bool]string{true: "--unsafe-writable-git", false: "AGENT_VM_UNSAFE_WRITABLE_GIT=1"}[o.UnsafeWritableGit])
-			}
-		case namesStale:
-			fmt.Fprintf(s.io.Stdout, "Making %s read-only for VM '%s'...\n", strings.Join(s.names, ", "), s.name)
-		}
-		if gitStale || namesStale {
-			fmt.Fprint(s.io.Stdout, s.notes)
-		}
+	if !wasRunning && sharesDiffer(inst, want) {
 		if !isNew {
 			switch {
 			case !wantWritable && !allReadOnly(inst):
