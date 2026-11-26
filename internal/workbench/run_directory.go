@@ -117,13 +117,13 @@ func sharedRoot(state runProjects, dir string) (root, workspace string) {
 			root, workspace = folder, owner
 		}
 	}
-	for _, folder := range state.Projects {
-		consider(folder, folder)
-	}
 	for _, group := range state.Groups {
 		for _, folder := range group.Folders {
 			consider(folder, group.Workspace)
 		}
+	}
+	for _, folder := range state.Projects {
+		consider(folder, folder)
 	}
 	return root, workspace
 }

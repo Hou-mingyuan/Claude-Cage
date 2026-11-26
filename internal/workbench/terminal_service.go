@@ -38,6 +38,7 @@ type terminalRequest struct {
 	afterLogin      *terminalSession
 	sharedID        string
 	requestContext  context.Context
+	hostInput       bool
 }
 
 // terminalManager owns host PTYs; subscriptions only borrow their output. The
@@ -57,10 +58,11 @@ func (m *terminalManager) startSession(cmd *exec.Cmd, workspace, kind string, se
 }
 
 func (m *terminalManager) startSessionWithPTY(cmd *exec.Cmd, workspace, kind string, selection claudeSelection, finished func(), start func() (terminalPTY, error)) (*terminalSession, error) {
-	return m.startReplacing(nil, false, cmd, workspace, kind, selection, finished, start)
+	return m.startReplacing(terminalRequest{}, cmd, workspace, kind, selection, finished, start)
 }
 
-func (m *terminalManager) startReplacing(previous *terminalSession, background bool, cmd *exec.Cmd, workspace, kind string, selection claudeSelection, finished func(), start func() (terminalPTY, error)) (*terminalSession, error) {
+func (m *terminalManager) startReplacing(input terminalRequest, cmd *exec.Cmd, workspace, kind string, selection claudeSelection, finished func(), start func() (terminalPTY, error)) (*terminalSession, error) {
+	previous, background := input.afterLogin, input.BackgroundLogin
 	var evicted []*terminalSession
 	m.mu.Lock()
 	defer func() {
@@ -84,6 +86,7 @@ func (m *terminalManager) startReplacing(previous *terminalSession, background b
 		title = "Claude 账号登录"
 	}
 	session := newTerminalSession(file)
+	session.hostInput = input.hostInput
 	session.creationOrder = m.sequence
 	session.backgroundLogin = background
 	session.id, session.title, session.workspace, session.cmd = randomToken()[:16], title, workspace, cmd
@@ -435,6 +438,9 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 		if err != nil {
 			return nil, err
 		}
+		if err := s.checkCLIAccountUse(selection, login); err != nil {
+			return nil, err
+		}
 		if input.LoginProxyNode != nil {
 			if err = s.setLoginDraftNode(selection.ID, *input.LoginProxyNode); err != nil {
 				return nil, err
@@ -447,8 +453,8 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 			if (input.loginDraft == nil && !validClaudeID(selection.ID)) || !validClaudeGuestID(selection.GuestID) || (login && selection.GuestID == "default") {
 				return nil, errors.New("Claude 账号 ID 无效")
 			}
-			if login && selection.ID != "" && s.mobileCLI.activeAccounts()[selection.ID] > 0 {
-				return nil, errors.New("请先结束该账号正在执行的移动 CLI 轮次，再重新登录")
+			if login && selection.ID != "" && s.activeAccountRuns()[selection.ID] > 0 {
+				return nil, errors.New("请先结束该账号正在执行的 CLI 任务，再重新登录")
 			}
 			if selection.ID != "" {
 				if existing, conflict := s.terminals.existingProfileLogin(selection, login); existing != nil || conflict != nil {
@@ -498,7 +504,7 @@ func (s *Server) createTerminalLocked(input terminalRequest) (*terminalSession, 
 			return nil, errMobileLocked
 		}
 	}
-	session, err := s.terminals.startReplacing(input.afterLogin, input.BackgroundLogin, cmd, workspace, input.Kind, selection, finished, func() (terminalPTY, error) { return startTerminal(cmd, 100, 30) })
+	session, err := s.terminals.startReplacing(input, cmd, workspace, input.Kind, selection, finished, func() (terminalPTY, error) { return startTerminal(cmd, 100, 30) })
 	if input.requestContext != nil {
 		s.account.mu.Unlock()
 	}

@@ -16,7 +16,7 @@ def until(condition, message, timeout=5):
         time.sleep(0.025)
     raise AssertionError(message)
 
-def verify(supervisor, crash):
+def verify(supervisor, crash, native):
     with tempfile.TemporaryDirectory(prefix="cage-supervisor-") as directory:
         root = Path(directory)
         child = (
@@ -37,7 +37,10 @@ def verify(supervisor, crash):
             [sys.executable, "-I", supervisor, directory, sys.executable, "-c", cli],
             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         with proc:
-            proc.stdin.write(json.dumps("synthetic approved command").encode() + b"\n")
+            if native:
+                proc.stdin.write(b'{"binary":true}\n' + bytes(4))
+            else:
+                proc.stdin.write(json.dumps("synthetic approved command").encode() + b"\n")
             proc.stdin.flush()
             until(lambda: (root / "tool.pid").is_file(), "tool did not start")
             if crash:
@@ -56,6 +59,7 @@ def verify(supervisor, crash):
 if __name__ == "__main__":
     if not sys.platform.startswith("linux"):
         raise SystemExit("run inside an isolated Linux guest")
-    for crash in (False, True):
-        verify(str(Path(sys.argv[1]).resolve()), crash)
-        print("CLI crash: PASS" if crash else "SSH disconnect: PASS")
+    for native in (False, True):
+        for crash in (False, True):
+            verify(str(Path(sys.argv[1]).resolve()), crash, native)
+            print("native" if native else "mobile", "CLI crash: PASS" if crash else "SSH disconnect: PASS")

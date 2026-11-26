@@ -613,6 +613,10 @@ Section "Cage" Main
   ${EndIf}
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "DesktopShortcut" $DesktopShortcut
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "StartMenuShortcuts" $StartMenuShortcuts
+  File /oname=$PLUGINSDIR\terminal-path.ps1 "..\..\cmd\cage\terminal-path.ps1"
+  nsExec::ExecToLog /TIMEOUT=20000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\terminal-path.ps1" -InstallLocation "$INSTDIR" -Action Register'
+  Pop $0
+  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=3000
   ${If} $LANGUAGE != $InstallerSystemLanguage
     ; Seed a fresh profile after a successful interactive installation.
     nsExec::ExecToLog /TIMEOUT=10000 '"$INSTDIR\resources\cage.exe" interface-language --seed-windows-id "$LANGUAGE"'
@@ -681,6 +685,10 @@ Section "Uninstall"
     Abort "$(CageSetupDetail15)"
   ${EndIf}
   !insertmacro UninstallPhase "removing_shortcuts_and_registration"
+  File /oname=$PLUGINSDIR\terminal-path.ps1 "..\..\cmd\cage\terminal-path.ps1"
+  nsExec::ExecToLog /TIMEOUT=20000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\terminal-path.ps1" -InstallLocation "$INSTDIR" -Action Unregister'
+  Pop $0
+  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=3000
   Delete "$DESKTOP\Cage.lnk"
   Delete "$SMPROGRAMS\Cage\Cage.lnk"
   Delete "$SMPROGRAMS\Cage\Uninstall Cage.lnk"

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -241,12 +242,33 @@ func AgentStartService(ctx context.Context, configPath string) error {
 	}
 }
 
+// A native launcher can spell the same profile directory through a system
+// alias (such as /tmp on macOS). Keep the configuration filename pinned.
+func sameControllerConfig(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if a == b {
+		return true
+	}
+	if filepath.Base(a) != filepath.Base(b) {
+		return false
+	}
+	left, err := os.Stat(filepath.Dir(a))
+	if err != nil {
+		return false
+	}
+	right, err := os.Stat(filepath.Dir(b))
+	return err == nil && os.SameFile(left, right)
+}
+
 func agentCheckController(c *controllerClient, configPath string) error {
 	want, err := currentController()
 	if err != nil || !want.matches(c.launch.Controller) || c.launch.DesktopGateway || c.launch.ClientOnly {
 		return &AgentError{Code: "controller_mismatch", Message: "Use the CLI shipped with the running workload. No controller was replaced.", NextAction: "open_desktop"}
 	}
-	if filepath.Clean(c.launch.ConfigPath) != filepath.Clean(configPath) {
+	if !sameControllerConfig(c.launch.ConfigPath, configPath) {
 		return &AgentError{Code: "config_path_mismatch", Message: "This directory's controller uses a different configuration filename. Use its original absolute config path.", NextAction: "doctor"}
 	}
 	return nil

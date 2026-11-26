@@ -41,14 +41,18 @@ func mobileLaunchArgs(launcher string, account claudeSelection) ([]string, error
 	if len(parts) != 1 || parts[0] != "claude" {
 		return nil, errors.New("移动会话支持 claude 或 ccs 配置名，请在主机检查 Claude 启动命令")
 	}
+	return claudeProfileArgs("run", account)
+}
+
+func claudeProfileArgs(mode string, account claudeSelection) ([]string, error) {
 	if account.ID == "" && account.GuestID == "" {
-		return parts, nil
+		return []string{"claude"}, nil
 	}
 	boundDefault := account.ID == "" && account.GuestID == "default"
 	if (!boundDefault && !validClaudeID(account.ID)) || !validClaudeGuestID(account.GuestID) || len(account.Subject) != 64 {
 		return nil, errors.New("Claude 账号身份无效")
 	}
-	return []string{"env", "CAGE_CLAUDE_SUBJECT=" + account.Subject, "/usr/local/bin/cage-claude-account", "run", account.GuestID}, nil
+	return []string{"env", "CAGE_CLAUDE_SUBJECT=" + account.Subject, "/usr/local/bin/cage-claude-account", mode, account.GuestID}, nil
 }
 
 func sharedCLILauncher(launcher string) bool {
@@ -132,6 +136,11 @@ func (s *Server) prepareMobileLaunch(record *mobileRecord) (claudeSelection, str
 			return selection, "", empty, errors.New("原会话的 Claude 账号已停用或发生变化")
 		}
 		if _, err = s.terminals.existingProfileLogin(selection, false); err != nil {
+			return selection, "", empty, err
+		}
+	}
+	if launcher == "claude" {
+		if err := s.checkCLIAccountUse(selection, false); err != nil {
 			return selection, "", empty, err
 		}
 	}

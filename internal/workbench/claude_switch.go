@@ -457,7 +457,7 @@ func (s *Server) maybeSwitchClaudeAccount(ctx context.Context, id string, lastUs
 			}
 		}
 	}
-	active := s.mobileCLI.activeAccounts()
+	active := s.activeAccountRuns()
 	logins := make(map[string]bool)
 	for _, terminal := range s.terminals.snapshot() {
 		if terminal["closed"] == true {

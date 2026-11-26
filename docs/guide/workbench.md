@@ -27,7 +27,36 @@ keywords: 项目 Claude Code 编辑器 code-server Git GitHub gh 提交 推送 �
 
 共享文件在环境内显示为当前用户所有，Git 可正常读取已打开项目的状态与历史。文件内容仍属于原来的主机目录，Git 元数据与项目一起共享，环境中的 Git 操作会直接更新主机仓库。授权目录内的隐藏文件、工具配置、Git 配置和钩子均按普通项目文件共享。Cage 不按文件名额外隐藏文件或禁止写入；云端共享的整目录只读授权仍然生效。
 
-### 从命令行在项目中运行
+### 在本机终端使用 Claude Code
+
+macOS 在 **Cage → 安装终端命令…** 中安装 `cage`，然后打开新的终端。Windows 安装完整应用后，在新开的 PowerShell 或命令提示符中使用 `cage`。Linux 系统包提供 `claude-cage`，短名可用时可运行 `claude-cage install-cli` 安装 `cage`。
+
+```sh
+cage login
+cd ~/Projects/my-project
+cage
+cage -c
+git diff | cage -p "概括这次修改" --output-format json
+```
+
+`cage login` 打开 Cage 自己的浏览器。第一次授权后即可回到本机终端工作。直接输入 `cage` 也会按需启动后台和本机环境，交互模式下会等你完成首次配置或登录。脚本调用遇到需要人工授权的状态时返回错误，诊断文字写入标准错误。
+
+在一个新文件夹运行 Claude 会自动将**当前文件夹**加入工作台的共享项目。修改会写回本机，关掉终端后项目仍在侧栏，可从工作台移除。在已有项目的子目录或其他绑定文件夹运行时，复用该项目，从当前子目录开始工作。根目录、用户主目录和 Cage 的私有目录沿用工作台的共享限制。显式传入的额外目录（如 `--add-dir ../library`）共享到最后一个使用它的命令结束。已登记的项目按原来的共享设置使用。登录、状态和帮助命令都可以在任意目录执行。
+
+提示词、选项和 Claude 子命令由环境内安装的 Claude Code 解析。可以使用 `cage --model sonnet`、`cage -r 会话ID`、`cage mcp --help`，也可以将 `--output-format stream-json --verbose` 用于 `-p`。脚本可读取 Claude 的标准输出、标准错误和退出码。关闭本机交互终端后，仍在运行的会话可从工作台接回。若要用 Claude 自带的 `--bg` 启动长期任务，请将长期需要的额外目录加入工作台的项目绑定。
+
+| 命令 | 用途 |
+| --- | --- |
+| `cage status` | 查看本机环境状态 |
+| `cage stop`、`cage restart` | 停止或重启本机环境，会中断其中正在运行的任务 |
+| `cage account list` | 查看工作台已登记的 Claude 账号和编号 |
+| `cage account use 2`、`cage account use auto` | 为后续 CLI 调用选定账号，或恢复工作台的自动分配 |
+| `cage account run 2 -- -p "你好"` | 只为本次调用选择账号 |
+| `cage --help`、`cage claude --help` | 分别查看 Cage 和环境内 Claude Code 的命令 |
+
+遇到同名命令时，`cage claude` 可明确调用 Claude Code，例如 `cage claude stop 会话ID`。登录凭据留在 Cage 环境里，运行的 Claude 使用所选账号的出口和权限设置。和工作台相同，一个环境可以同时访问多个已共享项目。
+
+### 从命令行在项目中运行其他程序
 
 通过 SSH 登录运行 Cage 的电脑等纯终端场景，可以在本机项目目录中直接使用 Cage 的命令行（各平台的位置见[让 Agent 配置 Cage](agent.md#agent-从哪里开始)，Linux 上为 `claude-cage`）：
 

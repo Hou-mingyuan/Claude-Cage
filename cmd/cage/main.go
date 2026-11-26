@@ -37,6 +37,16 @@ import (
 
 const help = `Claude Cage — local isolated Claude development
 
+cage [prompt / Claude options / subcommand]
+                   Run the official Claude Code in the current project. The
+                   current folder is shared automatically. Example:
+                   git diff | cage -p "Review this diff" --output-format json
+cage status        Report the state of the local Cage environment
+cage account list  Show registered Claude Code accounts
+cage account use ID|auto    Select a CLI account or use workbench scheduling
+cage account run ID [--] ARGS   Use an account just for this invocation
+cage restart       Restart the local environment and wait until it is ready
+cage install-cli   Install the terminal command for this user
 cage desktop       Open the unified Cage workbench (desktop launcher)
 cage agent         Discover and use the versioned, JSON-only external Agent interface
 cage serve         Run its private localhost control service
@@ -50,7 +60,7 @@ cage proxy-stop    Stop Cage's core and close external networking
 cage setup         Build the isolated base VM through the specified proxy
 cage up            Start the shared Cage environment, editor and browser
                    --reset re-clones the VM; files and logins on its disk are lost
-cage login         Start cage services, then Claude's login flow inside the VM
+cage login         Open the Claude login page in Cage's browser
                    --reset re-clones the VM; files and logins on its disk are lost
 cage access        Inspect legacy viewer credentials (diagnostics only)
 cage shell         Open a shell in the shared environment
@@ -60,7 +70,8 @@ cage run COMMAND   Execute a command in the shared environment: from the current
                    --here requires the current directory (asks before sharing
                    it on a terminal, fails otherwise); --workdir DIR runs from
                    DIR in the environment
-cage claude        Run Claude Code in the shared environment
+cage claude ARGS   Send every following argument to Claude Code in Cage
+                   (including commands such as doctor or stop <session-id>)
 cage stop          Stop the shared Cage environment and its proxy core
                    --keep-proxy keeps the core running for an environment restart
 cage list          List this cage profile's VMs
@@ -71,7 +82,7 @@ cage licenses      Print third-party license notices
 
 Configuration: ~/.claude-cage/config.json (override CLAUDE_CAGE_CONFIG).
 Each configuration directory is an independent cage profile.
-Only explicitly opened project folders are shared. No host Claude credentials are imported.
+Project commands share their current folder. Management commands do not.
 `
 
 func main() {
@@ -104,8 +115,8 @@ func run() int {
 	cli.UpdateHint = "update Cage from the app, or with the installer or package that installed it"
 	// --reset deletes the environment's disk with the user's files and logins.
 	cli.StaleBaseHint = "提示：Cage 的基础镜像比当前环境新。当前环境的磁盘会保留，不需要重建；请在 Cage 的“设置 > 环境与恢复”中更新环境组件或环境工具，也可以运行 cage update-tools。"
-	args := os.Args[1:]
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+	args := cageArgs(os.Args[1:])
+	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Print(help)
 		return 0
 	}
@@ -193,6 +204,31 @@ func run() int {
 	}
 	if err := host.ConfigureWindowsRuntime(); err != nil {
 		return fail(err)
+	}
+	if args[0] == "install-cli" {
+		if len(args) != 1 {
+			return fail(errors.New("usage: cage install-cli"))
+		}
+		return installTerminalCommand()
+	}
+	if args[0] == "claude" || args[0] == "account" || args[0] == "status" || args[0] == "restart" || len(args) == 1 && (args[0] == "login" || args[0] == "stop") {
+		action := args[0]
+		if action == "claude" {
+			action = "run"
+		} else if action != "account" && len(args) != 1 {
+			return fail(fmt.Errorf("usage: cage %s", action))
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		code, err := workbench.HostCLI(ctx, path, action, args[1:], os.Stdin, os.Stdout, os.Stderr)
+		if err != nil {
+			if ctx.Err() != nil {
+				return 130
+			}
+			fmt.Fprintln(os.Stderr, workbench.HostCLIDiagnostic(err.Error()))
+			return code
+		}
+		return code
 	}
 	store := diagnostics.New(filepath.Dir(path))
 	diagnostics.SetDefault(store)

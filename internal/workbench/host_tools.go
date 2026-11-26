@@ -145,6 +145,7 @@ func (s *Server) startHostTools(serving bool) error {
 		return err
 	}
 	approvals := newHostApprovals()
+	approvals.checkProject = s.checkCLIHostProject
 	approvals.remoteAsk = s.remoteApprovals.ask
 	approvals.neverAlways[workspaceControlPlugin+"/"+workspaceControlManageTool] = true
 	// Preferences include the command every new terminal runs.
@@ -168,8 +169,8 @@ func (s *Server) startHostTools(serving bool) error {
 	}
 	external, failures := hostbridge.LoadPlugins(ctx, filepath.Join(s.profile, "plugins"), hostbridge.LoadOptions{
 		Taken: []string{"run_command", "command_job"}, TakenPrompts: []string{hostCommandsPlugin}, Off: off, Version: version.Version,
-		ProjectDir: s.hostActiveProjectDir(),
-		Approve:    approvals.approveTool, Guest: s.guestPluginCommand, GuestOnly: !serving, Env: s.workspaceControlPluginEnv(control)})
+		ProjectDir: s.hostActiveProjectDir(), CheckProject: s.checkCLIHostProject,
+		Approve: approvals.approveTool, Guest: s.guestPluginCommand, GuestOnly: !serving, Env: s.workspaceControlPluginEnv(control)})
 	var problems []string
 	pluginProblems := map[string]string{}
 	missingPrograms := map[string]string{}
