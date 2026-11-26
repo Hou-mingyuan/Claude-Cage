@@ -84,6 +84,8 @@ bash scripts/build-app.sh
 | `npm ci` 报 `EBADENGINE` 警告，或前端构建报 `Cannot find native binding`（Rolldown） | `PATH` 上优先使用的 Node.js 低于 Vite 的要求。用 `node -v` 和 `node -p 'process.execPath'` 确认实际使用的是哪个 Node，切换到 Node 24 后重新运行构建。 |
 | 只允许写入工作区的沙箱中 npm、uv 或 Swift 模块缓存报 `Operation not permitted` | 脚本发现默认缓存目录不可写时，改用 `_output/cache` 下的 npm、uv 和 Swift 模块缓存。`iconutil` 在部分沙箱中仍会报 `Failed to generate ICNS`，这一步需要在沙箱外运行构建。 |
 | 检出路径经过 `/tmp` 等符号链接 | 构建脚本按真实路径判断入口，可以在符号链接目录中构建。 |
+| 获取代理核心时报 `The Mihomo license could not be obtained` | `raw.githubusercontent.com` 不可达时，脚本会改从 GitHub 源码归档提取 Mihomo 的 LICENSE，归档按固定 SHA-256 校验；两者都失败时停止构建，避免应用包缺少许可证。按报错把 LICENSE 或源码归档放到提示的 `_output/proxy-core/` 路径，或把 `CAGE_GITHUB_MIRROR` 设为可访问的 HTTPS GitHub 下载镜像前缀，再重新运行。 |
+| `make cage` 下载 Go 工具链或模块失败，例如访问 `sum.golang.org` 超时 | 设置可访问的模块代理和校验数据库后重试，例如 `GOPROXY=https://goproxy.cn,direct GOSUMDB=sum.golang.google.cn bash scripts/build-app.sh`。`tools/tailnet` 需要的 Go 1.27.3 工具链也经由 `GOPROXY` 下载；也可以先安装满足要求的 Go 并使用 `GOTOOLCHAIN=local`。 |
 
 ## 维护者：配置自动邀请
 
