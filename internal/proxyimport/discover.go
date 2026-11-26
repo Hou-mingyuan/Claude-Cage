@@ -437,18 +437,28 @@ func Scan(locations []Location, key []byte) []Config {
 				}
 				count := 0
 				for _, file := range files {
-					ext := strings.ToLower(filepath.Ext(file.Name()))
-					if file.IsDir() || (ext != ".yaml" && ext != ".yml") {
+					name := file.Name()
+					ext := strings.ToLower(filepath.Ext(name))
+					if file.IsDir() || flutterInternal[strings.ToLower(name)] || (ext != ".yaml" && ext != ".yml" && ext != ".json") {
 						continue
 					}
 					if count >= 32 {
 						break
 					}
 					count++
-					if subdir == "" {
-						add(file.Name(), "", file.Name(), "", file.Name() == "config.yaml")
-					} else {
-						add(filepath.Join(subdir, file.Name()), subdir, file.Name(), "", current != "" && strings.TrimSuffix(file.Name(), filepath.Ext(file.Name())) == current)
+					label := name
+					isCurrent := subdir == "profiles" && current != "" && strings.TrimSuffix(name, filepath.Ext(name)) == current
+					if subdir == "" && (name == "config.yaml" || name == "config.json" || name == "gui-config.json") {
+						isCurrent = true
+						if name == "config.yaml" {
+							label = "当前生效配置"
+						}
+					}
+					c, ok, _ := build(filepath.Join(subdir, name), subdir, label, "", isCurrent)
+					// Other Flutter state can also be JSON. Only offer JSON files
+					// with importable nodes, as plain profiles may use this format.
+					if ok && (ext != ".json" || c.Error == "") {
+						out = append(out, c)
 					}
 				}
 			}

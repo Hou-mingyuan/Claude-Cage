@@ -253,7 +253,7 @@ func TestScanWindowsFlClashFollowClashDirectory(t *testing.T) {
 			continue
 		}
 		switch e.Name {
-		case "config.yaml":
+		case "当前生效配置":
 			runtime = &entries[i]
 		case "123.yaml":
 			profile = &entries[i]
@@ -278,6 +278,8 @@ func TestScanFlClashSkipsFlutterInternalJSONAndMarksCurrentProfile(t *testing.T)
 		writeConfig(t, root, "config.yaml", testNode)
 		writeConfig(t, root, "profiles/1732000000001.yaml", testNode)
 		writeConfig(t, root, "profiles/1732000000002.yaml", testNode)
+		writeConfig(t, root, "profiles/imported.json", `{"proxies":[{"name":"json profile","type":"socks5","server":"node.example.com","port":1080}]}`)
+		writeConfig(t, root, "settings.json", `{"theme":"dark"}`)
 		writeConfig(t, root, "libCachedImageData.json", `[{"key":"https://image.example/private-cache-token","relativePath":"a.png"}]`)
 		if current != "" {
 			writeConfig(t, root, "shared_preferences.json", strings.Replace(prefs, "%s", current, 1))
@@ -290,8 +292,8 @@ func TestScanFlClashSkipsFlutterInternalJSONAndMarksCurrentProfile(t *testing.T)
 			}
 			got[e.Name] = e
 		}
-		if len(got) != 3 || len(entries) != 3 {
-			t.Fatalf("expected config.yaml and two profiles only: %s", mustJSON(t, entries))
+		if len(got) != 4 || len(entries) != 4 || got["imported.json"].Nodes != 1 {
+			t.Fatalf("expected runtime config and three importable profiles: %s", mustJSON(t, entries))
 		}
 		view := mustJSON(t, entries)
 		for _, secret := range []string{"private-preference-token", "private-cache-token", root} {
@@ -310,7 +312,7 @@ func TestScanFlClashSkipsFlutterInternalJSONAndMarksCurrentProfile(t *testing.T)
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := scan(t, test.current)
-			if !got["config.yaml"].Current {
+			if !got["当前生效配置"].Current {
 				t.Fatalf("runtime config.yaml not current: %s", mustJSON(t, got))
 			}
 			for _, name := range []string{"1732000000001.yaml", "1732000000002.yaml"} {
