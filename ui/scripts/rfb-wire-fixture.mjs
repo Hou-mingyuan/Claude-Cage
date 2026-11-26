@@ -7,6 +7,7 @@ export async function startDisplay(upstream, { frameInterval = 50, sharedClipboa
   const stats = { connections: 0, closed: 0, frames: 0, clipboardConnections: 0, clipboardUpdates: [], keys: [] };
   const sockets = new Set();
   const displays = new Set();
+  const framebufferWriters = new Set();
   const clipboardWriters = new Set();
   const sharedWriters = new Set(), sharedSockets = new Set();
   const terminalWriters = new Set();
@@ -66,6 +67,17 @@ export async function startDisplay(upstream, { frameInterval = 50, sharedClipboa
       send(update);
       makeFrame();
     };
+    const sendPixelRect = (x, y, encoding, payload) => {
+      const update = Buffer.alloc(20);
+      update.writeUInt16BE(1, 2);
+      update.writeUInt16BE(x, 4);
+      update.writeUInt16BE(y, 6);
+      update.writeUInt16BE(1, 8);
+      update.writeUInt16BE(1, 10);
+      update.writeInt32BE(encoding, 12);
+      payload.copy(update, 16);
+      send(update);
+    };
     const consume = (data) => {
       rfb = Buffer.concat([rfb, data]);
       if (phase === 0 && rfb.length >= 12) { rfb = rfb.subarray(12); phase = 1; send(Buffer.from([1, 1])); }
@@ -86,6 +98,7 @@ export async function startDisplay(upstream, { frameInterval = 50, sharedClipboa
         send(fence);
         makeFrame();
         displays.add(resize);
+        framebufferWriters.add(sendPixelRect);
         clipboardWriters.add(clipboard);
         timer = setInterval(() => {
           if (framesPaused || socket.writableLength > frame.length * 2) return;
@@ -141,7 +154,7 @@ export async function startDisplay(upstream, { frameInterval = 50, sharedClipboa
       }
     });
     socket.on("error", () => {});
-    socket.on("close", () => { clearInterval(timer); displays.delete(resize); clipboardWriters.delete(clipboard); sharedWriters.delete(sharedWrite); terminalWriters.delete(terminalWrite); sharedSockets.delete(socket); sockets.delete(socket); stats.closed++; });
+    socket.on("close", () => { clearInterval(timer); displays.delete(resize); framebufferWriters.delete(sendPixelRect); clipboardWriters.delete(clipboard); sharedWriters.delete(sharedWrite); terminalWriters.delete(terminalWrite); sharedSockets.delete(socket); sockets.delete(socket); stats.closed++; });
     if (terminal) terminalWrite("Terminal clipboard ready\r\n$ ");
     else if (!shared) send(Buffer.from("RFB 003.008\n"));
   });
@@ -150,6 +163,15 @@ export async function startDisplay(upstream, { frameInterval = 50, sharedClipboa
     url: `http://127.0.0.1:${server.address().port}`,
     stats,
     pauseFrames(paused) { framesPaused = paused; },
+    sendPixel(x, y, [r, g, b]) {
+      for (const write of framebufferWriters) write(x, y, 0, Buffer.from([r, g, b, 0])); // Raw in the client's RGBX format
+    },
+    copyPixel(sourceX, sourceY, x, y) {
+      const source = Buffer.alloc(4);
+      source.writeUInt16BE(sourceX, 0);
+      source.writeUInt16BE(sourceY, 2);
+      for (const write of framebufferWriters) write(x, y, 1, source); // CopyRect
+    },
     clipboard(text) { for (const write of clipboardWriters) write(text); },
     sharedClipboard(value) { for (const write of sharedWriters) write(value); },
     terminalOutput(text) { for (const write of terminalWriters) write(text); },
