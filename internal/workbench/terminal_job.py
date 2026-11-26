@@ -87,20 +87,32 @@ class TerminalJob:
         except (OSError, ValueError):
             pass  # A disconnected controller cannot abandon the terminal job.
 
+    def reap_within_grace(self):
+        until = time.monotonic() + 1
+        while True:
+            if os.waitpid(self.child, os.WNOHANG)[0]:
+                self.child = None
+                return True
+            if time.monotonic() >= until:
+                return False
+            time.sleep(0.02)
+
     def shutdown(self):
         if self.child is None:
             return
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(self.child, signal.SIGTERM)
-            os.killpg(self.child, signal.SIGCONT)
-        until = time.monotonic() + 1
-        while time.monotonic() < until:
-            if os.waitpid(self.child, os.WNOHANG)[0]:
-                self.child = None
+        try:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.child, signal.SIGTERM)
+                os.killpg(self.child, signal.SIGCONT)
+            if self.reap_within_grace():
                 return
-            time.sleep(0.02)
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(self.child, signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.child, signal.SIGKILL)
+        except PermissionError:
+            # Darwin can return EPERM for an exiting group before its leader is waitable.
+            if self.reap_within_grace():
+                return
+            raise
         os.waitpid(self.child, 0)
         self.child = None
 

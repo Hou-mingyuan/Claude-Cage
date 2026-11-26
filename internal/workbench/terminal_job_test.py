@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import runpy
 import select
 import shlex
 import shutil
@@ -16,6 +17,7 @@ import tempfile
 import termios
 import time
 import unittest
+from unittest import mock
 import uuid
 import fcntl
 
@@ -66,6 +68,28 @@ def fixture_cli(args):
             print("history=" + (config / "fixture-history").read_text(), flush=True)
         else:
             print("foreground=" + str(os.tcgetpgrp(0)), flush=True)
+
+
+class TerminalJobShutdownTest(unittest.TestCase):
+    def setUp(self):
+        job_type = runpy.run_path(str(SOURCE / "terminal_job.py"))["TerminalJob"]
+        self.job = job_type({"identifier": str, "ROOT": SOURCE}, {"id": "fixture"})
+        self.job.child = 123
+
+    def test_dying_group_is_reaped_after_signal_denial(self):
+        with mock.patch("os.killpg", side_effect=[None, PermissionError(errno.EPERM, "dying group")]) as send:
+            with mock.patch("os.waitpid", side_effect=[(0, 0), (123, 0)]) as reap:
+                self.job.shutdown()
+        self.assertEqual(send.call_args_list, [mock.call(123, signal.SIGTERM), mock.call(123, signal.SIGCONT)])
+        self.assertEqual(reap.call_args_list, [mock.call(123, os.WNOHANG)] * 2)
+        self.assertIsNone(self.job.child)
+
+    def test_live_group_signal_denial_is_reported(self):
+        with mock.patch("os.killpg", side_effect=PermissionError(errno.EPERM, "live group")):
+            with mock.patch("os.waitpid", return_value=(0, 0)):
+                with self.assertRaises(PermissionError):
+                    self.job.shutdown()
+        self.assertEqual(self.job.child, 123)
 
 
 class TerminalJobTest(unittest.TestCase):
@@ -263,7 +287,8 @@ class TerminalJobTest(unittest.TestCase):
     def assert_closed_job(self, when):
         state = self.job_state()
         self.assertEqual(state.get("pid"), self.child, f"recorded PID changed {when}")
-        self.assertIs(state.get("closed"), True, f"terminal state still open {when}")
+        self.assertIs(state.get("closed"), True,
+                      f"terminal state still open {when}, PTY output={self.output[-1024:]!r}")
         with self.assertRaises(ProcessLookupError, msg=f"CLI survived {when}"):
             os.kill(self.child, 0)
 
