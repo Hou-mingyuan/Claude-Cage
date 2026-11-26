@@ -463,11 +463,8 @@ function Invoke-WindowsQemuProbe {
     $start.WorkingDirectory = Split-Path $start.FileName -Parent
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    # QEMU uses the Windows ANSI code page for redirected path output. Decode
-    # just this pipe instead of changing the calling shell's output encoding.
-    $codePage = Get-ItemPropertyValue -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage' -Name ACP
-    [Text.Encoding]::RegisterProvider([Text.CodePagesEncodingProvider]::Instance)
-    $start.StandardOutputEncoding = [Text.Encoding]::GetEncoding([int]$codePage)
+    # The bundled QEMU executables opt into UTF-8 even on legacy system code pages.
+    $start.StandardOutputEncoding = [Text.Encoding]::UTF8
     $start.StandardErrorEncoding = $start.StandardOutputEncoding
     # Catch missing DLLs even on a host with MSYS2 or another QEMU on PATH.
     $start.Environment['PATH'] = [Environment]::SystemDirectory

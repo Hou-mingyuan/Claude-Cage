@@ -4,7 +4,8 @@
 param([Parameter(Mandatory)][string]$Installer, [switch]$RequireSignedQemu)
 . (Join-Path $PSScriptRoot 'windows-common.ps1')
 if (-not $IsWindows) { throw 'Installation smoke tests must run on Windows.' }
-$target = Join-Path $env:LOCALAPPDATA ('Programs/Cage-test-' + [guid]::NewGuid().ToString('N'))
+# Exercise QEMU's bundled firmware lookup from a path outside Windows-1252.
+$target = Join-Path $env:LOCALAPPDATA ('Programs/Cage-测试-' + [guid]::NewGuid().ToString('N'))
 $savedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ClaudeCage'
 if (Test-Path $savedKey) { throw 'Use a disposable Windows user without an existing Cage installation.' }
 $fixture = Join-Path $PSScriptRoot 'personal-data-fixture.mjs'
