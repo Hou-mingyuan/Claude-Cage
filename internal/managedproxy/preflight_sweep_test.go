@@ -20,7 +20,10 @@ func stalePreflightDir(t *testing.T, parent, name string, record *preflightCoreR
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = lock.Close() // the owner is gone
+	// The owner is gone. Unlock explicitly: Windows releases the lock of a
+	// closed handle asynchronously, after the sweep below may have run.
+	_ = unlockPreflight(lock)
+	_ = lock.Close()
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("secret"), 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,13 @@ func tryLockPreflight(f *os.File) (bool, error) {
 	return err == nil, err
 }
 
+// unlockPreflight releases the lock before its handle is closed: Windows
+// frees the locks of a closed handle asynchronously, so a lock left to Close
+// may still be held when the directory is checked next.
+func unlockPreflight(f *os.File) error {
+	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, new(windows.Overlapped))
+}
+
 func ownedByCurrentUser(path string, _ os.FileInfo) bool {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
