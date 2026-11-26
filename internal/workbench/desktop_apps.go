@@ -167,7 +167,7 @@ APP_STATE`
 func (s *Server) desktopApp(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
 	get := map[string]bool{"status": true, "vnc": true, "vnc-credentials": true, "clipboard": true, "input": true}
-	post := map[string]bool{"install": true, "update": true, "remove": true, "start": true, "stop": true}
+	post := map[string]bool{"install": true, "update": true, "remove": true, "start": true, "stop": true, "resize": true}
 	if r.Method == http.MethodGet && !get[action] || r.Method == http.MethodPost && !post[action] {
 		http.NotFound(w, r)
 		return
@@ -177,7 +177,13 @@ func (s *Server) desktopApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "插件未启用，或这个版本的 Cage 还不能运行它的应用", http.StatusNotFound)
 		return
 	}
-	if r.Method == http.MethodPost {
+	var size displaySize
+	var scale string
+	if action == "resize" {
+		if size, scale, ok = readDisplaySize(w, r); !ok {
+			return
+		}
+	} else if r.Method == http.MethodPost {
 		var input struct{}
 		if !readJSON(w, r, &input) {
 			return
@@ -223,6 +229,19 @@ func (s *Server) desktopApp(w http.ResponseWriter, r *http.Request) {
 		return
 	case "input":
 		s.streamDesktopCommand(w, r, `exec env HOME="$HOME/.local/share/desktop-apps/`+target.id+`/input" /usr/local/bin/cage-native-input --relay`)
+		return
+	case "resize":
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		defer cancel()
+		// The application's unit has the runtime directory and display record
+		// of a Desktop instance. It shares the environment's namespaces, so
+		// entering those of its main process changes nothing.
+		output, err := s.guestQuick(ctx, accountDesktopResizeScript(target.id, size.Width, size.Height, scale))
+		if err != nil {
+			http.Error(w, "应用画面尺寸未能调整", 502)
+			return
+		}
+		displayResizeReply(w, size, scale, output)
 		return
 	}
 	s.launchRequest(w, r, "desktop-app-"+action, func() error {
