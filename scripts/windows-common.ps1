@@ -35,6 +35,15 @@ function Resolve-WindowsBuildDirectory {
     return $resolved
 }
 
+# Returns the file system of a drive-letter path, or nothing for UNC paths and
+# drives that cannot be queried.
+function Get-WindowsBuildFileSystem {
+    param([string]$Directory)
+    $root = [IO.Path]::GetPathRoot($Directory)
+    if (-not $root -or $root.StartsWith('\\')) { return $null }
+    try { return [IO.DriveInfo]::new($root).DriveFormat } catch { return $null }
+}
+
 function Assert-WindowsWorkbenchTestBase {
     param([string]$Directory = (Get-WindowsWorkbenchTestBase -WorkbenchProfile))
     if (-not $IsWindows) { return }
@@ -47,6 +56,13 @@ function Assert-WindowsWorkbenchTestBase {
         if ($path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw 'The workbench smoke test directory resolves inside AppData or another private configuration directory. Set RUNNER_TEMP to a writable local directory outside it, such as D:\CageBuildTemp.'
         }
+    }
+    # Cage rejects private records that are not owned by the current user, and
+    # FAT-family volumes store no owner or ACL, so the workbench never starts
+    # and acceptance only ends at its timeout.
+    $fileSystem = Get-WindowsBuildFileSystem $path
+    if ($fileSystem -in @('exFAT', 'FAT', 'FAT32')) {
+        throw "The workbench smoke test directory is on a $fileSystem volume, which cannot keep the owner and permissions Cage requires for its private files. Set RUNNER_TEMP to a writable local directory on an NTFS volume outside AppData, such as C:\CageBuildTemp."
     }
 }
 
