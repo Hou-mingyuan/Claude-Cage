@@ -143,6 +143,7 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 	allTimedOut := true
 	allProxyConnectFailed := true
 	allTLSHandshakeFailed := true
+	allSchemeMismatch := true
 	started, pending := 1, 1
 	start(0)
 	timer := time.NewTimer(stagger)
@@ -182,6 +183,9 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 		if !result.timing.tlsError {
 			allTLSHandshakeFailed = false
 		}
+		if !errors.Is(result.err, http.ErrSchemeMismatch) {
+			allSchemeMismatch = false
+		}
 		if pending == 0 && started < len(services) && ctx.Err() == nil {
 			start(started)
 			started, pending = started+1, pending+1
@@ -196,6 +200,13 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 	}
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return "", usererror.Wrap("通过所选代理查询出口 IP", ctx.Err(), "外网保持关闭。")
+	}
+	if allSchemeMismatch {
+		// A plain HTTP answer proves the node is reachable, so the
+		// connectivity check and the ClientHello hints would not help. Trojan
+		// and similar servers hand unauthenticated or unparsable streams to a
+		// fallback web server, which produces exactly this answer.
+		return "", usererror.New("通过所选代理建立 TLS 连接", strings.Join(reported, "；"), "节点没有按代理协议转发请求，而是直接返回了网页响应，常见于节点的密码、协议、端口或传输设置与服务端不一致，或代理核心与该节点不兼容；请核对节点配置后重新导入并应用，或切换代理节点；外网保持关闭。", errors.Join(ErrTLSHandshakeFailed, http.ErrSchemeMismatch))
 	}
 	if allTLSHandshakeFailed && !allTimedOut {
 		// The bundled core grants a SOCKS5 CONNECT before it dials the node,

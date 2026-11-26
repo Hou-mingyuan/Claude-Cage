@@ -584,6 +584,32 @@ func TestExitProbeClassifiesTLSHandshakeEOFAndTimeout(t *testing.T) {
 	}
 }
 
+func TestExitProbeReportsPlainHTTPAnswerToTLS(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer plain.Close()
+	var checks atomic.Int32
+	reachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		checks.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer reachable.Close()
+	endpoint := "https://" + strings.TrimPrefix(plain.URL, "http://")
+	services := []exitProbeService{{id: "a", name: "主检测服务", endpoint: endpoint}, {id: "b", name: "备用检测服务", endpoint: endpoint}}
+	ip, err := probeExitIPServices(context.Background(), &http.Client{Timeout: 2 * time.Second}, services, time.Minute, reachable.URL)
+	if ip != "" || !errors.Is(err, ErrTLSHandshakeFailed) || !errors.Is(err, http.ErrSchemeMismatch) || errors.Is(err, ErrProxyConnectFailed) || errors.Is(err, ErrExitProbeTimeout) {
+		t.Fatalf("plain HTTP answer expected ErrTLSHandshakeFailed + ErrSchemeMismatch, got ip=%q err=%v", ip, err)
+	}
+	message := err.Error()
+	if !strings.Contains(message, "明文 HTTP 响应") || !strings.Contains(message, "备用检测服务") || !strings.Contains(message, "核对节点配置") || strings.Contains(message, "未能取得可识别的错误原因") || strings.Contains(message, "client-fingerprint") || strings.Contains(message, "分段传输") {
+		t.Fatalf("plain HTTP answer must keep its reason and node advice: %s", message)
+	}
+	if checks.Load() != 0 {
+		t.Fatalf("plain HTTP answer must not run the connectivity check, got %d", checks.Load())
+	}
+	if diagnosticProbeReason(err) != "tls_handshake" {
+		t.Fatalf("diagnostic reason = %q", diagnosticProbeReason(err))
+	}
+}
 func TestExitProbeTimeoutChecksWhetherTheProxyReachesTheInternet(t *testing.T) {
 	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
