@@ -196,3 +196,58 @@ func TestExternalUseCageStartsWhenWindowsAppsPython3StubPrecedesRealPython(t *te
 		t.Fatal("use-cage started with zero tools")
 	}
 }
+
+func TestResolveWindowsGitBashPrefersGitInstallOverSystem32Stub(t *testing.T) {
+	base := t.TempDir()
+	sys32 := filepath.Join(base, "Windows", "System32")
+	gitCmd := filepath.Join(base, "Git", "cmd")
+	gitBin := filepath.Join(base, "Git", "bin")
+	for _, dir := range []string{sys32, gitCmd, gitBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{
+		filepath.Join(sys32, "bash.exe"),
+		filepath.Join(gitCmd, "git.exe"),
+		filepath.Join(gitBin, "bash.exe"),
+	} {
+		if err := os.WriteFile(file, []byte{}, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := []string{
+		"PATH=" + sys32 + ";" + gitCmd,
+		"ProgramFiles=" + filepath.Join(base, "empty-pf"),
+		"ProgramFiles(x86)=" + filepath.Join(base, "empty-pf86"),
+		"LOCALAPPDATA=" + filepath.Join(base, "empty-local"),
+	}
+	got, ok := resolveWindowsGitBash(env)
+	if !ok {
+		t.Fatal("expected Git Bash to be found")
+	}
+	want := filepath.Join(gitBin, "bash.exe")
+	if !strings.EqualFold(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveWindowsGitBashSkipsStandaloneSystem32Stub(t *testing.T) {
+	base := t.TempDir()
+	sys32 := filepath.Join(base, "Windows", "System32")
+	if err := os.MkdirAll(sys32, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sys32, "bash.exe"), []byte{}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"PATH=" + sys32,
+		"ProgramFiles=" + filepath.Join(base, "empty-pf"),
+		"ProgramFiles(x86)=" + filepath.Join(base, "empty-pf86"),
+		"LOCALAPPDATA=" + filepath.Join(base, "empty-local"),
+	}
+	if got, ok := resolveWindowsGitBash(env); ok {
+		t.Fatalf("System32 bash.exe stub should not be selected, got %q", got)
+	}
+}
