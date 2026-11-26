@@ -135,6 +135,9 @@ test(
     const old = await app(path.join(root, "qa backup", "previous-Cage.app"));
     const foreign = await app(path.join(root, "Other.app"), "example.other");
     const external = await app(path.join(outside, "Cage.app"));
+    const publishing = await mkdtemp(path.join(root, ".Cage-publish."));
+    const candidate = await app(path.join(publishing, "Cage.app"));
+    const backup = await app(path.join(publishing, "previous.app"));
     await symlink(outside, path.join(root, "linked-backup"));
     assert.deepEqual(
       await cleanupApps({
@@ -144,7 +147,7 @@ test(
       [old],
     );
     await assert.rejects(access(old), { code: "ENOENT" });
-    for (const preserved of [latest, foreign, external])
+    for (const preserved of [latest, foreign, external, candidate, backup])
       await access(preserved);
   },
 );
