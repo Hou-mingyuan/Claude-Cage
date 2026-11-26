@@ -68,3 +68,33 @@ func TestPackageInstallFailureReadsOlderSetupOutput(t *testing.T) {
 		t.Fatalf("old setup output lost its failure details: current=%v older=%v", current, older)
 	}
 }
+
+func TestPackageInstallFailureReportsKeptPartialDownload(t *testing.T) {
+	const marker = "APT_FAILED exit=100 command=apt-get install -y --no-install-recommends claude-desktop\n"
+	const tail = "Err:1 https://downloads.claude.ai/claude-desktop/apt/stable/main arm64 claude-desktop arm64 1.0\n  Connection timed out\nE: Failed to fetch https://downloads.claude.ai/claude-desktop.deb  Connection timed out\n"
+	err := packageInstallFailure("安装", errors.New("exit status 100"), tail+"APT_PARTIAL bytes=7864320\n"+marker)
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	msg := err.Error()
+	for _, want := range []string{"连接下载服务器失败或超时", "7.5 MiB", "APT 会尝试复用匹配的缓存"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing %q: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "APT_PARTIAL") {
+		t.Fatalf("partial marker leaked into the output tail: %s", msg)
+	}
+	for name, log := range map[string]string{
+		"none":  tail + marker,
+		"zero":  tail + "APT_PARTIAL bytes=0\n" + marker,
+		"stale": "APT_PARTIAL bytes=4096\n" + tail + marker,
+	} {
+		if msg := packageInstallFailure("安装", errors.New("x"), log).Error(); strings.Contains(msg, "未完成的软件包") {
+			t.Fatalf("%s: reported a partial download that was not kept: %s", name, msg)
+		}
+	}
+	if msg := packageInstallFailure("安装", errors.New("x"), tail+"APT_PARTIAL bytes=2048\n"+marker).Error(); !strings.Contains(msg, "2 KiB") {
+		t.Fatalf("small partial size: %s", msg)
+	}
+}

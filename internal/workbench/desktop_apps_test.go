@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/hostbridge"
 )
 
@@ -97,7 +98,7 @@ func runInstaller(t *testing.T, target desktopAppTarget) (string, error) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("bash", "-s")
-	cmd.Stdin = strings.NewReader("cage_curl_download() { : > \"$1\"; }\n" + variables + linuxAppInstall)
+	cmd.Stdin = strings.NewReader(cage.ToolInstallPrelude() + "\ncage_curl_download() { : > \"$1\"; }\n" + variables + linuxAppInstall)
 	cmd.Env = append(os.Environ(), "HOME="+stubs, "PATH="+stubs+":"+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	return string(out), err

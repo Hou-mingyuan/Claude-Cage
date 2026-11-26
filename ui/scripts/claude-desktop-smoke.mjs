@@ -72,6 +72,12 @@ try {
     .getByRole("alert")
     .filter({ hasText: "安装源暂时不可用" })
     .waitFor();
+  // The application can also be recovered from an external Agent. Let the
+  // user clear the earlier job error without submitting another operation.
+  const installAlert = page.getByRole("alert").filter({ hasText: "安装源暂时不可用" });
+  await installAlert.getByRole("button", { name: "关闭", exact: true }).click();
+  await installAlert.waitFor({ state: "hidden" });
+  assert.deepEqual(actions, ["install"]);
   assert.equal(desktop.installed, false);
   failInstall = false;
   await page.getByRole("button", { name: "下载并安装", exact: true }).click();
