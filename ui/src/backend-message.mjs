@@ -83,6 +83,7 @@ export const backendMessageKeys = [
   "VLESS 分享链接的安全层暂不支持；请改用 Clash/Mihomo YAML",
   "VMess 分享链接不是 v2rayN 格式；请改用 Clash/Mihomo YAML",
   "VMess 分享链接的安全层暂不支持；请改用 Clash/Mihomo YAML",
+  "Shadowrocket 分享链接含有暂不支持的参数；请改用 Clash/Mihomo YAML",
   "Shadowsocks 分享链接的 obfs 模式无效",
   "Shadowsocks 分享链接的插件暂不支持；请改用 Clash/Mihomo YAML",
   "Hysteria2 分享链接的混淆方式暂不支持",

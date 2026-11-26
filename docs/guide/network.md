@@ -42,12 +42,14 @@ Surge 配置读取 `[Proxy]` 和 `[Proxy Group]` 中的节点，跟随同目录�
 | 协议 | 链接格式 | 说明 |
 | --- | --- | --- |
 | Trojan | `trojan://密码@服务器:端口?sni=…#名称` | 支持 `sni`/`peer`、`allowInsecure`、`alpn`、`fp`，传输 `tcp`、`ws`、`grpc`、`h2` |
-| VLESS | `vless://UUID@服务器:端口?security=tls\|reality…#名称` | 支持 `flow`、`sni`、`fp`、`pbk`/`sid`（Reality）及同上传输；`encryption` 非 `none`、`xhttp`、`kcp`、`quic` 暂不支持 |
-| VMess | `vmess://Base64(v2rayN JSON)` | 支持 `tcp`、`ws`、`grpc`、`h2` 与 TLS |
+| VLESS | `vless://UUID@服务器:端口?security=tls\|reality…#名称`，或 Shadowrocket 的 `vless://Base64(auto:UUID@服务器:端口)?remarks=…` | 支持 `flow`、`sni`、`fp`、`pbk`/`sid`（Reality）及同上传输；`encryption` 非 `none`、`xhttp`、`kcp`、`quic` 暂不支持 |
+| VMess | `vmess://Base64(v2rayN JSON)`，或 Shadowrocket 的 `vmess://Base64(加密方式:UUID@服务器:端口)?remarks=…` | 支持 `tcp`、`ws`、`grpc`、`h2` 与 TLS；Shadowrocket 链接另支持 `obfs=http` |
 | Shadowsocks | `ss://Base64(方法:密码)@服务器:端口#名称`（SIP002）或旧式整段 Base64 | 插件只支持 `obfs-local`/`simple-obfs` |
 | Hysteria2 | `hysteria2://` 或 `hy2://认证@服务器:端口?sni=…&obfs=salamander…#名称` | 支持 `insecure`、`mport`、`pinSHA256` |
 | TUIC | `tuic://UUID:密码@服务器:端口?congestion_control=…#名称` | TUIC v4 token 链接暂不支持 |
 | AnyTLS | `anytls://密码@服务器:端口?sni=…#名称` | 支持 `insecure`、`fp`、`alpn` |
+
+Shadowrocket 导出的 VLESS 与 VMess 链接以 `remarks` 作为节点名称，支持 `obfs`（`none`、`websocket`、`grpc`、`h2`，VMess 另支持 `http`）、`obfsParam`、`path`、`tls`、`peer`、`allowInsecure`、`alpn`、`fp`、`tfo`、`udp` 及 VMess 的 `alterId`。开启 `mux` 或 `xtls`、`obfsParam` 为 JSON 请求头，或含其他参数的链接会列在跳过原因中，请改用 Clash/Mihomo YAML。
 
 无法无歧义转换的链接（其他协议、未支持的传输方式或伪装头、缺少端口或凭据等）不会被静默丢弃，会和名称一起列在来源的跳过原因中；跳过原因不包含链接内容或凭据。Xray/v2rayN 原生 JSON 与只引用远程 provider 的配置仍不支持。导入采用支持的节点、代理链及节点域名解析设置，不采用订阅中的主机系统代理、TUN、监听端口或直连规则。同一份配置中 `type: inline` 的 provider 节点会一并导入；设置了 `override` 或过滤规则的 inline provider 会列在跳过原因中。节点的 `dialer-proxy` 指向只含一个本来源节点的分组时，按该节点导入代理链；分组含多个节点、`DIRECT`、`use` 或过滤规则时仍会跳过该节点。
 

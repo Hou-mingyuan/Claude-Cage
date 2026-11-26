@@ -2798,6 +2798,7 @@
   "SSH、SFTP 与使用 OpenSSH 的工具可直接使用以上私网地址。其他应用的接入方式见下方“应用访问私网”。": "SSH, SFTP 및 OpenSSH를 사용하는 도구는 위의 개인 네트워크 주소를 바로 사용할 수 있습니다. 다른 앱의 접속 방법은 아래 \"앱에서 개인 네트워크 접근\"을 참고하세요.",
   "ShadowTLS v{0} 暂不支持（支持 v1～v3）": "ShadowTLS v{0}은(는) 아직 지원되지 않습니다(v1~v3 지원)",
   "ShadowTLS 只支持与 Shadowsocks 搭配": "ShadowTLS는 Shadowsocks와 함께 사용할 때만 지원됩니다",
+  "Shadowrocket 分享链接含有暂不支持的参数；请改用 Clash/Mihomo YAML": "Shadowrocket 공유 링크에 아직 지원되지 않는 매개변수가 있습니다. Clash/Mihomo YAML을 사용하세요",
   "Shadowsocks 分享链接的 obfs 模式无效": "Shadowsocks 공유 링크의 obfs 모드가 잘못되었습니다",
   "Shadowsocks 分享链接的插件暂不支持；请改用 Clash/Mihomo YAML": "Shadowsocks 공유 링크의 플러그인이 아직 지원되지 않습니다. Clash/Mihomo YAML을 사용하세요",
   "Snell v{0} 暂不支持（支持 v1～v3）": "Snell v{0}은(는) 아직 지원되지 않습니다(v1~v3 지원)",

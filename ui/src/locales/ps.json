@@ -2797,6 +2797,7 @@
   "SSH、SFTP 与使用 OpenSSH 的工具可直接使用以上私网地址。其他应用的接入方式见下方“应用访问私网”。": "SSH، SFTP او هغه وسایل چې OpenSSH کاروي، پورته د خصوصي شبکې پته نېغ په نېغه کارولی شي. د نورو کاریالونو د لاسرسي لپاره لاندې «د کاریالونو لاسرسی خصوصي شبکې ته» وګورئ.",
   "ShadowTLS v{0} 暂不支持（支持 v1～v3）": "ShadowTLS v{0} لا ملاتړ نه کېږي (v1–v3 ملاتړ کېږي)",
   "ShadowTLS 只支持与 Shadowsocks 搭配": "ShadowTLS یوازې له Shadowsocks سره ملاتړ کېږي",
+  "Shadowrocket 分享链接含有暂不支持的参数；请改用 Clash/Mihomo YAML": "د Shadowrocket شریکولو لینک داسې پارامټرونه لري چې لا ملاتړ نه کېږي؛ پر ځای یې Clash/Mihomo YAML وکاروئ",
   "Shadowsocks 分享链接的 obfs 模式无效": "د Shadowsocks شریکولو لینک obfs حالت نااعتباره دی",
   "Shadowsocks 分享链接的插件暂不支持；请改用 Clash/Mihomo YAML": "د Shadowsocks شریکولو لینک پلګ‌این لا ملاتړ نه کېږي؛ پر ځای یې Clash/Mihomo YAML وکاروئ",
   "Snell v{0} 暂不支持（支持 v1～v3）": "Snell v{0} لا ملاتړ نه کېږي (v1–v3 ملاتړ کېږي)",

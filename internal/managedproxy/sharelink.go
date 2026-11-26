@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -93,9 +94,12 @@ func shareLinkScheme(line string) string {
 
 // shareLinkName is the URL fragment, the only part of a link meant for display.
 func shareLinkName(line string) string {
-	_, fragment, ok := strings.Cut(line, "#")
+	before, fragment, ok := strings.Cut(line, "#")
 	if !ok {
-		return ""
+		// Shadowrocket links carry the display name in remarks instead.
+		_, rawQuery, _ := strings.Cut(before, "?")
+		name, _ := rawQueryValue(rawQuery, "remarks")
+		return strings.TrimSpace(name)
 	}
 	if name, err := url.PathUnescape(fragment); err == nil {
 		fragment = name
@@ -198,10 +202,12 @@ func applyTransport(p map[string]any, network, path, host, service, header strin
 		}
 		p["h2-opts"] = opts
 	default:
-		return errors.New("分享链接的传输方式暂不支持；请改用 Clash/Mihomo YAML")
+		return errShareLinkTransport
 	}
 	return nil
 }
+
+var errShareLinkTransport = errors.New("分享链接的传输方式暂不支持；请改用 Clash/Mihomo YAML")
 
 func parseTrojanLink(line string) (map[string]any, error) {
 	u, p, err := linkBase(line, "trojan")
@@ -235,7 +241,17 @@ func parseTrojanLink(line string) (map[string]any, error) {
 	return p, nil
 }
 
+var errVLESSEncryption = errors.New("VLESS 分享链接的 encryption 暂不支持；请改用 Clash/Mihomo YAML")
+
 func parseVLESSLink(line string) (map[string]any, error) {
+	_, rest, _ := strings.Cut(line, "://")
+	if i := strings.IndexAny(rest, "?#"); i >= 0 {
+		rest = rest[:i]
+	}
+	authority, _, _ := strings.Cut(rest, "/")
+	if !strings.Contains(authority, "@") {
+		return parseShadowrocketVLESS(line)
+	}
 	u, p, err := linkBase(line, "vless")
 	if err != nil {
 		return nil, err
@@ -246,7 +262,7 @@ func parseVLESSLink(line string) (map[string]any, error) {
 	}
 	q := u.Query()
 	if enc := q.Get("encryption"); enc != "" && enc != "none" {
-		return nil, errors.New("VLESS 分享链接的 encryption 暂不支持；请改用 Clash/Mihomo YAML")
+		return nil, errVLESSEncryption
 	}
 	p["uuid"] = uuid
 	setString(p, "flow", q.Get("flow"))
@@ -279,7 +295,10 @@ func parseVLESSLink(line string) (map[string]any, error) {
 	return p, nil
 }
 
-// parseVMessLink reads the v2rayN form vmess://Base64(JSON).
+var errVMessFormat = errors.New("VMess 分享链接不是 v2rayN 格式；请改用 Clash/Mihomo YAML")
+
+// parseVMessLink reads the v2rayN form vmess://Base64(JSON), then
+// Shadowrocket's vmess://Base64(cipher:uuid@server:port)?params.
 func parseVMessLink(line string) (map[string]any, error) {
 	encoded := strings.TrimSpace(line[len("vmess://"):])
 	var raw []byte
@@ -290,7 +309,7 @@ func parseVMessLink(line string) (map[string]any, error) {
 		}
 	}
 	if raw == nil {
-		return nil, errors.New("VMess 分享链接不是 v2rayN 格式；请改用 Clash/Mihomo YAML")
+		return parseShadowrocketVMess(line)
 	}
 	var v struct {
 		PS, Add, ID, Scy, Net, Type, Host, Path, TLS, SNI, ALPN, FP string
@@ -298,7 +317,7 @@ func parseVMessLink(line string) (map[string]any, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if decoder.Decode(&v) != nil {
-		return nil, errors.New("VMess 分享链接不是 v2rayN 格式；请改用 Clash/Mihomo YAML")
+		return parseShadowrocketVMess(line)
 	}
 	port, portErr := jsonInt(v.Port)
 	aid, aidErr := jsonInt(v.AID)
@@ -340,6 +359,189 @@ func parseVMessLink(line string) (map[string]any, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+var errShadowrocketParam = errors.New("Shadowrocket 分享链接含有暂不支持的参数；请改用 Clash/Mihomo YAML")
+
+// shadowrocketParams are the Shadowrocket parameters with a Mihomo
+// equivalent. Any other parameter is rejected instead of dropped, because it
+// may change how the node connects.
+var shadowrocketParams = map[string]bool{
+	"remarks": true, "obfs": true, "obfsParam": true, "path": true, "tls": true, "peer": true,
+	"allowInsecure": true, "alpn": true, "fp": true, "udp": true, "tfo": true, "mux": true, "xtls": true,
+}
+
+// shadowrocketLink is the scheme://Base64(method:id@server:port)?params form
+// Shadowrocket exports for VLESS and VMess. The name is in remarks, not in
+// the fragment.
+type shadowrocketLink struct {
+	method, id string
+	p          map[string]any
+	q          url.Values
+}
+
+// parseShadowrocketLink returns ok=false when the encoded part does not decode
+// to method:id@server:port, so the caller can report its own format error.
+func parseShadowrocketLink(line, typ string, extra ...string) (*shadowrocketLink, bool, error) {
+	_, rest, _ := strings.Cut(line, "://")
+	rest, fragment, _ := strings.Cut(rest, "#")
+	encoded, rawQuery, _ := strings.Cut(rest, "?")
+	decoded, ok := decodeBase64(strings.TrimSuffix(encoded, "/"))
+	if !ok {
+		return nil, false, nil
+	}
+	at := strings.LastIndexByte(decoded, '@')
+	if at < 0 {
+		return nil, false, nil
+	}
+	method, id, ok := strings.Cut(decoded[:at], ":")
+	if !ok {
+		return nil, false, nil
+	}
+	host, portText, err := net.SplitHostPort(decoded[at+1:])
+	port, portErr := strconv.Atoi(portText)
+	if err != nil || portErr != nil || port < 1 || port > 65535 || method == "" || id == "" || host == "" ||
+		strings.ContainsAny(id, ":@/?# \t\r\n") || strings.ContainsAny(host, "@/?# \t\r\n") {
+		return nil, true, errShareLinkInvalid
+	}
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return nil, true, errShareLinkInvalid
+	}
+	for k, v := range q {
+		if len(v) != 1 || !(shadowrocketParams[k] || slices.Contains(extra, k)) {
+			return nil, true, errShadowrocketParam
+		}
+	}
+	name := ""
+	if n, err := url.PathUnescape(fragment); err == nil {
+		name = strings.TrimSpace(n)
+	}
+	if name == "" {
+		name = strings.TrimSpace(q.Get("remarks"))
+	}
+	if name == "" {
+		name = typ + " " + net.JoinHostPort(host, strconv.Itoa(port))
+	}
+	p := map[string]any{"name": name, "type": typ, "server": host, "port": port}
+	return &shadowrocketLink{method: method, id: id, p: p, q: q}, true, nil
+}
+
+func shadowrocketBool(v string) (bool, bool) {
+	switch strings.ToLower(v) {
+	case "", "0", "false":
+		return false, true
+	case "1", "true":
+		return true, true
+	}
+	return false, false
+}
+
+// apply maps the TLS, UDP and transport parameters. allowHTTP enables obfs=http,
+// HTTP/1.1 header camouflage over TCP, which Cage maps only for VMess.
+func (l *shadowrocketLink) apply(allowHTTP bool) error {
+	flags := map[string]bool{}
+	for _, k := range []string{"tls", "allowInsecure", "udp", "tfo", "mux", "xtls"} {
+		v, ok := shadowrocketBool(l.q.Get(k))
+		if !ok {
+			return errShadowrocketParam
+		}
+		flags[k] = v
+	}
+	// Shadowrocket's mux and XTLS modes have no exact Mihomo equivalent.
+	if flags["mux"] || flags["xtls"] {
+		return errShadowrocketParam
+	}
+	p, q := l.p, l.q
+	if flags["tls"] {
+		p["tls"] = true
+		setString(p, "servername", q.Get("peer"))
+		if flags["allowInsecure"] {
+			p["skip-cert-verify"] = true
+		}
+		if alpn := commaList(q.Get("alpn")); len(alpn) > 0 {
+			p["alpn"] = alpn
+		}
+		setString(p, "client-fingerprint", q.Get("fp"))
+	}
+	// udp is only validated: import turns UDP off for every node.
+	if flags["tfo"] {
+		p["tfo"] = true
+	}
+	path, host := q.Get("path"), q.Get("obfsParam")
+	// Newer Shadowrocket versions may write obfsParam as a JSON header map;
+	// only a plain host name is mapped.
+	if strings.ContainsAny(host, "{}\"' \t") {
+		return errShadowrocketParam
+	}
+	switch q.Get("obfs") {
+	case "", "none", "tcp":
+		return nil
+	case "websocket", "ws":
+		return applyTransport(p, "ws", path, host, "", "")
+	case "grpc":
+		return applyTransport(p, "grpc", "", "", path, "")
+	case "h2":
+		return applyTransport(p, "h2", path, host, "", "")
+	case "http":
+		if !allowHTTP {
+			break
+		}
+		if path == "" {
+			path = "/"
+		}
+		opts := map[string]any{"path": []string{path}}
+		if hosts := commaList(host); len(hosts) > 0 {
+			opts["headers"] = map[string]any{"Host": hosts}
+		}
+		p["network"], p["http-opts"] = "http", opts
+		return nil
+	}
+	return errShareLinkTransport
+}
+
+func parseShadowrocketVLESS(line string) (map[string]any, error) {
+	l, ok, err := parseShadowrocketLink(line, "vless")
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errShareLinkInvalid
+	}
+	if l.method != "auto" && l.method != "none" {
+		return nil, errVLESSEncryption
+	}
+	l.p["uuid"] = l.id
+	if err := l.apply(false); err != nil {
+		return nil, err
+	}
+	return l.p, nil
+}
+
+var vmessCiphers = map[string]bool{"auto": true, "none": true, "zero": true, "aes-128-gcm": true, "chacha20-poly1305": true}
+
+func parseShadowrocketVMess(line string) (map[string]any, error) {
+	l, ok, err := parseShadowrocketLink(line, "vmess", "alterId")
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errVMessFormat
+	}
+	if !vmessCiphers[l.method] {
+		return nil, errShadowrocketParam
+	}
+	aid := 0
+	if v := l.q.Get("alterId"); v != "" {
+		if aid, err = strconv.Atoi(v); err != nil || aid < 0 || aid > 65535 {
+			return nil, errShareLinkInvalid
+		}
+	}
+	l.p["uuid"], l.p["alterId"], l.p["cipher"] = l.id, aid, l.method
+	if err := l.apply(true); err != nil {
+		return nil, err
+	}
+	return l.p, nil
 }
 
 func jsonInt(raw json.RawMessage) (int, error) {
