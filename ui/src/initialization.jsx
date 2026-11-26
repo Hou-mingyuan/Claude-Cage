@@ -128,7 +128,8 @@ function Initialization({ initial, onComplete }) {
           setCanReselect(Boolean(install?.reselect));
           if (!restored.current) {
             restored.current = true;
-            if (initial.started && !initial.prepared && !account?.guest_system && !install?.pending && !next.job?.running && !next.job?.setup_progress && !next.ready) setStep("system");
+            const failedStart = next.job?.kind === "start" && Boolean(next.job.error);
+            if (!failedStart && initial.started && !initial.prepared && !account?.guest_system && !install?.pending && !next.job?.running && !next.job?.setup_progress && !next.ready) setStep("system");
           }
         }
         if (next.job?.running && ["start", "guest-install", "safety"].includes(next.job.kind)) setStep("install");
@@ -312,7 +313,7 @@ function Initialization({ initial, onComplete }) {
             {status.ready && network.mode !== "open" && !busy && !needsRestart && <>
               <div className="initialization-network"><p>{status.safety?.error || job.error || status.network_error || tr("客机已经连接，请完成网络和隔离检查后进入工作台。")}</p><button disabled={Boolean(connectionError)} onClick={checkNetwork}>{tr("运行网络与隔离检查")}</button></div>
             </>}
-            {(progress?.setup_progress.phase === "image" || (failed && !networkPending)) && <p>{tr("系统镜像遵循主机代理设置。下载失败时，可在操作详情中查看当前文件和重试记录。客机内的联网请求使用 Cage 代理。")}</p>}
+            {progress?.setup_progress.phase === "image" && <p>{tr("系统镜像遵循主机代理设置。下载失败时，可在操作详情中查看当前文件和重试记录。客机内的联网请求使用 Cage 代理。")}</p>}
             <div className="initialization-recovery">{canReselect && <button disabled={busy} onClick={() => setStep("system")}>{tr("查看或撤销原安装选择")}</button>}<button onClick={() => { if (failed) setDnsOpen(true); setStep("proxy"); }} disabled={busy}>{tr("检查 Cage 代理配置")}</button>{!progress && <button onClick={() => setDetails(true)}>{tr("查看操作详情")}</button>}</div>
           </>)}
         </div>

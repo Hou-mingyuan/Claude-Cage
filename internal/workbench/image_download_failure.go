@@ -64,7 +64,7 @@ func imageDownloadFailure(output string) (reason, next string, ok bool) {
 		parts = append(parts, imageMirrorNames[fields[0]]+"（"+cause+"）")
 	}
 	reason = "Debian 镜像的下载地址都未能完成下载：" + strings.Join(parts, "；")
-	next = "这通常与所选代理出口和镜像站之间的连接有关。请在网络与代理设置中换一个节点，或稍后再继续安装"
+	next = "请检查宿主机到镜像站的网络连接，或稍后继续安装"
 	if hostProxy {
 		// The image is fetched by the host through its own proxy settings,
 		// so a different Cage node cannot fix this failure.

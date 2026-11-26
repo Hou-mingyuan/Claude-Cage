@@ -23,6 +23,7 @@ import (
 	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/hostimage"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
+	"github.com/sylvinus/agent-vm/internal/usererror"
 	"github.com/sylvinus/agent-vm/internal/vm"
 	"github.com/sylvinus/agent-vm/internal/vmname"
 )
@@ -372,6 +373,17 @@ func (s *Server) runCage(args ...string) error {
 	}
 	return nil
 }
+func setupProxyPreflightFailure(cause error) error {
+	reason := "启动前的代理出口检查未通过"
+	if errors.Is(cause, cage.ErrProxyConnectFailed) {
+		// The SOCKS core can acknowledge CONNECT before dialing the upstream.
+		// A failed exit probe alone cannot identify which hop failed.
+		reason = "代理出口预检未通过，首跳状态未确定，请检查宿主机经物理网卡到首跳节点端口的连接"
+	}
+	detail := usererror.Display("验证代理出口", cause, "请重新检测；仍失败时导出诊断包。")
+	return usererror.New("启动环境", reason, detail.Error(), cause)
+}
+
 func (s *Server) startEnvironment(syncTimezone bool) error {
 	s.desktopViews.reset()
 	s.browserViews.reset()
@@ -498,7 +510,7 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 		return err
 	}
 	if probeErr != nil && !s.environmentPrepared() {
-		return probeErr
+		return setupProxyPreflightFailure(probeErr)
 	}
 	if cfg.ExitPolicy.NeedsBinding() && loc.IP != "" && !s.vmRunning() {
 		bound := cfg.ExitPolicy.BindMissing(loc.exitLocation())
