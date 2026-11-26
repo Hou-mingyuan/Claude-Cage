@@ -16,6 +16,26 @@ export function canDeleteDesktop(catalog) {
   return Boolean(catalog?.supported) && visibleDesktopCount(catalog) > 1;
 }
 
+export function isMultiDesktopMode(catalog) {
+  return Boolean(catalog?.supported) && visibleDesktopCount(catalog) > 1;
+}
+
+export function soleDesktopInstance(catalog) {
+  if (isMultiDesktopMode(catalog)) return null;
+  const instances = catalog?.instances ?? catalog?.accounts ?? [];
+  if (hasDefaultDesktop(catalog)) {
+    return instances.find((item) => item.id === "default") || { id: "default", number: 0, label: "" };
+  }
+  return instances.find((item) => item.id !== "default") || null;
+}
+
+export function flatDesktopTooltip(instance, defaultLabel = "默认 Desktop") {
+  if (!instance) return "Claude Desktop";
+  const label = (instance.label || "").trim();
+  const hasDetail = Boolean(instance.number > 0 || (label && label !== defaultLabel && label !== "默认 Desktop"));
+  return hasDetail ? `Claude Desktop · ${desktopTitle(instance)}` : "Claude Desktop";
+}
+
 export function mergedDefaultInstance(catalog) {
   const target = catalog?.redirects?.default;
   if (!target || !Array.isArray(catalog?.instances)) return null;

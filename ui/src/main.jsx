@@ -401,7 +401,14 @@ function App() {
   }, []);
   const accountDesktops = useAccountDesktops(
     () => {setManagementPage(""); setHome(false); setDesktopOpen(true);},
-    () => {setDesktopOpen(false); setHome(true);}, notify, (...args) => confirm(...args), desktopOpen && running && status?.account_desktops_supported && !managementPage, status?.desktop_catalog_revision, handleDefaultDesktopRemoved);
+    () => {setDesktopOpen(false); setHome(true);},
+    notify,
+    (...args) => confirm(...args),
+    desktopOpen && running && status?.account_desktops_supported && !managementPage,
+    status?.desktop_catalog_revision,
+    handleDefaultDesktopRemoved,
+    Boolean(status?.account_desktops_supported && (!running || status?.ready)),
+  );
   useEffect(() => {
     if (!running) {
       setDefaultDesktopRunning(false);
