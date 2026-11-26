@@ -138,6 +138,7 @@ systemd-notify() { touch "$TEST_READY"; }
 claude-desktop() { ` + appBody + `; }
 `
 			script := strings.ReplaceAll(sessionScript, "/usr/bin/python3", "python3")
+			script = strings.ReplaceAll(script, "/usr/local/bin/cage-display-governor", filepath.Join(dir, "missing-governor"))
 
 			stopUnlocker := make(chan struct{})
 			go func() {
