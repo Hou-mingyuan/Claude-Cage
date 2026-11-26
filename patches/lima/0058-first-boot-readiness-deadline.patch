@@ -1,0 +1,258 @@
+diff --git a/pkg/hostagent/hostagent.go b/pkg/hostagent/hostagent.go
+index 4e6a5794..407db8d7 100644
+--- a/pkg/hostagent/hostagent.go
++++ b/pkg/hostagent/hostagent.go
+@@ -688,16 +688,18 @@ ln -sf "${SSH_AUTH_SOCK}" /run/host-services/ssh-auth.sock`
+ 
+ 	hasGuestAgentDaemon := !*a.instConfig.Plain && *a.instConfig.OS == limatype.LINUX
+ 	var bootDone chan struct{}
++	var bootDeadline time.Time
+ 	if hasGuestAgentDaemon {
+ 		go a.watchGuestAgentEvents(ctx)
+ 		go a.startTimeSync(ctx)
+ 		if a.showProgress {
+ 			bootDone = make(chan struct{})
++			bootDeadline = time.Now().Add(cloudInitMonitorTimeout)
+ 			cloudInitDone := make(chan struct{})
+ 			go func() {
+ 				// Progress mode follows a first boot that may download packages
+ 				// for a long time; the caller's idle timeout detects a stall.
+-				timeoutCtx, cancel := context.WithTimeout(ctx, cloudInitMonitorTimeout)
++				timeoutCtx, cancel := context.WithDeadline(ctx, bootDeadline)
+ 				defer cancel()
+ 
+ 				a.watchCloudInitProgress(timeoutCtx, bootDone)
+@@ -729,12 +731,7 @@ ln -sf "${SSH_AUTH_SOCK}" /run/host-services/ssh-auth.sock`
+ 		}
+ 	}
+ 
+-	finalRequirements := a.finalRequirements()
+-	if *a.instConfig.OS == limatype.WINDOWS {
+-		finalRequirements = a.finalWinRequirements()
+-	}
+-
+-	if err := a.waitForRequirements("final", finalRequirements); err != nil {
++	if err := a.waitForFinalRequirements(ctx, bootDeadline); err != nil {
+ 		errs = append(errs, err)
+ 	} else if bootDone != nil {
+ 		close(bootDone)
+diff --git a/pkg/hostagent/requirements.go b/pkg/hostagent/requirements.go
+index 0a565e8f..e9f9657e 100644
+--- a/pkg/hostagent/requirements.go
++++ b/pkg/hostagent/requirements.go
+@@ -22,8 +22,28 @@ import (
+ 	"github.com/lima-vm/lima/v2/pkg/sshutil"
+ )
+ 
++func (a *HostAgent) waitForFinalRequirements(ctx context.Context, bootDeadline time.Time) error {
++	if *a.instConfig.OS == limatype.WINDOWS {
++		return a.waitForRequirements("final", a.finalWinRequirements())
++	}
++	final := a.finalRequirements()
++	if bootDeadline.IsZero() {
++		return a.waitForRequirements("final", final)
++	}
++	// The first-boot progress watcher owns the idle limit. Retry the real
++	// marker check through transient SSH failures until its overall deadline.
++	ctx, cancel := context.WithDeadline(ctx, bootDeadline)
++	defer cancel()
++	return checkRequirements(ctx, "final", final, 0, func(req requirement) error {
++		out, err := a.cloudInitCommand(ctx, req.script).CombinedOutput()
++		if err != nil {
++			return fmt.Errorf("boot marker probe: %s: %w", strings.TrimSpace(string(out)), err)
++		}
++		return nil
++	})
++}
++
+ func (a *HostAgent) waitForRequirements(label string, requirements []requirement) error {
+-	const sleepDuration = 3 * time.Second
+ 	retries := 200
+ 	if *a.instConfig.OS == limatype.DARWIN && *a.instConfig.VMType == limatype.QEMU {
+ 		var opts limatype.QEMUOpts
+@@ -33,17 +53,24 @@ func (a *HostAgent) waitForRequirements(label string, requirements []requirement
+ 			retries = 1200
+ 		}
+ 	}
+-	var errs []error
+-
+ 	fn := a.waitForRequirement
+ 	if *a.instConfig.OS == limatype.WINDOWS {
+ 		fn = a.waitForWinRequirement
+ 	}
+ 
++	return checkRequirements(context.Background(), label, requirements, retries, fn)
++}
++
++// A zero attempt limit retries until the supplied context expires.
++func checkRequirements(ctx context.Context, label string, requirements []requirement, retries int, fn func(requirement) error) error {
++	var errs []error
+ 	for i, req := range requirements {
+ 		logrus.Infof("Waiting for the %s requirement %d of %d: %#q", label, i+1, len(requirements), req.description)
+ 	retryLoop:
+-		for j := range retries {
++		for j := 1; ; j++ {
++			if err := ctx.Err(); err != nil {
++				return fmt.Errorf("waiting for the %s requirement %#q: %w", label, req.description, err)
++			}
+ 			err := fn(req)
+ 			if err == nil {
+ 				logrus.Infof("The %s requirement %d of %d is satisfied", label, i+1, len(requirements))
+@@ -54,11 +81,15 @@ func (a *HostAgent) waitForRequirements(label string, requirements []requirement
+ 				errs = append(errs, fmt.Errorf("failed to satisfy the %s requirement %d of %d %#q: %s; skipping further checks: %w", label, i+1, len(requirements), req.description, req.debugHint, err))
+ 				return errors.Join(errs...)
+ 			}
+-			if j == retries-1 {
++			if j == retries {
+ 				errs = append(errs, fmt.Errorf("failed to satisfy the %s requirement %d of %d %#q: %s: %w", label, i+1, len(requirements), req.description, req.debugHint, err))
+ 				break retryLoop
+ 			}
+-			time.Sleep(sleepDuration)
++			select {
++			case <-ctx.Done():
++				return fmt.Errorf("waiting for the %s requirement %#q: %w: %w", label, req.description, ctx.Err(), err)
++			case <-time.After(3 * time.Second):
++			}
+ 		}
+ 	}
+ 	return errors.Join(errs...)
+diff --git a/pkg/hostagent/requirements_test.go b/pkg/hostagent/requirements_test.go
+new file mode 100644
+index 00000000..e754e50d
+--- /dev/null
++++ b/pkg/hostagent/requirements_test.go
+@@ -0,0 +1,134 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package hostagent
++
++import (
++	"context"
++	"errors"
++	"os"
++	"path/filepath"
++	"runtime"
++	"strings"
++	"testing"
++	"testing/synctest"
++	"time"
++
++	"github.com/lima-vm/sshocker/pkg/ssh"
++
++	"github.com/lima-vm/lima/v2/pkg/limatype"
++)
++
++func TestFinalRequirementRetryBudget(t *testing.T) {
++	if runtime.GOOS == "windows" {
++		t.Skip("uses a POSIX test ssh executable")
++	}
++	dir := t.TempDir()
++	probes := filepath.Join(dir, "probes")
++	marker := filepath.Join(dir, "lima-boot-done")
++	t.Setenv("BOOT_PROBES", probes)
++	t.Setenv("BOOT_MARKER", marker)
++	t.Setenv("BLOCK_BOOT_PROBE", "")
++	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
++	// The guest reports the marker on its 201st probe, just beyond the
++	// normal retry budget. Run the actual guest check against a private marker.
++	const script = `#!/bin/sh
++program=$(sed 's|/var/run/lima-boot-done|$BOOT_MARKER|g;s|/run/lima-boot-done|$BOOT_MARKER|g')
++if [ "$BLOCK_BOOT_PROBE" = 1 ]; then
++    echo started > "$BOOT_PROBES"
++    exec sleep 10
++fi
++read -r count < "$BOOT_PROBES"
++count=$((count+1))
++echo "$count" > "$BOOT_PROBES"
++if [ "$count" -eq 201 ]; then echo current-boot > "$BOOT_MARKER"; fi
++exec sh -c "$program"
++`
++	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o755); err != nil {
++		t.Fatal(err)
++	}
++	osType := limatype.LINUX
++	a := &HostAgent{instConfig: &limatype.LimaYAML{OS: &osType}, sshConfig: &ssh.SSHConfig{}, iid: "current-boot"}
++	for _, tc := range []struct {
++		name     string
++		deadline time.Duration
++		want     string
++	}{
++		{"ordinary", 0, "200"},
++		{"monitored", cloudInitMonitorTimeout, "201"},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			if err := os.WriteFile(marker, []byte("previous-boot\n"), 0o600); err != nil {
++				t.Fatal(err)
++			}
++			if err := os.WriteFile(probes, []byte("0\n"), 0o600); err != nil {
++				t.Fatal(err)
++			}
++			synctest.Test(t, func(t *testing.T) {
++				var deadline time.Time
++				if tc.deadline != 0 {
++					deadline = time.Now().Add(tc.deadline)
++				}
++				err := a.waitForFinalRequirements(t.Context(), deadline)
++				if (err == nil) != (tc.deadline != 0) {
++					t.Fatalf("unexpected readiness result: %v", err)
++				}
++			})
++			got, err := os.ReadFile(probes)
++			if err != nil || strings.TrimSpace(string(got)) != tc.want {
++				t.Fatalf("probe count %q, want %s: %v", got, tc.want, err)
++			}
++		})
++	}
++	t.Run("cancel active SSH", func(t *testing.T) {
++		t.Setenv("BLOCK_BOOT_PROBE", "1")
++		ctx, cancel := context.WithCancel(t.Context())
++		defer cancel()
++		done := make(chan error, 1)
++		go func() { done <- a.waitForFinalRequirements(ctx, time.Now().Add(time.Minute)) }()
++		timeout := time.After(5 * time.Second)
++		for {
++			if got, _ := os.ReadFile(probes); strings.TrimSpace(string(got)) == "started" {
++				break
++			}
++			select {
++			case <-timeout:
++				t.Fatal("SSH probe did not start")
++			case <-time.After(10 * time.Millisecond):
++			}
++		}
++		cancel()
++		select {
++		case err := <-done:
++			if !errors.Is(err, context.Canceled) {
++				t.Fatalf("got %v after canceling SSH", err)
++			}
++		case <-time.After(2 * time.Second):
++			t.Fatal("SSH probe kept running after cancellation")
++		}
++	})
++}
++
++func TestRequirementWaitStopsBetweenProbes(t *testing.T) {
++	synctest.Test(t, func(t *testing.T) {
++		for _, userCancel := range []bool{false, true} {
++			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
++			calls := 0
++			err := checkRequirements(ctx, "final", []requirement{{description: "boot marker"}}, 0, func(requirement) error {
++				calls++
++				if userCancel {
++					cancel()
++				}
++				return errors.New("still installing")
++			})
++			cancel()
++			want := context.DeadlineExceeded
++			if userCancel {
++				want = context.Canceled
++			}
++			if !errors.Is(err, want) || calls != 1 {
++				t.Fatalf("got %v after %d probes, want %v after one probe", err, calls, want)
++			}
++		}
++	})
++}
