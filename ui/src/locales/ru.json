@@ -2971,6 +2971,7 @@
   "SSH 配置已变化，请重新打开导入预览": "Конфигурация SSH изменилась; откройте предпросмотр импорта заново",
   "ShadowTLS v{0} 暂不支持（支持 v1～v3）": "ShadowTLS v{0} пока не поддерживается (поддерживаются v1–v3)",
   "ShadowTLS 只支持与 Shadowsocks 搭配": "ShadowTLS поддерживается только совместно с Shadowsocks",
+  "Shadowrocket 分享链接含有暂不支持的参数；请改用 Clash/Mihomo YAML": "Ссылка Shadowrocket содержит параметры, которые пока не поддерживаются; используйте Clash/Mihomo YAML",
   "Shadowsocks 分享链接的 obfs 模式无效": "Недопустимый режим obfs в ссылке Shadowsocks",
   "Shadowsocks 分享链接的插件暂不支持；请改用 Clash/Mihomo YAML": "Плагин в ссылке Shadowsocks пока не поддерживается; используйте Clash/Mihomo YAML",
   "Snell v{0} 暂不支持（支持 v1～v3）": "Snell v{0} пока не поддерживается (поддерживаются v1–v3)",

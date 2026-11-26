@@ -2798,6 +2798,7 @@
   "SSH、SFTP 与使用 OpenSSH 的工具可直接使用以上私网地址。其他应用的接入方式见下方“应用访问私网”。": "SSH、SFTP 與使用 OpenSSH 的工具可直接使用上述私網位址。其他應用程式的存取方式請見下方「應用程式存取私網」。",
   "ShadowTLS v{0} 暂不支持（支持 v1～v3）": "暫不支援 ShadowTLS v{0}（支援 v1～v3）",
   "ShadowTLS 只支持与 Shadowsocks 搭配": "ShadowTLS 僅支援與 Shadowsocks 搭配",
+  "Shadowrocket 分享链接含有暂不支持的参数；请改用 Clash/Mihomo YAML": "Shadowrocket 分享連結含有暫不支援的參數；請改用 Clash/Mihomo YAML",
   "Shadowsocks 分享链接的 obfs 模式无效": "Shadowsocks 分享連結的 obfs 模式無效",
   "Shadowsocks 分享链接的插件暂不支持；请改用 Clash/Mihomo YAML": "Shadowsocks 分享連結的外掛程式暫不支援；請改用 Clash/Mihomo YAML",
   "Snell v{0} 暂不支持（支持 v1～v3）": "暫不支援 Snell v{0}（支援 v1～v3）",

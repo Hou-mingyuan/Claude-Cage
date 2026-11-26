@@ -2798,6 +2798,7 @@
   "SSH、SFTP 与使用 OpenSSH 的工具可直接使用以上私网地址。其他应用的接入方式见下方“应用访问私网”。": "SSH፣ SFTP ከምኡውን OpenSSH ዝጥቀሙ መሳርሒታት ነቲ ኣብ ላዕሊ ዘሎ ብሕታዊ ኣድራሻ ኔትወርክ ብቐጥታ ክጥቀሙሉ ይኽእሉ። ንኻልኦት መተግበሪታት ኣብ ታሕቲ \"መተግበሪታት ናብ ብሕታዊ ኔትወርክ ክኣትዉ\" ርአ።",
   "ShadowTLS v{0} 暂不支持（支持 v1～v3）": "ShadowTLS v{0} ገና ኣይድገፍን (v1–v3 ይድገፉ)",
   "ShadowTLS 只支持与 Shadowsocks 搭配": "ShadowTLS ምስ Shadowsocks ጥራይ እዩ ዝድገፍ",
+  "Shadowrocket 分享链接含有暂不支持的参数；请改用 Clash/Mihomo YAML": "መካፈሊ ሊንክ ናይ Shadowrocket ገና ዘይድገፉ መለክዒታት ይሓዝ፤ ኣብ ክንድኡ Clash/Mihomo YAML ተጠቐም",
   "Shadowsocks 分享链接的 obfs 模式无效": "ኩነታት obfs ናይ Shadowsocks መካፈሊ ሊንክ ቅኑዕ ኣይኮነን",
   "Shadowsocks 分享链接的插件暂不支持；请改用 Clash/Mihomo YAML": "ፕለጊን ናይ Shadowsocks መካፈሊ ሊንክ ገና ኣይድገፍን፤ ኣብ ክንድኡ Clash/Mihomo YAML ተጠቐም",
   "Snell v{0} 暂不支持（支持 v1～v3）": "Snell v{0} ገና ኣይድገፍን (v1–v3 ይድገፉ)",
