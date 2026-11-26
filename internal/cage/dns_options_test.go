@@ -1,6 +1,7 @@
 package cage
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -78,6 +79,57 @@ func TestDNSFailsOverToBackupEndpointThroughProxy(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "/dns-query") || strings.Contains(err.Error(), primary.URL) {
 		t.Fatalf("error leaked an endpoint path: %v", err)
+	}
+}
+
+// A silently dropped primary must not use up the guest resolver's 5-second
+// window before the backup is tried.
+func TestDNSFailsOverToBackupWithinGuestTimeoutWhenPrimaryHangs(t *testing.T) {
+	var primaryHits, backupHits atomic.Int32
+	var backupDown atomic.Bool
+	release := make(chan struct{})
+	primary := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits.Add(1)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(primary.Close)
+	t.Cleanup(func() { close(release) })
+	backup := dohServer(t, &backupDown, &backupHits)
+	p, connects := testProxy(t)
+	defer p.Close()
+	c := DefaultConfig()
+	c.ProxyURL, c.DNSURL = p.URL, primary.URL
+	c.DNS = NewDNSOptions([]string{backup.URL}, nil, false)
+	e, err := NewEgress(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.client.CloseIdleConnections()
+	pool := primary.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs.Clone()
+	pool.AddCert(backup.Certificate())
+	e.client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{RootCAs: pool}
+	q := new(dns.Msg).SetQuestion("deb.debian.org.", dns.TypeA)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	began := time.Now()
+	if _, err := e.ExchangeDNS(ctx, q); err != nil {
+		t.Fatalf("backup did not answer within the guest window: %v", err)
+	}
+	if elapsed := time.Since(began); elapsed >= 4*time.Second {
+		t.Fatalf("failover took %v", elapsed)
+	}
+	if primaryHits.Load() != 1 || backupHits.Load() != 1 || connects.Load() == 0 {
+		t.Fatalf("failover order wrong: primary=%d backup=%d connects=%d", primaryHits.Load(), backupHits.Load(), connects.Load())
+	}
+	began = time.Now()
+	if _, err := e.ExchangeDNS(t.Context(), q); err != nil || primaryHits.Load() != 1 || backupHits.Load() != 2 {
+		t.Fatalf("answering backup not preferred: %v primary=%d backup=%d", err, primaryHits.Load(), backupHits.Load())
+	}
+	if elapsed := time.Since(began); elapsed >= time.Second {
+		t.Fatalf("preferred backup still waited %v", elapsed)
 	}
 }
 
