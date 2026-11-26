@@ -35,7 +35,7 @@ internal static class UpdateRecovery
     // verified controller to check the shared profile and stop any new process.
     public static async Task PrepareRollback(string backup, CancellationToken cancellation = default)
     {
-        var (exit, result) = await Backend.JsonAt(BackendPath(backup), ["prepare-update", "--json", "--stop"], cancellation);
+        var (exit, result) = await Backend.JsonAt(BackendPath(backup), ["prepare-update", "--json", "--stop"], cancellation, Backend.UpdateStopDeadline);
         if (exit != 0 || result.Text("status") != "prepared")
             throw new IOException("旧版后台无法确认环境已停止，原应用备份已保留");
     }

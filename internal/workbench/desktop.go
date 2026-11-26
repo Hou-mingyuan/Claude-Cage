@@ -48,6 +48,9 @@ const (
 	controllerReleaseRequestTimeout = 2*vmProbeTimeout + 5*time.Second
 	// Connecting may start a controller and then wait for its first status.
 	localBootstrapTimeout = controllerVMRequestTimeout + 12*time.Second
+	// Lima can wait 190 seconds for its host agent and another 180 seconds
+	// for the instance. Leave room for stop-job bookkeeping and polling.
+	controllerUpdateStopTimeout = 7 * time.Minute
 )
 
 // controllerRequestBudget extends the client timeout only for the requests
@@ -440,7 +443,7 @@ func (c *controllerClient) stopAndHandoff() error {
 	if status != http.StatusOK || requested.ID == "" {
 		return errors.New("后台未接受停止请求，已取消本次更新。")
 	}
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(controllerUpdateStopTimeout)
 	for {
 		var state struct {
 			VMRunning *bool `json:"vm_running"`
