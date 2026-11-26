@@ -31,6 +31,7 @@ fingerprint=$(gpg --batch --show-keys --with-colons "$temporary/key.asc" | awk -
 test "$fingerprint" = 31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE || { echo 'Anthropic signing key did not match; installation stopped.' >&2; exit 1; }
 sudo install -m 0644 "$temporary/key.asc" /usr/share/keyrings/claude-desktop-archive-keyring.asc
 printf '%s\n' 'deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main' | sudo tee /etc/apt/sources.list.d/claude-desktop.list >/dev/null
+declare -F cage_refresh_apt_sources >/dev/null && cage_refresh_apt_sources || :
 apt_get update
 printf '正在下载并安装 Claude Desktop…\n'
 # Cowork's nested VM packages are intentionally optional; Chat and Code share

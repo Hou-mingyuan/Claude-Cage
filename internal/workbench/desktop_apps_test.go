@@ -199,3 +199,90 @@ func TestDesktopAppResizeHTTP(t *testing.T) {
 		t.Fatalf("resize of a disabled plugin's application: %d", w.Code)
 	}
 }
+
+func TestDesktopAppDownloadResumesTransientErrorsAndStopsOn403(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the installer Bash script runs in the Linux guest, not the Windows host")
+	}
+	shell, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	start := strings.Index(linuxAppInstall, "download() {")
+	end := strings.Index(linuxAppInstall[start:], "\npackage=")
+	if start < 0 || end < 0 {
+		t.Fatal("download function not found in linux-app-install.sh")
+	}
+	downloadFn := linuxAppInstall[start : start+end]
+
+	home := t.TempDir()
+	dest := filepath.Join(home, "app.archive")
+	// Attempt 1 writes partial bytes and exits 28 (timeout); attempt 2 resumes
+	// and prints "200" (matching tool-download.py) without leaking it to stdout.
+	script := `set -euo pipefail
+sleep() { :; }
+app_id=0123456789abcdef01234567
+release_version=2.35.2
+release_url=https://storage.googleapis.com/antigravity-public/example.tar.gz
+release_digest=
+cage_curl_download() {
+  local part="$1"
+  local count=0
+  [ -f "$HOME/attempt-count" ] && count=$(cat "$HOME/attempt-count")
+  count=$((count + 1))
+  printf '%s' "$count" > "$HOME/attempt-count"
+  case "$*" in
+    *"--continue-at -"*) ;;
+    *) echo "missing --continue-at -" >&2; return 99 ;;
+  esac
+  if (( count == 1 )); then
+    printf 'part1-' >> "$part"
+    printf '000'
+    return 28
+  fi
+  printf 'part2' >> "$part"
+  printf '200'
+  return 0
+}
+` + downloadFn + `
+download "$DEST"
+printf 'CONTENT=%s CALLS=%s\n' "$(cat "$DEST")" "$(cat "$HOME/attempt-count")"
+`
+	cmd := exec.Command(shell, "-s")
+	cmd.Stdin = strings.NewReader(script)
+	cmd.Env = append(os.Environ(), "HOME="+home, "DEST="+dest)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("resumable download failed: %v\n%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "CONTENT=part1-part2 CALLS=2") || strings.Contains(text, "200") {
+		t.Fatalf("unexpected download output: %q", text)
+	}
+
+	// HTTP 403 (curl exit 22, http_code 403) must fail immediately without retrying.
+	failScript := `set -euo pipefail
+sleep() { :; }
+app_id=0123456789abcdef01234567
+release_version=2.35.2
+release_url=https://storage.googleapis.com/antigravity-public/example.tar.gz
+release_digest=
+cage_curl_download() {
+  echo call >> "$HOME/calls"
+  printf '403'
+  return 22
+}
+` + downloadFn + `
+download "$DEST"
+`
+	cmd = exec.Command(shell, "-s")
+	cmd.Stdin = strings.NewReader(failScript)
+	cmd.Env = append(os.Environ(), "HOME="+home, "DEST="+dest)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("403 unexpectedly succeeded: %s", out)
+	}
+	calls, err := os.ReadFile(filepath.Join(home, "calls"))
+	if err != nil || strings.Count(string(calls), "call") != 1 {
+		t.Fatalf("403 retried unexpectedly: %q (%v)", string(calls), err)
+	}
+}
