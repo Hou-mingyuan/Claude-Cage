@@ -110,7 +110,7 @@ class TerminalJobTest(unittest.TestCase):
                                        json.dumps(request)], self.env)
         self.addCleanup(self.close)
         self.output = b""
-        self.wait_for(b"cli-ready=")
+        self.wait_for(b"cli-ready=", startup=True)
         self.child = json.loads((self.folder / "state.json").read_text())["pid"]
         self.wait_for(str(self.child).encode())
         command = subprocess.check_output(["ps", "-ww", "-o", "command=", "-p", str(self.pid)], text=True)
@@ -121,26 +121,66 @@ class TerminalJobTest(unittest.TestCase):
         if self.master is not None:
             os.close(self.master)
             self.master = None
+        if self.pid is not None:
+            self.wait_for_owner()
+
+    def wait_for_owner(self):
         deadline = time.monotonic() + 4
-        while time.monotonic() < deadline:
-            if os.waitpid(self.pid, os.WNOHANG)[0]:
-                return
+        while True:
+            pid, status = os.waitpid(self.pid, os.WNOHANG)
+            if pid:
+                self.pid = None
+                return os.waitstatus_to_exitcode(status)
+            if time.monotonic() >= deadline:
+                break
             time.sleep(0.01)
+        pids = [self.pid]
+        if hasattr(self, "child"):
+            pids.append(self.child)
+        snapshot = subprocess.run(["ps", "-o", "pid,ppid,pgid,stat,comm", "-p",
+                                   ",".join(map(str, pids))], text=True, capture_output=True)
         os.kill(self.pid, signal.SIGKILL)
         os.waitpid(self.pid, 0)
-        self.fail("terminal owner did not exit after hangup")
+        self.pid = None
+        self.fail("terminal owner did not exit after hangup:\n" + snapshot.stdout)
 
-    def wait_for(self, text):
-        deadline = time.monotonic() + 7
-        while text not in self.output and time.monotonic() < deadline:
-            if select.select([self.master], [], [], 0.1)[0]:
+    def read_output(self, timeout):
+        if not select.select([self.master], [], [], timeout)[0]:
+            return True
+        try:
+            data = os.read(self.master, 8192)
+        except OSError as error:
+            if error.errno == errno.EIO:
+                return False
+            raise
+        self.output += data
+        return bool(data)
+
+    def wait_for(self, text, *, startup=False):
+        # A cold launch includes the account helper's 10-second identity check.
+        timeout = 20 if startup else 7
+        deadline = time.monotonic() + timeout
+        reason = f"{timeout}s deadline expired"
+        while text not in self.output:
+            if startup and b"test-shell> " in self.output:
+                reason = "shell returned before CLI startup"
+                break
+            remaining = deadline - time.monotonic()
+            if not self.read_output(max(0, remaining)):
+                reason = "terminal reached EOF"
+                break
+            # Read once without blocking when the observer resumes past its deadline.
+            if remaining <= 0:
+                break
+        if text not in self.output:
+            details = ""
+            if startup:
                 try:
-                    self.output += os.read(self.master, 8192)
-                except OSError as error:
-                    if error.errno == errno.EIO:
-                        break
-                    raise
-        self.assertIn(text, self.output)
+                    state = self.job_state()
+                except FileNotFoundError:
+                    state = {}
+                details = f", owner={self.pid}, registered CLI={state.get('pid')}, closed={state.get('closed')}"
+            self.fail(f"{reason} waiting for {text!r}{details}, PTY output={self.output[-1024:]!r}")
         self.output = self.output.split(text, 1)[1]
 
     def pause(self):
@@ -178,8 +218,9 @@ class TerminalJobTest(unittest.TestCase):
         os.write(self.master, b"""printf 'status=%d flags=%d mask=%s\\n' "$?" "$(env | grep -c '^CAGE_')" "$(umask)"\n""")
         self.wait_for(b"status=23 flags=0 mask=0027")
         self.assertFalse((self.workspace / "stale-input-executed").exists())
+        self.wait_for(b"test-shell> ")
         os.write(self.master, b"claude\n")
-        self.wait_for(b"cli-ready=")
+        self.wait_for(b"cli-ready=", startup=True)
         os.write(self.master, b"/resume\n")
         self.wait_for(b"history=" + self.session.encode())
         self.assertEqual(self.resume(), {"error": "terminal_unavailable"})
@@ -202,19 +243,29 @@ class TerminalJobTest(unittest.TestCase):
         self.start_job()
         self.pause()
         os.kill(self.pid, signal.SIGTERM)
-        self.assert_reaped()
+        # A connected terminal keeps reading while the guest shuts down.
+        # Darwin can wait for its remaining echo to drain at exit.
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline and not self.job_state().get("closed"):
+            if not self.read_output(0.01):
+                break
+        self.assert_closed_job("after SIGTERM with the terminal still open")
 
     def assert_reaped(self):
-        until = time.monotonic() + 4
-        while time.monotonic() < until:
-            if json.loads((self.folder / "state.json").read_text()).get("closed"):
-                with self.assertRaises(ProcessLookupError):
-                    os.kill(self.child, 0)
-                return
-            time.sleep(0.01)
-        snapshot = subprocess.run(["ps", "-o", "pid,ppid,pgid,stat,comm", "-p",
-                                   f"{self.pid},{self.child}"], text=True, capture_output=True)
-        self.fail("terminal state is still open after close; supervisor and CLI:\n" + snapshot.stdout)
+        # After the supervisor exits its final write is complete, even if the
+        # observer was descheduled during shutdown.
+        status = self.wait_for_owner()
+        self.assert_closed_job(f"after supervisor exit (status {status})")
+
+    def job_state(self):
+        return json.loads((self.folder / "state.json").read_text())
+
+    def assert_closed_job(self, when):
+        state = self.job_state()
+        self.assertEqual(state.get("pid"), self.child, f"recorded PID changed {when}")
+        self.assertIs(state.get("closed"), True, f"terminal state still open {when}")
+        with self.assertRaises(ProcessLookupError, msg=f"CLI survived {when}"):
+            os.kill(self.child, 0)
 
     def test_other_foreground_job_keeps_its_input(self):
         self.start_job()
