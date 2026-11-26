@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"syscall"
@@ -23,6 +24,7 @@ func TestKnownFailureIsReadableAndPreservesCause(t *testing.T) {
 		{syscall.ENOSPC, "空间不足"},
 		{syscall.ECONNREFUSED, "拒绝了连接"},
 		{x509.UnknownAuthorityError{}, "证书"},
+		{&url.Error{Op: "Get", URL: "https://user:private@example.com/", Err: http.ErrSchemeMismatch}, "明文 HTTP 响应"},
 	} {
 		err := Wrap("连接更新源", tc.cause, "请检查所选代理。")
 		if !strings.Contains(err.Error(), tc.reason) || !strings.Contains(err.Error(), "连接更新源") || strings.Contains(err.Error(), "private") {

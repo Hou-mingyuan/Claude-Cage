@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -79,6 +80,11 @@ func Reason(err error) string {
 	var record tls.RecordHeaderError
 	if errors.As(err, &authority) || errors.As(err, &hostname) || errors.As(err, &certificate) {
 		return "服务器证书验证未通过"
+	}
+	// net/http replaces the record header error with this sentinel when the
+	// peer answered a TLS ClientHello with plain HTTP.
+	if errors.Is(err, http.ErrSchemeMismatch) {
+		return "服务器在加密连接上返回了明文 HTTP 响应，协议或端口可能不匹配"
 	}
 	if errors.As(err, &record) {
 		return "服务器没有返回有效的加密连接响应"
