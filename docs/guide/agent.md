@@ -208,7 +208,7 @@ cage agent job 012345abcdef --wait 30m
 
 `--wait` 为有限等待，范围为 0 到 24 小时；不指定时立即返回。等待或客户端断开不会自动取消作业。每个作业会通过 `initiator` 记录发起方（`agent`、`desktop` 或 `setup`）。后台只保留最近一个作业和被它替换的上一个作业，更早的记录会丢失，重启也可能失去记录。仍在运行的作业被停止或取消时，原作业返回 `job_canceled`，`canceled_by` 给出取消来源（`agent`、`desktop` 或 `setup`），`superseded_by` 给出替换它的作业 id，可据此查询停止作业的结果并决定是否重试。`job_not_found`、`outcome_unknown` 或连接中断后，先读 `status` 和相应配置，核对副作用；不要把其他任务成功当成原任务成功。`job_canceled` 单独表示取消，不能视为完成。
 
-命名 call 的输入必须是单个 JSON 对象，最大 12 MiB；request 支持原始二进制文件流。未知命令和字段会被拒绝。能力清单的 `input_schema` 描述允许字段；当前平台、系统状态和字段组合仍由后台验证。错误说明经过脱敏，正常业务结果保持接口原值。用户可以查看的密码、Cookie、配对码等，在同样的再次验证和权限检查通过后也可由 Agent 读取，应通过私有管道处理，避免默认记录或回显。
+`call` 只接受能力清单 `operations` 中的名称；`capabilities`、`doctor`、`init`、`service.start`、`host.inspect`、`routes`、`diagnostics` 是顶层命令，直接以 `cage agent 命令` 运行，传给 `call` 会返回 `unknown_operation`，`next_action` 给出对应的顶层命令。命名 call 的输入必须是单个 JSON 对象，最大 12 MiB；request 支持原始二进制文件流。未知命令和字段会被拒绝。能力清单的 `input_schema` 描述允许字段；当前平台、系统状态和字段组合仍由后台验证。错误说明经过脱敏，正常业务结果保持接口原值。用户可以查看的密码、Cookie、配对码等，在同样的再次验证和权限检查通过后也可由 Agent 读取，应通过私有管道处理，避免默认记录或回显。
 
 ## 定位问题与恢复
 
@@ -216,9 +216,10 @@ cage agent job 012345abcdef --wait 30m
 
 | 稳定错误码或可见状态 | Agent 的下一步 |
 | --- | --- |
-| `config_missing` | 核对用户数据位置；真正首次使用才运行 `init`。 |
+| `config_missing` | 核对用户数据位置；真正首次使用才运行 `init`。此时后台检查也会指向 `init`，配置创建后再执行 `service.start` 和 `account.create`。 |
 | `config_invalid`、`private_file_permissions` | 保留配置与磁盘，导出诊断，检查原文件和权限；不要覆盖整个 profile。 |
-| `service_unavailable` | 核对实际 CLI 与路径，执行 `service.start`；失败时导出离线诊断。 |
+| `service_unavailable` | 核对实际 CLI 与路径，执行顶层命令 `cage agent service.start`（不是 `call service.start`）或打开 Cage 应用；失败时导出离线诊断。 |
+| `authentication_failed` | 后台拒绝了这次会话。从 Cage 应用重新打开工作台后重试；`service.start` 会复用已有后台，不能恢复会话。 |
 | `controller_mismatch` | 使用与运行后台同一应用内的 CLI；更新需要保存并停止已有任务，Agent 不会自动接管。 |
 | `config_path_mismatch` | 同一目录的后台使用了另一个配置文件名；改用原后台的绝对配置路径，保留所有现有文件。 |
 | `account_missing` | 这份配置还没有账户：由用户在 Cage 创建，或通过私有输入调用 `account.create`；不要调用 `account.unlock`。 |
