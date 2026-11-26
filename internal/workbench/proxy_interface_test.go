@@ -432,8 +432,8 @@ func TestSettingsProbeRebindsActiveCoreOnlyWithoutBootstrapPreflight(t *testing.
 	const preflightEndpoint = "socks5://cage:preflight@127.0.0.1:19877"
 	restarts := 0
 	preflights := 0
+	activeProbes := 0
 	physicalProxyInterface = func(context.Context) (string, error) { return "wlp4s0", nil }
-	proxyInterfaceCoreRunning = func(context.Context, string, managedproxy.Store) bool { return true }
 	startProxyCore = func(_ context.Context, profile string, _ managedproxy.Store) error {
 		restarts++
 		return os.WriteFile(filepath.Join(profile, "proxy", "config.yaml"), []byte("interface-name: wlp4s0\n"), 0600)
@@ -446,6 +446,7 @@ func TestSettingsProbeRebindsActiveCoreOnlyWithoutBootstrapPreflight(t *testing.
 		if c.ProxyURL == preflightEndpoint {
 			return Location{IP: "8.8.8.8", CountryCode: "US", CheckedAt: time.Now()}, nil
 		}
+		activeProbes++
 		return Location{IP: "1.1.1.1", CountryCode: "US", CheckedAt: time.Now()}, nil
 	}
 
@@ -458,9 +459,15 @@ func TestSettingsProbeRebindsActiveCoreOnlyWithoutBootstrapPreflight(t *testing.
 		t.Fatalf("candidate preflight probe got code=%d preflights=%d restarts=%d body=%s", w.Code, preflights, restarts, w.Body.String())
 	}
 
-	// Ordinary probe using the active core auto-rebinds the stale stopped-VM interface first.
+	// No managed core is listening. An ordinary probe should explain how to start it.
 	ordinaryView := settingsView(cfg, s.preferences)
 	body, _ = json.Marshal(ordinaryView)
+	w = request(s, "POST", "/api/settings/probe", s.origin, string(body), true)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "内置代理未就绪") || !strings.Contains(w.Body.String(), "请先启动环境") || activeProbes != 0 || restarts != 0 || preflights != 1 {
+		t.Fatalf("stopped core probe got code=%d probes=%d preflights=%d restarts=%d body=%s", w.Code, activeProbes, preflights, restarts, w.Body.String())
+	}
+	// With the core running, rebind its stale interface before probing.
+	proxyInterfaceCoreRunning = func(context.Context, string, managedproxy.Store) bool { return true }
 	w = request(s, "POST", "/api/settings/probe", s.origin, string(body), true)
 	if w.Code != 200 || preflights != 1 || restarts != 1 {
 		t.Fatalf("ordinary probe got code=%d preflights=%d restarts=%d body=%s", w.Code, preflights, restarts, w.Body.String())
