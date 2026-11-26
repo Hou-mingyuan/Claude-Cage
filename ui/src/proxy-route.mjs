@@ -413,3 +413,31 @@ export function sanitizeRelayHopAfterExitChange(hops, newExitID) {
     return hop;
   });
 }
+
+export function hasConfiguredRelays(hops) {
+  if (!Array.isArray(hops) || hops.length <= 1) return false;
+  return hops.slice(0, -1).some((hop) =>
+    hop?.kind === "relay" && (Boolean(hop.source_id) || (hop.node_ids?.length || 0) > 0),
+  );
+}
+
+export function restoreChainRoute(currentExitHop, rememberedRelays, sources, usableIDs) {
+  const exit = currentExitHop?.kind === "node" ? nodeHop(currentExitHop.node_id) : nodeHop("");
+  if (!Array.isArray(rememberedRelays) || rememberedRelays.length === 0) {
+    return [relayHop(), exit];
+  }
+  const sourceIDs = new Set((sources || []).map((s) => s.id));
+  const cleaned = rememberedRelays
+    .filter((hop) => hop?.kind === "relay")
+    .map((hop) => {
+      if (hop.source_id) {
+        return sourceIDs.has(hop.source_id)
+          ? relayHop({ strategy: hop.strategy, source_id: hop.source_id })
+          : relayHop({ strategy: hop.strategy });
+      }
+      const kept = (hop.node_ids || []).filter((id) => !usableIDs || usableIDs.has(id));
+      return relayHop({ strategy: hop.strategy, node_ids: kept });
+    });
+  if (cleaned.length === 0) return [relayHop(), exit];
+  return sanitizeRelayHopAfterExitChange([...cleaned, exit], exit.node_id);
+}

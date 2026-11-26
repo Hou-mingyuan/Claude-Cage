@@ -1150,7 +1150,7 @@ button.large {
   margin: 0;
   color: var(--ink);
 }
-.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip) {
+.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label) {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1549,7 +1549,7 @@ button.large {
 }
 
 /* Reading sizes remain comfortable at a normal 1280px workbench window. */
-.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip),
+.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label),
 .settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
 .settings-content .inline-select-trigger,
 .choice strong,

@@ -5,6 +5,7 @@ import {
   RELAY_STRATEGY_URL_TEST,
   bulkToggleNodesInRelayHop,
   canSwapTwoHopRoute,
+  hasConfiguredRelays,
   hopsEqual,
   isMultiNodeHop,
   moveNodeInRelayHop,
@@ -12,6 +13,7 @@ import {
   nodesClaimedByOtherHops,
   relayHop,
   resolveHopPickerIndex,
+  restoreChainRoute,
   sanitizeRelayHopAfterExitChange,
   savedHopsFromProxy,
   serializeHopsForAPI,
@@ -122,4 +124,38 @@ test("same-source exit is allowed and picker focuses missing hop first", () => {
   // sourceUsableRelayCount does not subtract the node currently selected in targetIndex itself.
   const singleFromAirport = [relayHop({ node_ids: ["hk1"] }), nodeHop("exit1")];
   assert.equal(sourceUsableRelayCount(sources[0], singleFromAirport, 0, usableIDs, sources), 3);
+});
+
+test("switching single mode and back preserves remembered relays without exit conflicts", () => {
+  const customChain = [
+    relayHop({ strategy: RELAY_STRATEGY_URL_TEST, node_ids: ["hk1", "hk2", "jp1"] }),
+    nodeHop("exit1"),
+  ];
+  assert.equal(hasConfiguredRelays(customChain), true);
+  assert.equal(hasConfiguredRelays([relayHop(), nodeHop("exit1")]), false);
+
+  const single = singleHopFromRoute(customChain);
+  assert.deepEqual(single, [nodeHop("exit1")]);
+
+  // Switching back preserves relay pool and strategy identically.
+  const restoredSameExit = restoreChainRoute(single[0], customChain.slice(0, -1), sources, usableIDs);
+  assert.equal(hopsEqual(restoredSameExit, customChain), true);
+
+  // If exit was changed to one of the relay nodes while in single mode, sanitize removes the duplicate.
+  const restoredOverlapExit = restoreChainRoute(nodeHop("hk2"), customChain.slice(0, -1), sources, usableIDs);
+  assert.deepEqual(restoredOverlapExit, [
+    relayHop({ strategy: RELAY_STRATEGY_URL_TEST, node_ids: ["hk1", "jp1"] }),
+    nodeHop("hk2"),
+  ]);
+
+  // Whole-subscription relay is also preserved across mode switch, and dropped cleanly if source was removed.
+  const sourceRelays = [relayHop({ strategy: RELAY_STRATEGY_FALLBACK, source_id: "airport" })];
+  assert.deepEqual(
+    restoreChainRoute(nodeHop("exit1"), sourceRelays, sources, usableIDs),
+    [relayHop({ strategy: RELAY_STRATEGY_FALLBACK, source_id: "airport" }), nodeHop("exit1")],
+  );
+  assert.deepEqual(
+    restoreChainRoute(nodeHop("exit1"), [relayHop({ source_id: "deleted-source" })], sources, usableIDs),
+    [relayHop(), nodeHop("exit1")],
+  );
 });

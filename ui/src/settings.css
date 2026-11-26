@@ -172,7 +172,7 @@
 }
 
 /* ── Form fields ─────────────────────────────────────────── */
-.settings-page .settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip) {
+.settings-page .settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label) {
   gap: 8px;
   margin-bottom: 20px;
   font-size: var(--s-sm);

@@ -41,6 +41,7 @@ import {
   RELAY_STRATEGY_URL_TEST,
   bulkToggleNodesInRelayHop,
   canSwapTwoHopRoute,
+  hasConfiguredRelays,
   hopCandidateIDs,
   hopsEqual,
   isMultiNodeHop,
@@ -48,6 +49,7 @@ import {
   nodeHop,
   nodesClaimedByOtherHops,
   relayHop,
+  restoreChainRoute,
   sanitizeRelayHopAfterExitChange,
   savedHopsFromProxy,
   serializeHopsForAPI,
@@ -128,6 +130,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     loading = useRef(false),
     latest = useRef(null),
     appliedFailure = useRef(null),
+    rememberedRelaysRef = useRef(null),
     measuring = useRef(false),
     portDirty = useRef(false);
   const reload = async () => {
@@ -592,12 +595,21 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
   };
   const selectSingleMode = () => {
     setPreferredMode("single");
-    if (route.length > 1) setRouteDraft(singleHopFromRoute(route));
+    if (route.length > 1) {
+      if (hasConfiguredRelays(route)) {
+        rememberedRelaysRef.current = route.slice(0, -1);
+      }
+      const next = singleHopFromRoute(route);
+      setRouteDraft(hopsEqual(next, savedHops) ? null : next);
+    }
   };
   const selectChainMode = () => {
     setPreferredMode("chain");
     if (allNodes.length > 0 && route.length === 1) {
-      setRouteDraft([relayHop(), route[0]]);
+      const remembered = rememberedRelaysRef.current
+        ?? (savedHops.length > 1 ? savedHops.slice(0, -1) : null);
+      const next = restoreChainRoute(route[0], remembered, sources, usableIDs);
+      setRouteDraft(hopsEqual(next, savedHops) ? null : next);
     }
   };
   const scrollToNodeList = () => {
@@ -1265,10 +1277,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                       </span>
                       <div className="proxy-hop-control">
                         <div className="proxy-hop-label-row">
-                          <label htmlFor={`proxy-hop-${index}`}>{label}</label>
-                          <span className={`proxy-hop-role-tag ${final ? "is-exit" : "is-relay"}`}>
-                            {final ? tr("对外 IP") : index === 0 ? tr("本机先连") : tr("经上一跳")}
-                          </span>
+                          <label className="proxy-hop-label" htmlFor={`proxy-hop-${index}`}>{label}</label>
                         </div>
                         {final ? (
                           <>
@@ -1365,7 +1374,10 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                           title={tr("移除{0}", (label))}
                           onClick={() => {
                             const next = route.filter((_, i) => i !== index);
-                            setRouteDraft(next);
+                            if (next.length === 1) {
+                              rememberedRelaysRef.current = [];
+                            }
+                            setRouteDraft(hopsEqual(next, savedHops) ? null : next);
                           }}
                         >
                           <X size={15} />

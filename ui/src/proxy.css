@@ -918,7 +918,7 @@ button.proxy-node-push-btn:disabled {
   content: "";
   position: absolute;
   top: 37px;
-  bottom: -2px;
+  bottom: -4px;
   inset-inline-start: 16px;
   width: 1px;
   background: var(--line);
@@ -928,7 +928,7 @@ button.proxy-node-push-btn:disabled {
   place-items: center;
   width: 25px;
   height: 25px;
-  margin-top: 2px;
+  margin-top: 0;
   flex: none;
   border: 1.5px solid var(--line);
   border-radius: 50%;
@@ -953,19 +953,16 @@ button.proxy-node-push-btn:disabled {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 7px;
+  min-height: 25px;
+  margin-bottom: 8px;
 }
-.proxy-hop-label-row label,
-.settings-page
-  .settings-content
-  .proxy-manager
-  .proxy-hop-label-row
-  label:not(.check-line):not(.choice):not(.toggle-row) {
+.proxy-hop-label-row label.proxy-hop-label {
+  display: block;
   margin: 0;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--strong);
-  line-height: 1.4;
+  line-height: 1.3;
 }
 .proxy-hop-role-tag {
   display: inline-flex;
@@ -1004,7 +1001,7 @@ button.proxy-node-push-btn:disabled {
 }
 .proxy-hop-remove {
   flex: none;
-  margin-top: 26px;
+  margin-top: 37px;
 }
 .proxy-route-chain-tools {
   display: flex;
