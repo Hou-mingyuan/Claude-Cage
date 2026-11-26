@@ -81,7 +81,8 @@ bash scripts/build-app.sh
 | Swift 报 `redefinition of module 'SwiftBridging'` | Command Line Tools 升级后残留了旧的模块映射文件，`usr/include/swift/module.modulemap` 与 `bridging.modulemap` 重复定义。重新安装 Command Line Tools，或用 `xcode-select` 选择完整 Xcode。脚本不修改系统工具链。 |
 | 图标生成阶段出现与 Swift 无关的报错 | `PATH` 上可能有同名的非 Apple `swift`。构建脚本通过 `xcrun` 调用 Swift，若仍失败，检查 `xcode-select -p`。 |
 | 签名报 `resource fork, Finder information, or similar detritus not allowed` | 仓库位于 iCloud Drive 等文件同步目录时，文件会带上扩展属性。脚本在签名前清除应用包内的扩展属性；无法清除时，把仓库移到不受同步管理的目录再构建。 |
-| `npm ci` 报 `EBADENGINE` 警告，或前端构建报 `Cannot find native binding`（Rolldown） | `PATH` 上优先使用的 Node.js 低于 Vite 的要求。用 `node -v` 和 `node -p 'process.execPath'` 确认实际使用的是哪个 Node，切换到 Node 24 后重新运行构建。 |
+| `npm ci` 报 `EBADENGINE`，随后 Rolldown 可能报 `Cannot find native binding` | 用 `node -v` 与警告中的版本要求对照。若当前 Node 版本不符合要求，切换到 Node 24 后重新构建。 |
+| Rolldown 报 `Cannot find native binding`，内层 `dlopen` 错误含 `different Team IDs` | 用 `node -p 'process.execPath'` 查看实际运行的 Node。如果路径指向其他桌面应用内置的 Node，将 Node.js 官方 macOS 发行包的 `bin` 目录放到当前终端的 `PATH` 首位，再运行构建。 |
 | 只允许写入工作区的沙箱中 npm、uv 或 Swift 模块缓存报 `Operation not permitted` | 脚本发现默认缓存目录不可写时，改用 `_output/cache` 下的 npm、uv 和 Swift 模块缓存。`iconutil` 在部分沙箱中仍会报 `Failed to generate ICNS`，这一步需要在沙箱外运行构建。 |
 | 检出路径经过 `/tmp` 等符号链接 | 构建脚本按真实路径判断入口，可以在符号链接目录中构建。 |
 
