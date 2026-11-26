@@ -129,6 +129,13 @@ class TerminalJob:
             resources.enter_context(wake_read)
             resources.enter_context(wake_write)
             wake_write.setblocking(False)
+            events = select.poll()
+            # The PTY may disconnect without delivering SIGHUP to the owner.
+            # Darwin needs explicit hangup/error flags. Do not request POLLIN:
+            # queued input belongs to the foreground process.
+            events.register(0, select.POLLHUP | select.POLLERR)
+            events.register(wake_read, select.POLLIN)
+            events.register(listener, select.POLLIN)
             resources.callback(signal.set_wakeup_fd, signal.set_wakeup_fd(wake_write.fileno()))
             for sig in (signal.SIGCHLD, signal.SIGHUP, signal.SIGTERM, signal.SIGWINCH):
                 resources.callback(signal.signal, sig, signal.signal(sig, self.signal_received))
@@ -164,12 +171,14 @@ class TerminalJob:
                     code = self.poll()
                     if code is not None:
                         return code
-                    readable, _, _ = select.select([wake_read, listener], [], [])
-                    if wake_read in readable:
+                    ready_fds = dict(events.poll())
+                    if ready_fds.get(0, 0) & (select.POLLHUP | select.POLLERR | select.POLLNVAL):
+                        self.closing = signal.SIGHUP
+                    elif wake_read.fileno() in ready_fds:
                         wake_read.recv(4096)
-                        continue
-                    with listener.accept()[0] as client:
-                        self.reply(client)
+                    elif listener.fileno() in ready_fds:
+                        with listener.accept()[0] as client:
+                            self.reply(client)
                 return -self.closing
             finally:
                 self.shutdown()

@@ -69,7 +69,7 @@ def fixture_cli(args):
 
 
 class TerminalJobTest(unittest.TestCase):
-    def setUp(self):
+    def start_job(self, *, block_hangup=False):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         home = Path(self.temp.name).resolve()
@@ -102,6 +102,8 @@ class TerminalJobTest(unittest.TestCase):
                     "TMPDIR": str(home), "CAGE_WORKBENCH": "1", "LANG": "C"}
         self.pid, self.master = pty.fork()
         if self.pid == 0:
+            if block_hangup:
+                signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGHUP})
             os.chdir(self.workspace)
             os.umask(0o027)
             os.execve(sys.executable, [sys.executable, "-I", str(self.channel), "terminal",
@@ -157,6 +159,7 @@ class TerminalJobTest(unittest.TestCase):
         return json.loads(reply.stdout)
 
     def test_continue_same_group_and_account_after_exit(self):
+        self.start_job()
         for _ in range(2):
             self.pause()
             self.assertEqual(self.resume(config="/different"), {"error": "terminal_conflict"})
@@ -182,12 +185,21 @@ class TerminalJobTest(unittest.TestCase):
         self.assertEqual(self.resume(), {"error": "terminal_unavailable"})
 
     def test_close_reaps_suspended_job(self):
+        self.start_job()
+        self.close_suspended_job()
+
+    def test_close_reaps_suspended_job_without_sighup(self):
+        self.start_job(block_hangup=True)
+        self.close_suspended_job()
+
+    def close_suspended_job(self):
         self.pause()
         os.close(self.master)
         self.master = None
         self.assert_reaped()
 
     def test_stop_reaps_suspended_job(self):
+        self.start_job()
         self.pause()
         os.kill(self.pid, signal.SIGTERM)
         self.assert_reaped()
@@ -200,9 +212,12 @@ class TerminalJobTest(unittest.TestCase):
                     os.kill(self.child, 0)
                 return
             time.sleep(0.01)
-        self.fail("suspended CLI survived terminal close")
+        snapshot = subprocess.run(["ps", "-o", "pid,ppid,pgid,stat,comm", "-p",
+                                   f"{self.pid},{self.child}"], text=True, capture_output=True)
+        self.fail("terminal state is still open after close; supervisor and CLI:\n" + snapshot.stdout)
 
     def test_other_foreground_job_keeps_its_input(self):
+        self.start_job()
         os.write(self.master, b"other\n")
         self.wait_for(b"other-ready")
         os.write(self.master, b"half")
