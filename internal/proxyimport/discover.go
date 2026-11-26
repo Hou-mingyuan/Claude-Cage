@@ -63,6 +63,10 @@ const (
 	// SakuraCat stores config.json and offline_cache.json in a private encoded
 	// format, so the directory only yields a migration notice.
 	SakuraCat
+	// FlClash keeps its runtime config.yaml at the root and profiles as
+	// profiles/<id>.yaml. The same directory holds Flutter's own JSON files,
+	// such as shared_preferences.json, which are never node configs.
+	FlClash
 )
 
 const encryptedConfigError = "配置文件使用 age 加密，Cage 不会解密私有配置，无法直接导入。请从原客户端或服务商导出明文 Clash/Mihomo YAML 后通过“添加来源”导入，或手动添加节点"
@@ -108,8 +112,7 @@ func Locations(platform, home, dataHome, configHome string) []Location {
 		nyanpasuHome = filepath.Join(dataHome, "Clash Nyanpasu", "config")
 	}
 	out := []Location{
-		{"FlClash", filepath.Join(dataHome, "com.follow.clash"), Plain, ""},
-		{"FlClash", filepath.Join(dataHome, "com.follow.clash", "profiles"), Plain, ""},
+		{"FlClash", filepath.Join(dataHome, "com.follow.clash"), FlClash, ""},
 		{"FlClash for oixCloud", filepath.Join(dataHome, "com.oixcloud.clash"), OixCloud, ""},
 		{"Clash Verge Rev", filepath.Join(dataHome, "io.github.clash-verge-rev.clash-verge-rev"), Verge, ""},
 		// Clash Neo is a Verge fork and keeps the same profile layout.
@@ -137,10 +140,8 @@ func Locations(platform, home, dataHome, configHome string) []Location {
 	}
 	if platform == "windows" {
 		out = append(out,
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash"), Plain, ""},
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash", "profiles"), Plain, ""},
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "clash"), Plain, ""},
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "clash", "profiles"), Plain, ""},
+			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash"), FlClash, ""},
+			Location{"FlClash", filepath.Join(dataHome, "com.follow", "clash"), FlClash, ""},
 			Location{"FlClash for oixCloud", filepath.Join(dataHome, "com.oixcloud", "FlClash"), OixCloud, ""},
 			Location{"FlClash for oixCloud", filepath.Join(dataHome, "com.follow", "FlClash for oixCloud"), OixCloud, ""},
 			Location{"SakuraCat", filepath.Join(dataHome, "SakuraCat", "SakuraCat"), SakuraCat, ""},
@@ -268,7 +269,7 @@ func Scan(locations []Location, key []byte) []Config {
 						continue
 					}
 					ext := strings.ToLower(filepath.Ext(file.Name()))
-					if ext != ".yaml" && ext != ".yml" && ext != ".json" && ext != ".age" {
+					if (ext != ".yaml" && ext != ".yml" && ext != ".json" && ext != ".age") || flutterInternal[strings.ToLower(file.Name())] {
 						continue
 					}
 					if count >= 32 {
@@ -427,6 +428,30 @@ func Scan(locations []Location, key []byte) []Config {
 			for _, p := range nyanpasuProfiles(data) {
 				add(filepath.Join("profiles", p.file), "", p.name, p.url, p.current)
 			}
+		case FlClash:
+			current := flclashCurrentProfile(root)
+			for _, subdir := range []string{"", "profiles"} {
+				files, err := listWithin(root, subdir)
+				if err != nil {
+					continue
+				}
+				count := 0
+				for _, file := range files {
+					ext := strings.ToLower(filepath.Ext(file.Name()))
+					if file.IsDir() || (ext != ".yaml" && ext != ".yml") {
+						continue
+					}
+					if count >= 32 {
+						break
+					}
+					count++
+					if subdir == "" {
+						add(file.Name(), "", file.Name(), "", file.Name() == "config.yaml")
+					} else {
+						add(filepath.Join(subdir, file.Name()), subdir, file.Name(), "", current != "" && strings.TrimSuffix(file.Name(), filepath.Ext(file.Name())) == current)
+					}
+				}
+			}
 		case Surge:
 			files, err := os.ReadDir(root)
 			if err != nil {
@@ -469,6 +494,44 @@ func Scan(locations []Location, key []byte) []Config {
 		return out[i].Current && !out[j].Current
 	})
 	return out
+}
+
+// flutterInternal lists files Flutter plugins write into a FlClash-family data
+// directory: shared_preferences_windows/linux and flutter_cache_manager.
+var flutterInternal = map[string]bool{
+	"shared_preferences.json": true,
+	"libcachedimagedata.json": true,
+}
+
+// flclashCurrentProfile returns the currentProfileId FlClash saves, as a JSON
+// string, under "flutter.config" in shared_preferences.json. The id may be a
+// string or a number depending on the release; anything unexpected yields "".
+func flclashCurrentProfile(root string) string {
+	data, err := readWithin(root, "shared_preferences.json")
+	if err != nil {
+		return ""
+	}
+	var prefs struct {
+		Config string `json:"flutter.config"`
+	}
+	if json.Unmarshal(data, &prefs) != nil || prefs.Config == "" {
+		return ""
+	}
+	var config struct {
+		Current json.RawMessage `json:"currentProfileId"`
+	}
+	if json.Unmarshal([]byte(prefs.Config), &config) != nil || len(config.Current) == 0 {
+		return ""
+	}
+	var id string
+	if json.Unmarshal(config.Current, &id) != nil {
+		var n json.Number
+		if json.Unmarshal(config.Current, &n) != nil {
+			return ""
+		}
+		id = n.String()
+	}
+	return id
 }
 
 type nyanpasuProfile struct {
