@@ -320,7 +320,8 @@ func parseGuestOwner(output []byte) *reversesshfs.Owner {
 // projectShareOptions are the sshfs options of a project folder in a Linux
 // guest. Every lookup and attribute read is otherwise a round trip to the
 // host, and tools repeat them constantly: a status check of a repository
-// asks about each of its files. With the cache the guest kernel keeps names
+// asks about each of its files and probes missing files such as .gitignore in
+// every folder. With the cache the guest kernel keeps names, negative lookups
 // and attributes for projectFileCacheSeconds, so a file the host changes,
 // deletes or extends can show as it was for that long; directory listings
 // are always read from the host. The cache is the kernel's rather than
@@ -333,7 +334,7 @@ func projectShareOptions(owner *reversesshfs.Owner, cache bool) string {
 	}
 	options := `slave,allow_other,cache=no,nodev,nosuid,` + ids
 	if cache {
-		options += fmt.Sprintf(",entry_timeout=%d,attr_timeout=%d", projectFileCacheSeconds, projectFileCacheSeconds)
+		options += fmt.Sprintf(",entry_timeout=%d,attr_timeout=%d,negative_timeout=%d", projectFileCacheSeconds, projectFileCacheSeconds, projectFileCacheSeconds)
 	}
 	return options
 }
