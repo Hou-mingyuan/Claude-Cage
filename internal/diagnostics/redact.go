@@ -54,7 +54,7 @@ var hostInMessage = regexp.MustCompile(`\b((?:` + operationLead + `|` + localeLe
 // known diagnostic forms. A port or a further domain label still masks the host.
 var publicDiagnostic = regexp.MustCompile(`^(?:` +
 	operationLead + `(?:network\.check|settings\.probe|proxy\.(?:route|select))|` +
-	localeLead + `[a-zA-Z]{2,3}_[a-zA-Z]{2,3}\.UTF-8|` +
+	localeLead + `(?:C|[a-zA-Z]{2,3}_[a-zA-Z]{2,3})\.UTF-8|` +
 	fileLead + cageFile + `|` + sourceLead + `main\.go:[0-9]+)$`)
 
 func Redact(s string) string {

@@ -39,6 +39,8 @@ func TestRedactProxyAddresses(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
 		{setupHint, setupHint},
 		{"cannot change locale (zh_CN.UTF-8)", "cannot change locale (zh_CN.UTF-8)"},
+		{"LANG=C.UTF-8 LC_ALL=C.UTF-8", "LANG=C.UTF-8 LC_ALL=C.UTF-8"},
+		{"LANG=C.UTF-8:443 LC_ALL=C.UTF-8.example dial C.UTF-8", "LANG=[host] LC_ALL=[host] dial [host]"},
 		{"call settings.probe then proxy.select", "call settings.probe then proxy.select"},
 		{"writing lima.yaml and setup.sh", "writing lima.yaml and setup.sh"},
 		{"panic at main.go:699", "panic at main.go:699"},
@@ -198,7 +200,7 @@ func TestGuestRunnerRedactsProxyAddresses(t *testing.T) {
 	if err := os.WriteFile(script, []byte(GuestRunner()), 0600); err != nil {
 		t.Fatal(err)
 	}
-	input := setupHint + "\n" + proxyFailure + "\n[::ffff:192.0.2.8]:443 fe80::1%en0 0123456789abcdef01234567 token=private-token" +
+	input := setupHint + "\nLANG=C.UTF-8 LC_ALL=C.UTF-8.example\n" + proxyFailure + "\n[::ffff:192.0.2.8]:443 fe80::1%en0 0123456789abcdef01234567 token=private-token" +
 		"\nError: socket path `/Users/alice/deep folder/state/ssh.sock.1234` is too long: >= UNIX_PATH_MAX=104"
 	cmd := exec.Command("uv", "run", "--no-project", "python", script, "/bin/sh", "-c", `printf '%s\n' "$1"`, "sh", input)
 	var stderr bytes.Buffer
