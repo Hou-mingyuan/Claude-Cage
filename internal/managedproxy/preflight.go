@@ -92,6 +92,12 @@ func StartPreflight(ctx context.Context, profile string, s Store) (*PreflightPro
 	if err != nil {
 		return nil, err
 	}
+	// Protect the directory before the lock marks it as ours: on Windows this
+	// also hands an elevated launch's directory from Administrators to the user.
+	if err := host.EnsurePrivateDir(workDir); err != nil {
+		_ = os.RemoveAll(workDir)
+		return nil, err
+	}
 	owner, err := lockPreflightDir(workDir)
 	if err != nil {
 		_ = os.RemoveAll(workDir)
@@ -100,10 +106,6 @@ func StartPreflight(ctx context.Context, profile string, s Store) (*PreflightPro
 	cleanupWork := func() {
 		_ = owner.Close()
 		_ = os.RemoveAll(workDir)
-	}
-	if err := host.EnsurePrivateDir(workDir); err != nil {
-		cleanupWork()
-		return nil, err
 	}
 
 	sockPath, sockCleanupDir, err := preflightSocketPath(profile)

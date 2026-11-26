@@ -32,7 +32,15 @@ func ownedByCurrentUser(path string, _ os.FileInfo) bool {
 		return false
 	}
 	owner, _, err := sd.Owner()
-	return err == nil && owner != nil && windows.EqualSid(owner, user.User.Sid)
+	if err != nil || owner == nil {
+		return false
+	}
+	if windows.EqualSid(owner, user.User.Sid) {
+		return true
+	}
+	// An elevated process creates objects owned by Administrators; a directory
+	// left by such a launch that crashed before protecting it is still ours.
+	return windows.GetCurrentProcessToken().IsElevated() && owner.IsWellKnown(windows.WinBuiltinAdministratorsSid)
 }
 
 func preflightProcessStart(pid int) (uint64, string, error) {
