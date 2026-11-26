@@ -119,6 +119,15 @@ NuGet 报 `Central Directory corrupt` 或 `Received an unexpected EOF or 0 bytes
 
 应用输出到 `_output/windows-amd64/app`。本地默认自检目录是仓库内的 `_output/workbench-smoke`。源码如果检出到 AppData 或重解析到其他私有目录，构建会在开始前提示把 `RUNNER_TEMP` 指向 AppData 外的普通本地目录，例如 `D:\CageBuildTemp`。源码位于 exFAT、FAT32 等不保存文件所有者和权限的分区（常见于外接 SSD、U 盘）时，Cage 无法确认私有文件归当前用户所有，自检窗口不会启动；构建同样会在开始前提示，把 `RUNNER_TEMP` 指向 NTFS 分区上 AppData 外的目录，例如 `C:\CageBuildTemp`。若自检失败，构建输出会显示已识别的共享目录错误、候选应用目录和诊断路径。可查看 `smoke.json` 和 `profile/logs/events.jsonl`。`prepareStatus=prepared` 是自检结束时后台的停止确认。
 
+工作台自检会打开 WebView2 窗口，需要已登录用户的交互式桌面。通过 Win32-OpenSSH 或服务运行的进程位于会话 0，自检会报 `无效的窗口句柄 (0x80070578)`；`build-windows.ps1` 和 `package-windows.ps1` 会在开始时检测并提前停止。远程构建时，在桌面会话中运行，或用交互式登录的一次性计划任务运行构建与打包脚本（该用户须已登录桌面）：
+
+```powershell
+$action = New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument '-NoProfile -WindowStyle Hidden -File C:\path\package.ps1'
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+Register-ScheduledTask -TaskName CageBuildOnce -Action $action -Principal $principal -Force
+Start-ScheduledTask CageBuildOnce   # 完成后 Unregister-ScheduledTask CageBuildOnce
+```
+
 源码构建常见主机环境问题排查：
 
 - **Go 编译进程（`compile.exe`）停在 0% CPU 且无报错挂起**：通常是第三方企业/高校同步盘（如 AnyShare 文件监控服务）或安全软件向子进程注入了 Hook DLL。可在 PowerShell 运行 `(Get-Process compile).Modules` 查看加载的非系统 DLL，并将 `go.exe`、`compile.exe`、`link.exe`、`vet.exe`、`asm.exe`、`cgo.exe`（以及运行期使用的 `cage.exe`、`Cage.exe`、`mihomo.exe`、`qemu-system-x86_64.exe`、`qemu-img.exe`、`ssh.exe`）加入其排除列表，或构建期间暂停该服务。

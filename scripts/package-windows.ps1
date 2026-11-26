@@ -19,6 +19,8 @@ if (-not $DependencyCache) { $DependencyCache = Join-Path $repository '_output/w
 $AppDirectory = [IO.Path]::GetFullPath($AppDirectory)
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath (Join-Path $AppDirectory 'CageData')) { throw 'App directory contains CageData user data. Package a clean build directory; do not package an installed application.' }
+# Both paths run the workbench smoke test on Windows: the build itself, or the -SkipBuild self-check.
+Assert-WindowsInteractiveDesktop
 $makeNSIS = Get-BuildCommand @('makensis.exe', 'makensis') -Optional
 if (-not $makeNSIS) { throw 'NSIS (makensis) is missing from PATH. See scripts/install-nsis.ps1 and docs/windows.md#windows-源码构建.' }
 $sevenZip = Get-BuildCommand @('7z.exe', '7zz', '7z')
