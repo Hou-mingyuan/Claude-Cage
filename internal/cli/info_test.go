@@ -52,14 +52,13 @@ func TestInfo(t *testing.T) {
 	t.Chdir(proj)
 	t.Setenv("PWD", proj)
 	name := vmname.Name(proj)
-	t.Setenv("AGENT_VM_UNSAFE_WRITABLE_GIT", "")
 
 	te := newTestEnv(t, vmtest.New())
 	m := infoMap(t, te)
 	for k, want := range map[string]string{
 		"template": "base", "dir": proj, "vm_name": name, "project_env": proj + "/.agent-vm.env",
 		"base_exists": "0", "vm_exists": "0", "vm_running": "0", "vm_stale": "unknown", "ssh_host": "lima-" + name,
-		"ssh_config": "unknown", "git_protected": "1", "security_questions": "none", "state_dir": string(te.state),
+		"ssh_config": "unknown", "git_protected": "0", "security_questions": "none", "state_dir": string(te.state),
 	} {
 		if m[k] != want {
 			t.Errorf("no VM: %s=%q, want %q", k, m[k], want)
@@ -84,17 +83,13 @@ func TestInfo(t *testing.T) {
 		t.Error("an up to date VM said stale")
 	}
 
-	// What a start would ask.
+	// Git configuration inside the project does not trigger security questions.
 	exec.Command("git", "-C", proj, "init", "-q").Run()
 	exec.Command("git", "-C", proj, "config", "core.hooksPath", ".").Run()
 	exec.Command("git", "-C", proj, "config", "core.fsmonitor", "./mon.sh").Run()
 	os.WriteFile(filepath.Join(home, ".gitconfig"), nil, 0o644)
-	if q := infoMap(t, te)["security_questions"]; q != "hooks,git-config" {
-		t.Errorf("questions: %q", q)
-	}
-	t.Setenv("AGENT_VM_UNSAFE_WRITABLE_GIT", "1")
 	if m := infoMap(t, te); m["git_protected"] != "0" || m["security_questions"] != "none" {
-		t.Errorf("opted out: %v", m)
+		t.Errorf("git repo info: %v", m)
 	}
 
 	// A backend that cannot be asked: unknown, never a confident 0.

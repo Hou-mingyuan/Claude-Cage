@@ -15,7 +15,6 @@ import (
 	limaversion "github.com/lima-vm/lima/v2/pkg/version"
 
 	"github.com/sylvinus/agent-vm/internal/env"
-	"github.com/sylvinus/agent-vm/internal/gitguard"
 	"github.com/sylvinus/agent-vm/internal/guard"
 	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/mounts"
@@ -100,15 +99,6 @@ func (e *app) doctorCmd(ctx context.Context, args []string) int {
 	for _, f := range vm.LimaOverrides(LimaHome(e.state)) {
 		d.line("fail", f+" adds to every VM's config: agent-vm makes and starts no VM while it is there", "Move it out of the way.")
 	}
-	protects := !writableGitOptOut(false)
-	if cageWritableGit() {
-		d.line("info", "Cage projects allow Git writes within the shared directories")
-	} else if protects {
-		d.line("ok", "every .git is read-only for the VMs (sshfs.readonlyNames)")
-	} else {
-		d.line("warn", "AGENT_VM_UNSAFE_WRITABLE_GIT=1: the VMs can write .git, and git on this machine runs what .git/config and hooks name",
-			"Unset it to keep .git read-only.")
-	}
 	var prereqs bytes.Buffer
 	switch runtime.GOOS {
 	case "linux":
@@ -158,7 +148,7 @@ func (e *app) doctorCmd(ctx context.Context, args []string) int {
 			d.line("ok", vmname.Template+" is ready")
 		}
 		if _, err := os.Stat(e.state.Path(state.BaseBuiltBy)); err != nil {
-			d.line("warn", "the base template was built by agent-vm 0.1.0, without what the shares that keep .git read-only need",
+			d.line("warn", "the base template was built by agent-vm 0.1.0",
 				"'agent-vm setup' rebuilds it, then '--reset' the VMs made from it.")
 		}
 	case base != nil:
@@ -201,7 +191,7 @@ func (e *app) doctorCmd(ctx context.Context, args []string) int {
 
 	wd, _ := vmname.AbsDir("")
 	d.section(fmt.Sprintf("This directory (%s)", wd))
-	d.directory(ctx, wd, protects, getVM)
+	d.directory(ctx, wd, getVM)
 
 	d.section("All VMs")
 	if vms, err := e.lookVMs(ctx); err == nil {
@@ -248,9 +238,8 @@ func unique(s []string) []string {
 	return out
 }
 
-// directory checks the project dir: its path, its VM and what protects it,
-// the hooks and config git runs from its shares, its runtime and env files.
-func (d *doctor) directory(ctx context.Context, dir string, protects bool, getVM func(string) (*vm.Instance, error)) {
+// directory checks the project dir: its path, its VM, its runtime and env files.
+func (d *doctor) directory(ctx context.Context, dir string, getVM func(string) (*vm.Instance, error)) {
 	e := d.e
 	if why, bad := mounts.Unmountable(dir); bad {
 		d.line("fail", "the path "+why, "agent-vm refuses to mount it. Rename the directory.")
@@ -258,11 +247,6 @@ func (d *doctor) directory(ctx context.Context, dir string, protects bool, getVM
 	if why, bad := mounts.UnsafeProject(dir, e.refs()); bad {
 		d.line("fail", "this directory "+why, "agent-vm refuses to share it with a VM. Run it from a project directory.")
 	}
-	scan := &gitguard.Result{}
-	if !cageWritableGit() {
-		scan = e.scan(ctx, dir)
-	}
-	names := scan.Names()
 	name := e.instanceName(dir)
 	inst, err := getVM(name)
 	switch {
@@ -292,57 +276,6 @@ func (d *doctor) directory(ctx context.Context, dir string, protects bool, getVM
 		default:
 			d.line("info", "stopped")
 		}
-		protected := len(inst.Mounts) > 0 && unprotected(inst, nil) == ""
-		current := unprotected(inst, names) == ""
-		switch {
-		case cageWritableGit() && !protected:
-			d.line("info", "its shares allow Git writes in Cage projects")
-		case protected && !current:
-			d.line("warn", "its shares keep .git read-only, but not all of "+strings.Join(names, ", "),
-				"The next start (after 'agent-vm stop' if it runs) fixes that.")
-		case protected:
-			d.line("ok", "its shares keep every .git read-only")
-		case !protects:
-			d.line("warn", "its shares leave .git writable (AGENT_VM_UNSAFE_WRITABLE_GIT=1)")
-		default:
-			d.line("warn", "its shares leave .git writable", "The next start (after 'agent-vm stop' if it runs) fixes that.")
-		}
-	}
-	for _, h := range scan.Hooks {
-		rel, inRepo, _ := strings.Cut(h, "\t")
-		if rel == "" {
-			continue
-		}
-		what := "git runs hooks from " + rel + " (core.hooksPath)"
-		switch {
-		case rel == ".":
-			what = "git runs hooks from the project directory itself (core.hooksPath)"
-		case inRepo == ".":
-			what = "git runs hooks from " + rel + ", which no read-only name covers (core.hooksPath)"
-		}
-		hn, ok := gitguard.HooksName(inRepo)
-		current := false
-		if inst != nil {
-			current = unprotected(inst, names) == ""
-		}
-		switch {
-		case !ok:
-			d.line("warn", what+", which the VM can write",
-				"agent-vm can only keep a folder inside a share read-only, by a name without quotes or backslashes: point core.hooksPath to one.")
-		case !protects:
-			d.line("warn", what+", which the VM can write", "agent-vm keeps it read-only when it keeps .git read-only (see above).")
-		case inst == nil:
-			d.line("info", fmt.Sprintf("%s: every '%s' in the project will be read-only for the VM", what, hn))
-		case current:
-			d.line("ok", fmt.Sprintf("%s: every '%s' in the project is read-only for the VM", what, hn))
-		default:
-			d.line("warn", what+", which the VM can still write",
-				fmt.Sprintf("The next start (after 'agent-vm stop' if it runs) makes every '%s' in the project read-only.", hn))
-		}
-	}
-	if risks := scan.Risks(names); len(risks) > 0 {
-		d.line("warn", "git on this machine uses these, and the VM can write them:",
-			append(risks, "Move them out of the shared folders, or have them name commands outside them.")...)
 	}
 	rt := runscript.ProjectPath(dir)
 	if rel, ok := env.ProjectRel(dir, rt); ok {
