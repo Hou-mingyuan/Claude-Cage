@@ -15,13 +15,13 @@ func TestImageDownloadFailureNamesEachMirror(t *testing.T) {
 		vm.ImageDownloadMarker + " official:eof:kept nju:http-429:kept ustc:http-403:none\n"
 	err := executionFailure("准备 Debian 13 镜像", errors.New("exit status 1"), output)
 	text := err.Error()
-	for _, want := range []string{"Debian 官方源（连接被中途断开，已保留下载进度）", "南京大学镜像（HTTP 429，请求过于频繁，已保留下载进度）", "中国科学技术大学镜像（HTTP 403，服务器拒绝访问）", "换一个节点", "断点续传"} {
+	for _, want := range []string{"Debian 官方源（连接被中途断开，已保留下载进度）", "南京大学镜像（HTTP 429，请求过于频繁，已保留下载进度）", "中国科学技术大学镜像（HTTP 403，服务器拒绝访问）", "宿主机", "断点续传"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("message lacks %q: %s", want, text)
 		}
 	}
-	if strings.Contains(text, "未返回可识别的原因") {
-		t.Fatalf("still unexplained: %s", text)
+	if strings.Contains(text, "未返回可识别的原因") || strings.Contains(text, "换一个节点") {
+		t.Fatalf("unexpected image download guidance: %s", text)
 	}
 	reason, next, ok := imageDownloadFailure(vm.ImageDownloadMarker + " official:http-503:none ustc:checksum:none")
 	if !ok || !strings.Contains(reason, "HTTP 503，服务器错误") || !strings.Contains(reason, "文件校验不符") || strings.Contains(next, "断点续传") {
