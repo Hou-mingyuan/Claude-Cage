@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,7 +14,10 @@ import (
 // Administrators group as owner. Test the OS lock before repairing its ACL;
 // credential-file ownership must not be used as a process-liveness test.
 func openControllerLock(profile string, flags int) (*os.File, error) {
-	path := filepath.Join(profile, "control.lock")
+	return openControlLockFile(filepath.Join(profile, "control.lock"), flags)
+}
+
+func openControlLockFile(path string, flags int) (*os.File, error) {
 	if info, err := os.Lstat(path); err == nil {
 		if !info.Mode().IsRegular() {
 			return nil, errors.New("控制锁必须是普通文件")
@@ -32,6 +36,34 @@ func openControllerLock(profile string, flags int) (*os.File, error) {
 		return nil, errors.New("控制锁路径已变化，请重试")
 	}
 	return f, nil
+}
+
+// The service itself holds control.lock for its lifetime. Launchers hold
+// this separate lock only until the service publishes its private endpoint.
+func acquireControllerLaunch(ctx context.Context, profile string) (*os.File, error) {
+	if err := host.EnsurePrivateDir(profile); err != nil {
+		return nil, err
+	}
+	f, err := openControlLockFile(filepath.Join(profile, "control-start.lock"), os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		return nil, err
+	}
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for ctx.Err() == nil {
+		if err := lockController(f); err == nil {
+			return f, nil
+		} else if !controllerLockContended(err) {
+			f.Close()
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+		case <-tick.C:
+		}
+	}
+	f.Close()
+	return nil, ctx.Err()
 }
 
 // A status probe can briefly own the lock while it checks or repairs its ACL.

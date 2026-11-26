@@ -58,7 +58,14 @@ source scripts/macos-build-env.sh
 macos_prepare_caches
 macos_check_toolchain
 bash scripts/fetch-proxy-core.sh
-make cage VERSION="$version"
+if ! make cage VERSION="$version"; then
+  cat >&2 <<'EOF'
+make cage failed. If the error is a Go toolchain or module download (proxy.golang.org, sum.golang.org,
+or the Go 1.27.3 toolchain for tools/tailnet), point Go at reachable mirrors and rerun, for example:
+  GOPROXY=https://goproxy.cn,direct GOSUMDB=sum.golang.google.cn bash scripts/build-app.sh
+EOF
+  exit 1
+fi
 _output/bin/cage verify-web-assets
 build_stage="$(mktemp -d "$PWD/_output/app-build.XXXXXX")"
 install_stage=''

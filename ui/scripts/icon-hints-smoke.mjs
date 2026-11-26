@@ -75,6 +75,10 @@ try {
   await page.mouse.move(1200, 800);
   assert.equal(await hint.isVisible(), false, "Pointer exit must not revive dismissed focus state");
   await button.focus();
+  assert.equal(await hint.isVisible(), false, "Script focus after a click must keep the hint hidden");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  assert.equal(await button.evaluate(el => document.activeElement === el), true);
   assert.equal(await hint.isVisible(), true, "Keyboard focus must still reveal the hint after dismissal");
   await page.keyboard.press("Escape");
 

@@ -55,11 +55,17 @@ func protectPrivate(path string, dir bool) error {
 }
 
 func checkPrivate(path string, _ os.FileInfo) error {
-	sid, err := privateSID()
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return err
 	}
-	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	return checkPrivateDescriptor(sd)
+}
+
+// checkPrivateDescriptor rejects security that is not owned by the current
+// user or grants access to anyone but the user and SYSTEM.
+func checkPrivateDescriptor(sd *windows.SECURITY_DESCRIPTOR) error {
+	sid, err := privateSID()
 	if err != nil {
 		return err
 	}

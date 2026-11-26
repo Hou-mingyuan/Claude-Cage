@@ -381,6 +381,7 @@ function App() {
   const accountLogin = useRef("");
   const tabsBeforeLogin = useRef("");
   const [enrollmentID, setEnrollmentID] = useState("");
+  const lastHostCLIFocus = useRef("");
   const terminalAccounts = [...new Set(tabs.map(t=>t.claude_account_id).filter(Boolean))].sort().join(",");
   useEffect(() => {
     if (terminalAccounts && terminalAccounts.split(",").some(id => !claudeProfiles.accounts?.some(a => a.id === id))) {
@@ -983,6 +984,19 @@ function App() {
               setActive(b.active || all[0]?.id || "");
           }
           browserIds.current = new Set(b.tabs.map((item) => item.id));
+          const focus = next.host_cli_browser;
+          if (focus?.id && focus.id !== lastHostCLIFocus.current) {
+            const tab = b.tabs.find(item => focus.tab ? item.id === focus.tab : item.id === b.active && item.login);
+            if (tab) {
+              lastHostCLIFocus.current = focus.id;
+              browserDismissed.current = false;
+              setSettingsOpen(false);
+              setManagementPage("");
+              setDesktopOpen(false);
+              setHome(false);
+              setActive(tab.id);
+            }
+          }
           initialized.current = true;
         }
       } catch (e) {
@@ -1157,16 +1171,21 @@ function App() {
       setBrowserError("");
       if (b.desktopFocus === true) {
         const currentDesktops = notificationViewRef.current.accountDesktops;
-        const target = fallbackDesktopInstance(currentDesktops?.catalog);
-        if (target) {
-          setSettingsOpen(false);
-          void currentDesktops.act(target, "start");
-        } else if (!currentDesktops?.catalog?.default_removed) {
-          currentDesktops?.clear();
-          setDesktopOpen(true);
-          setHome(false);
-          setSettingsOpen(false);
-        }
+        void (async () => {
+          // The catalog loads lazily; without it a removed default Desktop
+          // would be opened and fail to start.
+          const catalog = currentDesktops?.catalog || await currentDesktops?.refresh?.(true);
+          const target = fallbackDesktopInstance(catalog);
+          if (target) {
+            setSettingsOpen(false);
+            void currentDesktops.act(target, "start");
+          } else if (!catalog?.default_removed) {
+            currentDesktops?.clear();
+            setDesktopOpen(true);
+            setHome(false);
+            setSettingsOpen(false);
+          }
+        })();
       }
       const previousPair = browserSnapshot.current.split;
       const local = layoutRef.current;
@@ -1572,6 +1591,11 @@ function App() {
     setProjectDialog(null);
     setHome(true);
   };
+  const savedProject = async () => {
+    await refreshSettings();
+    await refreshStatus.current?.();
+    setProjectDialog(null);
+  };
   useEffect(() => {
     if (status?.workspace) setSelectedProject(status.workspace);
   }, [status?.workspace]);
@@ -1875,13 +1899,14 @@ function App() {
             onDefaultDesktopStop={stopDefaultDesktop}
             accountDesktops={status.account_desktops_supported ? accountDesktops : null}
             onDesktopRename={(desktop) => setRename({ id: desktop.id, title: desktop.label || "", desktop: true })}
-            onClaudeDesktop={() => {
-              const target = fallbackDesktopInstance(accountDesktops.catalog);
+            onClaudeDesktop={async () => {
+              const catalog = accountDesktops.catalog || await accountDesktops.refresh(true);
+              const target = fallbackDesktopInstance(catalog);
               if (target) {
                 void accountDesktops.act(target, "start");
                 return;
               }
-              if (accountDesktops.catalog?.default_removed) return;
+              if (catalog?.default_removed) return;
               accountDesktops.clear();
               setManagementPage("");
               setHome(false);
@@ -2369,6 +2394,7 @@ function App() {
           onClose={() => setProjectDialog(null)}
           onSettings={() => { setProjectDialog(null); openSettings("project"); }}
           onOpened={openedProject}
+          onSaved={savedProject}
           onRemoved={async (removed, workspace) => {
             const members = groups.find(group => group.workspace === removed)?.folders || [removed];
             const currentPins = savedProjectPins[tabLayoutKey] || [];

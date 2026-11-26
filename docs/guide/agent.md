@@ -14,7 +14,7 @@ keywords: Agent CLI JSON 自动化 配置 接口 安装 诊断 修复 capabiliti
 
 ## Agent 从哪里开始
 
-下文的 `cage` 代表 Cage 安装包内的后台 CLI。先找到实际文件；不要把桌面启动程序或 Linux 上同名的 Wayland 程序当作 CLI。
+下文的 `cage agent` 是供外部 Agent 配置和检查 Cage 的 JSON 接口，安装包中的实际命令见下表。在本机终端向 Claude Code 提问、传入管道或恢复会话，请使用同一程序的 `cage`、`cage -p` 或 `cage -r`。Linux 安装包的命令名为 `claude-cage`。[主机终端使用示例](workbench.md#在本机终端使用-claude-code)
 
 | 平台 | 默认 CLI 位置 | 调用示例 |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ Intel Mac 的平台参数为 `darwin-amd64`；Windows 可用 PowerShell 下载�
 
 助手从同一标签读取安装包与 `SHA256SUMS`，拒绝不完整附件、重复校验项、HTTP 降级和校验不符。下载使用独立临时文件，成功后才生成目标文件；目标已存在时保留它并报错。失败后可以重新下载到新的目标目录。Windows 只有未签名预览包时，返回 `unsigned_package_requires_consent`；用户明确选择该预览后才添加 `--allow-unsigned`。
 
-下载使用主机网络，需能访问 GitHub 与 Release 附件；指定 `--version` 时不需要 GitHub API。Node 24 支持通过 `node --use-env-proxy agent-bootstrap.mjs ...` 使用用户明确配置的 `HTTPS_PROXY` / `HTTP_PROXY`；也可使用用户现有的主机 TUN。不要回显代理凭据。较旧 Node 的 fetch 不自动采用这些环境代理；连接失败时先排查主机下载网络，避免反复重建 Cage 配置。
+下载使用主机网络，需能访问 GitHub 与 Release 附件；指定 `--version` 时不需要 GitHub API。Node 22.21+ 与 24.5+ 支持通过 `node --use-env-proxy agent-bootstrap.mjs ...`（或 `NODE_USE_ENV_PROXY=1`）使用用户明确配置的 `HTTPS_PROXY` / `HTTP_PROXY`；也可使用用户现有的主机 TUN。不要回显代理凭据。未启用该选项或更旧 Node 的 fetch 不采用这些环境代理；也可用会读取代理的 curl 下载 `plan` 输出的 `url`，再按其 `sha256` 校验。下载网络失败返回 `download_connection_failed`、`download_timeout`（连续 120 秒未收到数据）或 `download_interrupted`，`next_action` 为 `check_host_network`；设置了代理变量而 Node 未使用时，`message` 会说明启用方式。先排查主机下载网络再重试 `download`，避免反复重建 Cage 配置。
 
 | 平台 | 安装与验证 |
 | --- | --- |
@@ -53,6 +53,8 @@ Intel Mac 的平台参数为 `darwin-amd64`；Windows 可用 PowerShell 下载�
 | Linux | 在用户授权的权限上下文执行 `sudo apt-get install -- /absolute/path/Cage-版本-linux-amd64.deb`，由包管理器检查依赖。公共命令名是 `claude-cage`。 |
 
 安装、更新与卸载只处理应用文件。保留 `.claude-cage`、用户指定的数据目录、共享项目与持久虚拟机磁盘。已有账户重新出现创建界面时，首先核对 `config_path` 与原数据位置；不要创建替代账户或初始化旧数据目录。下载成功与应用已安装是两个状态；安装后验证真实 CLI 文件和 `agent capabilities`，再开始配置。
+
+通过 SSH 在 Windows 上从源码构建或打包时，进程位于会话 0，工作台自检无法创建窗口，构建脚本会在开始时停止。请在用户已登录的桌面会话中运行，或用交互式登录的一次性计划任务运行，并把输出写入日志文件以便读取结果。计划任务示例见 [Windows 源码构建](https://github.com/Lee-xeo/Claude-Cage/blob/main/docs/windows.md#windows-源码构建)。
 
 ## 第一次配置的完整顺序
 
@@ -208,7 +210,7 @@ cage agent job 012345abcdef --wait 30m
 
 `--wait` 为有限等待，范围为 0 到 24 小时；不指定时立即返回。等待或客户端断开不会自动取消作业。每个作业会通过 `initiator` 记录发起方（`agent`、`desktop` 或 `setup`）。后台只保留最近一个作业和被它替换的上一个作业，更早的记录会丢失，重启也可能失去记录。仍在运行的作业被停止或取消时，原作业返回 `job_canceled`，`canceled_by` 给出取消来源（`agent`、`desktop` 或 `setup`），`superseded_by` 给出替换它的作业 id，可据此查询停止作业的结果并决定是否重试。`job_not_found`、`outcome_unknown` 或连接中断后，先读 `status` 和相应配置，核对副作用；不要把其他任务成功当成原任务成功。`job_canceled` 单独表示取消，不能视为完成。
 
-命名 call 的输入必须是单个 JSON 对象，最大 12 MiB；request 支持原始二进制文件流。未知命令和字段会被拒绝。能力清单的 `input_schema` 描述允许字段；当前平台、系统状态和字段组合仍由后台验证。错误说明经过脱敏，正常业务结果保持接口原值。用户可以查看的密码、Cookie、配对码等，在同样的再次验证和权限检查通过后也可由 Agent 读取，应通过私有管道处理，避免默认记录或回显。
+`call` 只接受能力清单 `operations` 中的名称；`capabilities`、`doctor`、`init`、`service.start`、`host.inspect`、`routes`、`diagnostics` 是顶层命令，直接以 `cage agent 命令` 运行，传给 `call` 会返回 `unknown_operation`，`next_action` 给出对应的顶层命令。命名 call 的输入必须是单个 JSON 对象，最大 12 MiB；request 支持原始二进制文件流。未知命令和字段会被拒绝。能力清单的 `input_schema` 描述允许字段；当前平台、系统状态和字段组合仍由后台验证。错误说明经过脱敏，正常业务结果保持接口原值。用户可以查看的密码、Cookie、配对码等，在同样的再次验证和权限检查通过后也可由 Agent 读取，应通过私有管道处理，避免默认记录或回显。
 
 ## 定位问题与恢复
 
@@ -216,9 +218,10 @@ cage agent job 012345abcdef --wait 30m
 
 | 稳定错误码或可见状态 | Agent 的下一步 |
 | --- | --- |
-| `config_missing` | 核对用户数据位置；真正首次使用才运行 `init`。 |
+| `config_missing` | 核对用户数据位置；真正首次使用才运行 `init`。此时后台检查也会指向 `init`，配置创建后再执行 `service.start` 和 `account.create`。 |
 | `config_invalid`、`private_file_permissions` | 保留配置与磁盘，导出诊断，检查原文件和权限；不要覆盖整个 profile。 |
-| `service_unavailable` | 核对实际 CLI 与路径，执行 `service.start`；失败时导出离线诊断。 |
+| `service_unavailable` | 核对实际 CLI 与路径，执行顶层命令 `cage agent service.start`（不是 `call service.start`）或打开 Cage 应用；失败时导出离线诊断。 |
+| `authentication_failed` | 后台拒绝了这次会话。从 Cage 应用重新打开工作台后重试；`service.start` 会复用已有后台，不能恢复会话。 |
 | `controller_mismatch` | 使用与运行后台同一应用内的 CLI；更新需要保存并停止已有任务，Agent 不会自动接管。 |
 | `config_path_mismatch` | 同一目录的后台使用了另一个配置文件名；改用原后台的绝对配置路径，保留所有现有文件。 |
 | `account_missing` | 这份配置还没有账户：由用户在 Cage 创建，或通过私有输入调用 `account.create`；不要调用 `account.unlock`。 |

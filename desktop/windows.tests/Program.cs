@@ -167,7 +167,13 @@ try
     Check(pendingRecovery != null, "updater accepted a partially restored installation");
     Check(pendingRecovery!.Contains(candidate) && pendingRecovery.Contains(backup), "recovery error omitted the preserved directories");
     Check(File.Exists(recoveryReceipt), "recovery validation removed the persistent receipt");
+    string? pendingUpdate = null;
+    try { UpdateRecovery.EnsureNoPendingTransaction(snapshotSource); }
+    catch (IOException error) { pendingUpdate = error.Message; }
+    Check(pendingUpdate != null && pendingUpdate.Contains(recoveryReceipt), "update started an installer that a pending receipt blocks");
+    Check(File.Exists(recoveryReceipt), "pending transaction check removed the persistent receipt");
     File.Delete(recoveryReceipt);
+    UpdateRecovery.EnsureNoPendingTransaction(snapshotSource);
     var rejectedMissingInstallation = false;
     try { ensureComplete.Invoke(null, [Path.Combine(integration, "missing installation")]); }
     catch (System.Reflection.TargetInvocationException error) when (error.InnerException is IOException) { rejectedMissingInstallation = true; }
@@ -219,6 +225,35 @@ try
         {
             File.WriteAllText(runningRelease, "release");
             foreach (var process in new[] { runningApp, runningChild })
+                if (!process.WaitForExit(5000)) { process.Kill(); process.WaitForExit(); }
+        }
+
+        // A candidate started after that check runs from the failed folder
+        // once detach has moved its program folders.
+        var detached = Path.Combine(integration, "detached application");
+        Directory.Move(running, detached);
+        var detachedRelease = Path.Combine(integration, "detached release");
+        var controllerInvoked = Path.Combine(backup, "resources", "controller-invoked");
+        using var detachedApp = System.Diagnostics.Process.Start(Backend.StartInfo(Path.Combine(detached, "Cage.exe"), "smoke-wait", detachedRelease))!;
+        using var detachedChild = System.Diagnostics.Process.Start(Backend.StartInfo(Path.Combine(detached, "resources", "cage.exe"), "smoke-wait", detachedRelease))!;
+        try
+        {
+            File.Delete(controllerInvoked);
+            await UpdateRecovery.StopDetachedCandidate(backup, detached, TimeSpan.FromMilliseconds(500));
+            Check(detachedApp.HasExited, "cleanup started while the candidate App ran from the failed folder");
+            Check(File.Exists(controllerInvoked), "rollback did not stop a controller the detached App may have restarted");
+            Check(!detachedChild.HasExited, "fixture did not keep a candidate process running past the wait");
+            File.WriteAllText(detachedRelease, "release");
+            await UpdateRecovery.StopDetachedCandidate(backup, detached, TimeSpan.FromSeconds(10));
+            Check(detachedChild.HasExited, "cleanup started before the detached candidate process exited");
+            File.Delete(controllerInvoked);
+            await UpdateRecovery.StopDetachedCandidate(backup, detached, TimeSpan.FromSeconds(10));
+            Check(!File.Exists(controllerInvoked), "rollback stopped the environment again with no candidate running");
+        }
+        finally
+        {
+            File.WriteAllText(detachedRelease, "release");
+            foreach (var process in new[] { detachedApp, detachedChild })
                 if (!process.WaitForExit(5000)) { process.Kill(); process.WaitForExit(); }
         }
     }

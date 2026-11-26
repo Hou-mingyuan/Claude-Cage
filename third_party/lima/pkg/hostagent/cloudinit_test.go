@@ -19,10 +19,25 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/lima-vm/sshocker/pkg/ssh"
 	"gotest.tools/v3/assert"
 
 	"github.com/lima-vm/lima/v2/pkg/hostagent/events"
 )
+
+func TestCloudInitSSHSession(t *testing.T) {
+	control := []string{"-o", "ControlMaster=auto", "-o", "ControlPath=boot.sock", "-o", "ControlPersist=yes"}
+	a := &HostAgent{
+		instSSHAddress: "127.0.0.1",
+		sshLocalPort:   6001,
+		sshConfig:      &ssh.SSHConfig{AdditionalArgs: append(control, "-o", "BatchMode=yes")},
+	}
+	if runtime.GOOS == "windows" {
+		control = []string{"-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ControlPersist=no"}
+	}
+	cmd := a.cloudInitCommand(t.Context(), cloudInitLogStreamScript)
+	assert.DeepEqual(t, cmd.Args[1:], append(control, "-o", "BatchMode=yes", "-T", "-p", "6001", "127.0.0.1", "sh", "-s"))
+}
 
 func TestEmitCloudInitProgressEventStripsControlChars(t *testing.T) {
 	var buf bytes.Buffer

@@ -46,6 +46,7 @@ internal static class UpdateInstaller
             Directory.SetCurrentDirectory(AppUpdater.Root);
             if (File.ReadAllText(Path.Combine(plan.Target, "Cage.install-id")).Trim() != "io.github.lee-xeo.claude-cage")
                 throw new IOException("请先使用 Cage 安装程序安装应用，再自动更新");
+            UpdateRecovery.EnsureNoPendingTransaction(plan.Target);
             var original = Path.Combine(plan.Target, "Cage.exe");
             string targetPublisher;
             if (plan.UnsignedSource)
@@ -191,6 +192,7 @@ internal static class UpdateInstaller
                         await PreserveFiles("complete", "", plan.Target, receipt);
                         throw;
                     }
+                    await UpdateRecovery.StopDetachedCandidate(backup, failed, TimeSpan.FromSeconds(30));
                     await PreserveFiles("cleanup", failed, plan.Target, receipt);
                     EnsureInstallationComplete(plan.Target);
                     UpdateRecovery.CleanupDirectory(backup); backup = null;

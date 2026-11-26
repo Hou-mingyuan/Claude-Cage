@@ -26,7 +26,9 @@ DISM /Online /Enable-Feature /FeatureName:HypervisorPlatform /All
 3. 在“快捷方式”页选择“添加桌面快捷方式”和“添加到开始菜单”。首次安装默认勾选两项，覆盖安装沿用上次选择，旧安装按已有快捷方式恢复选择。卸载会清理 Cage 创建的快捷方式。
 4. 从选中的快捷方式启动 Cage。如果 C 盘空间有限，在初始化界面的“存储目录”中选择其他磁盘的专用空文件夹，再导入代理并启动环境；已有环境也可以从设置迁移。见[选盘与迁移步骤](getting-started.md#选择环境存储位置)。
 
-安装器不设置系统代理，不安装 SSH 服务，不把随附工具加入系统 PATH。WebView2 是 Microsoft 提供的系统浏览器运行时，其安装与维护由 Microsoft 安装程序负责。
+v0.2.2 完整版安装成功后会将终端命令所在的 `resources` 目录加入当前用户的 PATH。在新开的 PowerShell 或命令提示符中运行 `cage --help` 核对命令，`cage login` 登录 Claude 账号，进入项目文件夹后输入 `cage` 开始工作。卸载时只清理安装器添加的 PATH 项。[终端命令与项目共享](guide/workbench.md#在本机终端使用-claude-code)
+
+安装器不设置系统代理，不安装 SSH 服务，也不修改系统级 PATH。WebView2 是 Microsoft 提供的系统浏览器运行时，其安装与维护由 Microsoft 安装程序负责。
 
 安装器逐文件解压到安装位置所在磁盘的暂存目录，成功后替换应用，避免在系统临时目录生成整包解压副本。Windows 临时目录仍可能保存少量安装器辅助文件；缺少 WebView2 时，Microsoft 安装程序会管理其共享运行组件的位置。
 
@@ -67,11 +69,13 @@ Cage 支持含中文的安装目录。启动时优先读取随附 QEMU 的 UEFI 
 - 提示权限或路径不可用：使用当前用户有权限访问的本地目录，不把 Cage 安装目录、私有配置或磁盘根目录作为共享项目。更新器拒绝含符号链接或目录联接的安装路径。
 - Go 或运行时进程无报错挂起且 CPU 为 0%：检查本机是否安装了企业/高校同步盘客户端（如基于 AnyShare 的同步盘）或其他向新建进程注入监控 DLL 的软件；可在 PowerShell 中用 `(Get-Process cage).Modules`（构建期查看 `compile`）确认是否被注入非系统 DLL，并将 `cage.exe`、`Cage.exe`、`mihomo.exe`、`qemu-system-x86_64.exe`、`qemu-img.exe`、`ssh.exe` 加入其排除列表或暂停相关监控服务后重试。
 
+Windows 同时安装了原生 Claude Desktop（MSIX）或 CLI 时，先确认连接来自哪个进程，可在任务管理器中核对程序路径和启动项。Cage 的联网状态只描述 Cage 环境。若 Windows 防火墙已设为默认阻止出站，仍需查看当前网络配置文件下按程序路径或应用包匹配的有效规则：显式允许规则可放行匹配的连接，匹配的显式阻止规则优先。[Windows 防火墙规则优先级](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules) · [程序和应用包规则筛选](https://learn.microsoft.com/en-us/powershell/module/netsecurity/get-netfirewallapplicationfilter)
+
 反馈问题时提供 Cage 版本、Windows 版本与内部版本号、CPU 架构、失败步骤和错误原文。不要附带代理密码、订阅链接、会话地址或未脱敏的配置文件。
 
 ## Windows 源码构建
 
-在 Windows x64 上从仓库根目录运行以下步骤。构建脚本需要 PowerShell 7，可用 `pwsh` 打开终端。安装命令行工具后重新打开终端，或在当前会话中更新 `PATH`。
+在 Windows x64 上安装以下工具。构建脚本需要 PowerShell 7，可用 `pwsh` 打开终端。安装命令行工具后重新打开终端，或在当前会话中更新 `PATH`。
 
 | 工具 | 版本与用途 |
 | --- | --- |
@@ -82,6 +86,16 @@ Cage 支持含中文的安装目录。启动时优先读取随附 QEMU 的 UEFI 
 | [uv](https://docs.astral.sh/uv/getting-started/installation/)、[7-Zip](https://www.7-zip.org/) | 工作台构建需要 `uv` 运行 noVNC 补丁脚本。Windows 构建需要完整的 7-Zip（`7z` 或 `7zz`）解包依赖，其中须包含 PE/NSIS 格式支持；构建开始时会用 `7z i` 检查，精简版即使同名也会被拒绝。可用 `uv --version` 和 `Get-Command 7z, 7zz -ErrorAction SilentlyContinue` 检查。 |
 | [WebView2 Evergreen 运行时](https://developer.microsoft.com/microsoft-edge/webview2/) | 本机需安装此运行时，构建完成后会启动工作台进行自检。 |
 | [MSYS2](https://www.msys2.org/)、NSIS | MSYS2 的 UCRT64 环境用于编译 QEMU。生成安装包还需要 NSIS。 |
+
+先在可写的本地 NTFS 目录中打开 PowerShell，用 Git 获取源码。仓库中的 Lima 配置和模板包含相对符号链接。请确认当前用户有创建符号链接的权限，例如已启用 Windows 开发者模式。[Git for Windows 符号链接说明](https://gitforwindows.org/symbolic-links.html)
+
+```powershell
+git clone -c core.symlinks=true https://github.com/Lee-xeo/Claude-Cage.git
+Set-Location Claude-Cage
+Get-Content .\third_party\lima\pkg\cidata\cloud-config.yaml -TotalCount 1
+```
+
+最后一条命令应输出 `#cloud-config`。若输出 `cidata.TEMPLATE.d/user-data`，说明 Git 将链接检出为只含目标路径的文本文件。用 Windows 自带的 `tar.exe` 解压 GitHub 的 **Code → Download ZIP** 也可能因无法创建链接而报错，即使其他文件已解压，源码仍不完整。遇到这两种情况时，确认链接权限后，在新的目录按上述命令重新克隆。
 
 把 MSYS2 安装到简短、只含 ASCII 且无空格的本地路径，例如 `C:\msys64`。打开 **MSYS2 UCRT64**，运行 `pacman -Syu` 更新。国内网络下若默认镜像 `mirror.msys2.org` 频繁返回 503 或超时，可将 `/etc/pacman.d/mirrorlist.*` 切换至国内镜像站（如 USTC 或 TUNA），并注意 `pacman.conf` 中各 MinGW 仓库共用 `mirrorlist.mingw`（含 `$repo` 变量）。若更新时终端关闭，重新打开 UCRT64 再运行一次。若 `pacman` 长时间没有进度，日志反复出现 `gpg: waiting for lock` 或 `starting migration from earlier GnuPG versions`，可能是 gpg-agent 无法建立本机套接字（目前见于部分 Windows 11 预览版本）。结束 MSYS2 中残留的 `gpg`、`gpg-agent`、`dirmngr` 和 `pacman` 进程，删除 `/etc/pacman.d/gnupg/` 下的 `.#lk*`、`*.lock` 和 `S.gpg-agent*` 后重试；仍然卡住时先排查 Windows 更新或安全软件对 AF_UNIX 套接字的影响，不建议关闭软件包签名校验。更新完成后安装下列依赖，包清单与 CI 一致。[Windows CI 工具配置](../.github/actions/windows-toolchain/action.yml)
 
@@ -105,7 +119,16 @@ QEMU 下载前会分别编译、链接并运行最小 C 和 C++ 程序。默认 
 
 NuGet 报 `Central Directory corrupt` 或 `Received an unexpected EOF or 0 bytes from the transport stream` 时，检查代理是否截断了运行时包的下载。已完成的 QEMU、前端和 NuGet 全局包缓存可以保留。从官方来源下载完整的同版本 `.nupkg`，与 NuGet 官方目录记录的 `packageHash` 核对一致后放入本地目录，再保留 `--locked-mode` 重试还原。命令行同时指定官方源和本地目录时，把 HTTPS 源写在前面，例如 `dotnet restore .\desktop\windows\Cage.Windows.csproj --locked-mode -r win-x64 -p:Configuration=Release --source https://api.nuget.org/v3/index.json --source C:\CageNuGetFeed`；本地目录在前时，部分 SDK 会把后面的地址当作文件路径并报 `NU1301`。也可通过 `NuGet.Config` 配置本地包源。
 
-应用输出到 `_output/windows-amd64/app`。本地默认自检目录是仓库内的 `_output/workbench-smoke`。源码如果检出到 AppData 或重解析到其他私有目录，构建会在开始前提示把 `RUNNER_TEMP` 指向 AppData 外的普通本地目录，例如 `D:\CageBuildTemp`。若自检失败，构建输出会显示已识别的共享目录错误、候选应用目录和诊断路径。可查看 `smoke.json` 和 `profile/logs/events.jsonl`。`prepareStatus=prepared` 是自检结束时后台的停止确认。
+应用输出到 `_output/windows-amd64/app`。本地默认自检目录是仓库内的 `_output/workbench-smoke`。源码如果检出到 AppData 或重解析到其他私有目录，构建会在开始前提示把 `RUNNER_TEMP` 指向 AppData 外的普通本地目录，例如 `D:\CageBuildTemp`。源码位于 exFAT、FAT32 等不保存文件所有者和权限的分区（常见于外接 SSD、U 盘）时，Cage 无法确认私有文件归当前用户所有，自检窗口不会启动；构建同样会在开始前提示，把 `RUNNER_TEMP` 指向 NTFS 分区上 AppData 外的目录，例如 `C:\CageBuildTemp`。若自检失败，构建输出会显示已识别的共享目录错误、候选应用目录和诊断路径。可查看 `smoke.json` 和 `profile/logs/events.jsonl`。`prepareStatus=prepared` 是自检结束时后台的停止确认。
+
+工作台自检会打开 WebView2 窗口，需要已登录用户的交互式桌面。通过 Win32-OpenSSH 或服务运行的进程位于会话 0，自检会报 `无效的窗口句柄 (0x80070578)`；`build-windows.ps1` 和 `package-windows.ps1` 会在开始时检测并提前停止。远程构建时，在桌面会话中运行，或用交互式登录的一次性计划任务运行构建与打包脚本（该用户须已登录桌面）：
+
+```powershell
+$action = New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument '-NoProfile -WindowStyle Hidden -File C:\path\package.ps1'
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+Register-ScheduledTask -TaskName CageBuildOnce -Action $action -Principal $principal -Force
+Start-ScheduledTask CageBuildOnce   # 完成后 Unregister-ScheduledTask CageBuildOnce
+```
 
 源码构建常见主机环境问题排查：
 

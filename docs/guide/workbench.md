@@ -1,9 +1,9 @@
 ---
 title: 项目、终端与文件
-description: 在同一工作台运行 Claude Code、编辑代码、传递附件，并弄清关闭和退出对任务的影响。
+description: 在工作台或主机终端运行 Claude Code，管理共享项目、编辑代码、传递附件，并了解任务何时结束。
 group: 日常工作
 order: 3
-keywords: 项目 Claude Code 编辑器 code-server Git GitHub gh 提交 推送 文件 复制 粘贴 快捷键 分屏 标签 localhost
+keywords: 项目 Claude Code 主机终端 CLI cage start cage login cage up cage stop cage account 编辑器 code-server Git GitHub gh 提交 推送 文件 复制 粘贴 快捷键 分屏 标签 localhost
 ---
 ## 打开项目与编辑文件
 
@@ -27,7 +27,62 @@ keywords: 项目 Claude Code 编辑器 code-server Git GitHub gh 提交 推送 �
 
 共享文件在环境内显示为当前用户所有，Git 可正常读取已打开项目的状态与历史。文件内容仍属于原来的主机目录，Git 元数据与项目一起共享，环境中的 Git 操作会直接更新主机仓库。授权目录内的隐藏文件、工具配置、Git 配置和钩子均按普通项目文件共享。Cage 不按文件名额外隐藏文件或禁止写入；云端共享的整目录只读授权仍然生效。
 
-### 从命令行在项目中运行
+## 在本机终端使用 Claude Code
+
+主机 CLI 是面向 v0.2.2 的完整版功能，可在应用自带的 `cage --help` 中查找 `cage start` 来确认当前构建是否支持。macOS 在 **Cage → 安装终端命令…** 中安装 `cage`，然后打开新终端。Windows 安装完整版后，在新开的 PowerShell 或命令提示符中使用 `cage`。Linux 可直接用 `claude-cage` 替换下文的 `cage`。短名空闲时可用 `claude-cage install-cli` 安装。
+
+```sh
+cage login
+cd ~/Projects/my-project
+cage
+```
+
+`cage login` 会打开 Cage 自己的浏览器，供你登录 **Claude 账号**。只有环境里的 Claude Code 确认授权，终端才提示登录成功。已有有效登录时会直接打开 `claude.ai`。本机工作台处于锁定状态时，在 Cage 窗口解锁，原命令会自动继续。直接输入 `cage login` 或 `cage` 都会按需启动后台和本机环境，也可以提前运行 `cage start`。
+
+在一个新文件夹运行 Claude 会自动将**当前文件夹**加入工作台的共享项目。修改会写回本机，关掉终端后项目仍在侧栏，可从工作台移除。在已有项目的子目录或其他绑定文件夹运行时，复用该项目，从当前子目录开始工作。根目录、用户主目录和 Cage 的私有目录沿用工作台的共享限制。显式传入的额外目录（如 `--add-dir ../library`）共享到最后一个使用它的命令结束。已登记的项目按原来的共享设置使用。登录、状态和帮助命令都可以在任意目录执行。
+
+### 提问、脚本与会话
+
+提示词、选项和 Claude 子命令由环境内安装的 Claude Code 解析。
+
+```sh
+cage "解释这个仓库的启动流程"
+cage -c                                # 继续当前目录最近的会话
+cage -r "$SESSION_ID"                  # SESSION_ID 为要恢复的会话 ID
+cage --model sonnet
+git diff | cage -p "概括改动" --output-format json
+cage auth status                       # 查看 Claude 的授权状态
+```
+
+脚本可读取 Claude 的标准输出、标准错误和退出码。流式输出用 `-p --output-format stream-json --verbose`。遇到需要人工授权的状态时，脚本返回错误，提示写入标准错误。关闭本机交互终端后，仍在运行的会话可从工作台接回。若要用 Claude 自带的 `--bg` 启动长期任务，请将长期需要的额外目录加入工作台的项目绑定。
+
+### 后台服务与运行环境
+
+| 命令 | 用途 |
+| --- | --- |
+| `cage start` | 在后台启动或复用本机控制服务，服务就绪后返回终端。虚拟机保持原来的运行状态 |
+| `cage serve` | 在当前终端前台运行控制服务 |
+| `cage up` | 显式启动本机运行环境、编辑器和浏览器服务 |
+| `cage status` | 分别查看后台服务与运行环境状态，工作台锁定时显示解锁提示 |
+| `cage stop` | 停止本机运行环境及其代理，中断环境内的任务。后台控制服务可继续运行 |
+| `cage restart` | 用已有磁盘和配置重启本机运行环境，等待环境就绪。正在运行的任务会中断 |
+| `cage desktop` | 从本机终端打开 Cage 工作台 |
+
+遇到同名命令时，`cage claude` 可明确调用 Claude Code。例如，`cage claude stop <后台会话ID>` 只停止指定的 Claude 后台会话。`cage --help` 和 `cage --version` 查看 Cage 的命令和版本。`cage claude --help`、`cage claude --version` 查看环境内 Claude Code 的帮助和版本，`cage mcp --help` 列出它的 MCP 子命令。
+
+**重建环境会丢失虚拟磁盘中的文件与登录状态。** `cage up --reset` 和旧版兼容用法 `cage login --reset` 都会重建虚拟机。日常登录使用 `cage login`。
+
+### 选择 Claude 账号
+
+| 命令 | 用途 |
+| --- | --- |
+| `cage account list` | 查看工作台已登记的 Claude 账号和编号 |
+| `cage account use 2`、`cage account use auto` | 为后续 CLI 调用选定账号，或恢复工作台的自动分配 |
+| `cage account run 2 -- -p "你好"` | 只为本次调用选择账号 |
+
+登录凭据留在 Cage 环境里，Claude 使用所选账号的出口和权限设置。和工作台相同，一个环境可以同时访问多个已共享项目。[账号分配与会话接续](accounts.md)
+
+### 从命令行在项目中运行其他程序
 
 通过 SSH 登录运行 Cage 的电脑等纯终端场景，可以在本机项目目录中直接使用 Cage 的命令行（各平台的位置见[让 Agent 配置 Cage](agent.md#agent-从哪里开始)，Linux 上为 `claude-cage`）：
 

@@ -60,7 +60,7 @@ func TestStartEnvironmentDispatch(t *testing.T) {
 }
 
 func TestStartUsageBeforeOpeningProfile(t *testing.T) {
-	for _, command := range []string{"up", "login"} {
+	for _, command := range []string{"start", "up", "login"} {
 		for _, args := range [][]string{
 			{"--unknown"}, {"unexpected"}, {"--reset", "--unknown"},
 			{"--help", "--unknown"}, {"-h", "unexpected"},

@@ -176,20 +176,26 @@ func (d *desktopLocal) Connect(ctx context.Context) (_ *remotehost.Session, retu
 			st.ControllerID = ""
 		}
 	}
+	bootstrap, cancel := context.WithTimeout(ctx, localBootstrapTimeout)
+	defer cancel()
 	var launchID string
 	if !st.ServiceRunning {
 		launchID = randomToken()
-		if err = startControllerExecutable(d.config, d.executable, "CAGE_DESKTOP_START_ID="+launchID); err != nil {
+		c, started, err := startControllerExecutable(bootstrap, d.config, d.executable, "CAGE_DESKTOP_START_ID="+launchID)
+		if started {
+			defer func() {
+				if returned != nil {
+					d.releaseFailedLaunch(launchID)
+				}
+			}()
+		} else {
+			launchID = ""
+		}
+		if err != nil {
 			return nil, err
 		}
-		defer func() {
-			if returned != nil {
-				d.releaseFailedLaunch(launchID)
-			}
-		}()
+		c.close()
 	}
-	bootstrap, cancel := context.WithTimeout(ctx, localBootstrapTimeout)
-	defer cancel()
 	for {
 		c, err := openController(d.profile)
 		if err == nil {

@@ -55,6 +55,7 @@ Claude Cage 在一个小型的 Debian 13 环境里运行官方 Claude Code 和 C
 
 ## 你可以用它做什么
 
+- **在本机终端使用 Claude Code（v0.2.2 功能）。** `cage login` 打开 Cage 浏览器，供你登录 Claude 账号。在项目目录输入 `cage` 即可共享当前文件夹并打开会话，支持 Claude Code 原生参数、管道和账号选择。也可用 `cage start` 提前启动后台服务。[终端命令与示例](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **在一个窗口里完成工作。** 用终端运行 Claude Code，用编辑器查看改动，用 Cage 浏览器预览服务和完成登录。
 - **通过插件市场解锁全部能力。** 内置开放的[插件市场（cage-plugins）](https://github.com/Lee-xeo/cage-plugins)，插件 = MCP + 扩展：既能让环境里的 Claude 通过标准 MCP 安全、受控地使用本机能力（如桌面键鼠控制、Office 文档、Blender、命令行工具等），也能通过沙箱页面定制 Cage 工作台。主机插件默认受权限声明与弹窗确认保护。 [插件与插件市场](docs/guide/plugins.md) · [开发规范](docs/plugins.md)
 - **三个平台，同一个轻量化环境。** macOS、Windows 和 Linux 上的 Cage 都运行同一个轻量化 Debian 13 环境，无需维护复杂的多系统客机，工具与操作方式一致。 [Debian 环境](docs/guide/guest-systems.md)
@@ -73,8 +74,10 @@ Claude Cage 在一个小型的 Debian 13 环境里运行官方 Claude Code 和 C
 把这句话发给你的 agent（codex，dsh，workbuddy，反正不会是 claude code😁）
 
 ```markdown
-帮我拉取 https://github.com/Lee-xeo/Claude-Cage 的最新源码，打包安装，并把 Cage 的代理配置通过我本机 clash 的 xx 节点走我的 xx ip 出口，全过程你盯着，有问题直接修复，且有必要的话顺手给项目提交 issue 帮助他们优化兼容性。
+帮我拉取 https://github.com/Lee-xeo/Claude-Cage 的最新源码，打包安装，将我导出的上游节点配置 [文件路径] 导入 Cage。如果使用代理链，请依次配置中转节点和出口节点。验证公网出口 IP 为 [预期 IP]。全过程你盯着，有问题直接修复，且有必要的话顺手给项目提交 issue 帮助他们优化兼容性。
 ```
+
+Clash/Mihomo 或 sing-box 在本机监听的地址（如 `127.0.0.1:7890`）不能用作上游节点。 [迁移已有代理链](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 你唯一需要的，是一个靠谱的代理节点，本项目不做任何代理推广，可以自行搜索黑色错误网站解决。
 

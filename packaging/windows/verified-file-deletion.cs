@@ -16,11 +16,18 @@ public static class CageVerifiedFile
     }
     [StructLayout(LayoutKind.Sequential)] private struct IOStatus { public IntPtr Status, Information; }
     [StructLayout(LayoutKind.Sequential)] private struct AttributeTag { public uint Attributes, Tag; }
+    [StructLayout(LayoutKind.Sequential)] private struct FileInformation
+    {
+        public uint Attributes, CreationLow, CreationHigh, AccessLow, AccessHigh, WriteLow, WriteHigh;
+        public uint VolumeSerial, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+    }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int kind, out AttributeTag info, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(SafeFileHandle file, out FileInformation info);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetFileInformationByHandle(SafeFileHandle file, int kind, ref byte delete, uint size);
     [DllImport("ntdll.dll")]
@@ -40,9 +47,7 @@ public static class CageVerifiedFile
         using (SafeFileHandle directory = CreateFile(root, 0x80000000, 7, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero))
         {
             if (directory.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
-            AttributeTag tag;
-            if (!GetFileInformationByHandleEx(directory, 9, out tag, 8)) throw new Win32Exception(Marshal.GetLastWin32Error());
-            if ((tag.Attributes & 0x400) != 0) throw new IOException("Installation directory is a reparse point");
+            if ((GetAttributes(directory) & 0x400) != 0) throw new IOException("Installation directory is a reparse point");
             IntPtr text = Marshal.StringToHGlobalUni(relative.Replace('/', '\\'));
             IntPtr name = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString)));
             try
@@ -60,14 +65,26 @@ public static class CageVerifiedFile
                 if (result < 0) { if (file != null) file.Dispose(); throw new Win32Exception((int)RtlNtStatusToDosError(result)); }
                 try
                 {
-                    if (!GetFileInformationByHandleEx(file, 9, out tag, 8)) throw new Win32Exception(Marshal.GetLastWin32Error());
-                    if ((tag.Attributes & 0x410) != 0) throw new IOException("Installation file is a directory or reparse point");
+                    if ((GetAttributes(file) & 0x410) != 0) throw new IOException("Installation file is a directory or reparse point");
                     return new FileStream(file, FileAccess.Read);
                 }
                 catch { file.Dispose(); throw; }
             }
             finally { Marshal.FreeHGlobal(name); Marshal.FreeHGlobal(text); }
         }
+    }
+
+    private static uint GetAttributes(SafeFileHandle file)
+    {
+        AttributeTag tag;
+        if (GetFileInformationByHandleEx(file, 9, out tag, 8)) return tag.Attributes;
+        // FAT32 and exFAT reject FileAttributeTagInfo with these errors. They
+        // cannot store reparse points, so the plain attributes are sufficient.
+        int error = Marshal.GetLastWin32Error();
+        if (error != 1 && error != 50 && error != 87) throw new Win32Exception(error);
+        FileInformation info;
+        if (!GetFileInformationByHandle(file, out info)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        return info.Attributes;
     }
 
     public static void Delete(FileStream file)

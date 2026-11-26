@@ -950,7 +950,8 @@ const server = http.createServer(async (req, res) => {
         try { return await vault.request(input); }
         catch (error) { return { vaultError: error.message }; }
       }
-      if (req.url === "/login-open" || (req.url === "/new" && (input.route || isClaudeSignIn(input.url)))) {
+      const accountHome = input.account && (input.url === "https://claude.ai" || input.url === "https://claude.ai/");
+      if (req.url === "/login-open" || (req.url === "/new" && (input.route || accountHome || isClaudeSignIn(input.url)))) {
         const external = req.url === "/new" && !isClaudeSignIn(input.url);
         const privateLogin = !external && !existsSync("/etc/claude-cage/login-browser-mode");
         openingTargets++;

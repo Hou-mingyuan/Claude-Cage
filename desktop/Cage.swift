@@ -183,6 +183,9 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
         completeUpdateMenu.isHidden = !controllerNeedsUpdate
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: CageLanguage.text("设置…"), action: #selector(settings), keyEquivalent: ",")
+        if !CageProfile.clientOnly {
+            appMenu.addItem(withTitle: CageLanguage.text("安装终端命令…"), action: #selector(installTerminalCommand), keyEquivalent: "")
+        }
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: CageLanguage.text("隐藏 Cage"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: CageLanguage.text("显示全部"), action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
@@ -237,6 +240,29 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName:"Cage", .applicationVersion:version, .credits:NSAttributedString(string:CageLanguage.text("本机隔离编码工作区") + "\n" + CageLanguage.text("基于 agent-vm、Lima、Chromium、noVNC 与 xterm.js") + status)])
     }
     @objc private func settings() { action("settings") }
+    @objc private func installTerminalCommand() {
+        guard let executable = Bundle.main.url(forResource: "cage", withExtension: nil) else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process(), output = Pipe()
+            process.executableURL = executable
+            process.arguments = ["install-cli"]
+            process.standardOutput = output
+            process.standardError = output
+            let message: String
+            do {
+                try process.run()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                message = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch { message = error.localizedDescription }
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = CageLanguage.text("安装终端命令…")
+                alert.informativeText = message
+                alert.beginSheetModal(for: self.window)
+            }
+        }
+    }
     @objc private func openProject() { action("openProject") }
     @objc private func newTab() { action("newTab") }
     @objc private func newTerminal() { action("newTerminal") }

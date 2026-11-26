@@ -37,14 +37,35 @@ var patterns = []struct {
 	{regexp.MustCompile(`\b` + ipv4Address + `\b(?::[0-9]+)?`), "[ip]"},
 	// Older logs already contain masked IPs with their original ports attached.
 	{regexp.MustCompile(`\[ip\]:[0-9]+`), "[ip]"},
-	// Core errors contain bare endpoints as well as URLs. Remove the complete
-	// hostname and optional port, including punycode labels and DNS trailing dots.
-	{regexp.MustCompile(`(?i)\b(?:[a-z0-9_][a-z0-9_-]*\.)+(?:xn--[a-z0-9-]+|[a-z]{2,})\b\.?(?::[0-9]+)?`), "[host]"},
 }
+
+// Core errors contain bare endpoints as well as URLs. Match the whole endpoint,
+// including its port, before considering a dotted word in a diagnostic message.
+const bareHost = `(?i:(?:[a-z0-9_][a-z0-9_-]*\.)+(?:xn--[a-z0-9-]+|[a-z]{2,}(?:-[a-z0-9-]+)?)\b\.?(?::[0-9]+)?)`
+const operationLead = `(?:call |then |recovery=)`
+const localeLead = `(?:Locale=|LANG=|LC_ALL=|locale \()`
+const cageFile = `(?:lima\.yaml|setup\.sh|main\.go)`
+const fileLead = `(?:writing|reading|opening) (?:` + cageFile + ` and )*`
+const sourceLead = `panic at `
+
+var hostInMessage = regexp.MustCompile(`\b((?:` + operationLead + `|` + localeLead + `|` + fileLead + `|` + sourceLead + `)?)(` + bareHost + `)`)
+
+// A filename such as setup.sh can also be an endpoint. Preserve only complete,
+// known diagnostic forms. A port or a further domain label still masks the host.
+var publicDiagnostic = regexp.MustCompile(`^(?:` +
+	operationLead + `(?:network\.check|settings\.probe|proxy\.(?:route|select))|` +
+	localeLead + `(?:C|[a-zA-Z]{2,3}_[a-zA-Z]{2,3})\.UTF-8|` +
+	fileLead + cageFile + `|` + sourceLead + `main\.go:[0-9]+)$`)
 
 func Redact(s string) string {
 	for _, p := range patterns {
 		s = p.re.ReplaceAllString(s, p.replacement)
 	}
+	s = hostInMessage.ReplaceAllStringFunc(s, func(match string) string {
+		if publicDiagnostic.MatchString(match) {
+			return match
+		}
+		return hostInMessage.ReplaceAllString(match, "${1}[host]")
+	})
 	return strings.ToValidUTF8(s, "�")
 }

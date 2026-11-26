@@ -581,6 +581,11 @@ func (s *Server) stopEnvironment() (returned error) {
 	s.guestManifest = nil
 	s.setGuestUpdateLocked(false, "")
 	s.safety.Error = ""
+	for use := range s.hostCLIUses {
+		if use.cancel != nil {
+			use.cancel()
+		}
+	}
 	s.mu.Unlock()
 	s.terminals.closeAll()
 	s.mobileCLI.stopAll()
