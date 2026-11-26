@@ -71,8 +71,10 @@ Claude Cage reúne terminal, navegador, editor, Claude Desktop oficial y mercado
 Envíe esta solicitud a su agente de IA (codex, dsh, workbuddy; probablemente no Claude Code 😁):
 
 ```markdown
-Obtén el código fuente más reciente de https://github.com/Lee-xeo/Claude-Cage, compílalo, empaquétalo e instálalo. Configura el proxy de Cage para usar el nodo xx de mi Clash local y salir por mi IP xx. Supervisa todo el proceso, corrige directamente los problemas y, si es necesario, abre una issue en el proyecto para ayudar a mejorar la compatibilidad.
+Obtén el código fuente más reciente de https://github.com/Lee-xeo/Claude-Cage, compílalo, empaquétalo e instálalo. Importa en Cage el nodo que exporté a [ruta del archivo]. Si uso una cadena de proxies, configura primero el nodo intermedio y luego el de salida. Comprueba que la IP pública de salida coincida con [IP esperada]. Supervisa todo el proceso, corrige directamente los problemas y, si es necesario, abre una issue en el proyecto para ayudar a mejorar la compatibilidad.
 ```
+
+Cage no admite como nodo la dirección local en la que escucha Clash/Mihomo o sing-box, por ejemplo `127.0.0.1:7890`. [Migrar una cadena de proxies](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 Todo lo que necesita es un punto final de proxy de red confiable. Este proyecto no promueve ningún proveedor de proxy; Puede encontrar un proveedor usted mismo, por ejemplo buscando en el sitio web de Black Error.
 

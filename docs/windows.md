@@ -73,7 +73,7 @@ Windows 同时安装了原生 Claude Desktop（MSIX）或 CLI 时，先确认连
 
 ## Windows 源码构建
 
-在 Windows x64 上从仓库根目录运行以下步骤。构建脚本需要 PowerShell 7，可用 `pwsh` 打开终端。安装命令行工具后重新打开终端，或在当前会话中更新 `PATH`。
+在 Windows x64 上安装以下工具。构建脚本需要 PowerShell 7，可用 `pwsh` 打开终端。安装命令行工具后重新打开终端，或在当前会话中更新 `PATH`。
 
 | 工具 | 版本与用途 |
 | --- | --- |
@@ -84,6 +84,16 @@ Windows 同时安装了原生 Claude Desktop（MSIX）或 CLI 时，先确认连
 | [uv](https://docs.astral.sh/uv/getting-started/installation/)、[7-Zip](https://www.7-zip.org/) | 工作台构建需要 `uv` 运行 noVNC 补丁脚本。Windows 构建需要完整的 7-Zip（`7z` 或 `7zz`）解包依赖，其中须包含 PE/NSIS 格式支持；构建开始时会用 `7z i` 检查，精简版即使同名也会被拒绝。可用 `uv --version` 和 `Get-Command 7z, 7zz -ErrorAction SilentlyContinue` 检查。 |
 | [WebView2 Evergreen 运行时](https://developer.microsoft.com/microsoft-edge/webview2/) | 本机需安装此运行时，构建完成后会启动工作台进行自检。 |
 | [MSYS2](https://www.msys2.org/)、NSIS | MSYS2 的 UCRT64 环境用于编译 QEMU。生成安装包还需要 NSIS。 |
+
+先在可写的本地 NTFS 目录中打开 PowerShell，用 Git 获取源码。仓库中的 Lima 配置和模板包含相对符号链接。请确认当前用户有创建符号链接的权限，例如已启用 Windows 开发者模式。[Git for Windows 符号链接说明](https://gitforwindows.org/symbolic-links.html)
+
+```powershell
+git clone -c core.symlinks=true https://github.com/Lee-xeo/Claude-Cage.git
+Set-Location Claude-Cage
+Get-Content .\third_party\lima\pkg\cidata\cloud-config.yaml -TotalCount 1
+```
+
+最后一条命令应输出 `#cloud-config`。若输出 `cidata.TEMPLATE.d/user-data`，说明 Git 将链接检出为只含目标路径的文本文件。用 Windows 自带的 `tar.exe` 解压 GitHub 的 **Code → Download ZIP** 也可能因无法创建链接而报错，即使其他文件已解压，源码仍不完整。遇到这两种情况时，确认链接权限后，在新的目录按上述命令重新克隆。
 
 把 MSYS2 安装到简短、只含 ASCII 且无空格的本地路径，例如 `C:\msys64`。打开 **MSYS2 UCRT64**，运行 `pacman -Syu` 更新。国内网络下若默认镜像 `mirror.msys2.org` 频繁返回 503 或超时，可将 `/etc/pacman.d/mirrorlist.*` 切换至国内镜像站（如 USTC 或 TUNA），并注意 `pacman.conf` 中各 MinGW 仓库共用 `mirrorlist.mingw`（含 `$repo` 变量）。若更新时终端关闭，重新打开 UCRT64 再运行一次。若 `pacman` 长时间没有进度，日志反复出现 `gpg: waiting for lock` 或 `starting migration from earlier GnuPG versions`，可能是 gpg-agent 无法建立本机套接字（目前见于部分 Windows 11 预览版本）。结束 MSYS2 中残留的 `gpg`、`gpg-agent`、`dirmngr` 和 `pacman` 进程，删除 `/etc/pacman.d/gnupg/` 下的 `.#lk*`、`*.lock` 和 `S.gpg-agent*` 后重试；仍然卡住时先排查 Windows 更新或安全软件对 AF_UNIX 套接字的影响，不建议关闭软件包签名校验。更新完成后安装下列依赖，包清单与 CI 一致。[Windows CI 工具配置](../.github/actions/windows-toolchain/action.yml)
 
