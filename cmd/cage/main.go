@@ -41,7 +41,8 @@ cage [prompt / Claude options / subcommand]
                    Run the official Claude Code in the current project. The
                    current folder is shared automatically. Example:
                    git diff | cage -p "Review this diff" --output-format json
-cage status        Report the state of the local Cage environment
+cage start         Start or reuse the local Cage service in the background
+cage status        Show the state of the background service and the environment
 cage account list  Show registered Claude Code accounts
 cage account use ID|auto    Select a CLI account or use workbench scheduling
 cage account run ID [--] ARGS   Use an account just for this invocation
@@ -60,8 +61,8 @@ cage proxy-stop    Stop Cage's core and close external networking
 cage setup         Build the isolated base VM through the specified proxy
 cage up            Start the shared Cage environment, editor and browser
                    --reset re-clones the VM; files and logins on its disk are lost
-cage login         Open the Claude login page in Cage's browser
-                   --reset re-clones the VM; files and logins on its disk are lost
+cage login         Sign in to your Claude account in Cage's browser for Claude Code
+                   --reset re-clones the VM before Claude sign-in; files and logins on its disk are lost
 cage access        Inspect legacy viewer credentials (diagnostics only)
 cage shell         Open a shell in the shared environment
 cage run COMMAND   Execute a command in the shared environment: from the current
@@ -123,6 +124,10 @@ func run() int {
 	if text, ok := subcommandHelp(args); ok {
 		fmt.Print(text)
 		return 0
+	}
+	if args[0] == "start" && len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "Usage: cage start")
+		return 2
 	}
 	var startArgs []string
 	if args[0] == "up" || args[0] == "login" {
@@ -211,7 +216,7 @@ func run() int {
 		}
 		return installTerminalCommand()
 	}
-	if args[0] == "claude" || args[0] == "account" || args[0] == "status" || args[0] == "restart" || len(args) == 1 && (args[0] == "login" || args[0] == "stop") {
+	if slices.Contains([]string{"claude", "account", "start", "status", "restart"}, args[0]) || len(args) == 1 && (args[0] == "login" || args[0] == "stop") {
 		action := args[0]
 		if action == "claude" {
 			action = "run"
@@ -791,7 +796,7 @@ func subcommandHelp(args []string) (string, bool) {
 	if len(args) < 2 || args[1] != "--help" && args[1] != "-h" || helpPassthrough[args[0]] {
 		return "", false
 	}
-	if (args[0] == "up" || args[0] == "login") && len(args) != 2 {
+	if len(args) != 2 && slices.Contains([]string{"start", "up", "login"}, args[0]) {
 		return "", false
 	}
 	var lines []string

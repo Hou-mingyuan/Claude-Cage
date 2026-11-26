@@ -114,7 +114,7 @@ func (s *Server) hostCLILogin(ctx context.Context, c *hostCLIConn) error {
 				return errors.New("Cage 浏览器未能打开 Claude 页面")
 			}
 			s.requestCLIBrowser(tab.ID)
-			return c.event(hostCLIEvent{Type: "exit", Message: "Claude Code 已登录。"})
+			return c.event(hostCLIEvent{Type: "exit", Message: "Claude 账号已登录，可使用 Claude Code。"})
 		}
 	}
 	t, err := s.createTerminal(terminalRequest{Kind: "claude-login", ClaudeAccountID: loginID, BackgroundLogin: true, requestContext: ctx})
@@ -122,7 +122,7 @@ func (s *Server) hostCLILogin(ctx context.Context, c *hostCLIConn) error {
 		return err
 	}
 	s.requestCLIBrowser("")
-	if err := c.event(hostCLIEvent{Type: "notice", Message: "请在 Cage 浏览器中完成 Claude 授权。"}); err != nil {
+	if err := c.event(hostCLIEvent{Type: "notice", Message: "请在 Cage 浏览器中完成 Claude 账号授权。"}); err != nil {
 		return err
 	}
 	select {
@@ -134,7 +134,7 @@ func (s *Server) hostCLILogin(ctx context.Context, c *hostCLIConn) error {
 	success, guest, account := t.exitOK && !t.dismissed, t.loginGuestID, t.claudeAccountID
 	t.mu.Unlock()
 	if !success {
-		return errors.New("Claude Code 登录未完成")
+		return errors.New("Claude 账号授权未完成")
 	}
 	reading, err := s.probeCodeLogin(ctx, guest, account)
 	if err != nil {
@@ -149,5 +149,5 @@ func (s *Server) hostCLILogin(ctx context.Context, c *hostCLIConn) error {
 	if err = s.bindCLILogin(ctx, reading.subject()); err != nil {
 		return err
 	}
-	return c.event(hostCLIEvent{Type: "exit", Message: "Claude Code 已登录。"})
+	return c.event(hostCLIEvent{Type: "exit", Message: "Claude 账号已登录，可使用 Claude Code。"})
 }

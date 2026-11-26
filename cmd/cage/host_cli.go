@@ -10,7 +10,7 @@ func cageCommand(args []string) bool {
 	case "help", "--help", "-h", "version", "--version", "-V", "licenses", "agent", "verify-web-assets", "verify-vm-assets", "guest-os", "interface-language",
 		"container-runtime", "container-configure", "container-install-script", "container-network", "container-tap", "server-entry", "diagnostic-event", "diagnostics", "log-relay", "app-update",
 		"clipboard-files", "upload-files", "browser-file", "desktop-file", "share-project", "serve-desktop", "serve", "desktop", "prepare-update", "init", "stop", "list", "info",
-		"proxy-start", "proxy-stop", "up", "login", "shell", "run", "claude", "doctor", "access", "name", "check", "setup", "update-tools", "hostagent", "restart", "status", "install-cli", "account":
+		"proxy-start", "proxy-stop", "up", "login", "shell", "run", "claude", "doctor", "access", "name", "check", "setup", "update-tools", "hostagent", "start", "restart", "status", "install-cli", "account":
 		return true
 	case "--debug":
 		for _, arg := range args {

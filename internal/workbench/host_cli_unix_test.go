@@ -100,37 +100,53 @@ func TestHostCLIMatchesNativeProfileDirectoryAlias(t *testing.T) {
 }
 
 func TestHostCLIFirstLoginWaitsForVerifiedManagedAccount(t *testing.T) {
-	s := agentTestController(t)
-	s.ready = true
-	s.claudeAccounts.probe = func(_ context.Context, id string) (claudeGuestSnapshot, error) {
-		if id == "default" {
-			return claudeGuestSnapshot{}, nil
-		}
-		return claudeGuestSnapshot{LoggedIn: true, Email: "first@example.test"}, nil
-	}
-	mobileTestSSHRewrite(t, s, t.TempDir(), []string{"PATH=/usr/bin:/bin"}, func(command string) string {
-		if strings.Contains(command, "cage-claude-account") && strings.Contains(command, "login") {
-			return "exit 0"
-		}
-		return "exit 1"
-	})
-	t.Cleanup(s.terminals.close)
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-	defer cancel()
-	client, err := agentConnect(ctx, s.configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.close()
-	var stderr bytes.Buffer
-	code, err := cliExchange(ctx, client, hostCLIRequest{Action: "login"}, strings.NewReader(""), io.Discard, &stderr, nil)
-	if err != nil || code != 0 || !strings.Contains(stderr.String(), "在 Cage 浏览器") {
-		t.Fatalf("login: %d %v %q", code, err, stderr.String())
-	}
-	pin, err := s.cliPinnedAccount()
-	list, listErr := s.cliAccountRoster()
-	if err != nil || listErr != nil || len(list.Accounts) != 1 || list.Accounts[0].ID != pin || list.Accounts[0].Enabled || list.PendingLogin != "" {
-		t.Fatalf("new enrollment did not become usable by the CLI: %s %+v %v %v", pin, list, err, listErr)
+	for _, tc := range []struct {
+		name       string
+		authorized bool
+	}{{"without Claude authorization", false}, {"with Claude authorization", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := agentTestController(t)
+			s.ready = true
+			s.claudeAccounts.probe = func(_ context.Context, id string) (claudeGuestSnapshot, error) {
+				if id == "default" || !tc.authorized {
+					return claudeGuestSnapshot{}, nil
+				}
+				return claudeGuestSnapshot{LoggedIn: true, Email: "first@example.test"}, nil
+			}
+			mobileTestSSHRewrite(t, s, t.TempDir(), []string{"PATH=/usr/bin:/bin"}, func(command string) string {
+				if strings.Contains(command, "cage-claude-account") && strings.Contains(command, "login") {
+					return "exit 0"
+				}
+				return "exit 1"
+			})
+			t.Cleanup(s.terminals.close)
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+			defer cancel()
+			client, err := agentConnect(ctx, s.configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.close()
+			var stderr bytes.Buffer
+			code, err := cliExchange(ctx, client, hostCLIRequest{Action: "login"}, strings.NewReader(""), io.Discard, &stderr, nil)
+			if !tc.authorized {
+				if err == nil || code == 0 || !strings.Contains(err.Error(), "Claude") || strings.Contains(stderr.String(), "Claude 账号已登录") {
+					t.Fatalf("unexpected result without Claude authorization: %d %v %q", code, err, stderr.String())
+				}
+				if pin, err := s.cliPinnedAccount(); err != nil || pin != "" {
+					t.Fatalf("unverified Claude account selected: %q %v", pin, err)
+				}
+				return
+			}
+			if err != nil || code != 0 || !strings.Contains(stderr.String(), "在 Cage 浏览器") || !strings.Contains(stderr.String(), "Claude 账号已登录") {
+				t.Fatalf("login: %d %v %q", code, err, stderr.String())
+			}
+			pin, err := s.cliPinnedAccount()
+			list, listErr := s.cliAccountRoster()
+			if err != nil || listErr != nil || len(list.Accounts) != 1 || list.Accounts[0].ID != pin || list.Accounts[0].Enabled || list.PendingLogin != "" {
+				t.Fatalf("new enrollment did not become usable by the CLI: %s %+v %v %v", pin, list, err, listErr)
+			}
+		})
 	}
 }
 

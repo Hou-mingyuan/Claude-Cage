@@ -8,6 +8,9 @@ import (
 func TestClaudeArgumentRouting(t *testing.T) {
 	for _, tc := range []struct{ in, out []string }{
 		{nil, []string{"claude"}},
+		{[]string{"start"}, []string{"start"}},
+		{[]string{"login"}, []string{"login"}},
+		{[]string{"-p", "start"}, []string{"claude", "-p", "start"}},
 		{[]string{"mcp", "--help"}, []string{"claude", "mcp", "--help"}},
 		{[]string{"-p", "stop", "--output-format", "json"}, []string{"claude", "-p", "stop", "--output-format", "json"}},
 		{[]string{"--", "login", ""}, []string{"claude", "--", "login", ""}},

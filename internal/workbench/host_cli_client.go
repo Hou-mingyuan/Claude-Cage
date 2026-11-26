@@ -29,6 +29,8 @@ type hostCLIStatus struct {
 	Job           Job
 }
 
+const cliServiceRunning = "Cage 后台服务正在运行。"
+
 func cliCall(ctx context.Context, c *controllerClient, method, path string, in, out any) error {
 	code, reason, err := c.callReason(ctx, method, path, in, out)
 	if err != nil {
@@ -202,15 +204,33 @@ func showHostCLIDesktop(ctx context.Context, config string, workload *controller
 	}
 }
 
+func cliWorkbenchAccessHint(ctx context.Context, c *controllerClient) (string, error) {
+	var account accountView
+	if err := cliCall(ctx, c, "GET", "/api/account", nil, &account); err != nil {
+		return "", err
+	}
+	if account.Exists {
+		return "Cage 本机工作台已锁定，请在 Cage 窗口解锁。", nil
+	}
+	return "请在 Cage 窗口完成本机工作台的首次设置。", nil
+}
+
 func cliWaitAccess(ctx context.Context, c *controllerClient, config string, interactive bool, stderr io.Writer) (status hostCLIStatus, err error) {
 	shown := false
 	for {
 		err = cliCall(ctx, c, "GET", "/api/status", nil, &status)
-		var access *AgentError
-		if err != nil && (!interactive || !errors.As(err, &access) || access.HTTPStatus != 423) {
-			return status, err
-		}
-		if err == nil {
+		var hint string
+		if err != nil {
+			var access *AgentError
+			if !errors.As(err, &access) || access.HTTPStatus != http.StatusLocked {
+				return status, err
+			}
+			if !shown {
+				if hint, err = cliWorkbenchAccessHint(ctx, c); err != nil {
+					return status, err
+				}
+			}
+		} else {
 			if status.Ready {
 				return status, nil
 			}
@@ -221,12 +241,13 @@ func cliWaitAccess(ctx context.Context, c *controllerClient, config string, inte
 			if !init.Required {
 				return status, nil
 			}
-			if !interactive {
-				return status, errors.New("请先在 Cage 窗口完成环境配置")
-			}
+			hint = "请在 Cage 窗口完成本机环境的首次配置。"
+		}
+		if !interactive {
+			return status, errors.New(hint)
 		}
 		if !shown {
-			fmt.Fprintln(stderr, "请在 Cage 本机窗口解锁账户或完成首次配置，命令将自动继续。")
+			fmt.Fprintln(stderr, hint+"完成后，当前命令会自动继续。")
 			if err = showHostCLIDesktop(ctx, config, c); err != nil {
 				return status, err
 			}
@@ -266,24 +287,33 @@ func HostCLI(ctx context.Context, config, action string, args []string, in, out,
 			return 1, err
 		}
 		if !running || action == "status" {
+			if action == "status" {
+				fmt.Fprintln(out, "Cage 后台服务未运行。")
+			}
 			if !running && action == "stop" {
 				if err = managedproxy.Stop(profile); err != nil {
 					return 1, err
 				}
 			}
 			if running {
-				fmt.Fprintln(out, "Cage 环境正在运行，控制服务未连接。")
+				fmt.Fprintln(out, "Cage 环境正在运行。")
 			} else {
 				fmt.Fprintln(out, "Cage 环境已停止。")
 			}
 			return 0, nil
 		}
 	}
-	start, cancel := context.WithTimeout(ctx, 40*time.Second)
-	err := AgentStartService(start, config)
-	cancel()
-	if err != nil {
-		return 1, err
+	if action != "status" {
+		start, cancel := context.WithTimeout(ctx, 40*time.Second)
+		err := AgentStartService(start, config)
+		cancel()
+		if err != nil {
+			return 1, err
+		}
+		if action == "start" {
+			fmt.Fprintln(out, cliServiceRunning)
+			return 0, nil
+		}
 	}
 	c, err := agentConnect(ctx, config)
 	if err != nil {
@@ -292,6 +322,9 @@ func HostCLI(ctx context.Context, config, action string, args []string, in, out,
 	defer c.close()
 	c.connectionID = "local"
 	c.client.Timeout = 2 * time.Minute
+	if action == "status" {
+		fmt.Fprintln(out, cliServiceRunning)
+	}
 	if action == "accounts" || action == "use-account" {
 		return cliExchange(ctx, c, hostCLIRequest{Action: action, Account: selector}, in, out, errOut, out)
 	}
@@ -300,7 +333,11 @@ func HostCLI(ctx context.Context, config, action string, args []string, in, out,
 		if err = cliCall(ctx, c, "GET", "/api/status", nil, &status); err != nil {
 			var access *AgentError
 			if action == "status" && errors.As(err, &access) && access.HTTPStatus == http.StatusLocked {
-				fmt.Fprintln(out, "Cage 工作台已锁定。")
+				hint, err := cliWorkbenchAccessHint(ctx, c)
+				if err != nil {
+					return 1, err
+				}
+				fmt.Fprintln(out, hint)
 				return 0, nil
 			}
 			return 1, err
@@ -336,6 +373,9 @@ func HostCLI(ctx context.Context, config, action string, args []string, in, out,
 		stdin = strings.NewReader("")
 	}
 	canOpen := action == "login" || tty
+	if action == "login" {
+		fmt.Fprintln(errOut, "正在准备 Claude 账号授权…")
+	}
 	status, err = cliWaitAccess(ctx, c, config, canOpen, errOut)
 	if err != nil {
 		return 1, err

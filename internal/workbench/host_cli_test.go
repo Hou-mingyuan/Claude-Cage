@@ -14,6 +14,91 @@ import (
 	"time"
 )
 
+func TestHostCLIStartOnlyNeedsTheService(t *testing.T) {
+	s := agentTestController(t)
+	s.account.lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	for _, action := range []string{"start", "start", "status"} {
+		out, err := os.CreateTemp(t.TempDir(), "result")
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, callErr := HostCLI(ctx, s.configPath, action, nil, null, out, null)
+		if err := out.Close(); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(out.Name())
+		if err != nil || callErr != nil || code != 0 {
+			t.Fatalf("%s: %d %v %v", action, code, callErr, err)
+		}
+		if !strings.Contains(string(body), cliServiceRunning) || (action == "status") != strings.Contains(string(body), "已锁定") {
+			t.Fatalf("%s returned %q", action, body)
+		}
+	}
+	if _, unlocked := s.account.access(); unlocked || s.jobs.snapshot().ID != "" || s.hostCLIBrowser.ID != "" {
+		t.Fatal("starting the service changed workbench access, started an environment job or requested a browser")
+	}
+	if projects, err := s.projectPaths(); err != nil || len(projects) > 0 {
+		t.Fatalf("service start shared a project: %v %v", projects, err)
+	}
+}
+
+func TestHostCLIConcurrentLaunchersSpawnOneService(t *testing.T) {
+	exe := os.Getenv("CAGE_TEST_CAGE_CLI")
+	if !filepath.IsAbs(exe) {
+		t.Skip("set CAGE_TEST_CAGE_CLI to a built Cage executable")
+	}
+	config := filepath.Join(t.TempDir(), "profile", "config.json")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	t.Cleanup(func() {
+		if _, err := PrepareUpdate(config, false); err != nil {
+			t.Error(err)
+		}
+	})
+	type launch struct {
+		pid     int
+		started bool
+		err     error
+	}
+	const count = 4
+	begin := make(chan struct{})
+	results := make(chan launch, count)
+	for range count {
+		go func() {
+			<-begin
+			c, started, err := startControllerExecutable(ctx, config, exe)
+			r := launch{started: started, err: err}
+			if c != nil {
+				r.pid = c.record.PID
+				c.close()
+			}
+			results <- r
+		}()
+	}
+	close(begin)
+	var pid, launches int
+	for range count {
+		r := <-results
+		if r.err != nil || r.pid == 0 || (pid != 0 && r.pid != pid) {
+			t.Errorf("launch returned %+v, prior PID %d", r, pid)
+		}
+		pid = r.pid
+		if r.started {
+			launches++
+		}
+	}
+	if launches != 1 {
+		t.Fatalf("%d callers started a service, want one", launches)
+	}
+}
+
 func TestHostCLIRequiresLocalProof(t *testing.T) {
 	s := testServer(t)
 	rec := request(s, "GET", "/api/host-cli", "", "", true)

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/remotehost"
@@ -215,31 +214,22 @@ func agentHTTPError(code int) *AgentError {
 // or stops an existing controller as a side effect of an agent call.
 func AgentStartService(ctx context.Context, configPath string) error {
 	profile := filepath.Dir(configPath)
-	c, err := connectController(profile)
-	if err == nil {
-		defer c.close()
-		return agentCheckController(c, configPath)
-	}
-	if !errors.Is(err, errControllerUnavailable) || !controllerLockFree(profile) {
+	// A simultaneous start can hold the profile lock before publishing its
+	// control record. Reuse that controller once it is ready.
+	c, err := waitControllerReady(ctx, profile)
+	if errors.Is(err, errControllerUnavailable) {
+		c, err = startController(ctx, configPath)
+		if err != nil {
+			if ctx.Err() != nil {
+				return &AgentError{Code: "service_start_timeout", Message: "The controller has not become ready. It may still be starting.", NextAction: "doctor", Retryable: true}
+			}
+			return &AgentError{Code: "service_start_failed", Message: "Cage could not start its controller.", NextAction: "doctor"}
+		}
+	} else if err != nil {
 		return &AgentError{Code: "service_unavailable", Message: "The controller cannot be authenticated. Preserve its data and inspect diagnostics.", NextAction: "doctor"}
 	}
-	if err := startController(configPath); err != nil {
-		return &AgentError{Code: "service_start_failed", Message: "Cage could not start its controller.", NextAction: "doctor"}
-	}
-	timer := time.NewTicker(100 * time.Millisecond)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return &AgentError{Code: "service_start_timeout", Message: "The controller has not become ready. It may still be starting.", NextAction: "doctor", Retryable: true}
-		case <-timer.C:
-			c, err := connectController(profile)
-			if err == nil {
-				defer c.close()
-				return agentCheckController(c, configPath)
-			}
-		}
-	}
+	defer c.close()
+	return agentCheckController(c, configPath)
 }
 
 // A native launcher can spell the same profile directory through a system

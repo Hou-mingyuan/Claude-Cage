@@ -128,7 +128,7 @@ func hostCLIExitCode(err error) int {
 	return 1
 }
 
-var errHostCLILogin = errors.New("请先在 Cage 中登录 Claude Code，可运行 cage login")
+var errHostCLILogin = errors.New("Claude Code 需要登录 Claude 账号，请运行 cage login")
 
 func (s *Server) hostCLI(w http.ResponseWriter, r *http.Request) {
 	ws, err := s.upgrade(w, r)
