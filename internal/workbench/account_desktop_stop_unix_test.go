@@ -186,7 +186,9 @@ claude-desktop() { ` + appBody + `; }
 				}
 				deadline := time.Now().Add(10 * time.Second)
 				for {
-					if _, err := os.Stat(waitTarget); err == nil {
+					// The session creates app-pid with a shell redirect before
+					// printf writes the PID, so an existing file may still be empty.
+					if data, err := os.ReadFile(waitTarget); err == nil && (tc.windowOpens || strings.HasSuffix(string(data), "\n")) {
 						break
 					}
 					if time.Now().After(deadline) {
