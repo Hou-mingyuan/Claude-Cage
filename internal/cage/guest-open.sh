@@ -18,6 +18,21 @@ while [ "$#" -ge 3 ]; do
   shift 2
 done
 if [ "${1:-}" = --stdin ]; then set -- "$(cat)"; fi
+# Absolute opener paths skip the independent Desktop's PATH. Use the same
+# per-instance MIME handlers as its xdg-open, including for browser callbacks.
+if [ -z "$route$account$login" ]; then
+  case "${HOME:-}" in
+    */.local/share/desktop-profiles/*/home)
+      case "${1:-}" in
+        http://*|https://*|claude://*)
+          profile=${HOME%/home}
+          [ "${XDG_RUNTIME_DIR:-}" -ef "/run/desktop-${profile##*/}" ] || exit 1
+          exec /usr/bin/gio open "$1"
+          ;;
+      esac
+      ;;
+  esac
+fi
 case "${1:-}" in
   --finish-login)
     [ -n "$login" ] || exit 2

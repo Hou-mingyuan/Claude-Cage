@@ -254,6 +254,17 @@ try {
     await row.getByRole("button", { name: "保存备注" }).click();
   };
 
+  profiles.push({ id: "desktop-only", source: "managed", email: "desktop@example.test",
+    label: "Desktop 账号", status: "signed_out", code_unlinked: true, desktop_status: "ready" });
+  await openAccounts();
+  const desktopOnly = profileCard("Desktop 账号");
+  await desktopOnly.getByText("Code 待授权", { exact: true }).waitFor();
+  assert.ok(await desktopOnly.getByRole("button", { name: "检查状态" }).isDisabled());
+  assert.ok(await desktopOnly.getByRole("button", { name: "授权 Code", exact: true }).isEnabled());
+  assert.equal(await desktopOnly.getByText("请用原账号重新登录。").count(), 0);
+  await back();
+  profiles.pop();
+
   // Records created by the previous version keep their recovery actions.
   profiles.push({ id: "legacy", label: "草稿", status: "pending", enabled: true });
   await openAccounts();

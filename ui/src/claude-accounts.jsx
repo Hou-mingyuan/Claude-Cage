@@ -301,7 +301,7 @@ function ProfileCard({ proxySources, desktopNetwork, profile, environment, usage
             onClick={() => { setLabel(profile.label === profile.email ? "" : profile.label || ""); setRenaming(true); }}><Pencil size={13} /></button>
         </div>}
         <div className="claude-profile-meta">
-          <span className="claude-status-pill" data-ready={profile.status === "ready"} title={codeStatusTitle}>Code</span>
+          <span className="claude-status-pill" data-ready={!profile.code_unlinked && profile.status === "ready"} title={codeStatusTitle}>{profile.code_unlinked ? codeStatusTitle : "Code"}</span>
           <span className="claude-status-pill" data-ready={profile.desktop_status === "ready"} title={desktopStatusTitle}>Desktop</span>
           {profile.email && (profile.email !== displayName || profile.organization) && <span className="claude-profile-email" title={[profile.email, profile.organization].filter(Boolean).join(" · ")}>
             {[profile.email !== displayName && profile.email, profile.organization].filter(Boolean).join(" · ")}
@@ -357,14 +357,14 @@ function ProfileCard({ proxySources, desktopNetwork, profile, environment, usage
       {profile.status === "changed" ? tr("普通终端已换号，此账号暂不参与分配。新身份将单独归档。") : tr("普通终端已退出。要继续使用此账号，请先重新登录原身份。")}
       {active > 0 && " " + tr("原工作终端仍保留首次分配的标签。请重新打开工作会话确认身份。")}
     </p>}
-    {!fromTerminal && profile.status === "changed" && <p className="field-help">{tr("请用原账号重新登录。")}</p>}
+    {!fromTerminal && !profile.code_unlinked && profile.status === "changed" && <p className="field-help">{tr("请用原账号重新登录。")}</p>}
     {profile.status === "duplicate" && <p className="field-help">{tr("同一订阅只参与一次分配。请在此位置登录另一个账号。")}</p>}
     <ProfileNotices notices={profile.notices} />
     <div className="claude-profile-actions">
       {fromTerminal ? <span className="claude-profile-source">{tr("普通终端账号")}</span> :
         <button className="quiet-button" disabled={busy || !!environment || active > 0} onClick={() => perform(() => login(profile.id))}>
           <TerminalSquare size={14} />{profile.status === "ready" ? tr("重新授权 Code") : tr("授权 Code")}</button>}
-      <button className="quiet-button" disabled={busy || !!usageEnvironment || usage.state === "checking"} onClick={usage.check}>
+      <button className="quiet-button" disabled={busy || !!usageEnvironment || profile.code_unlinked || usage.state === "checking"} onClick={usage.check}>
         <RefreshCw size={14} className={usage.state === "checking" ? "spin" : undefined} />{tr("检查状态")}</button>
       <button type="button" className={`quiet-button claude-config-toggle ${configOpen ? "open" : ""}`} aria-expanded={configOpen} onClick={() => setConfigOpen(!configOpen)}>
         <SlidersHorizontal size={13} />{tr("设置")}

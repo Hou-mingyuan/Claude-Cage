@@ -104,6 +104,36 @@ func TestDesktopCallbackFocusAfterHandoff(t *testing.T) {
 	}
 }
 
+func TestAbsoluteDesktopOpenerUsesInstanceHandlers(t *testing.T) {
+	dir := t.TempDir()
+	id := strings.Repeat("a", 24)
+	home := "/home/test/.local/share/desktop-profiles/" + id + "/home"
+	runtime := "desktop-" + id
+	if err := os.Mkdir(filepath.Join(dir, runtime), 0700); err != nil {
+		t.Fatal(err)
+	}
+	gio := filepath.Join(dir, "gio")
+	if err := os.WriteFile(gio, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := strings.NewReplacer("/run/desktop-", "./desktop-", "/usr/bin/gio", "./gio").Replace(guestOpen)
+	for _, url := range []string{"https://example.com/login", "claude://callback?state=a&code=b"} {
+		for _, source := range []string{runtime, "."} {
+			cmd := exec.Command("sh", "-c", script, "open", url)
+			cmd.Dir = dir
+			cmd.Env = []string{"HOME=" + home, "XDG_RUNTIME_DIR=" + source, "PATH=."}
+			out, err := cmd.CombinedOutput()
+			if source == runtime {
+				if err != nil || string(out) != "open\n"+url+"\n" {
+					t.Fatalf("instance handoff: %q %v", out, err)
+				}
+			} else if err == nil || len(out) != 0 {
+				t.Fatalf("mismatched instance dispatched: %q %v", out, err)
+			}
+		}
+	}
+}
+
 func TestTailnetBrowserOpenPassesOnlyReturnSignal(t *testing.T) {
 	bin := t.TempDir()
 	helper := filepath.Join(bin, "return-helper")

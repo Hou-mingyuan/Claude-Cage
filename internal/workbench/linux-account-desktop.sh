@@ -207,9 +207,16 @@ cat > "$XDG_RUNTIME_DIR/windows.xml" <<'XML'
 <openbox_config xmlns="http://openbox.org/3.4/rc"><desktops><number>1</number></desktops><applications><application type="normal"><decor>no</decor><maximized>yes</maximized></application></applications></openbox_config>
 XML
 openbox --config-file "$XDG_RUNTIME_DIR/windows.xml" >/dev/null 2>&1 &
+# Pace this instance's display independently of the other Desktop sessions.
+if [ -x /usr/local/bin/cage-display-governor ]; then
+  /usr/local/bin/cage-display-governor &
+fi
 # Settings that stay as they are when the density changes. Electron draws its
 # own GTK controls; Openbox decorations alone do not hide them.
 printf 'Gtk/DecorationLayout ":"\n' > "$XDG_RUNTIME_DIR/xsettings.fixed"
+if [ "$display_scale" = 1.5 ]; then
+  printf 'Gtk/EnableAnimations 0\n' >> "$XDG_RUNTIME_DIR/xsettings.fixed"
+fi
 guest_theme=
 if [ -r "$work_home/.config/claude-cage/theme-variant" ]; then
   read -r guest_theme < "$work_home/.config/claude-cage/theme-variant" || true

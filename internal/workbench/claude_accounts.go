@@ -178,6 +178,12 @@ func (s *Server) loadClaudeAccounts() (claudeAccountList, error) {
 		if a.ProxyNodeID != "" && !validClaudeID(a.ProxyNodeID) || !validClaudeID(a.ID) || ids[a.ID] || a.Source != "managed" && a.Source != "default" || a.Source == "default" && (a.Email == "" || a.ProfileID != "") || a.ProfileID != "" && !validClaudeID(a.ProfileID) || len(a.HandoffGroup) > 64 {
 			return list, errors.New("Claude 账号文件含无效或重复的记录，请从备份恢复")
 		}
+		// Older quota probes could mark a Desktop-only identity as changed.
+		// Keep any historical readings, but discard the unbound probe status.
+		if a.CodeUnlinked {
+			a.Status = "signed_out"
+			a.UsageStatus, a.UsageCheckedAt = "", 0
+		}
 		ids[a.ID] = true
 		if a.Source == "managed" {
 			if profiles[a.guestID()] {
