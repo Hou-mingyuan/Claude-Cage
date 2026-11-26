@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -288,5 +289,41 @@ func TestDesktopAuthBrowserHardeningAndNoIncognito(t *testing.T) {
 	}
 	if len(regCageKeys) != 0 {
 		t.Fatalf("CAGE_* env leaked into regular chromium: %v", regCageKeys)
+	}
+}
+
+func TestClaudeDesktopInstallerReportsKeptPartialDownload(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the installer Bash script runs in the Linux guest, not the Windows host")
+	}
+	dir := t.TempDir()
+	archives := filepath.Join(dir, "archives")
+	if err := os.MkdirAll(filepath.Join(archives, "partial"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, size := range map[string]int{"claude-desktop_1.0_arm64.deb": 3000, "libfoo_1_arm64.deb": 234, "lock": 99} {
+		if err := os.WriteFile(filepath.Join(archives, "partial", name), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commands := map[string]string{
+		"sudo":       "#!/bin/sh\ncase \"$1\" in env|find) exec \"$@\";; esac\necho blocked-privileged-operation >&2; exit 97\n",
+		"apt-get":    "#!/bin/sh\necho 'E: Failed to fetch claude-desktop.deb  Connection timed out' >&2\nexit 100\n",
+		"apt-config": "#!/bin/sh\nprintf \"archives='%s/'\\n\" \"$CAGE_TEST_ARCHIVES\"\n",
+		"systemctl":  "#!/bin/sh\nexit 3\n",
+		"flock":      "#!/bin/sh\nexit 0\n",
+		"dpkg":       "#!/bin/sh\necho arm64\n",
+	}
+	for name, body := range commands {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("bash", "-s")
+	cmd.Stdin = strings.NewReader(ClaudeDesktopInstallScript())
+	cmd.Env = append(os.Environ(), "HOME="+dir, "PATH="+dir+":"+os.Getenv("PATH"), "CAGE_TEST_ARCHIVES="+archives)
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "APT_PARTIAL bytes=3234\nAPT_FAILED exit=100 command=apt-get update\n") {
+		t.Fatalf("kept partial download was not reported before the failure marker: %v\n%s", err, out)
 	}
 }

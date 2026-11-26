@@ -8,13 +8,23 @@ if systemctl is-active --quiet cage-claude-desktop.service; then
   exit 1
 fi
 case "$(dpkg --print-architecture)" in arm64|amd64) ;; *) echo 'Unsupported desktop architecture.' >&2; exit 1;; esac
+# Downloads APT could not finish stay in its partial directory and resume on
+# the next attempt, so a failure reports how much is kept.
+apt_partial_bytes() {
+  local archives=
+  eval "$(APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-config shell archives Dir::Cache::archives/d 2>/dev/null || :)"
+  [[ -n $archives ]] || return 0
+  { sudo find "${archives%/}/partial" -maxdepth 1 -type f -name '*.deb' -printf '%s\n' 2>/dev/null || :; } | awk '{ s += $1 } END { if (s > 0) printf "%d\n", s }'
+}
 apt_get() {
-  local status
+  local status partial
   if sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get -o DPkg::Lock::Timeout=60 "$@" </dev/null; then
     return 0
   else
     status=$?
   fi
+  partial=$(apt_partial_bytes)
+  [[ -z $partial ]] || printf 'APT_PARTIAL bytes=%s\n' "$partial" >&2
   printf 'APT_FAILED exit=%s command=apt-get %s\n' "$status" "$*" >&2
   return "$status"
 }

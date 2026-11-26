@@ -174,13 +174,16 @@ func maintenanceScript(script, token string, container bool) string {
 printf '%s\n' 'Dir::Cache::archives "/var/cache/apt/install-archives";' >> "$CAGE_APT_CONFIG"
 ` + script
 	}
+	// APT's Timeout bounds each connection or stalled read, not a whole
+	// transfer. Each retry resumes from the partial file with a Range request,
+	// so a large package survives a few stalls without restarting.
 	return fmt.Sprintf(`set -euo pipefail
 umask 077
 cage_maintenance_dir=$(mktemp -d)
 trap 'rm -rf "$cage_maintenance_dir"' EXIT
 export CAGE_INSTALL_PROXY='http://cage-install:%s@127.0.0.1:%d'
 export CAGE_APT_CONFIG="$cage_maintenance_dir/apt.conf"
-printf 'Acquire::http::Proxy "%%s";\nAcquire::https::Proxy "%%s";\nAcquire::Retries "1";\nAcquire::http::Timeout "15";\nAcquire::https::Timeout "15";\n' "$CAGE_INSTALL_PROXY" "$CAGE_INSTALL_PROXY" > "$CAGE_APT_CONFIG"
+printf 'Acquire::http::Proxy "%%s";\nAcquire::https::Proxy "%%s";\nAcquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' "$CAGE_INSTALL_PROXY" "$CAGE_INSTALL_PROXY" > "$CAGE_APT_CONFIG"
 unset ALL_PROXY all_proxy NO_PROXY no_proxy FTP_PROXY ftp_proxy
 export http_proxy="$CAGE_INSTALL_PROXY" https_proxy="$CAGE_INSTALL_PROXY" HTTP_PROXY="$CAGE_INSTALL_PROXY" HTTPS_PROXY="$CAGE_INSTALL_PROXY"
 (
