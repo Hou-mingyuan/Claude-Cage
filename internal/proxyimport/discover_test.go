@@ -253,7 +253,7 @@ func TestScanWindowsFlClashFollowClashDirectory(t *testing.T) {
 			continue
 		}
 		switch e.Name {
-		case "config.yaml":
+		case "当前生效配置":
 			runtime = &entries[i]
 		case "123.yaml":
 			profile = &entries[i]
@@ -269,6 +269,71 @@ func TestScanWindowsFlClashFollowClashDirectory(t *testing.T) {
 	}
 }
 
+func TestScanFlClashSkipsFlutterInternalJSONAndMarksCurrentProfile(t *testing.T) {
+	const prefs = `{"flutter.config":"{\"currentProfileId\":%s,\"appSetting\":{\"locale\":\"zh_CN\"}}","flutter.token":"private-preference-token"}`
+	scan := func(t *testing.T, current string) map[string]Config {
+		t.Helper()
+		data := t.TempDir()
+		root := filepath.Join(data, "com.follow", "clash")
+		writeConfig(t, root, "config.yaml", testNode)
+		writeConfig(t, root, "profiles/1732000000001.yaml", testNode)
+		writeConfig(t, root, "profiles/1732000000002.yaml", testNode)
+		writeConfig(t, root, "profiles/imported.json", `{"proxies":[{"name":"json profile","type":"socks5","server":"node.example.com","port":1080}]}`)
+		writeConfig(t, root, "settings.json", `{"theme":"dark"}`)
+		writeConfig(t, root, "libCachedImageData.json", `[{"key":"https://image.example/private-cache-token","relativePath":"a.png"}]`)
+		if current != "" {
+			writeConfig(t, root, "shared_preferences.json", strings.Replace(prefs, "%s", current, 1))
+		}
+		entries := Scan(Locations("windows", t.TempDir(), data, ""), []byte("session"))
+		got := map[string]Config{}
+		for _, e := range entries {
+			if e.Error != "" || e.Nodes != 1 || e.Client != "FlClash" {
+				t.Fatalf("unexpected FlClash entry: %s", mustJSON(t, entries))
+			}
+			got[e.Name] = e
+		}
+		if len(got) != 4 || len(entries) != 4 || got["imported.json"].Nodes != 1 {
+			t.Fatalf("expected runtime config and three importable profiles: %s", mustJSON(t, entries))
+		}
+		view := mustJSON(t, entries)
+		for _, secret := range []string{"private-preference-token", "private-cache-token", root} {
+			if strings.Contains(view, secret) {
+				t.Fatalf("display metadata leaked %q", secret)
+			}
+		}
+		return got
+	}
+	for _, test := range []struct{ name, current, want string }{
+		{"numeric id", "1732000000002", "1732000000002.yaml"},
+		{"string id", `\"1732000000001\"`, "1732000000001.yaml"},
+		{"unknown id", "42", ""},
+		{"malformed config", `{`, ""},
+		{"no preferences", "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := scan(t, test.current)
+			if !got["当前生效配置"].Current {
+				t.Fatalf("runtime config.yaml not current: %s", mustJSON(t, got))
+			}
+			for _, name := range []string{"1732000000001.yaml", "1732000000002.yaml"} {
+				if got[name].Current != (name == test.want) {
+					t.Fatalf("profile %s current = %v, want %q current: %s", name, got[name].Current, test.want, mustJSON(t, got))
+				}
+			}
+		})
+	}
+
+	// FlClash for oixCloud shares the Flutter internals; they must not surface
+	// as parse errors next to its app settings config.yaml.
+	oixRoot := t.TempDir()
+	writeConfig(t, oixRoot, "config.yaml", "mixed-port: 7890\nmode: rule\n")
+	writeConfig(t, oixRoot, "shared_preferences.json", strings.Replace(prefs, "%s", "1", 1))
+	writeConfig(t, oixRoot, "libCachedImageData.json", `[]`)
+	oix := Scan([]Location{{"FlClash for oixCloud", oixRoot, OixCloud, ""}}, []byte("session"))
+	if len(oix) != 1 || oix[0].Name != "config.yaml" {
+		t.Fatalf("oixCloud Flutter internal files scanned: %s", mustJSON(t, oix))
+	}
+}
 func TestScanFlClashForOixCloudEncryptedProfiles(t *testing.T) {
 	const ageBinary = "age-encryption.org/v1\n-> X25519 private-recipient-marker\nciphertext-body\n--- mac\nbinary-payload"
 	const ageArmored = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3Yx\n-----END AGE ENCRYPTED FILE-----\n"
