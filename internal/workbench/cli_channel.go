@@ -22,6 +22,9 @@ import (
 //go:embed cli_channel.py
 var cliChannelHelper string
 
+//go:embed terminal_job.py
+var terminalJobHelper string
+
 //go:embed cli_channel.resume.md
 var cliResumePrompt string
 
@@ -39,18 +42,10 @@ func resumeChannelRequest(record *mobileRecord) map[string]any {
 // guest by digest. Command lines then stay small on every host: Windows limits
 // CreateProcessW to 32767 UTF-16 units, including the ssh.exe arguments.
 var cliChannelBundle = sync.OnceValue(func() []byte {
-	var helper strings.Builder
-	for _, line := range strings.Split(cliChannelHelper, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		helper.WriteString(line)
-		helper.WriteByte('\n')
-	}
+	helper, _ := json.Marshal([]string{cliChannelHelper, terminalJobHelper})
 	var compressed bytes.Buffer
 	writer, _ := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
-	_, _ = writer.Write([]byte(helper.String()))
+	_, _ = writer.Write(helper)
 	_ = writer.Close()
 	return compressed.Bytes()
 })
@@ -64,24 +59,26 @@ const cliChannelMissing = 75
 var cliChannelTimeout = 15 * time.Second
 
 func cliChannelDigest() string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt)))
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(cliChannelHelper+terminalJobHelper+cliResumePrompt+claudeAccountResumePrompt)))
 }
 
 // Installs the compressed helper read from standard input. The file name is
 // the version digest; the content must match the expected SHA-256.
 func cliChannelInstallCommand() string {
 	content := sha256.Sum256(cliChannelBundle())
-	script := fmt.Sprintf(`import gzip,hashlib,os,pathlib,sys,tempfile
+	script := fmt.Sprintf(`import gzip,hashlib,json,os,pathlib,sys,tempfile
 d=pathlib.Path.home()/".local/share/cage/cli-channel-code"
 d.mkdir(parents=True,exist_ok=True,mode=0o700)
 p=d/"%s.py"
 b=sys.stdin.buffer.read()
 if hashlib.sha256(b).hexdigest()!="%x":sys.exit(2)
-if not p.is_file():
+core,job=json.loads(gzip.decompress(b))
+for target,source in [(p.with_suffix(".terminal.py"),job),(p,core)]:
+ if target.is_file():continue
  with tempfile.NamedTemporaryFile(dir=d,delete=False) as f:
-  f.write(gzip.decompress(b))
+  f.write(source.encode())
   t=f.name
- os.replace(t,p)
+ os.replace(t,target)
 `, cliChannelDigest(), content)
 	return shellescape.QuoteCommand([]string{"python3", "-I", "-c", script})
 }
@@ -153,6 +150,8 @@ type terminalConversation struct {
 	ChannelReady        bool          `json:"channel_ready"`
 	HasHistory          bool          `json:"has_history"`
 	Running             bool          `json:"running"`
+	Paused              bool          `json:"paused"`
+	ExternalRunning     bool          `json:"external_running"`
 	ClaudeDesktop       bool          `json:"claude_desktop"`
 	Active              bool          `json:"active"`
 	ConnectionNotice    string        `json:"connection_notice"`
@@ -387,6 +386,9 @@ func (s *Server) discoverConversations(ctx context.Context, paths []string, reus
 		if record != nil && !record.Terminal {
 			continue
 		}
+		if record != nil && item.ExternalRunning {
+			s.detachManualConversation(record)
+		}
 		if record == nil {
 			record = &mobileRecord{mobileSession: mobileSession{mobileSummary: mobileSummary{ID: uuid.NewString(), Workspace: workspace}, Turns: []mobileTurn{}}, CLIID: item.CLIID, Terminal: true, Resume: true}
 			record.Generation = m.epochLocked()
@@ -398,6 +400,10 @@ func (s *Server) discoverConversations(ctx context.Context, paths []string, reus
 			record.AccountLabel = a.Label
 		}
 		record.Workspace = workspace
+		if record.Paused != item.Paused {
+			record.Paused = item.Paused
+			record.Revision++
+		}
 		record.Active = item.Active
 		record.Title, record.GuestConfig, record.Connection = item.Title, item.Config, item.Connection
 		record.GuestWorkspace = item.Workspace
@@ -406,6 +412,7 @@ func (s *Server) discoverConversations(ctx context.Context, paths []string, reus
 				record.TerminalID = terminal.id
 				terminal.mu.Lock()
 				terminal.sharedID = record.ID
+				terminal.paused = item.Paused
 				terminal.mu.Unlock()
 			}
 		}
@@ -426,6 +433,22 @@ func (s *Server) discoverConversations(ctx context.Context, paths []string, reus
 
 func (s *Server) terminalConversationView(ctx context.Context, id string) (mobileSession, error) {
 	return s.readTerminalConversation(ctx, id, nil)
+}
+
+// A hand-started CLI may reuse the transcript after the managed job exits.
+// Its old tab is now the user's shell and must not be treated as its owner.
+func (s *Server) detachManualConversation(record *mobileRecord) {
+	if terminal := s.terminals.get(record.TerminalID); terminal != nil {
+		terminal.mu.Lock()
+		if terminal.sharedID == record.ID {
+			terminal.conversationEnded = true
+			terminal.paused = false
+			terminal.sharedID = ""
+			terminal.connectionID = ""
+		}
+		terminal.mu.Unlock()
+	}
+	record.TerminalID = ""
 }
 
 func (s *Server) readTerminalConversation(ctx context.Context, id string, observation *codeLoginObservation) (mobileSession, error) {
@@ -500,6 +523,7 @@ func (s *Server) readTerminalConversation(ctx context.Context, id string, observ
 		terminal.mu.Lock()
 		if terminal.connectionID == current.Connection {
 			terminal.conversationEnded = !current.Running
+			terminal.paused = current.Paused
 		}
 		terminal.mu.Unlock()
 	}
@@ -519,6 +543,9 @@ func (s *Server) readTerminalConversation(ctx context.Context, id string, observ
 		return record.snapshot(), nil
 	}
 	before, _ := json.Marshal(record)
+	if current.ExternalRunning {
+		s.detachManualConversation(record)
+	}
 	record.Turns = adoptedMobileTurns(record.LegacyTurns, current.Turns)
 	if record.Turns == nil {
 		record.Turns = []mobileTurn{}
@@ -529,6 +556,7 @@ func (s *Server) readTerminalConversation(ctx context.Context, id string, observ
 	record.GuestWorkspace = current.Workspace
 	record.Resume = record.Resume || current.HasHistory
 	record.TerminalRunning = current.Running
+	record.Paused = current.Paused
 	record.Active = current.Active
 	record.AccountFailure = current.AccountFailure
 	if current.NativeHistory {
@@ -692,6 +720,7 @@ func (s *Server) prepareTerminalConversation(workspace string, selection claudeS
 		}
 	}
 	record.TerminalID, record.TerminalRunning = "", true
+	record.Paused = false
 	record.Connection = uuid.NewString()
 	if record.ResumeTranscript != "" && record.Switch != nil {
 		record.Connection = record.Switch.ID
@@ -715,7 +744,7 @@ func (s *Server) prepareTerminalConversation(workspace string, selection claudeS
 	data, _ := json.Marshal(payload)
 	record.CanSend = new(bool)
 	record.ConnectionNotice = ""
-	body := cliChannelCommand("launch", string(data)) + "; exec bash -i"
+	body := "exec " + cliChannelCommand("terminal", string(data))
 	directory := record.GuestWorkspace
 	if directory == "" {
 		directory = guestPath(workspace)
@@ -736,6 +765,9 @@ func (s *Server) isTerminalConversation(id string) bool {
 }
 
 func (s *Server) stopTerminalConversation(ctx context.Context, view mobileSession, turnID string) (mobileSession, error) {
+	if view.Paused {
+		return view, errors.New("Claude 已暂停，请先继续对话")
+	}
 	if len(view.Turns) == 0 || view.Turns[len(view.Turns)-1].ID != turnID || view.Turns[len(view.Turns)-1].Status != "running" {
 		return view, errors.New("本轮运行状态已变化，请重新读取")
 	}

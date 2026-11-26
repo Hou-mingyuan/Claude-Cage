@@ -34,6 +34,7 @@ type mobileSummary struct {
 	Pinned        bool      `json:"pinned"`
 	Active        bool      `json:"active"`
 	Running       bool      `json:"running"`
+	Paused        bool      `json:"paused,omitempty"`
 	ClaudeDesktop bool      `json:"claude_desktop,omitempty"`
 	MetadataSet   bool      `json:"metadata_set"`
 	Deleted       bool      `json:"deleted,omitempty"`
@@ -178,6 +179,9 @@ func (record *mobileRecord) snapshot() mobileSession {
 	}
 	view.mediaWorkingDir = record.GuestWorkspace
 	view.TerminalAvailable = record.Terminal
+	if record.Terminal {
+		view.Running = record.TerminalRunning
+	}
 	view.DesktopTerminalID = record.TerminalID
 	if record.CustomTitle != "" {
 		view.Title = record.CustomTitle
@@ -274,6 +278,7 @@ func (m *mobileCLIStore) summaries(profile string, granted map[string]bool, arch
 			summary.Active = run.record.turnActive()
 		}
 		summary.Running = m.running[id]
+		summary.Paused = summary.Running && summary.Paused && !summary.Archived
 		summary.ClaudeDesktop = summary.Running && m.desktop[id]
 		if granted[summary.Workspace] && !summary.Deleted && summary.Archived == archived {
 			if summary.CustomTitle != "" {

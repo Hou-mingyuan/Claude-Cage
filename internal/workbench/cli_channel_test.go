@@ -4,7 +4,6 @@ package workbench
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,6 +38,17 @@ func TestCLIChannelProtocol(t *testing.T) {
 	}
 }
 
+func TestTerminalJobControl(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	cmd := exec.Command(python, "-I", "terminal_job_test.py")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("terminal job control: %v\n%s", err, output)
+	}
+}
+
 func TestCLIChannelCommandFitsWindows(t *testing.T) {
 	// Leave room in CreateProcessW's 32767 UTF-16 limit for SSH paths and the
 	// login-shell quoting around this command.
@@ -70,7 +80,7 @@ func TestSharedSendReceiptSurvivesReadFailure(t *testing.T) {
 	}
 	// Keep the real host SSH/bootstrap/RPC path; replace only the guest
 	// operation boundary to lose the read immediately after an admitted send.
-	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
 	if err = os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +227,7 @@ func TestDiscoveryRunningStateUpdatesCatalogAndClearsMissingHistory(t *testing.T
 	}
 	// Keep the host bootstrap and SSH path; substitute the guest's observation.
 	observation := filepath.Join(home, "observation.json")
-	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
 	if err := os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +268,7 @@ func TestCachedDiscoveryReuseIsBoundedAndInvalidatedByWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	observation := filepath.Join(home, "observation.json")
-	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
 	if err := os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +343,7 @@ func TestTerminalViewReusesUnchangedGuestView(t *testing.T) {
 	s, id, project := metadataFixture(t)
 	home, _ := filepath.EvalSymlinks(t.TempDir())
 	mobileTestSSH(t, s, home, []string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/local/bin"})
-	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
 	if err := os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -42,6 +42,7 @@ test("canSendImmediately requires an idle, synced, unpaused empty queue", () => 
 test("canDrainQueue drains FIFO only when visible, ready, idle, and unpaused", () => {
   const readyToDrain = { ...idleState(), queueLength: 2 };
   assert.equal(canDrainQueue(readyToDrain), true);
+  assert.equal(canDrainQueue({ ...readyToDrain, session: { paused: true } }), false);
   assert.equal(canDrainQueue({ ...readyToDrain, visible: false }), false);
   assert.equal(canDrainQueue({ ...readyToDrain, ready: false }), false);
   assert.equal(canDrainQueue({ ...readyToDrain, running: true }), false);

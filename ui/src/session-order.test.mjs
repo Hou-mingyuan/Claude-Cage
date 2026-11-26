@@ -61,3 +61,11 @@ test("terminals outside every project folder stay reachable", () => {
   const rows = projectSessionRows(unassignedTerminalTabs(tabs, ["/p/one"], groups), [], {}, undefined, new Map());
   assert.deepEqual(rows.map(row => row.id), ["terminal:removed"], "an ended conversation terminal is listed as itself, not as history");
 });
+test("a paused terminal and its history row stay selectable from the sidebar", () => {
+  const session = {id:"original", running:true, paused:true};
+  for (const tabs of [[], [{id:"terminal:owned", cli_session_id:"original"}]]) {
+    const [row] = projectSessionRows(tabs, [session], {}, undefined, new Map());
+    assert.equal(row.sessionPaused, true);
+    assert.equal(row.sessionRunningElsewhere, false);
+  }
+});
