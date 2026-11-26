@@ -41,13 +41,14 @@ for variable, suffix in (("CC", "c"), ("CXX", "cpp")):
     command = os.environ[variable]
     try:
         arguments = subprocess.list2cmdline([str(source), "-o", str(executable)])
-        subprocess.run(f"{command} {arguments}", check=True)
-        subprocess.run([str(executable)], check=True)
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
-        sys.exit(
-            f"MSYS2 UCRT64 compile/link/run check failed for {variable}={command}: {error}\n"
-            "Check the selected assembler and linker, including the System32 zlib1.dll conflict in docs/windows.md."
-        )
+        for step in (f"{command} {arguments}", [str(executable)]):
+            result = subprocess.run(step, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+            if result.returncode != 0:
+                sys.stderr.write(result.stdout)
+                status = result.returncode & 0xFFFFFFFF
+                raise RuntimeError(f"exit status {result.returncode} (0x{status:08X})")
+    except (ValueError, OSError, RuntimeError) as error:
+        sys.exit(f"MSYS2 UCRT64 compile/link/run check failed for {variable}={command}: {error}")
 CAGE_COMPILER_CHECK
     exit
 fi

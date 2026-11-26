@@ -55,6 +55,27 @@ try {
     } finally { $lock.Dispose() }
     (Enter-WindowsQemuOutputLock $cached).Dispose()
 
+    $systemDirectory = 'C:\Windows\System32'
+    $loader = Get-WindowsCompilerPreflightError -Output @("`e[31mgcc.exe: fatal error`e[0m", 'cage-compiler-check: exit status -1073741515 (0xC0000135)') `
+        -ExitCode 1 -MsysDirectory 'D:\msys64\' -SystemDirectory $systemDirectory -SystemZlib $false
+    if ($loader -notlike "*`$env:CC = 'gcc -BD:/msys64/ucrt64/bin/'; `$env:CXX = 'g++ -BD:/msys64/ucrt64/bin/'*" -or
+        $loader -notlike '*zlib1.dll from C:\Windows\System32*' -or $loader -match "`e" -or $loader -notlike '*exit code 1 *') {
+        throw "The compiler preflight did not explain the System32 zlib1.dll loader failure: $loader"
+    }
+    $assembler = Get-WindowsCompilerPreflightError -Output @('C:/msys64/ucrt64/x86_64-w64-mingw32/bin/as.exe returned 1 exit status') `
+        -ExitCode 1 -MsysDirectory 'C:\msys64' -SystemDirectory $systemDirectory -SystemZlib $true
+    if ($assembler -notlike "*'gcc -BC:/msys64/ucrt64/bin/'*") { throw 'An assembler failure beside a System32 zlib1.dll lacked the -B workaround.' }
+    $generic = Get-WindowsCompilerPreflightError -Output @('undefined reference to `missing''') -ExitCode 1 -MsysDirectory 'C:\msys64' `
+        -SystemDirectory $systemDirectory -SystemZlib $false
+    if ($generic -like '*zlib1.dll*' -or $generic -notlike '*undefined reference*') { throw 'A generic compiler failure reported the zlib1.dll conflict.' }
+    $shadow = Get-WindowsCompilerPreflightError -Output @('ld.exe: cannot find -lfoo') -ExitCode 1 -MsysDirectory 'C:\msys64' `
+        -SystemDirectory $systemDirectory -SystemZlib $true
+    if ($shadow -notlike '*C:\Windows\System32 contains zlib1.dll*' -or $shadow -like '*gcc -B*') { throw 'A System32 zlib1.dll was not mentioned as a possible cause.' }
+    $long = Get-WindowsCompilerPreflightError -Output @(('x' * 5000) + 'tail') -ExitCode 1 -MsysDirectory 'C:\msys64' -SystemDirectory $systemDirectory -SystemZlib $false
+    if ($long.Length -gt 3500 -or $long -notlike '*...*tail*') { throw 'Long compiler output was not truncated to its tail.' }
+    if ((Get-WindowsCompilerPreflightError -Output $null -ExitCode 1 -MsysDirectory 'C:\msys64' -SystemDirectory $systemDirectory -SystemZlib $false) -notlike '*(no output)*') {
+        throw 'An empty compiler output was not reported.'
+    }
     $downloads = Join-Path $root 'downloads'
     $script:downloadContent = 'truncated payload'
     # Exercise the built-in download path offline: without Node on the lookup,
@@ -103,5 +124,5 @@ try {
             throw 'Get-VerifiedDependency did not fall back to Invoke-WebRequest after shared downloader failure.'
         }
     }
-    Write-Output 'PASS: QEMU cache locking, rollback, interrupted rebuild recovery, custom output ownership, and dependency retry.'
+    Write-Output 'PASS: QEMU cache locking, rollback, interrupted rebuild recovery, custom output ownership, compiler preflight diagnosis, and dependency retry.'
 } finally { Remove-Item -LiteralPath $root -Recurse -Force }

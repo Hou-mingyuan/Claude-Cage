@@ -455,6 +455,30 @@ function Get-VerifiedGitArchive {
     return $archive
 }
 
+# Builds the preflight failure message from captured compiler output. Pure so it
+# can be tested without a broken toolchain.
+function Get-WindowsCompilerPreflightError {
+    param([string[]]$Output, [int]$ExitCode, [string]$MsysDirectory, [string]$SystemDirectory, [bool]$SystemZlib)
+    $text = (($Output -join "`n") -replace '\x1b\[[0-9;?]*[A-Za-z]', '' -replace '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '').Trim()
+    $limit = 3000
+    if ($text.Length -gt $limit) { $text = '...' + $text.Substring($text.Length - $limit) }
+    if (-not $text) { $text = '(no output)' }
+    $message = "The MSYS2 UCRT64 compile/link check failed with exit code $ExitCode before the QEMU build. Compiler output:`n$text"
+    # 0xC0000135 (STATUS_DLL_NOT_FOUND) also covers a missing entry point in an
+    # older DLL that Windows found first, such as zlib1.dll in System32.
+    $loaderFailure = $text -match '(?i)0xC0000135|3221225781|-1073741515|zlib1\.dll'
+    $assembler = $text -match '(?i)\bas\.exe|assembler'
+    if ($loaderFailure -or ($SystemZlib -and $assembler)) {
+        $bin = ($MsysDirectory -replace '\\', '/').TrimEnd('/') + '/ucrt64/bin/'
+        $message += "`n`nThe GCC assembler or linker probably loaded an old zlib1.dll from $SystemDirectory instead of $($bin)zlib1.dll. " +
+            "Clear CC and CXX to use the build's default -B prefix, or set `$env:CC = 'gcc -B$bin'; `$env:CXX = 'g++ -B$bin'. " +
+            'Do not delete or replace the System32 DLL; other software may depend on it.'
+    } elseif ($SystemZlib) {
+        $message += "`n`n$SystemDirectory contains zlib1.dll, which can shadow the MSYS2 copy used by the assembler and linker."
+    }
+    return $message + "`nSee docs/windows.md#windows-源码构建."
+}
+
 function Invoke-WindowsQemuProbe {
     param([string]$Executable, [string[]]$Arguments)
     $start = [Diagnostics.ProcessStartInfo]::new([IO.Path]::GetFullPath($Executable))

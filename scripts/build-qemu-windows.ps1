@@ -76,7 +76,18 @@ function Build-WindowsQemuRuntime {
         $shell = @('--noprofile', '--norc', (Join-Path $PSScriptRoot 'build-qemu-windows.sh'))
         try { Invoke-BuildTool (Join-Path $uclib 'pkg-config.exe') @('--print-errors', '--exists', 'glib-2.0', 'pixman-1', 'slirp') }
         catch { throw 'Missing QEMU libraries in MSYS2 UCRT64. Install glib2, pixman and libslirp from the packages listed in docs/windows.md#windows-源码构建.' }
-        Invoke-BuildTool $bash ($shell + @('preflight', $stage)) | Out-Host
+        # Capture the check so a failure can be explained; PowerShell 7.0 and 7.1
+        # turn redirected native stderr into terminating errors under Stop.
+        $preflight = & {
+            $ErrorActionPreference = 'Continue'
+            & $bash @($shell + @('preflight', $stage)) 2>&1 | ForEach-Object { "$_" }
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $systemDirectory = [Environment]::SystemDirectory
+            throw (Get-WindowsCompilerPreflightError -Output $preflight -ExitCode $LASTEXITCODE -MsysDirectory $MsysDirectory `
+                -SystemDirectory $systemDirectory -SystemZlib (Test-Path -LiteralPath (Join-Path $systemDirectory 'zlib1.dll') -PathType Leaf))
+        }
+        $preflight | Out-Host
         $archive = Get-VerifiedGitArchive $dependencies.qemuSource $DependencyCache
         $keymapArchive = Get-VerifiedDependency $dependencies.qemuKeycodemap $DependencyCache
         # QEMU's mkvenv bootstraps pip, setuptools and wheel. Supply the pinned
