@@ -16,8 +16,23 @@ import (
 )
 
 func TestFirstStartReportsUnreachableProxyBeforeImageSetup(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Setenv("TMPDIR", "/tmp") // Leave room for Lima's Unix socket under the test profile.
+	// The startup path validates Lima's socket length before it reaches the
+	// proxy. Keep the isolated profile short, including on Windows CI where
+	// TMP normally points inside a per-run directory under RUNNER_TEMP.
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		t.Setenv("TMPDIR", "/tmp")
+	case "windows":
+		root := os.Getenv("RUNNER_TEMP")
+		if root == "" {
+			var err error
+			root, err = os.UserHomeDir()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Setenv("TMP", root)
+		t.Setenv("TEMP", root)
 	}
 	s := testServer(t)
 	if err := writePrivate(filepath.Join(s.profile, "environment.json"), cage.EnvironmentRecord{Directory: t.TempDir()}); err != nil {
