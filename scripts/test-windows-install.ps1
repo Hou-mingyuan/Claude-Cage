@@ -46,8 +46,12 @@ function Assert-Shortcuts {
         if ((Test-Path -LiteralPath (Join-Path $startMenuDirectory $name)) -ne $StartMenu) { throw "Start menu shortcut differs from the installer selection: $name" }
     }
     if ($Desktop) {
-        $shell = New-Object -ComObject WScript.Shell
-        if ($shell.CreateShortcut($desktopShortcut).TargetPath -ne (Join-Path $target 'Cage.exe')) { throw 'Desktop shortcut targets a different installation.' }
+        $shell = New-Object -ComObject Shell.Application
+        $desktopFolder = $shell.NameSpace((Split-Path $desktopShortcut -Parent))
+        $shortcut = $desktopFolder.ParseName((Split-Path $desktopShortcut -Leaf))
+        $actual = $shortcut.ExtendedProperty('System.Link.TargetParsingPath')
+        $expected = Join-Path $target 'Cage.exe'
+        if ($actual -ne $expected) { throw "Expected the desktop shortcut to target '$expected', got '$actual'." }
     }
 }
 # Cover the directory-picker path where the user creates an empty folder first.
