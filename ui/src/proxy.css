@@ -1721,22 +1721,257 @@ button.proxy-flow-chip.is-empty:hover:not(:disabled) {
   justify-self: start;
 }
 
-/* ── Auto-Switch Relay Group Controls ────────────────────────────────── */
-.proxy-hop-kind-toggle {
+/* ── Unified Relay Hop Field (1 node = fixed, >=2 or source = auto-switch) ─ */
+.proxy-hop-field {
+  display: grid;
+  gap: 8px;
+}
+.proxy-hop-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 38px;
+  padding: 5px 8px 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--input, var(--paper));
+  color: var(--strong);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
+}
+.proxy-hop-box:hover:not(.is-disabled) {
+  border-color: color-mix(in srgb, var(--strong) 34%, var(--line));
+}
+.proxy-hop-box.is-open,
+.proxy-hop-box:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--paper);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.proxy-hop-box.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.proxy-hop-tokens {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+.proxy-hop-placeholder {
+  font-size: 13px;
+  color: var(--muted);
+  padding-inline-start: 2px;
+}
+.proxy-hop-add-hint {
+  font-size: 12px;
+  color: var(--muted);
+  padding-inline-start: 4px;
+  white-space: nowrap;
+}
+.proxy-hop-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 5px 2px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--strong);
+}
+.proxy-hop-token.is-source {
+  border-color: color-mix(in srgb, var(--strong) 25%, var(--line));
+  background: color-mix(in srgb, var(--chrome) 75%, var(--paper));
+  gap: 6px;
+}
+.proxy-hop-token.is-live {
+  border-color: color-mix(in srgb, var(--success) 42%, var(--line));
+  background: color-mix(in srgb, var(--success) 8%, var(--paper));
+}
+.proxy-hop-token.is-missing {
+  border-color: color-mix(in srgb, var(--danger, #bc4c4c) 45%, var(--line));
+  color: var(--danger, #bc4c4c);
+}
+.proxy-hop-token-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--chrome);
+  border: 1px solid var(--line-subtle);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.proxy-hop-token-name {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 520;
+}
+.proxy-hop-token-meta {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.settings-page .settings-content .proxy-route button.proxy-hop-token-btn,
+button.proxy-hop-token-btn {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+.settings-page .settings-content .proxy-route button.proxy-hop-token-btn:hover:not(:disabled),
+button.proxy-hop-token-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--strong);
+}
+.settings-page .settings-content .proxy-route button.proxy-hop-token-btn:disabled,
+button.proxy-hop-token-btn:disabled {
+  opacity: 0.28;
+}
+.settings-page .settings-content .proxy-route button.proxy-hop-more-btn,
+button.proxy-hop-more-btn {
+  min-height: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-page .settings-content .proxy-route button.proxy-hop-more-btn:hover:not(:disabled),
+button.proxy-hop-more-btn:hover:not(:disabled) {
+  color: var(--strong);
+  background: var(--hover);
+}
+.proxy-hop-box-end {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-inline-start: auto;
+  flex: none;
+}
+.settings-page .settings-content .proxy-route button.proxy-hop-clear-btn,
+button.proxy-hop-clear-btn {
+  min-height: 22px;
+  padding: 1px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.settings-page .settings-content .proxy-route button.proxy-hop-clear-btn:hover:not(:disabled),
+button.proxy-hop-clear-btn:hover:not(:disabled) {
+  color: var(--strong);
+  background: var(--hover);
+}
+.settings-page .settings-content .proxy-route button.proxy-hop-chevron-btn,
+button.proxy-hop-chevron-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+.proxy-hop-box.is-open .proxy-hop-chevron-btn svg {
+  transform: rotate(180deg);
+  color: var(--strong);
+}
+
+.proxy-hop-dropdown {
+  margin-top: 0;
+}
+.proxy-hop-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.proxy-hop-option-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.proxy-hop-option-main > svg {
+  flex: none;
+  color: var(--muted);
+}
+.proxy-hop-option-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.proxy-hop-option-tail small {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.proxy-hop-option-check {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  border: 1.5px solid color-mix(in srgb, var(--muted) 55%, var(--line));
+  background: transparent;
+}
+.proxy-hop-option-check.is-checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink, var(--paper));
+}
+
+.proxy-hop-strategy-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.proxy-hop-strategy-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.proxy-hop-strategy-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   padding: 2px;
   border-radius: 8px;
   background: var(--chrome);
   border: 1px solid var(--line-subtle);
 }
-.proxy-hop-kind-toggle + .proxy-hop-pick-btn {
-  margin-inline-start: 0;
-}
-.settings-page .settings-content .proxy-hop-kind-toggle button,
-.proxy-hop-kind-toggle button {
+.settings-page .settings-content .proxy-route .proxy-hop-strategy-pills button,
+.proxy-hop-strategy-pills button {
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -1744,77 +1979,28 @@ button.proxy-flow-chip.is-empty:hover:not(:disabled) {
   font-size: 11.5px;
   font-weight: 500;
   min-height: 24px;
-  padding: 2px 9px;
+  padding: 2px 10px;
   white-space: nowrap;
   transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
 }
-.settings-page .settings-content .proxy-hop-kind-toggle button[aria-pressed="true"],
-.proxy-hop-kind-toggle button[aria-pressed="true"] {
+.settings-page .settings-content .proxy-route .proxy-hop-strategy-pills button:hover:not(:disabled):not([aria-pressed="true"]),
+.proxy-hop-strategy-pills button:hover:not(:disabled):not([aria-pressed="true"]) {
+  color: var(--strong);
+  background: transparent;
+}
+.settings-page .settings-content .proxy-route .proxy-hop-strategy-pills button[aria-pressed="true"],
+.proxy-hop-strategy-pills button[aria-pressed="true"] {
   background: var(--paper);
   color: var(--strong);
   font-weight: 600;
   box-shadow: var(--shadow-xs);
 }
-
-.proxy-relay-panel {
-  display: grid;
-  gap: 10px;
-  padding: 12px 13px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--chrome) 65%, var(--paper));
-}
-.proxy-relay-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 10px;
-}
-.proxy-relay-field-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-  min-width: 52px;
-}
-.proxy-relay-segmented {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 3px;
-  padding: 2px;
-  border-radius: 8px;
+.settings-page .settings-content .proxy-route .proxy-hop-strategy-pills button[aria-pressed="true"]:hover:not(:disabled),
+.proxy-hop-strategy-pills button[aria-pressed="true"]:hover:not(:disabled) {
   background: var(--paper);
-  border: 1px solid var(--line-subtle);
-}
-.settings-page .settings-content .proxy-relay-segmented button,
-.proxy-relay-segmented button {
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-  min-height: 26px;
-  padding: 3px 10px;
-  white-space: nowrap;
-  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
-}
-.settings-page .settings-content .proxy-relay-segmented button:hover:not(:disabled),
-.proxy-relay-segmented button:hover:not(:disabled) {
   color: var(--strong);
-  background: var(--hover);
-}
-.settings-page .settings-content .proxy-relay-segmented button[aria-pressed="true"],
-.proxy-relay-segmented button[aria-pressed="true"] {
-  background: var(--strong);
-  color: var(--paper);
-  font-weight: 580;
 }
 
-.proxy-relay-source-box {
-  display: grid;
-  gap: 8px;
-}
 .proxy-relay-live {
   display: inline-flex;
   align-items: center;
@@ -1822,9 +2008,7 @@ button.proxy-flow-chip.is-empty:hover:not(:disabled) {
   font-size: 12px;
   font-weight: 550;
   color: var(--success);
-}
-.proxy-relay-live.inline {
-  margin-inline-start: 4px;
+  margin-inline-start: auto;
 }
 .proxy-relay-live-dot {
   width: 7px;
@@ -1833,162 +2017,11 @@ button.proxy-flow-chip.is-empty:hover:not(:disabled) {
   background: var(--success);
   flex: none;
 }
-
-.proxy-relay-pool-box {
-  display: grid;
-  gap: 8px;
-  padding: 10px 11px;
-  border-radius: 8px;
-  background: var(--paper);
-  border: 1px solid var(--line-subtle);
-}
-.proxy-relay-pool-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.proxy-relay-pool-summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--strong);
-}
-.proxy-relay-pool-summary em {
-  font-style: normal;
-  font-size: 11.5px;
-  color: var(--warning, var(--muted));
-  font-weight: 500;
-}
-.proxy-relay-pool-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.proxy-relay-pool-actions .proxy-hop-pick-btn {
-  margin-inline-start: 0;
-}
-.settings-page .settings-content button.proxy-relay-clear-btn,
-button.proxy-relay-clear-btn {
-  min-height: 24px;
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--muted);
-}
-.settings-page .settings-content button.proxy-relay-clear-btn:hover:not(:disabled),
-button.proxy-relay-clear-btn:hover:not(:disabled) {
-  color: var(--strong);
-  background: var(--hover);
-}
-
-.proxy-relay-pool-list {
-  display: grid;
-  gap: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line-subtle);
-}
-.proxy-relay-order-hint {
-  font-size: 11.5px;
-  color: var(--muted);
-  line-height: 1.45;
-}
-.proxy-relay-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.proxy-relay-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  padding: 3px 6px 3px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--chrome);
-  font-size: 11.5px;
-  color: var(--strong);
-}
-.proxy-relay-chip.is-live {
-  border-color: color-mix(in srgb, var(--success) 40%, var(--line));
-  background: color-mix(in srgb, var(--success) 8%, var(--paper));
-}
-.proxy-relay-chip.is-missing {
-  border-color: color-mix(in srgb, var(--danger, #bc4c4c) 45%, var(--line));
-  color: var(--danger, #bc4c4c);
-}
-.proxy-relay-chip-rank {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 17px;
-  padding: 0 4px;
-  height: 16px;
-  border-radius: 999px;
-  background: var(--paper);
-  border: 1px solid var(--line-subtle);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.proxy-relay-chip-name {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 520;
-}
-.settings-page .settings-content button.proxy-relay-chip-btn,
-button.proxy-relay-chip-btn {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  min-width: 20px;
-  height: 20px;
-  min-height: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-}
-.settings-page .settings-content button.proxy-relay-chip-btn:hover:not(:disabled),
-button.proxy-relay-chip-btn:hover:not(:disabled) {
-  background: var(--hover);
-  color: var(--strong);
-}
-.settings-page .settings-content button.proxy-relay-chip-btn:disabled,
-button.proxy-relay-chip-btn:disabled {
-  opacity: 0.3;
-}
-.proxy-relay-expand-btn {
-  justify-self: start;
-  font-size: 11.5px;
-  padding: 2px 4px;
-  color: var(--muted);
-}
-.proxy-relay-expand-btn:hover:not(:disabled) {
-  color: var(--strong);
-}
-
 .proxy-relay-issue {
-  margin: 0;
+  margin: 4px 0 0;
   font-size: 12px;
   color: var(--warning, #b26a00);
   line-height: 1.5;
-}
-.proxy-relay-panel .proxy-relay-help {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--muted);
-  line-height: 1.55;
 }
 
 .proxy-flow-chip.is-relay-group {
@@ -1999,11 +2032,6 @@ button.proxy-relay-chip-btn:disabled {
   font-size: 11px;
   color: var(--muted);
   font-weight: 500;
-}
-
-.proxy-pick-pill.is-source-group {
-  border-style: dashed;
-  color: var(--muted);
 }
 
 .proxy-bulk-bar {
@@ -2042,19 +2070,12 @@ button.proxy-relay-chip-btn:disabled {
 }
 
 @media (max-width: 700px) {
-  .proxy-relay-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .proxy-hop-kind-toggle {
-    width: 100%;
-  }
-  .proxy-hop-kind-toggle button {
-    flex: 1;
+  .proxy-relay-live {
+    margin-inline-start: 0;
   }
 }
 
-:root[data-preset="high-contrast"] .proxy-relay-panel,
+:root[data-preset="high-contrast"] .proxy-hop-box,
 :root[data-preset="high-contrast"] .proxy-bulk-bar {
   background: var(--paper);
 }

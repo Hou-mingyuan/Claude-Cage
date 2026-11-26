@@ -3436,5 +3436,21 @@
   "取消当前筛选": "Ka saar shaandhada hadda",
   "全选当前筛选（{0}）": "Dooro dhammaan shaandhada ({0})",
   "取消本区": "Ka saar gobolkan",
-  "全选本区": "Dooro gobolkan"
+  "全选本区": "Dooro gobolkan",
+  "点击移出「{0}」": "Guji si aad uga saarto «{0}»",
+  "点击加入「{0}」": "Guji si aad ugu darto «{0}»",
+  "本机先连这里；选 1 个为固定中转，多选或选整份订阅时自动切换": "Qalabku halkan ayuu marka hore ku xirmaa; 1 noodh waa gudbin go'an, dhowr noodh ama isdiiwaangelinta oo dhan waxay shidaan isbeddel toos ah",
+  "经上一跳中转后再转发至下一跳；多选或选整份订阅时自动切换": "Waxay sii gudbisaa tallaabadii hore kadib; dhowr noodh ama isdiiwaangelinta oo dhan waxay shidaan isbeddel toos ah",
+  "正在勾选「{0}」（可多选）：": "Calaamaynaya «{0}» (dhowr waa la dooran karaa):",
+  "{0} · {1} 节点": "{0} · {1} noodh",
+  "当前为整份订阅：{0}（{1} 节点）": "Isdiiwaangelinta oo dhan: {0} ({1} noodh)",
+  "已选 {0} 个中转节点": "{0} noodh gudbin ah ayaa la doortay",
+  "（继续勾选可自动切换）": "(sii dooro si isbeddel toos ah u shaqeeyo)",
+  "整份订阅 · {0} 节点": "Isdiiwaangelinta oo dhan · {0} noodh",
+  "选择中转节点，或整份订阅（支持多选）": "Dooro noodhadh gudbin ama isdiiwaangelin dhan",
+  "+{0} 更多": "+{0} dheeraad",
+  "+ 可继续添加备用": "+ ku dar kayd",
+  "整份订阅（自动切换）": "Isdiiwaangelinta oo dhan (toos)",
+  "超过 300 上限": "ka badan xadka 300",
+  "{0} 节点": "{0} noodh"
 }

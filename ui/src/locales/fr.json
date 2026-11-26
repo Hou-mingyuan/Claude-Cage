@@ -3436,5 +3436,21 @@
   "取消当前筛选": "Désélectionner le filtre",
   "全选当前筛选（{0}）": "Tout cocher dans le filtre ({0})",
   "取消本区": "Désélectionner la région",
-  "全选本区": "Tout cocher"
+  "全选本区": "Tout cocher",
+  "点击移出「{0}」": "Cliquer pour retirer de « {0} »",
+  "点击加入「{0}」": "Cliquer pour ajouter à « {0} »",
+  "本机先连这里；选 1 个为固定中转，多选或选整份订阅时自动切换": "Premier saut depuis cet appareil ; 1 nœud = relais fixe, plusieurs nœuds ou tout un abonnement = bascule automatique",
+  "经上一跳中转后再转发至下一跳；多选或选整份订阅时自动切换": "Relais après le saut précédent ; plusieurs nœuds ou tout un abonnement = bascule automatique",
+  "正在勾选「{0}」（可多选）：": "Sélection pour « {0} » (choix multiple) :",
+  "{0} · {1} 节点": "{0} · {1} nœuds",
+  "当前为整份订阅：{0}（{1} 节点）": "Abonnement complet : {0} ({1} nœuds)",
+  "已选 {0} 个中转节点": "{0} nœuds relais sélectionnés",
+  "（继续勾选可自动切换）": "(ajoutez-en d'autres pour la bascule auto)",
+  "整份订阅 · {0} 节点": "Tout l'abonnement · {0} nœuds",
+  "选择中转节点，或整份订阅（支持多选）": "Choisir un ou plusieurs relais, ou tout un abonnement",
+  "+{0} 更多": "+{0} autres",
+  "+ 可继续添加备用": "+ ajouter un secours",
+  "整份订阅（自动切换）": "Tout l'abonnement (bascule auto)",
+  "超过 300 上限": "limite de 300 dépassée",
+  "{0} 节点": "{0} nœuds"
 }

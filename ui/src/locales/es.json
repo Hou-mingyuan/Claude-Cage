@@ -3436,5 +3436,21 @@
   "取消当前筛选": "Quitar filtro actual",
   "全选当前筛选（{0}）": "Marcar filtro actual ({0})",
   "取消本区": "Quitar región",
-  "全选本区": "Marcar región"
+  "全选本区": "Marcar región",
+  "点击移出「{0}」": "Haz clic para quitar de «{0}»",
+  "点击加入「{0}」": "Haz clic para añadir a «{0}»",
+  "本机先连这里；选 1 个为固定中转，多选或选整份订阅时自动切换": "Primer salto desde este equipo; 1 nodo = relevo fijo, varios nodos o toda una suscripción = cambio automático",
+  "经上一跳中转后再转发至下一跳；多选或选整份订阅时自动切换": "Reenvía tras el salto anterior; varios nodos o toda una suscripción = cambio automático",
+  "正在勾选「{0}」（可多选）：": "Marcando «{0}» (selección múltiple):",
+  "{0} · {1} 节点": "{0} · {1} nodos",
+  "当前为整份订阅：{0}（{1} 节点）": "Suscripción completa: {0} ({1} nodos)",
+  "已选 {0} 个中转节点": "{0} nodos de relevo elegidos",
+  "（继续勾选可自动切换）": "(marca más para cambio automático)",
+  "整份订阅 · {0} 节点": "Toda la suscripción · {0} nodos",
+  "选择中转节点，或整份订阅（支持多选）": "Elige uno o varios nodos de relevo, o una suscripción",
+  "+{0} 更多": "+{0} más",
+  "+ 可继续添加备用": "+ añadir respaldo",
+  "整份订阅（自动切换）": "Toda la suscripción (cambio automático)",
+  "超过 300 上限": "supera el límite de 300",
+  "{0} 节点": "{0} nodos"
 }
