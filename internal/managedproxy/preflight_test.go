@@ -212,10 +212,26 @@ func TestStartPreflightUsesCandidateDNSAndIsolatesFromActiveProxy(t *testing.T) 
 		t.Fatalf("saved sources.json mutated: %+v %v", reloaded.BootstrapDNS, err)
 	}
 
+	// The work directory is private, owned by this live process, and survives
+	// a sweep until Close removes it.
+	workDirs, _ := filepath.Glob(filepath.Join(Dir(profile), preflightDirPrefix+"*"))
+	if len(workDirs) != 1 {
+		t.Fatalf("preflight work dirs=%v", workDirs)
+	}
+	if _, ok := readPreflightRecord(workDirs[0]); !ok {
+		t.Fatal("preflight core record missing")
+	}
+	if err := sweepPreflight(Dir(profile), func(preflightCoreRecord) error { t.Fatal("live preflight swept"); return nil }); err != nil || !exists(workDirs[0]) {
+		t.Fatalf("live preflight swept: %v", err)
+	}
+
 	// Closing stops the helper process and removes the temporary socket directory.
 	sockDir := filepath.Dir(captured.Socket)
 	preflight.Close()
 	preflight.Close() // idempotent
+	if exists(workDirs[0]) {
+		t.Fatal("preflight work dir left behind after Close")
+	}
 	if _, err := os.Stat(captured.Socket); !os.IsNotExist(err) {
 		t.Fatalf("preflight socket left behind after Close: %v", err)
 	}
