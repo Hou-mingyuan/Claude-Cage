@@ -35,6 +35,7 @@ type remoteApprovalPrompt struct {
 	Tool      string `json:"tool,omitempty"`
 	Project   string `json:"project,omitempty"`
 	Dir       string `json:"dir,omitempty"`
+	Shell     string `json:"shell,omitempty"`
 	Command   string `json:"command,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	FromView  bool   `json:"from_view,omitempty"`
@@ -346,6 +347,9 @@ func validateRemoteApprovalPrompt(p remoteApprovalPrompt) error {
 		if err := check(p.Dir, 1024); err != nil {
 			return err
 		}
+		if err := check(p.Shell, 32); err != nil {
+			return err
+		}
 		return check(p.Project, 1024)
 	case "tool":
 		if strings.TrimSpace(p.Plugin) == "" || strings.TrimSpace(p.Tool) == "" {
@@ -376,8 +380,12 @@ func formatRemoteApprovalDialog(hostName string, p remoteApprovalPrompt) (title,
 		if project == "" || project == "." || project == string(filepath.Separator) {
 			project = p.Project
 		}
+		shellLine := ""
+		if p.Shell != "" {
+			shellLine = "\nShell　" + p.Shell
+		}
 		return fmt.Sprintf("允许在远程主机「%s」上运行命令？", label),
-			"远程主机　" + label + "\n项目「" + project + "」\n目录　" + p.Dir + "\n\n" + p.Command +
+			"远程主机　" + label + "\n项目「" + project + "」\n目录　" + p.Dir + shellLine + "\n\n" + p.Command +
 				"\n\n命令将以远程主机的系统账户权限在该服务器上运行。「始终允许」会记住远程主机上对该项目的授权，以后在该项目中运行命令不再询问；可在插件页随时撤销。"
 	}
 	title = fmt.Sprintf("允许远程主机「%s」上的 Claude 使用插件？", label)

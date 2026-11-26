@@ -4,6 +4,7 @@ package hostbridge
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,10 +14,133 @@ import (
 	"time"
 )
 
-func shellCommand(command string) *exec.Cmd {
-	cmd := exec.Command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	return cmd
+func normalizeShell(raw string) (string, error) {
+	switch name := strings.ToLower(strings.TrimSpace(raw)); name {
+	case "", "default":
+		return "", nil
+	case "powershell", "pwsh", "bash", "cmd":
+		return name, nil
+	default:
+		return "", fmt.Errorf("unsupported shell %q; use default, powershell, pwsh, bash, or cmd", raw)
+	}
+}
+
+func shellCommand(command, shell string) (*exec.Cmd, error) {
+	env := userEnv()
+	var cmd *exec.Cmd
+	switch shell {
+	case "", "powershell":
+		cmd = exec.Command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command)
+	case "pwsh":
+		program, ok := resolveWindowsExecutable(env, "pwsh.exe")
+		if !ok {
+			return nil, fmt.Errorf("PowerShell 7 (pwsh.exe) is not installed on this computer")
+		}
+		cmd = exec.Command(program, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command)
+	case "cmd":
+		comspec := envValueFold(env, "COMSPEC")
+		if comspec == "" {
+			comspec = "cmd.exe"
+		}
+		cmd = exec.Command(comspec, "/d", "/s", "/c", command)
+	case "bash":
+		program, ok := resolveWindowsGitBash(env)
+		if !ok {
+			return nil, fmt.Errorf("Git Bash (bash.exe) was not found; install Git for Windows or use powershell")
+		}
+		cmd = exec.Command(program, "-c", command)
+	default:
+		return nil, fmt.Errorf("unsupported shell %q; use default, powershell, pwsh, bash, or cmd", shell)
+	}
+	cmd.Env = env
+	hideWindow(cmd)
+	return cmd, nil
+}
+
+func resolveWindowsExecutable(env []string, filename string) (string, bool) {
+	dirs := windowsPathDirs(env)
+	for _, p := range findWindowsPathCandidates(dirs, filename, false) {
+		return p, true
+	}
+	for _, p := range findWindowsPathCandidates(dirs, filename, true) {
+		return p, true
+	}
+	if p, err := exec.LookPath(filename); err == nil {
+		return p, true
+	}
+	return "", false
+}
+
+func isWindowsSystemDir(dir string) bool {
+	cleaned := strings.ToLower(filepath.Clean(dir))
+	return strings.HasSuffix(cleaned, `\windows\system32`) || strings.Contains(cleaned, `\windows\system32\`) ||
+		strings.HasSuffix(cleaned, `\windows\syswow64`) || strings.Contains(cleaned, `\windows\syswow64\`)
+}
+
+// resolveWindowsGitBash finds a native Git Bash executable while avoiding the
+// Windows System32 WSL bash.exe stub and Microsoft Store aliases.
+func resolveWindowsGitBash(env []string) (string, bool) {
+	dirs := windowsPathDirs(env)
+	seen := map[string]bool{}
+	tryCandidate := func(path string) (string, bool) {
+		if path == "" {
+			return "", false
+		}
+		cleaned := filepath.Clean(path)
+		key := strings.ToLower(cleaned)
+		if seen[key] {
+			return "", false
+		}
+		seen[key] = true
+		if isWindowsSystemDir(filepath.Dir(cleaned)) || isWindowsAppsDir(filepath.Dir(cleaned)) {
+			return "", false
+		}
+		if windowsExecutableExists(cleaned) {
+			return cleaned, true
+		}
+		return "", false
+	}
+
+	// 1. Prefer bash.exe shipped alongside git.exe on PATH.
+	for _, gitPath := range findWindowsPathCandidates(dirs, "git.exe", false) {
+		gitDir := filepath.Dir(gitPath)
+		gitRoot := filepath.Dir(gitDir)
+		for _, candidate := range []string{
+			filepath.Join(gitRoot, "bin", "bash.exe"),
+			filepath.Join(gitRoot, "usr", "bin", "bash.exe"),
+			filepath.Join(gitDir, "bash.exe"),
+		} {
+			if found, ok := tryCandidate(candidate); ok {
+				return found, true
+			}
+		}
+	}
+
+	// 2. Accept a non-system bash.exe on PATH (e.g. Git\bin or Git\usr\bin).
+	for _, candidate := range findWindowsPathCandidates(dirs, "bash.exe", false) {
+		if found, ok := tryCandidate(candidate); ok {
+			return found, true
+		}
+	}
+
+	// 3. Fall back to standard Git for Windows installation locations.
+	var roots []string
+	for _, key := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
+		if base := envValueFold(env, key); base != "" {
+			roots = append(roots, filepath.Join(base, "Git"))
+		}
+	}
+	if localAppData := envValueFold(env, "LOCALAPPDATA"); localAppData != "" {
+		roots = append(roots, filepath.Join(localAppData, "Programs", "Git"))
+	}
+	for _, root := range roots {
+		for _, sub := range []string{filepath.Join("bin", "bash.exe"), filepath.Join("usr", "bin", "bash.exe")} {
+			if found, ok := tryCandidate(filepath.Join(root, sub)); ok {
+				return found, true
+			}
+		}
+	}
+	return "", false
 }
 
 // userEnv is the environment for programs run on the user's behalf, without

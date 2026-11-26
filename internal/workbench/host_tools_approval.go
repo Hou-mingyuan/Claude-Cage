@@ -50,6 +50,7 @@ func (a *hostApprovals) approve(ctx context.Context, request hostbridge.CommandR
 		Kind:    "command",
 		Project: request.Project,
 		Dir:     request.Dir,
+		Shell:   request.Shell,
 		Command: request.Command,
 	}
 	if a.checkProject != nil {
@@ -57,7 +58,7 @@ func (a *hostApprovals) approve(ctx context.Context, request hostbridge.CommandR
 			return err
 		}
 	}
-	err := a.decide(ctx, hostGrantProject+request.Project, []string{"commands"}, request.Command+request.Dir, len(request.Command),
+	err := a.decide(ctx, hostGrantProject+request.Project, []string{"commands"}, request.Command+request.Dir+request.Shell, len(request.Command),
 		"允许 Claude 在这台电脑上运行命令？", hostApprovalMessage(request), prompt)
 	if err == nil && a.checkProject != nil {
 		return a.checkProject(request.Project)
@@ -161,6 +162,10 @@ func (a *hostApprovals) alwaysAllowed(key string, permissions []string) bool {
 }
 
 func hostApprovalMessage(request hostbridge.CommandRequest) string {
-	return "项目「" + filepath.Base(request.Project) + "」\n目录　" + request.Dir + "\n\n" + request.Command +
+	shellLine := ""
+	if request.Shell != "" {
+		shellLine = "\nShell　" + request.Shell
+	}
+	return "项目「" + filepath.Base(request.Project) + "」\n目录　" + request.Dir + shellLine + "\n\n" + request.Command +
 		"\n\n命令以你的用户权限运行，可以访问这台电脑上的任何内容。「始终允许」会记住对该项目的授权，以后在这个项目里运行命令不再询问；可以在插件页随时撤销。"
 }

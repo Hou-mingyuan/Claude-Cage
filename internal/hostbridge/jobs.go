@@ -30,12 +30,85 @@ type Jobs struct {
 }
 
 type job struct {
-	output *cappedBuffer
+	output *jobBuffer
 	cancel context.CancelFunc
 	done   chan struct{}
 	// result and err are set before done closes.
 	result commandOutput
 	err    error
+}
+
+// jobBuffer keeps both a head/tail summary (for offset == 0 snapshots) and a
+// rolling tail ring buffer (for incremental offset-based polling of long jobs).
+type jobBuffer struct {
+	mu      sync.Mutex
+	summary cappedBuffer
+	ring    []byte
+	ringMax int
+	total   int
+}
+
+func newJobBuffer() *jobBuffer {
+	return &jobBuffer{
+		summary: cappedBuffer{limit: commandOutputLimit},
+		ringMax: jobRingBufferLimit,
+	}
+}
+
+func (b *jobBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, _ = b.summary.Write(p)
+	b.total += len(p)
+	if len(p) >= b.ringMax {
+		b.ring = append(b.ring[:0], p[len(p)-b.ringMax:]...)
+		return len(p), nil
+	}
+	b.ring = append(b.ring, p...)
+	if over := len(b.ring) - b.ringMax; over > 0 {
+		b.ring = append(b.ring[:0], b.ring[over:]...)
+	}
+	return len(p), nil
+}
+
+func (b *jobBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.summary.String()
+}
+
+func (b *jobBuffer) truncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.summary.truncated()
+}
+
+func (b *jobBuffer) snapshot() (output string, truncated bool, nextOffset int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.summary.String(), b.summary.truncated(), b.total
+}
+
+// readFrom returns up to maxChunk bytes starting at byte offset (clamped to the
+// retained ring window if older bytes were evicted).
+func (b *jobBuffer) readFrom(offset, maxChunk int) (chunk string, nextOffset, skipped int, truncated bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	base := b.total - len(b.ring)
+	if offset < base {
+		skipped = base - offset
+		offset = base
+	}
+	if offset >= b.total {
+		return "", b.total, skipped, skipped > 0
+	}
+	start := offset - base
+	avail := b.ring[start:]
+	if maxChunk > 0 && len(avail) > maxChunk {
+		avail = avail[:maxChunk]
+		truncated = true
+	}
+	return string(avail), offset + len(avail), skipped, truncated || skipped > 0
 }
 
 // NewJobs returns an empty set of background commands.
@@ -58,7 +131,7 @@ func (j *Jobs) Close() {
 	}
 }
 
-func (j *Jobs) start(command, dir string, timeout time.Duration) (commandOutput, error) {
+func (j *Jobs) start(command, shell, dir string, timeout time.Duration) (commandOutput, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.ctx.Err() != nil {
@@ -78,7 +151,7 @@ func (j *Jobs) start(command, dir string, timeout time.Duration) (commandOutput,
 	j.next++
 	id := fmt.Sprintf("job-%d", j.next)
 	ctx, cancel := context.WithCancel(j.ctx)
-	started := &job{output: &cappedBuffer{limit: commandOutputLimit}, cancel: cancel, done: make(chan struct{})}
+	started := &job{output: newJobBuffer(), cancel: cancel, done: make(chan struct{})}
 	j.jobs[id] = started
 	j.order = append(j.order, id)
 	// Forget the oldest finished jobs beyond what is kept.
@@ -102,21 +175,22 @@ func (j *Jobs) start(command, dir string, timeout time.Duration) (commandOutput,
 	go func() {
 		defer close(started.done)
 		defer cancel()
-		started.result, started.err = execute(ctx, command, dir, timeout, started.output)
+		started.result, started.err = execute(ctx, command, shell, dir, timeout, started.output)
 	}()
 	return commandOutput{Job: id, Running: true}, nil
 }
 
 type jobInput struct {
-	Job  string `json:"job" jsonschema:"the job id returned by run_command"`
-	Stop bool   `json:"stop,omitempty" jsonschema:"end the command if it is still running"`
-	Wait int    `json:"wait_seconds,omitempty" jsonschema:"wait up to this many seconds for the command to finish before answering; at most 50"`
+	Job    string `json:"job" jsonschema:"the job id returned by run_command"`
+	Stop   bool   `json:"stop,omitempty" jsonschema:"end the command if it is still running"`
+	Wait   int    `json:"wait_seconds,omitempty" jsonschema:"wait up to this many seconds for the command to finish before answering; at most 50"`
+	Offset int    `json:"offset,omitempty" jsonschema:"byte offset to read new output incrementally from next_offset; omit or pass 0 for a full summary snapshot"`
 }
 
 func (j *Jobs) register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "command_job",
-		Description: "Read the output so far and the state of a background command started with run_command, optionally waiting briefly for it to finish or stopping it.",
+		Description: "Read the output so far and the state of a background command started with run_command, optionally waiting briefly for it to finish, reading incrementally from offset, or stopping it.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in jobInput) (*mcp.CallToolResult, commandOutput, error) {
 		out, err := j.read(ctx, in)
 		return nil, out, err
@@ -124,6 +198,9 @@ func (j *Jobs) register(server *mcp.Server) {
 }
 
 func (j *Jobs) read(ctx context.Context, in jobInput) (commandOutput, error) {
+	if in.Offset < 0 {
+		return commandOutput{}, errors.New("offset must be non-negative")
+	}
 	j.mu.Lock()
 	found := j.jobs[in.Job]
 	j.mu.Unlock()
@@ -142,12 +219,31 @@ func (j *Jobs) read(ctx context.Context, in jobInput) (commandOutput, error) {
 		case <-ctx.Done():
 		}
 	}
+	populateOutput := func(res *commandOutput) {
+		if in.Offset > 0 {
+			chunk, next, skipped, trunc := found.output.readFrom(in.Offset, commandOutputLimit)
+			res.Output = chunk
+			res.NextOffset = next
+			res.SkippedBytes = skipped
+			res.Truncated = trunc
+			return
+		}
+		snap, trunc, next := found.output.snapshot()
+		res.Output = snap
+		res.Truncated = trunc
+		res.NextOffset = next
+	}
 	select {
 	case <-found.done:
 		result := found.result
 		result.Job = in.Job
+		if found.err == nil {
+			populateOutput(&result)
+		}
 		return result, found.err
 	default:
-		return commandOutput{Job: in.Job, Running: true, Output: found.output.String(), Truncated: found.output.truncated()}, nil
+		result := commandOutput{Job: in.Job, Running: true}
+		populateOutput(&result)
+		return result, nil
 	}
 }

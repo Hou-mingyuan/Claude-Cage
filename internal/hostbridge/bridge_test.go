@@ -336,3 +336,112 @@ func TestBackgroundCommandsAreBoundedAndEndWithTheBridge(t *testing.T) {
 		t.Fatal("a background command started without Jobs")
 	}
 }
+
+func TestCommandShellSelectionAndValidation(t *testing.T) {
+	dir := t.TempDir()
+	bridge := startBridge(t, dir)
+	if _, result := call(t, bridge, commandInput{Command: "echo hi", Shell: "/bin/sh"}); !result.IsError {
+		t.Fatal("arbitrary shell path was accepted")
+	}
+	if _, result := call(t, bridge, commandInput{Command: "echo hi", Shell: "unknown-shell"}); !result.IsError {
+		t.Fatal("unknown shell name was accepted")
+	}
+	if runtime.GOOS == "windows" {
+		out, result := call(t, bridge, commandInput{Command: "echo hello-cmd", Shell: "cmd"})
+		if result.IsError || out.ExitCode != 0 || !strings.Contains(out.Output, "hello-cmd") {
+			t.Fatalf("cmd shell failed: %+v", out)
+		}
+		return
+	}
+	out, result := call(t, bridge, commandInput{Command: "printf 'from-sh'", Shell: "sh"})
+	if result.IsError || out.ExitCode != 0 || out.Output != "from-sh" {
+		t.Fatalf("sh shell failed: %+v", out)
+	}
+	var seen CommandRequest
+	token, _ := NewToken()
+	guarded, err := Start(token, Command{
+		Dirs: func() []string { return []string{dir} },
+		Approve: func(_ context.Context, req CommandRequest) error {
+			seen = req
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = guarded.Close() })
+	if out, result := call(t, guarded, commandInput{Command: "printf ok", Shell: "SH"}); result.IsError || out.Output != "ok" {
+		t.Fatalf("normalized shell failed: %+v", out)
+	}
+	if seen.Shell != "sh" {
+		t.Fatalf("approval request shell = %q, want %q", seen.Shell, "sh")
+	}
+}
+
+func TestBackgroundJobIncrementalOffsetReading(t *testing.T) {
+	buf := &jobBuffer{summary: cappedBuffer{limit: 32}, ringMax: 100}
+	_, _ = buf.Write([]byte("0123456789"))
+	snap, trunc, next := buf.snapshot()
+	if snap != "0123456789" || trunc || next != 10 {
+		t.Fatalf("snapshot: %q trunc=%v next=%d", snap, trunc, next)
+	}
+	_, _ = buf.Write([]byte("abcdefghij"))
+	chunk, next2, skipped, trunc2 := buf.readFrom(next, 6)
+	if chunk != "abcdef" || next2 != 16 || skipped != 0 || !trunc2 {
+		t.Fatalf("first page: %q next=%d skipped=%d trunc=%v", chunk, next2, skipped, trunc2)
+	}
+	chunk, next3, skipped, trunc3 := buf.readFrom(next2, 6)
+	if chunk != "ghij" || next3 != 20 || skipped != 0 || trunc3 {
+		t.Fatalf("second page: %q next=%d skipped=%d trunc=%v", chunk, next3, skipped, trunc3)
+	}
+	// Overflow the 100-byte ring buffer and verify skipped byte reporting.
+	_, _ = buf.Write([]byte(strings.Repeat("x", 150)))
+	chunk, next4, skipped, trunc4 := buf.readFrom(next3, 200)
+	if len(chunk) != 100 || next4 != 170 || skipped != 50 || !trunc4 {
+		t.Fatalf("after eviction: len=%d next=%d skipped=%d trunc=%v", len(chunk), next4, skipped, trunc4)
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	dir := t.TempDir()
+	jobs := NewJobs()
+	t.Cleanup(jobs.Close)
+	command := Command{Dirs: func() []string { return []string{dir} }, Jobs: jobs}
+	ctx := context.Background()
+	started, err := command.run(ctx, commandInput{Command: "printf 'part1\n'; sleep 0.2; printf 'part2\n'", Background: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first commandOutput
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		first, err = jobs.read(ctx, jobInput{Job: started.Job})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(first.Output, "part1") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for part1: %+v", first)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if first.NextOffset <= 0 {
+		t.Fatalf("expected positive next_offset, got %+v", first)
+	}
+	rest, err := jobs.read(ctx, jobInput{Job: started.Job, Wait: 10, Offset: first.NextOffset})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rest.Running || rest.ExitCode != 0 {
+		t.Fatalf("expected finished job: %+v", rest)
+	}
+	if strings.Contains(rest.Output, "part1") || !strings.Contains(rest.Output, "part2") {
+		t.Fatalf("incremental read should only include new output: %+v", rest)
+	}
+	if _, err := jobs.read(ctx, jobInput{Job: started.Job, Offset: -1}); err == nil {
+		t.Fatal("negative offset was accepted")
+	}
+}
