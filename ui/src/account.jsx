@@ -870,7 +870,9 @@ function AccountDeviceSettings({ onOpenPassword, passwordDisabled, recoveryDisab
     : states[kind] === "unavailable"
       ? tr("暂时无法检查系统钥匙串，授权记录已保留。请稍后重新检查。")
       : "";
-  const biometricNote = issueText("biometric") || (!deviceSupport?.biometric_available && !credentialPresent(states.biometric) ? tr("请先在 macOS 系统设置中设置 Touch ID。") : "");
+  const biometricNote = states.biometric === "unsupported"
+    ? tr("此安装包不支持 Touch ID，请使用密码解锁。")
+    : issueText("biometric") || (!deviceSupport?.biometric_available && !credentialPresent(states.biometric) ? tr("请先在 macOS 系统设置中设置 Touch ID。") : "");
   const change = async (kind, enabled) => {
     setBusy(true); setError(""); setMessage("");
     try {

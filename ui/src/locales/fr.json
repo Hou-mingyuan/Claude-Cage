@@ -1823,6 +1823,7 @@
   "请先切换到这台电脑的本机环境，再生成或管理手机配对码。": "Passez d'abord à l'environnement local de cet ordinateur avant de générer ou gérer les codes d'appairage du téléphone.",
   "请先创建本地账户": "Veuillez d'abord créer un compte local",
   "请先启动当前环境。此操作不会扫描本机其他应用的数据。": "Démarrez d'abord l'environnement actuel. Cette opération n'analyse pas les données des autres applications de cet ordinateur.",
+  "此安装包不支持 Touch ID，请使用密码解锁。": "Ce paquet d’installation ne prend pas en charge Touch ID. Utilisez votre mot de passe pour déverrouiller Cage.",
   "请先在 macOS 系统设置中设置 Touch ID。": "Configurez d'abord Touch ID dans les Réglages système de macOS.",
   "请先在本机的「设置 → 账户」设置密码": "Définissez d'abord un mot de passe dans « Paramètres → Compte » sur cet ordinateur",
   "请先完成关键检查，再访问外部网站。": "Effectuez d'abord les vérifications essentielles avant d'accéder aux sites externes.",
