@@ -44,7 +44,7 @@ Intel Mac 的平台参数为 `darwin-amd64`；Windows 可用 PowerShell 下载�
 
 助手从同一标签读取安装包与 `SHA256SUMS`，拒绝不完整附件、重复校验项、HTTP 降级和校验不符。下载使用独立临时文件，成功后才生成目标文件；目标已存在时保留它并报错。失败后可以重新下载到新的目标目录。Windows 只有未签名预览包时，返回 `unsigned_package_requires_consent`；用户明确选择该预览后才添加 `--allow-unsigned`。
 
-下载使用主机网络，需能访问 GitHub 与 Release 附件；指定 `--version` 时不需要 GitHub API。Node 24 支持通过 `node --use-env-proxy agent-bootstrap.mjs ...` 使用用户明确配置的 `HTTPS_PROXY` / `HTTP_PROXY`；也可使用用户现有的主机 TUN。不要回显代理凭据。较旧 Node 的 fetch 不自动采用这些环境代理；连接失败时先排查主机下载网络，避免反复重建 Cage 配置。
+下载使用主机网络，需能访问 GitHub 与 Release 附件；指定 `--version` 时不需要 GitHub API。Node 22.21+ 与 24.5+ 支持通过 `node --use-env-proxy agent-bootstrap.mjs ...`（或 `NODE_USE_ENV_PROXY=1`）使用用户明确配置的 `HTTPS_PROXY` / `HTTP_PROXY`；也可使用用户现有的主机 TUN。不要回显代理凭据。未启用该选项或更旧 Node 的 fetch 不采用这些环境代理；也可用会读取代理的 curl 下载 `plan` 输出的 `url`，再按其 `sha256` 校验。下载网络失败返回 `download_connection_failed`、`download_timeout`（连续 120 秒未收到数据）或 `download_interrupted`，`next_action` 为 `check_host_network`；设置了代理变量而 Node 未使用时，`message` 会说明启用方式。先排查主机下载网络再重试 `download`，避免反复重建 Cage 配置。
 
 | 平台 | 安装与验证 |
 | --- | --- |
