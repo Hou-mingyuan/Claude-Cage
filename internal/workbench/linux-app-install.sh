@@ -19,26 +19,6 @@ if systemctl is-active --quiet "desktop-$app_id.service"; then
   echo '请先保存工作并关闭应用，再更新或修复安装。' >&2
   exit 1
 fi
-# Downloads APT could not finish stay in its partial directory and resume on
-# the next attempt, so a failure reports how much is kept.
-apt_partial_bytes() {
-  local archives=
-  eval "$(APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-config shell archives Dir::Cache::archives/d 2>/dev/null || :)"
-  [[ -n $archives ]] || return 0
-  { sudo find "${archives%/}/partial" -maxdepth 1 -type f -name '*.deb' -printf '%s\n' 2>/dev/null || :; } | awk '{ s += $1 } END { if (s > 0) printf "%d\n", s }'
-}
-apt_get() {
-  local status partial
-  if sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get -o DPkg::Lock::Timeout=60 "$@" </dev/null; then
-    return 0
-  else
-    status=$?
-  fi
-  partial=$(apt_partial_bytes)
-  [[ -z $partial ]] || printf 'APT_PARTIAL bytes=%s\n' "$partial" >&2
-  printf 'APT_FAILED exit=%s command=apt-get %s\n' "$status" "$*" >&2
-  return "$status"
-}
 temporary=$(mktemp -d)
 created_apt_list=
 created_apt_keyring=
@@ -61,9 +41,9 @@ if sudo test -s "$record_dir/app.json"; then
   previous_version=$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("version",""))' "$record_dir/app.json" 2>/dev/null || :)
 fi
 printf '正在准备安装依赖…\n'
-apt_get update
+cage_desktop_apt update
 # shellcheck disable=SC2086
-apt_get install -y --no-install-recommends $app_dependencies ${app_packages:-}
+cage_desktop_apt install -y --no-install-recommends $app_dependencies ${app_packages:-}
 
 # The sources and keyrings a vendor's package adds for itself are recorded so
 # that removing the application removes them too.
@@ -193,16 +173,16 @@ case "$app_source" in
       sudo rm -f "$list" "$keyring"
     fi
     declare -F cage_refresh_apt_sources >/dev/null && cage_refresh_apt_sources || :
-    apt_get update
+    cage_desktop_apt update
     printf '正在下载并安装最新版本…\n'
-    apt_get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "$package"
+    cage_desktop_apt install -y --no-install-recommends "$package"
     created_apt_list=
     created_apt_keyring=
     if sudo grep -rlsF -- "$app_repository" /etc/apt/sources.list.d 2>/dev/null | grep -vqxF "$list"; then
       if sudo test -e "$list"; then
         sudo rm -f "$list" "$keyring"
         declare -F cage_refresh_apt_sources >/dev/null && cage_refresh_apt_sources || :
-        apt_get update
+        cage_desktop_apt update
       fi
     fi
     version=$(dpkg-query -W -f='${Version}' "$package")
@@ -213,7 +193,7 @@ case "$app_source" in
     package=$(dpkg-deb -f "$temporary/app.deb" Package)
     [[ $package =~ ^[a-z0-9][a-z0-9+.-]{1,62}$ ]] || { echo '下载的安装包无效。' >&2; exit 1; }
     printf '正在安装 %s…\n' "$release_version"
-    apt_get install -y --no-install-recommends "$temporary/app.deb"
+    cage_desktop_apt install -y --no-install-recommends "$temporary/app.deb"
     version=$(dpkg-query -W -f='${Version}' "$package")
     ;;
   archive)

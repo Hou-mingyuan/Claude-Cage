@@ -77,7 +77,7 @@ func TestPackageInstallFailureReportsKeptPartialDownload(t *testing.T) {
 		t.Fatal("expected failure")
 	}
 	msg := err.Error()
-	for _, want := range []string{"连接下载服务器失败或超时", "7.5 MiB", "重新点击安装会从这里继续下载"} {
+	for _, want := range []string{"连接下载服务器失败或超时", "7.5 MiB", "APT 会尝试复用匹配的缓存"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("missing %q: %s", want, msg)
 		}
@@ -90,7 +90,7 @@ func TestPackageInstallFailureReportsKeptPartialDownload(t *testing.T) {
 		"zero":  tail + "APT_PARTIAL bytes=0\n" + marker,
 		"stale": "APT_PARTIAL bytes=4096\n" + tail + marker,
 	} {
-		if msg := packageInstallFailure("安装", errors.New("x"), log).Error(); strings.Contains(msg, "继续下载") {
+		if msg := packageInstallFailure("安装", errors.New("x"), log).Error(); strings.Contains(msg, "未完成的软件包") {
 			t.Fatalf("%s: reported a partial download that was not kept: %s", name, msg)
 		}
 	}

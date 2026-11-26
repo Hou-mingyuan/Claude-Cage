@@ -153,6 +153,7 @@ export function ClaudeDesktop({
             ? "环境内存不足，Claude Desktop 已被系统关闭。请在设置中检查计算资源后重新打开。"
             : "Claude Desktop 未能启动，可重试打开或修复安装。")} />
           <button onClick={onDetails}>{tr("操作详情")}</button>
+          {error && <button onClick={() => setError("")}>{tr("关闭")}</button>}
         </div>
       )}
       {desktop?.running && desktop.managed === false && !desktop.native_user_session && <div className="connection-banner" role="status">{tr("当前应用尚未接入 Cage 账户解锁。请先保存并关闭应用，再重新打开。")}</div>}

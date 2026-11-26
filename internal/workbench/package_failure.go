@@ -150,7 +150,7 @@ func packageInstallFailure(action string, cause error, log string) error {
 		detail += "；错误输出末尾：" + strings.ReplaceAll(tail, "\n", " | ")
 	}
 	if ev.partialBytes > 0 {
-		next += "已下载的 " + aptPartialSize(ev.partialBytes) + " 保留在环境中，重新点击安装会从这里继续下载，不必从头开始。"
+		next += "APT 缓存中有 " + aptPartialSize(ev.partialBytes) + " 未完成的软件包。重新点击安装时，若软件源支持续传，APT 会尝试复用匹配的缓存。"
 		detail += "；已保留未完成的下载 " + strconv.FormatInt(ev.partialBytes, 10) + " 字节"
 	}
 	diagnostics.Log("error", "package-install", "reason="+reason+" "+detail)
