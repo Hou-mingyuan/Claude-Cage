@@ -241,7 +241,7 @@ func (s *Server) changeDesktopApp(t desktopAppTarget, action string) error {
 		if !allowed {
 			return errors.New("工作台正在退出，请稍后重试安装")
 		}
-		script, err := desktopAppInstallScript(t)
+		script, httpsHosts, err := prepareDesktopAppInstall(t, reviewedDesktopApps[t.plugin])
 		if err != nil {
 			return err
 		}
@@ -252,7 +252,7 @@ func (s *Server) changeDesktopApp(t desktopAppTarget, action string) error {
 			s.setMessage("正在下载并安装 " + title + "，可在操作详情查看进度…")
 			script = cage.InstallTLS12Prelude(tls12Compat) + script
 		}
-		return RunMaintenanceScript(s.operationContext(), s.configPath, script, s.jobs.execution(), s.jobs.execution())
+		return runInstallMaintenanceScript(s.operationContext(), s.configPath, script, httpsHosts, s.jobs.execution(), s.jobs.execution())
 	case "remove":
 		s.setMessage("正在卸载 " + title + "…")
 		return s.runDesktopScript(desktopAppRemoveScript(t), 5*time.Minute)
