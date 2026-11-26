@@ -55,6 +55,7 @@ Claude Cage는 터미널, 브라우저, 편집기, 공식 Claude Desktop과 플�
 
 ## 케이지로 할 수 있는 일
 
+- **내 컴퓨터의 터미널에서 Claude Code를 사용합니다(v0.2.2).** `cage login`을 실행하면 Cage 브라우저에서 Claude 계정에 로그인할 수 있습니다. 프로젝트 폴더에서 `cage`를 실행하면 해당 폴더가 공유되고 세션이 열립니다. `cage start`로 백그라운드 서비스를 미리 시작할 수도 있습니다. [명령어와 예시](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **단일 창에서 작업합니다.** 터미널에서 Claude Code를 실행하고, 편집기에서 변경 사항을 검토하고, Cage 브라우저를 사용하여 서비스를 미리 보고 로그인하세요.
 - **플러그인 마켓으로 모든 능력을 열어 보세요.** 개방형 [플러그인 마켓(cage-plugins)](https://github.com/Lee-xeo/cage-plugins)을 내장해 「플러그인 = MCP + 확장」을 지원합니다. 화면·키보드·마우스 제어, Office 문서, Blender, 호스트 명령 같은 MCP 도구를 안전하고 통제된 승인 아래 연결하고, 샌드박스 페이지로 Cage를 맞춤화할 수 있습니다. [플러그인 가이드](docs/guide/plugins.md) · [개발 명세](docs/plugins.md)
 - **모든 플랫폼에서 같은 경량 환경.** macOS, Windows, Linux의 Cage는 모두 동일한 경량 Debian 13 환경을 사용해 복잡한 다중 OS 게스트 없이 도구와 사용 방법이 같습니다. [Debian 환경](docs/guide/guest-systems.md)

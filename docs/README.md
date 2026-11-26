@@ -10,6 +10,7 @@ Cage 为 Claude 及相关程序提供轻量化的本地 Debian 13 隔离环境�
 |---|---|
 | 让自己的 Agent 下载、安装、配置 Cage，跟踪任务并排查故障 | [Agent 使用指南](guide/agent.md) |
 | 选择 macOS、Windows、Linux 安装包，配置代理并打开第一个项目 | [开始使用](getting-started.md) |
+| 在本机终端登录 Claude 账号、共享当前项目，或通过管道调用 Claude Code | [主机 CLI 命令与示例](guide/workbench.md#在本机终端使用-claude-code) |
 | 了解 Debian 环境的要求、空间占用与数据保留 | [Debian 环境](guide/guest-systems.md) |
 | 从插件市场安装插件、管理主机授权与权限边界 | [插件与插件市场](guide/plugins.md) |
 | 开发 MCP 工具或自定义页面插件，并了解清单与协议规范 | [插件开发规范](plugins.md) |

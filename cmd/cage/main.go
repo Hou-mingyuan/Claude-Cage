@@ -46,11 +46,11 @@ cage status        Show the state of the background service and the environment
 cage account list  Show registered Claude Code accounts
 cage account use ID|auto    Select a CLI account or use workbench scheduling
 cage account run ID [--] ARGS   Use an account just for this invocation
-cage restart       Restart the local environment and wait until it is ready
+cage restart       Restart the local environment, interrupt its tasks, and wait until ready
 cage install-cli   Install the terminal command for this user
 cage desktop       Open the unified Cage workbench (desktop launcher)
 cage agent         Discover and use the versioned, JSON-only external Agent interface
-cage serve         Run its private localhost control service
+cage serve         Run the private localhost control service in the foreground
 cage server-entry --json  Issue a private SSH remote connection entry
 cage container-configure --json  Configure a Linux container from JSON stdin
 cage init          Create a private profile; add and select nodes in Cage settings
@@ -73,7 +73,8 @@ cage run COMMAND   Execute a command in the shared environment: from the current
                    DIR in the environment
 cage claude ARGS   Send every following argument to Claude Code in Cage
                    (including commands such as doctor or stop <session-id>)
-cage stop          Stop the shared Cage environment and its proxy core
+cage stop          Stop the shared Cage environment, its tasks and its proxy core
+                   The background control service can continue running.
                    --keep-proxy keeps the core running for an environment restart
 cage list          List this cage profile's VMs
 cage doctor        Diagnose the VM

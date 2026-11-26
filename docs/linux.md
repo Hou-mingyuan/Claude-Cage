@@ -52,6 +52,8 @@ sudo apt install ./Cage-<版本>-linux-amd64.deb
 
 Linux 使用 Ctrl 快捷键：`Ctrl+O` 打开项目，`Ctrl+T` 新建网页，`Ctrl+L` 定位地址栏，`Ctrl+W` 关闭标签，`Ctrl+Shift+Enter` 新建终端。终端用 `Ctrl+Shift+C/V` 复制粘贴，`Ctrl+C` 中断命令。
 
+使用 v0.2.2 完整版时，从主机终端运行 `claude-cage login`，在 Cage 浏览器中登录 Claude 账号。然后进入项目目录运行 `claude-cage`，即可共享该目录并启动 Claude Code。若系统中 `cage` 这个命令名空闲，可用 `claude-cage install-cli` 安装短名。[本机终端命令与示例](guide/workbench.md#在本机终端使用-claude-code)
+
 关闭窗口保留后台环境与任务，再次打开 Cage 可重新连接。在应用内停止环境后退出，才能结束后台任务。Linux 本地账户使用密码解锁；设备快速解锁暂不提供。
 
 浏览器上传使用本机文件选择窗口，下载可通过 GTK“另存为”选择保存位置。侧栏“下载”提供打开文件、打开所在文件夹和再次另存为；文件按当前桌面关联的应用打开。操作与限制见[浏览器上传与下载](getting-started.md#浏览器上传与下载)。

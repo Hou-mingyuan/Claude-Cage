@@ -14,7 +14,7 @@ keywords: Agent CLI JSON 自动化 配置 接口 安装 诊断 修复 capabiliti
 
 ## Agent 从哪里开始
 
-下文的 `cage` 代表 Cage 安装包内的后台 CLI。先找到实际文件；不要把桌面启动程序或 Linux 上同名的 Wayland 程序当作 CLI。
+下文的 `cage agent` 是供外部 Agent 配置和检查 Cage 的 JSON 接口，安装包中的实际命令见下表。在本机终端向 Claude Code 提问、传入管道或恢复会话，请使用同一程序的 `cage`、`cage -p` 或 `cage -r`。Linux 安装包的命令名为 `claude-cage`。[主机终端使用示例](workbench.md#在本机终端使用-claude-code)
 
 | 平台 | 默认 CLI 位置 | 调用示例 |
 | --- | --- | --- |
