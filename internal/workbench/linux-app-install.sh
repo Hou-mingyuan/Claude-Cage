@@ -40,7 +40,21 @@ apt_get() {
   return "$status"
 }
 temporary=$(mktemp -d)
-trap 'rm -rf "$temporary"' EXIT
+created_apt_list=
+created_apt_keyring=
+cleanup_install() {
+  if [[ -n $created_apt_list ]]; then
+    sudo rm -f -- "$created_apt_list" 2>/dev/null || :
+  fi
+  if [[ -n $created_apt_keyring ]]; then
+    sudo rm -f -- "$created_apt_keyring" 2>/dev/null || :
+  fi
+  if [[ -n ${_curl_compat_home:-} ]]; then
+    rm -rf -- "$_curl_compat_home"
+  fi
+  rm -rf "$temporary"
+}
+trap cleanup_install EXIT
 chmod 0755 "$temporary"
 previous_version=
 if sudo test -s "$record_dir/app.json"; then
@@ -97,11 +111,58 @@ CHECK
 }
 
 download() {
+  local destination="$1"
+  local cache_dir="$HOME/.cache/desktop-apps/$app_id"
+  local key part stale attempt status http attempts=3
+  key=$(python3 -I -c 'import hashlib,sys;print(hashlib.sha256((sys.argv[1]+"\n"+sys.argv[2]).encode()).hexdigest()[:16])' "$release_version" "$release_url")
+  mkdir -p -m 0700 "$cache_dir"
+  for stale in "$cache_dir"/*; do
+    [ -e "$stale" ] || continue
+    case "$(basename "$stale")" in
+      "$key.part"|"$key.part.ranges") ;;
+      *) rm -rf -- "$stale" ;;
+    esac
+  done
+  part="$cache_dir/$key.part"
   printf '正在从官方站点下载 %s…\n' "$release_version"
-  cage_curl_download "$1" --proto '=https' --proto-redir '=https' --max-redirs 5 -fSL --connect-timeout 15 "$release_url" -o "$1"
-  if [[ -n $release_digest ]]; then
-    printf '%s  %s\n' "$release_digest" "$1" | sha256sum -c --quiet - || { echo '下载文件校验失败，安装已停止。' >&2; exit 1; }
-  fi
+  for ((attempt=1; attempt<=attempts; attempt++)); do
+    if (( attempt > 1 )); then
+      printf '下载中断，正在续传重试（%s/%s）…\n' "$attempt" "$attempts"
+    fi
+    if http="$(cage_curl_download "$part" --proto '=https' --proto-redir '=https' --max-redirs 5 -fSL --connect-timeout 15 --continue-at - --write-out '%{http_code}' "$release_url" -o "$part" </dev/null)"; then
+      status=0
+    else
+      status=$?
+    fi
+    if [[ $status == 0 ]]; then
+      if [[ -n $release_digest ]]; then
+        if ! printf '%s  %s\n' "$release_digest" "$part" | sha256sum -c --quiet -; then
+          rm -rf -- "$part" "$part.ranges"
+          echo '下载文件校验失败，安装已停止。' >&2
+          exit 1
+        fi
+      fi
+      rm -rf -- "$part.ranges"
+      mv -f "$part" "$destination"
+      return 0
+    fi
+    if [[ $http == 416 ]]; then
+      rm -rf -- "$part" "$part.ranges"
+      if (( attempt < attempts )); then
+        continue
+      fi
+    fi
+    case "$status" in
+      33|36) rm -rf -- "$part" "$part.ranges" ;;
+      5|6|7|18|28|35|52|55|56|92) ;;
+      22) case "$http" in 408|429|500|502|503|504) ;; *) exit "$status" ;; esac ;;
+      *) exit "$status" ;;
+    esac
+    if (( attempt < attempts )); then
+      sleep $((attempt * 2))
+    fi
+  done
+  exit "${status:-1}"
 }
 
 package=
@@ -124,17 +185,23 @@ case "$app_source" in
       fingerprints=$(gpg --batch --homedir "$temporary/gnupg" --with-colons --list-keys | awk -F: '$1 == "fpr" {print $10}')
       grep -qxF "$app_fingerprint" <<<"$fingerprints" || { echo '官方签名密钥与插件声明的指纹不符，安装已停止。' >&2; exit 1; }
       gpg --batch --homedir "$temporary/gnupg" --export "$app_fingerprint" > "$temporary/keyring.gpg"
+      if ! sudo test -e "$keyring"; then created_apt_keyring=$keyring; fi
       sudo install -m 0644 "$temporary/keyring.gpg" "$keyring"
+      if ! sudo test -e "$list"; then created_apt_list=$list; fi
       printf 'deb [arch=%s signed-by=%s] %s %s %s\n' "$arch" "$keyring" "$app_repository" "$app_suite" "$app_components" | sudo tee "$list" >/dev/null
     else
       sudo rm -f "$list" "$keyring"
     fi
+    declare -F cage_refresh_apt_sources >/dev/null && cage_refresh_apt_sources || :
     apt_get update
     printf '正在下载并安装最新版本…\n'
-    apt_get install -y --no-install-recommends "$package"
+    apt_get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "$package"
+    created_apt_list=
+    created_apt_keyring=
     if sudo grep -rlsF -- "$app_repository" /etc/apt/sources.list.d 2>/dev/null | grep -vqxF "$list"; then
       if sudo test -e "$list"; then
         sudo rm -f "$list" "$keyring"
+        declare -F cage_refresh_apt_sources >/dev/null && cage_refresh_apt_sources || :
         apt_get update
       fi
     fi

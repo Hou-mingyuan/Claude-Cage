@@ -260,10 +260,14 @@ func (s *Server) changeDesktopApp(t desktopAppTarget, action string) error {
 		if !allowed {
 			return errors.New("工作台正在退出，请稍后重试安装")
 		}
-		script, httpsHosts, err := prepareDesktopAppInstall(t, reviewedDesktopApps[t.plugin])
+		plan, err := prepareDesktopAppInstall(t, reviewedDesktopApps[t.plugin])
 		if err != nil {
 			return err
 		}
+		if plan.unreviewedPlugin != "" {
+			_, _ = fmt.Fprintf(s.jobs.execution(), "提示：插件 %s 的当前版本或内容未经此版 Cage 审核，额外官方下载源未开放；若下载被拦截，请在插件市场更新插件或升级 Cage。\n", plan.unreviewedPlugin)
+		}
+		script := plan.script
 		if action == "update" {
 			s.setMessage("正在把 " + title + " 更新到官方最新版本，可在操作详情查看进度…")
 			script = "set -e\nsudo systemctl stop desktop-" + t.id + ".service 2>/dev/null || :\n" + cage.InstallTLS12Prelude(tls12Compat) + script
@@ -271,7 +275,12 @@ func (s *Server) changeDesktopApp(t desktopAppTarget, action string) error {
 			s.setMessage("正在下载并安装 " + title + "，可在操作详情查看进度…")
 			script = cage.InstallTLS12Prelude(tls12Compat) + script
 		}
-		return runInstallMaintenanceScript(s.operationContext(), s.configPath, script, httpsHosts, s.jobs.execution(), s.jobs.execution())
+		opts := maintenanceOptions{
+			installHTTPSHosts: plan.httpsHosts,
+			allowedAPTAppID:   plan.allowedAPTAppID,
+			unreviewedPlugin:  plan.unreviewedPlugin,
+		}
+		return runInstallMaintenanceScript(s.operationContext(), s.configPath, script, opts, s.jobs.execution(), s.jobs.execution())
 	case "remove":
 		s.setMessage("正在卸载 " + title + "…")
 		return s.runDesktopScript(desktopAppRemoveScript(t), 5*time.Minute)

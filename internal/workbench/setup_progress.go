@@ -113,7 +113,67 @@ func parseSetupProgress(line string) *SetupProgress {
 	if strings.HasPrefix(line, "Running custom setup from ") {
 		return &SetupProgress{Phase: "services", Label: "正在配置桌面服务"}
 	}
+	if label := cloudInitAPTLabel(line); label != "" {
+		return &SetupProgress{Phase: "image", Label: label}
+	}
 	return nil
+}
+
+// cloudInitAPTLabel names the APT step of the base system's first boot from
+// a cloud-init output line that Lima relays as `[cloud-init] …`, either bare
+// or as a logrus `msg="…"` field. Cage's later setup script prints the same
+// APT lines without that prefix and keeps its own labels. APT reports only
+// per-file sizes, never a total, so the step has no byte progress.
+func cloudInitAPTLabel(line string) string {
+	if strings.HasPrefix(line, "time=") {
+		_, quoted, ok := strings.Cut(line, " msg=")
+		if !ok {
+			return ""
+		}
+		prefix, err := strconv.QuotedPrefix(quoted)
+		if err != nil {
+			return ""
+		}
+		if line, err = strconv.Unquote(prefix); err != nil {
+			return ""
+		}
+	}
+	line, ok := strings.CutPrefix(line, "[cloud-init] ")
+	if !ok {
+		return ""
+	}
+	const index, install = "正在下载 Debian 软件索引", "正在安装基础依赖"
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	switch {
+	case fields[0] == "+" && len(fields) > 2 && fields[1] == "apt-get" && fields[2] == "update":
+		return index
+	case fields[0] == "+" && len(fields) > 2 && fields[1] == "apt-get" && fields[2] == "install":
+		return install
+	case strings.HasPrefix(fields[0], "Hit:") || strings.HasPrefix(fields[0], "Ign:"):
+		return index
+	case strings.HasPrefix(fields[0], "Get:"):
+		// Index files have capitalised names (InRelease, Sources, Packages,
+		// Translation-en); Debian package names are lower case.
+		for _, f := range fields[min(3, len(fields)):min(5, len(fields))] {
+			for _, name := range []string{"InRelease", "Release", "Sources", "Packages", "Translation-", "Contents-", "Components-"} {
+				if strings.HasPrefix(f, name) {
+					return index
+				}
+			}
+		}
+		if len(fields) >= 7 {
+			return install
+		}
+	}
+	for _, prefix := range []string{"Need to get ", "Selecting previously unselected package ", "Preparing to unpack ", "Unpacking ", "Setting up ", "Processing triggers for "} {
+		if strings.HasPrefix(line, prefix) {
+			return install
+		}
+	}
+	return ""
 }
 
 func guestProgressName(system string) string {

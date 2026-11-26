@@ -91,15 +91,19 @@
 .account-desktop-list {padding-inline-start:14px;}
 .account-desktop-row,.account-desktop-panes,.account-desktop-pane header {display:flex;}
 .account-desktop-row {position:relative;align-items:center;border-radius:8px;margin-bottom:2px;min-height:38px;transition:background-color var(--duration-fast) var(--ease-out);}
+.account-desktop-nav > .account-desktop-row {margin-bottom:0;min-height:36px;}
 .account-desktop-row:hover {background:var(--hover);}
 .account-desktop-row.active {background:var(--selected, var(--hover));color:var(--strong);font-weight:550;}
+.account-desktop-row.active:hover {background:var(--selected, var(--hover));}
+.account-desktop-row.active > .sidebar-link > svg {color:var(--strong);}
 .account-desktop-row.active::before {content:"";position:absolute;inset-inline-start:2px;top:8px;bottom:8px;width:3px;border-radius:999px;background:var(--accent);}
 .account-desktop-row > .sidebar-link {flex:1;min-width:0;min-height:38px;background:transparent;}
+.account-desktop-nav > .account-desktop-row > .sidebar-link {min-height:36px;}
 .account-desktop-row > .sidebar-link:hover {background:transparent;}
 .account-desktop-row:is(:hover, :focus-within, :has([aria-expanded="true"])) .terminal-row-actions {visibility:visible;max-width:none;margin-inline-end:3px;opacity:1;transform:none;}
 .account-desktop-row .terminal-row-actions > button.desktop-delete-action:is(:hover, :focus-visible) {color:var(--danger);}
 .account-desktop-status {margin-inline-start:auto;flex:none;color:var(--muted);font-size:.7rem;}
-.account-desktop-list .sidebar-link > svg,.account-desktop-title > svg,.account-desktop-pane header > button {flex:none;}
+.account-desktop-nav .sidebar-link > svg,.account-desktop-title > svg,.account-desktop-pane header > button {flex:none;}
 .account-desktop-label {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .account-desktop-panes {position:relative;height:100%;min-width:0;}
 .account-desktop-pane {display:flex;flex:1;flex-direction:column;min-width:0;position:relative;}
@@ -110,5 +114,9 @@
 .account-desktop-message {position:absolute;inset:auto 8px 8px;background:var(--paper);padding:6px;}
 
 .desktop-create-fields {display:grid;gap:8px;padding:6px 8px 10px;}
+.desktop-create-fields.desktop-create-flat {margin:4px 0 6px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface, var(--paper));}
 .desktop-create-fields label {display:grid;gap:4px;font-size:.85rem;}
 .desktop-create-fields .inline-select-trigger {width:100%;}
+.desktop-create-actions {display:flex;gap:6px;align-items:stretch;}
+.desktop-create-actions > button {min-height:32px;padding:6px 10px;font-size:.85rem;}
+.desktop-create-actions > .primary {flex:1;}

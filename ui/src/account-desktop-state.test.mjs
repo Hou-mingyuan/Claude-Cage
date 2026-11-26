@@ -6,9 +6,12 @@ import {
   desktopMergeNoticeTarget,
   desktopTitle,
   fallbackDesktopInstance,
+  flatDesktopTooltip,
   hasDefaultDesktop,
+  isMultiDesktopMode,
   mergedDefaultInstance,
   reconcileAccountDesktopPanes,
+  soleDesktopInstance,
   visibleDesktopCount,
 } from "./account-desktop-state.mjs";
 
@@ -123,4 +126,44 @@ test("canDeleteDesktop allows deleting any instance including default only while
   assert.equal(visibleDesktopCount(mergedSole), 1);
   assert.equal(canDeleteDesktop(mergedSole), false);
   assert.deepEqual(fallbackDesktopInstance(mergedSole), instanceA);
+});
+
+test("single desktop uses flat mode and switches to tree mode only with multiple instances", () => {
+  const defaultEntry = { id: "default", number: 0, label: "默认 Desktop", running: false };
+  const boundDefault = { id: "default", number: 2, label: "leexeo-max", running: true };
+  const renamedDefault = { id: "default", number: 0, label: "主力桌面", running: false };
+
+  // Unloaded, unsupported, or sole-instance catalogs stay flat.
+  assert.equal(isMultiDesktopMode(null), false);
+  assert.deepEqual(soleDesktopInstance(null), { id: "default", number: 0, label: "" });
+
+  const onlyDefault = { supported: true, instances: [defaultEntry], redirects: {}, default_removed: false };
+  assert.equal(isMultiDesktopMode(onlyDefault), false);
+  assert.deepEqual(soleDesktopInstance(onlyDefault), defaultEntry);
+  assert.equal(flatDesktopTooltip(defaultEntry), "Claude Desktop");
+  assert.equal(flatDesktopTooltip({ id: "default", number: 0, label: "Default Desktop" }, "Default Desktop"), "Claude Desktop");
+
+  const boundOnlyDefault = { supported: true, instances: [boundDefault], redirects: {}, default_removed: false };
+  assert.equal(isMultiDesktopMode(boundOnlyDefault), false);
+  assert.deepEqual(soleDesktopInstance(boundOnlyDefault), boundDefault);
+  assert.equal(flatDesktopTooltip(boundDefault), "Claude Desktop · #02 leexeo-max");
+  assert.equal(flatDesktopTooltip(renamedDefault), "Claude Desktop · 主力桌面");
+
+  const mergedSole = { supported: true, instances: [instanceA], redirects: { default: instanceA.id }, default_removed: false };
+  assert.equal(isMultiDesktopMode(mergedSole), false);
+  assert.deepEqual(soleDesktopInstance(mergedSole), instanceA);
+  assert.equal(flatDesktopTooltip(instanceA), "Claude Desktop · #01 工作账号");
+
+  const removedDefaultSole = { supported: true, instances: [instanceB], redirects: {}, default_removed: true };
+  assert.equal(isMultiDesktopMode(removedDefaultSole), false);
+  assert.deepEqual(soleDesktopInstance(removedDefaultSole), instanceB);
+
+  // Two or more instances use tree mode.
+  const twoInstances = { supported: true, instances: [defaultEntry, instanceA], redirects: {}, default_removed: false };
+  assert.equal(isMultiDesktopMode(twoInstances), true);
+  assert.equal(soleDesktopInstance(twoInstances), null);
+
+  const unsupportedMulti = { supported: false, instances: [defaultEntry, instanceA], redirects: {}, default_removed: false };
+  assert.equal(isMultiDesktopMode(unsupportedMulti), false);
+  assert.deepEqual(soleDesktopInstance(unsupportedMulti), defaultEntry);
 });

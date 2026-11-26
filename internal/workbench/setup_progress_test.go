@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -133,5 +134,94 @@ func TestToolProgressUsesOnlyKnownPackageNames(t *testing.T) {
 	}
 	if p := parseSetupProgress("CAGE_TOOL_BYTES chromium.deb 12 10"); p != nil {
 		t.Fatalf("excess bytes entered UI: %+v", p)
+	}
+}
+
+// The base system's first boot runs APT inside cloud-init; Lima relays each
+// output line through logrus. Those lines replace the generic boot label so a
+// slow index download is visible. APT gives no reliable total, so the card
+// stays an activity indicator.
+func TestBaseCloudInitAPTProgress(t *testing.T) {
+	const index, deps = "正在下载 Debian 软件索引", "正在安装基础依赖"
+	relay := func(s string) string {
+		return `time="2026-11-26T10:00:00+08:00" level=info msg=` + strconv.Quote("[cloud-init] "+s)
+	}
+	for _, tc := range []struct{ line, label string }{
+		{relay("+ apt-get update"), index},
+		{relay("Hit:1 http://deb.debian.org/debian trixie InRelease"), index},
+		{relay("Get:2 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]"), index},
+		{relay("Get:3 http://deb.debian.org/debian trixie/main Sources [10.5 MB]"), index},
+		{relay("Get:4 http://deb.debian.org/debian trixie/main amd64 Packages [9670 kB]"), index},
+		{relay("Get:5 http://deb.debian.org/debian trixie/main Translation-en [6484 kB]"), index},
+		{relay("Get:6 http://deb.debian.org/debian-security trixie-security/main amd64 Packages.diff/Index [63.3 kB]"), index},
+		{relay("Ign:7 https://mirrors.ustc.edu.cn/debian trixie InRelease"), index},
+		{"[cloud-init] Get:3 http://deb.debian.org/debian trixie/main Sources [10.5 MB]", index},
+		{relay("+ apt-get install -y --no-upgrade --no-install-recommends -q rsync"), deps},
+		{relay("Need to get 445 kB of archives."), deps},
+		{relay("Get:1 http://deb.debian.org/debian trixie/main amd64 rsync amd64 3.4.1+ds1-5 [445 kB]"), deps},
+		{relay("Selecting previously unselected package rsync."), deps},
+		{relay("Preparing to unpack .../rsync_3.4.1+ds1-5_amd64.deb ..."), deps},
+		{relay("Unpacking rsync (3.4.1+ds1-5) ..."), deps},
+		{relay("Setting up rsync (3.4.1+ds1-5) ..."), deps},
+		{relay("Processing triggers for man-db (2.13.1-1) ..."), deps},
+	} {
+		p := parseSetupProgress(tc.line)
+		if p == nil || p.Phase != "image" || p.Label != tc.label || p.Received != nil || p.Total != 0 {
+			t.Errorf("%s: got %+v, want image phase %q without bytes", tc.line, p, tc.label)
+		}
+	}
+	for _, line := range []string{
+		// Shared by both steps, or not APT: keep the current label.
+		relay("Reading package lists..."),
+		relay("Fetched 10.6 MB in 3min 2s (58.1 kB/s)"),
+		relay("Cloud-init v. 25.1.4 running 'modules:final' at Wed, 26 Nov 2026 02:00:00 +0000."),
+		relay("Err:3 http://deb.debian.org/debian trixie/main Sources"),
+		// Cage's own setup script installs later, under its own labels.
+		"Get:3 http://deb.debian.org/debian trixie/main Sources [10.5 MB]",
+		"Setting up rsync (3.4.1+ds1-5) ...",
+		`time="2026-11-26T10:00:00+08:00" level=info msg="SSH Local Port: 60022"`,
+	} {
+		if p := parseSetupProgress(line); p != nil {
+			t.Errorf("%s: unexpected progress %+v", line, p)
+		}
+	}
+}
+
+func TestBaseCloudInitAPTProgressFollowsBoot(t *testing.T) {
+	var m jobManager
+	var op sync.Mutex
+	var labels []string
+	_, err := m.submit(&op, "setup", 0, nil, nil, func() error {
+		e := m.execution()
+		e.setSetupProgress(&SetupProgress{Phase: "image", System: "debian-13"})
+		for _, line := range []string{
+			"CAGE_IMAGE_READY",
+			`time="2026-11-26T10:00:00+08:00" level=info msg="[cloud-init] Get:3 http://deb.debian.org/debian trixie/main Sources [10.5 MB]"`,
+			`time="2026-11-26T10:03:00+08:00" level=info msg="[cloud-init] Fetched 10.6 MB in 3min 2s (58.1 kB/s)"`,
+			`time="2026-11-26T10:03:05+08:00" level=info msg="[cloud-init] Unpacking rsync (3.4.1+ds1-5) ..."`,
+			"Installing packages inside VM...",
+		} {
+			_, _ = e.Write([]byte(line + "\n"))
+			p := m.snapshot().SetupProgress
+			labels = append(labels, p.Phase+"/"+p.Label+"/"+p.System)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitJobIdle(t, &m)
+	want := []string{
+		"image/正在启动 Linux 基础环境/debian-13",
+		"image/正在下载 Debian 软件索引/debian-13",
+		"image/正在下载 Debian 软件索引/debian-13",
+		"image/正在安装基础依赖/debian-13",
+		"packages/正在安装 Linux 基础软件包/debian-13",
+	}
+	if strings.Join(labels, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("labels:\n%s\nwant:\n%s", strings.Join(labels, "\n"), strings.Join(want, "\n"))
+	}
+	if log := m.snapshot().Log; !strings.Contains(log, "Sources") {
+		t.Fatalf("cloud-init line left the operation log: %q", log)
 	}
 }
