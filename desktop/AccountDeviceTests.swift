@@ -12,6 +12,10 @@ enum AccountDeviceTests {
         let destination = "cage-account-test-" + UUID().uuidString
         let credential = ["id": UUID().uuidString, "secret": UUID().uuidString]
         let kinds = CommandLine.arguments.contains("--biometric") ? ["automatic", "biometric"] : ["automatic"]
+        // The default test binary is ad hoc; --biometric signs the test app
+        // with the same entitlements as a provisioned Cage build.
+        let biometricStatus = CageAccountKeychain.status(binding: source, kind: "biometric", expectedID: nil)
+        try check(biometricStatus == (kinds.contains("biometric") ? "disabled" : "unsupported"))
         for kind in kinds {
             defer {
                 try? CageAccountKeychain.remove(binding: source, kind: kind)

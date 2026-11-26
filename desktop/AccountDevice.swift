@@ -50,6 +50,15 @@ final class CageAccountDevice: NSObject, URLSessionTaskDelegate, @unchecked Send
 
 enum CageAccountKeychain {
     private static let service = "io.github.lee-xeo.claude-cage.account"
+    static let biometricSigningMessage = "此安装包不支持 Touch ID，请使用密码解锁。"
+    // The data protection keychain uses the first explicit access group or
+    // the app identifier as the default group. Automatic login uses neither.
+    static let supportsBiometricKeychain: Bool = {
+        guard let task = SecTaskCreateFromSelf(nil) else { return false }
+        let appID = SecTaskCopyValueForEntitlement(task, "com.apple.application-identifier" as CFString, nil) as? String
+        let groups = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) as? [String]
+        return appID?.isEmpty == false || groups?.contains(where: { !$0.isEmpty }) == true
+    }()
     private static func query(binding: String, kind: String) -> [String: Any] {
         var result: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
@@ -62,6 +71,7 @@ enum CageAccountKeychain {
     }
     static func remove(binding: String, kind: String) throws {
         let status = SecItemDelete(query(binding: binding, kind: kind) as CFDictionary)
+        if kind == "biometric" && status == errSecMissingEntitlement { throw CageAccountError(biometricSigningMessage) }
         guard status == errSecSuccess || status == errSecItemNotFound else { throw CageAccountError("无法移除本机钥匙串记录，请重试") }
     }
     static func store(_ credential: [String: Any], binding: String, kind: String) throws {
@@ -81,6 +91,7 @@ enum CageAccountKeychain {
     // Inspect metadata only. Status checks must not read the secret or ask for
     // Touch ID, and must never search credentials belonging to another path.
     static func status(binding: String, kind: String, expectedID: String?) -> String {
+        if kind == "biometric" && !supportsBiometricKeychain { return "unsupported" }
         guard let expectedID else { return "disabled" }
         var item = query(binding: binding, kind: kind)
         item[kSecReturnAttributes as String] = true
@@ -145,7 +156,7 @@ extension CageAccountDevice {
             }
         }
         let context = LAContext()
-        let biometricAvailable = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        let biometricAvailable = CageAccountKeychain.supportsBiometricKeychain && context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
         if operation == "status" {
             let devices = account["devices"] as? [String: String] ?? [:]
             let states = Dictionary(uniqueKeysWithValues: ["automatic", "biometric"].map { kind in
@@ -154,6 +165,9 @@ extension CageAccountDevice {
             return ["supported": true, "biometric_available": biometricAvailable, "device_status": states]
         }
         guard let kind, ["automatic", "biometric"].contains(kind) else { throw CageAccountError("快捷登录类型无效") }
+        if kind == "biometric" && (operation == "enable" || operation == "unlock") && !CageAccountKeychain.supportsBiometricKeychain {
+            throw CageAccountError(CageAccountKeychain.biometricSigningMessage)
+        }
         switch operation {
         case "enable":
             if kind == "biometric" && !biometricAvailable { throw CageAccountError("请先在 macOS 系统设置中设置 Touch ID") }
