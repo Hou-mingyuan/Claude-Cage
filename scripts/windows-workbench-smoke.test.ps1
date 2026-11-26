@@ -154,7 +154,21 @@ try {
         'Mandatory Label\High Mandatory Level Label S-1-16-12288 Mandatory group'
     ))) 'Medium or High integrity was falsely flagged as Low Mandatory Level.'
     Assert-WindowsBuildDirectoryIntegrity $directory
-    Write-Output 'PASS: isolated temp, low-IL preflight, safe smoke diagnostics, exit status and executable release.'
+    Assert-SmokeContract ((Get-WindowsNonInteractiveSessionText -SessionId 0 -UserInteractive $false) -like '*会话 0*') 'Session 0 was not detected as non-interactive.'
+    Assert-SmokeContract ((Get-WindowsNonInteractiveSessionText -SessionId 0 -UserInteractive $true) -like '*会话 0*') 'Session 0 must fail even when the process reports UserInteractive.'
+    Assert-SmokeContract ((Get-WindowsNonInteractiveSessionText -SessionId 2 -UserInteractive $false) -like '*会话 2*') 'A non-visible window station was not detected.'
+    Assert-SmokeContract ($null -eq (Get-WindowsNonInteractiveSessionText -SessionId 1 -UserInteractive $true)) 'An interactive desktop session was rejected.'
+    $sessionFailure = ''
+    try { Assert-WindowsInteractiveDesktop -SessionId 0 -UserInteractive $false -Windows $true }
+    catch { $sessionFailure = $_.Exception.Message }
+    Assert-SmokeContract ($sessionFailure.Contains('交互式桌面') -and $sessionFailure.Contains('会话 0') -and $sessionFailure.Contains('计划任务')) 'Session 0 build preflight did not explain the interactive desktop requirement.'
+    Assert-WindowsInteractiveDesktop -SessionId 0 -UserInteractive $false -Windows $false
+    Assert-WindowsInteractiveDesktop -SessionId 1 -UserInteractive $true -Windows $true
+    [IO.File]::WriteAllText($report, '{"success":false,"nativeBridgeReady":false,"phase":"initializing_webview","nativeStatus":"无法初始化工作台：无效的窗口句柄。 (0x80070578)"}')
+    $handleFailure = ''
+    try { Assert-WindowsWorkbenchReport -ExitCode 1 -Report $report } catch { $handleFailure = $_.Exception.Message }
+    Assert-SmokeContract ($handleFailure.Contains('initializing_webview') -and $handleFailure.Contains('交互式桌面')) 'Invalid window handle smoke failure lacks the interactive session hint.'
+    Write-Output 'PASS: isolated temp, low-IL and interactive-session preflight, safe smoke diagnostics, exit status and executable release.'
 } finally {
     $env:RUNNER_TEMP = $savedRunnerTemp
     Remove-Item -LiteralPath $directory -Recurse

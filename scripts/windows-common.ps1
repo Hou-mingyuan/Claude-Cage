@@ -50,6 +50,32 @@ function Assert-WindowsWorkbenchTestBase {
     }
 }
 
+function Get-WindowsNonInteractiveSessionText {
+    param(
+        [int]$SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId,
+        [bool]$UserInteractive = [Environment]::UserInteractive
+    )
+    # WebView2 cannot create the smoke window without a visible window
+    # station; Win32-OpenSSH and services run in session 0 and fail late with
+    # 0x80070578 (invalid window handle).
+    if ($SessionId -eq 0) { return '当前在会话 0（SSH / 服务）中运行' }
+    if (-not $UserInteractive) { return "当前进程在会话 $SessionId 中没有可见的交互式桌面" }
+    return $null
+}
+
+function Assert-WindowsInteractiveDesktop {
+    param(
+        [int]$SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId,
+        [bool]$UserInteractive = [Environment]::UserInteractive,
+        [bool]$Windows = $IsWindows
+    )
+    if (-not $Windows) { return }
+    $session = Get-WindowsNonInteractiveSessionText -SessionId $SessionId -UserInteractive $UserInteractive
+    if ($session) {
+        throw "工作台自检需要已登录用户的交互式桌面；$session。请在桌面会话中运行，或用交互式登录的一次性计划任务运行构建与打包。参见 docs/windows.md#windows-源码构建。"
+    }
+}
+
 function Test-WindowsLowIntegrityText {
     param([string[]]$Lines)
     if (-not $Lines) { return $false }
@@ -186,7 +212,11 @@ function Assert-WindowsWorkbenchReport {
     Write-Host ('Cage smoke diagnostic: ' + ($safe | ConvertTo-Json -Depth 6 -Compress))
     if ($failed) {
         $reason = $safe['controllerError'] ?? $safe.nativeStatus
-        throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $reason. Diagnostics: $Report"
+        $hint = ''
+        if ($safe.nativeStatus -match '(?i)0x80070578') {
+            $hint = ' 0x80070578 表示无法创建工作台窗口，常见于会话 0（SSH / 服务）等非交互会话；工作台自检需要已登录用户的交互式桌面。参见 docs/windows.md#windows-源码构建。'
+        }
+        throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $reason. Diagnostics: $Report$hint"
     }
 }
 
