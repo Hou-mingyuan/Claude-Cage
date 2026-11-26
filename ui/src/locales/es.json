@@ -3004,6 +3004,7 @@
   "有 {0} 处引用了远程配置，未下载；这些节点不会导入。可在 Surge 中导出完整配置后再导入": "Hay {0} referencias a configuraciones remotas que no se descargaron; esos nodos no se importarán. Exporta la configuración completa desde Surge antes de importar",
   "服务器地址无效，请填写 IP 地址或域名": "Dirección de servidor no válida; introduce una dirección IP o un nombre de dominio",
   "服务器没有返回有效的加密连接响应": "El servidor no devolvió una respuesta válida de conexión cifrada",
+  "服务器在加密连接上返回了明文 HTTP 响应，协议或端口可能不匹配": "El servidor devolvió una respuesta HTTP sin cifrar en una conexión cifrada; es posible que el protocolo o el puerto no coincidan",
   "服务器证书验证未通过": "Error al verificar el certificado del servidor",
   "服务端口": "Puerto del servicio",
   "服务页面未能打开，请重试。": "No se pudo abrir la página del servicio; vuelve a intentarlo.",
