@@ -192,27 +192,17 @@ func desktopOpenCall(client *controllerClient, input map[string]string, output a
 	return nil
 }
 
-func hostFileCommand(platform, path, action string, directory bool) *exec.Cmd {
+func hostOpenCommand(ctx context.Context, platform, path string, directory bool) *exec.Cmd {
 	switch platform {
 	case "darwin":
-		if action == "reveal" {
-			return exec.Command("/usr/bin/open", "-R", "--", path)
-		}
-		return exec.Command("/usr/bin/open", "--", path)
+		return exec.CommandContext(ctx, "/usr/bin/open", "--", path)
 	case "windows":
-		if action == "reveal" {
-			return exec.Command("explorer.exe", "/select,"+path)
-		}
 		if directory {
-			return exec.Command("explorer.exe", path)
+			return exec.CommandContext(ctx, "explorer.exe", path)
 		}
-		return exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", path)
+		return exec.CommandContext(ctx, "rundll32.exe", "url.dll,FileProtocolHandler", path)
 	default:
-		if action == "reveal" {
-			uri := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
-			return exec.Command("gdbus", "call", "--session", "--dest", "org.freedesktop.FileManager1", "--object-path", "/org/freedesktop/FileManager1", "--method", "org.freedesktop.FileManager1.ShowItems", "[\""+uri+"\"]", "")
-		}
-		return exec.Command("gio", "open", path)
+		return exec.CommandContext(ctx, "gio", "open", path)
 	}
 }
 
@@ -223,17 +213,13 @@ func openHostFile(path, action string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	command := hostFileCommand(runtime.GOOS, path, action, info.IsDir())
-	cmd := exec.CommandContext(ctx, command.Path, command.Args[1:]...)
+	if action == "reveal" {
+		return revealHostFile(ctx, path)
+	}
+	cmd := hostOpenCommand(ctx, runtime.GOOS, path, info.IsDir())
 	host.HideCommandWindow(cmd)
-	if err = cmd.Run(); err != nil {
-		if runtime.GOOS != "linux" || action != "reveal" {
-			return errors.New("无法打开本机文件或文件管理器，请检查默认应用和文件权限")
-		}
-		fallback := exec.CommandContext(ctx, "gio", "open", filepath.Dir(path))
-		if fallback.Run() != nil {
-			return errors.New("无法打开本机文件管理器，请检查桌面环境和文件权限")
-		}
+	if err := cmd.Run(); err != nil {
+		return errors.New("无法打开本机文件或文件管理器，请检查默认应用和文件权限")
 	}
 	return nil
 }
