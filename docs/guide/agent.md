@@ -130,7 +130,7 @@ cage agent call proxy.select --input /private/path/selection.json --wait 2m
 cage agent call proxy.status
 ```
 
-`proxy.select` 只接受 `node_id`（可选 `port`）；请求体可以带与路径相同的 `"action":"select"`，其他取值会被拒绝。链式代理使用 `proxy.route`，输入 `{"node_ids":["入口ID","最终出口ID"]}`，顺序为入口到出口。只传一个节点时与 `proxy.select` 相同，保留该节点在订阅中自带的 `dialer-proxy` 中转。`proxy.select` 总是把路由替换为所选的单个节点：已有链会被清除，所选节点即使原本在链中也可以。节点无效、配置验证或核心启动失败时保留原路由；路由保存后的网络检查仍可能失败，应以 `proxy.status` 返回的当前路由为准。要保留或重建多跳链，请重新调用 `proxy.route`。更新订阅使用 `proxy.refresh` 和已有来源 `id`；本地来源没有订阅链接，`proxy.refresh` 需同时提供新的 `content`，按节点名称保留节点 ID、选择和出口规则。`proxy.edit-node` 输入来源 `id`、`node_id`、`server`、`server_port`，只修改本地节点的地址与端口；`proxy.import` 每次创建来源，不能盲目重试。
+`proxy.select` 只接受 `node_id`（可选 `port`）；请求体可以带与路径相同的 `"action":"select"`，其他取值会被拒绝。链式代理使用 `proxy.route`，输入 `{"node_ids":["入口ID","最终出口ID"]}`（固定单节点链）或 `{"hops":[{"relay":{"strategy":"fallback"|"url-test","source_id":"来源ID"|"node_ids":["中转1","中转2"]}},{"node_id":"最终出口ID"}]}`（支持非出口中转跳使用自动切换组；`node_ids` 与 `hops` 不可同传，最终出口必须为单个固定节点），顺序为入口到出口。只传一个节点时与 `proxy.select` 相同，保留该节点在订阅中自带的 `dialer-proxy` 中转。`proxy.status` 的 `route_hops` 会返回结构化路由、候选数量及当前实时生效的中转节点 `active_node_id`。`proxy.select` 总是把路由替换为所选的单个节点：已有链会被清除，所选节点即使原本在链中也可以。节点无效、配置验证或核心启动失败时保留原路由；路由保存后的网络检查仍可能失败，应以 `proxy.status` 返回的当前路由为准。要保留或重建多跳链，请重新调用 `proxy.route`。更新订阅使用 `proxy.refresh` 和已有来源 `id`；本地来源没有订阅链接，`proxy.refresh` 需同时提供新的 `content`，按节点名称保留节点 ID、选择和出口规则。`proxy.edit-node` 输入来源 `id`、`node_id`、`server`、`server_port`，只修改本地节点的地址与端口；`proxy.import` 每次创建来源，不能盲目重试。
 
 仅切换节点或代理链（包括跨国家切换）会保留运行中的环境和终端。旧网络连接和检查授权会被撤销，完整检查通过后才恢复联网。首次启用内置代理、修改代理端口或环境设置仍可能需要重启环境。
 

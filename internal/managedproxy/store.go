@@ -53,6 +53,7 @@ type Store struct {
 	Revision     string                       `json:"revision"`
 	Selected     string                       `json:"selected"`
 	Chain        []string                     `json:"chain,omitempty"`
+	RouteHops    []RouteHop                   `json:"route_hops,omitempty"`
 	Sources      []Source                     `json:"sources"`
 	ExitPolicies map[string]exitpolicy.Policy `json:"exit_policies,omitempty"`
 	// GuestDNS and BootstrapDNS copy the Cage DNS settings when a route is
@@ -220,32 +221,50 @@ func (s Store) Count() int {
 	return n
 }
 func (s *Store) Import(name, rawURL string, data []byte, id string, interval int, usage string) error {
+	_, err := s.ImportWithPruned(name, rawURL, data, id, interval, usage)
+	return err
+}
+
+// ImportWithPruned imports or refreshes a source. When refreshing a source that
+// supplies nodes for a custom auto-switch relay pool, removed candidates are
+// pruned automatically as long as at least one usable candidate remains; the
+// pruned count is returned so the caller can inform the user.
+func (s *Store) ImportWithPruned(name, rawURL string, data []byte, id string, interval int, usage string) (int, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 100 {
-		return errors.New("请填写 1–100 字节的来源名称")
+		return 0, errors.New("请填写 1–100 字节的来源名称")
 	}
 	if interval < 0 || interval > 168 {
-		return errors.New("更新间隔应为 0–168 小时，0 表示手动更新")
+		return 0, errors.New("更新间隔应为 0–168 小时，0 表示手动更新")
 	}
 	if id == "" {
 		id = Token()[:16]
 	}
 	nodes, skipped, err := parseNodes(data, id)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	nodeDNS, err := subscriptionNodeDNS(data)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	src := Source{ID: id, Name: name, URL: rawURL, Interval: interval, Updated: time.Now(), Attempted: time.Now(), Nodes: nodes, Usage: usage, Skipped: skipped, NodeDNS: nodeDNS}
 	for i := range s.Sources {
 		if s.Sources[i].ID == id {
+			if len(s.RouteHops) > 0 {
+				nextHops, pruned, err := s.refreshRouteHopsForSource(i, src)
+				if err != nil {
+					return 0, err
+				}
+				s.Sources[i] = src
+				s.RouteHops = nextHops
+				return pruned, nil
+			}
 			// Refresh must retain every hop of the saved route, including legacy
 			// node-level dialers. A partial import cannot shorten a working chain.
 			route, routeErr := s.Route()
 			if s.Selected != "" && routeErr != nil && !errors.Is(routeErr, ErrLocalProxyNode) {
-				return routeErr
+				return 0, routeErr
 			}
 			available := make(map[string]bool, len(nodes))
 			for _, n := range nodes {
@@ -264,15 +283,15 @@ func (s *Store) Import(name, rawURL string, data []byte, id string, interval int
 							break
 						}
 					}
-					return fmt.Errorf("订阅更新移除或跳过了当前出口或中转节点 %q：%s；原配置已保留，请先应用其他节点再更新", old.Name, reason)
+					return 0, fmt.Errorf("订阅更新移除或跳过了当前出口或中转节点 %q：%s；原配置已保留，请先应用其他节点再更新", old.Name, reason)
 				}
 			}
 			s.Sources[i] = src
-			return nil
+			return 0, nil
 		}
 	}
 	s.Sources = append(s.Sources, src)
-	return nil
+	return 0, nil
 }
 
 func unsafeOption(v any) bool {
@@ -320,6 +339,21 @@ func (s Store) Route() ([]string, error) {
 }
 
 func (s Store) route(blocked map[string]string) ([]string, error) {
+	if len(s.RouteHops) > 0 {
+		hops, err := s.resolveRoute(blocked, 1)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]string, len(hops))
+		for i, hop := range hops {
+			out[i] = hop.targetName()
+		}
+		return out, nil
+	}
+	return s.routeLegacy(blocked)
+}
+
+func (s Store) routeLegacy(blocked map[string]string) ([]string, error) {
 	if _, ok := s.Find(s.Selected); !ok {
 		return nil, errors.New("请先选择有效的最终出口")
 	}
@@ -362,17 +396,11 @@ func (s Store) Runtime(profile string) ([]byte, error) {
 
 func (s Store) runtimeWithSocket(socketPath string) ([]byte, error) {
 	blocked := s.BlockedNodes()
-	route, err := s.route(blocked)
+	hops, err := s.resolveRoute(blocked, 1)
 	if err != nil {
 		return nil, err
 	}
-	dialers := map[string]string{}
-	for i, id := range s.Chain {
-		dialers[id] = ""
-		if i > 0 {
-			dialers[id] = s.Chain[i-1]
-		}
-	}
+	dialers := hopDialers(hops, len(s.RouteHops) > 0 || len(s.Chain) > 0)
 	proxies := []map[string]any{}
 	originals := map[string]map[string]any{}
 	for _, src := range s.Sources {
@@ -416,7 +444,7 @@ func (s Store) runtimeWithSocket(socketPath string) ([]byte, error) {
 	if len(policies) > 0 {
 		dns["proxy-server-nameserver-policy"] = policies
 	}
-	config := map[string]any{"mixed-port": s.Port, "bind-address": "127.0.0.1", "allow-lan": false, "skip-auth-prefixes": []string{}, "mode": "rule", "ipv6": routeHasIPv6Server(route, originals), "log-level": "warning", "find-process-mode": "off", "external-controller-unix": socketPath, "tun": map[string]any{"enable": false}, "dns": dns, "geo-auto-update": false, "profile": map[string]any{"store-selected": false}, "proxy-groups": []any{map[string]any{"name": Group, "type": "select", "proxies": []string{s.Selected}}}}
+	config := map[string]any{"mixed-port": s.Port, "bind-address": "127.0.0.1", "allow-lan": false, "skip-auth-prefixes": []string{}, "mode": "rule", "ipv6": resolvedRouteHasIPv6Server(hops, originals), "log-level": "warning", "find-process-mode": "off", "external-controller-unix": socketPath, "tun": map[string]any{"enable": false}, "dns": dns, "geo-auto-update": false, "profile": map[string]any{"store-selected": false}, "proxy-groups": s.relayProxyGroups(hops)}
 	// An explicit environment chain can override imported dialers. Named
 	// account routes retain the node's imported chain, including dependent hops.
 	targets := map[string]string{}
