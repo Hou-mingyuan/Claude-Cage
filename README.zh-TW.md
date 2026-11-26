@@ -55,6 +55,7 @@ Claude Cage 在一個小型的 Debian 13 環境裡執行官方 Claude Code 和 C
 
 ## 你可以用它做什麼
 
+- **在本機終端機使用 Claude Code（v0.2.2 功能）。** `cage login` 會開啟 Cage 瀏覽器，讓你登入 Claude 帳號。在專案資料夾輸入 `cage` 即可共享目前的資料夾並開啟工作階段，支援 Claude Code 原生參數、管線和帳號選擇。也可以用 `cage start` 預先啟動背景服務。 [終端機指令與範例](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **在一個視窗裡完成工作。** 用終端執行 Claude Code，用編輯器檢視改動，用 Cage 瀏覽器預覽服務和完成登入。
 - **透過外掛市場解鎖全部能力。** 內建開放的[外掛市場（cage-plugins）](https://github.com/Lee-xeo/cage-plugins)，外掛 = MCP + 擴充：既能讓環境裡的 Claude 透過標準 MCP 安全、受控地使用本機能力（如桌面鍵鼠控制、Office 文件、Blender、命令列工具等），也能透過沙箱頁面客製化 Cage 工作臺。主機外掛預設受權限宣告與確認對話框保護。 [外掛與市場](docs/guide/plugins.md) · [開發規範](docs/plugins.md)
 - **三個平台，同一個輕量化環境。** macOS、Windows 和 Linux 上的 Cage 都執行同一個輕量化 Debian 13 環境，無需維護複雜的多系統客機，工具與操作方式一致。 [Debian 環境](docs/guide/guest-systems.md)

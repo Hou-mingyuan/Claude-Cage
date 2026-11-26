@@ -3,6 +3,7 @@
 import json
 import ctypes
 import os
+import select
 import selectors
 import signal
 import subprocess
@@ -44,6 +45,80 @@ def reap_adopted():
 
 FRAME_LIMIT = 256 * 1024
 
+def native_input(child, incoming):
+    """Carry binary stdin and its logical EOF while SSH still owns the child."""
+    hangup = select.POLLHUP | select.POLLERR | getattr(select, "POLLRDHUP", 0)
+    pending, finished = bytearray(), False
+    output = sys.stdout.buffer
+    os.set_blocking(child.stdout.fileno(), False)
+
+    def read_output():
+        try:
+            data = os.read(child.stdout.fileno(), 64 * 1024)
+        except BlockingIOError:
+            return False
+        if not data:
+            child.stdout.close()
+            return False
+        output.write(b"O" + len(data).to_bytes(4, "big") + data)
+        output.flush()
+        return True
+
+    def acknowledge():
+        output.write(b"A")
+        output.flush()
+
+    while child.poll() is None:
+        if len(incoming) >= 4:
+            size = int.from_bytes(incoming[:4], "big")
+            if finished or pending or size > FRAME_LIMIT:
+                return 2
+            if len(incoming) >= 4 + size:
+                if size == 0:
+                    finished = True
+                    if not child.stdin.closed:
+                        child.stdin.close()
+                elif child.stdin.closed:
+                    acknowledge()
+                else:
+                    pending = incoming[4:4 + size]
+                del incoming[:4 + size]
+        poll = select.poll()
+        # The host sends one chunk and waits for a guest acknowledgement.
+        # Even when the child's stdin is full, the SSH reader is free to
+        # deliver the disconnect. Output and acknowledgements share stdout
+        # framing; stderr remains an independent native byte stream.
+        poll.register(0, select.POLLIN | hangup)
+        if not child.stdout.closed:
+            poll.register(child.stdout, select.POLLIN)
+        if pending:
+            poll.register(child.stdin, select.POLLOUT)
+        for fd, events in poll.poll(150):
+            if fd == 0:
+                if events & hangup:
+                    return 130
+                data = os.read(0, 64 * 1024)
+                if not data:
+                    return 130
+                incoming.extend(data)
+            elif not child.stdout.closed and fd == child.stdout.fileno():
+                read_output()
+            elif pending:
+                try:
+                    count = os.write(fd, pending)
+                    del pending[:count]
+                except BlockingIOError:
+                    pass
+                except BrokenPipeError:
+                    pending.clear()
+                    child.stdin.close()
+                if not pending:
+                    acknowledge()
+    while not child.stdout.closed and read_output():
+        pass
+    return child.returncode if child.returncode >= 0 else 128 - child.returncode
+
+
 def terminate(child):
     try:
         os.killpg(child.pid, signal.SIGTERM)
@@ -71,16 +146,17 @@ def run():
         incoming.extend(block)
     first, _, incoming = incoming.partition(b"\n")
     mode = json.loads(first)
+    native = mode == {"binary": True}
     streaming = mode == {"stream": True}
-    if not streaming and (not isinstance(mode, str) or not 0 < len(mode.encode()) <= 32768):
+    if not native and not streaming and (not isinstance(mode, str) or not 0 < len(mode.encode()) <= 32768):
         return 2
     if not os.path.isabs(sys.argv[1]):
         return 2
     subreaper = enable_subreaper()
-    pending = bytearray() if streaming else bytearray(mode.encode())
+    pending = bytearray() if native or streaming else bytearray(mode.encode())
     finished = not streaming
     child = subprocess.Popen(sys.argv[2:], cwd=sys.argv[1], stdin=subprocess.PIPE,
-                             bufsize=0, start_new_session=True)
+                             stdout=subprocess.PIPE if native else None, bufsize=0, start_new_session=True)
     def interrupted(_signal, _frame):
         raise SystemExit(130)
     completed = False
@@ -88,6 +164,10 @@ def run():
         for signum in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
             signal.signal(signum, interrupted)
         os.set_blocking(child.stdin.fileno(), False)
+        if native:
+            code = native_input(child, incoming)
+            completed = code == 0
+            return code
         with selectors.DefaultSelector() as selector:
             selector.register(0, selectors.EVENT_READ)
             watching_write = False

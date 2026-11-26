@@ -14,7 +14,7 @@ func TestSubcommandHelpDoesNotRunTheCommand(t *testing.T) {
 	previous := os.Args
 	t.Cleanup(func() { os.Args = previous })
 	for _, flag := range []string{"--help", "-h"} {
-		for _, command := range []string{"init", "setup", "up", "login", "serve", "prepare-update", "version"} {
+		for _, command := range []string{"init", "setup", "start", "up", "login", "serve", "prepare-update", "version"} {
 			os.Args = []string{"cage", command, flag}
 			if code := run(); code != 0 {
 				t.Fatalf("%s %s returned %d", command, flag, code)

@@ -382,7 +382,7 @@ func startControlledTerminal(t *testing.T, manager *terminalManager, previous *t
 	t.Helper()
 	file := newControlledTerminal()
 	close(file.waitRelease)
-	session, err := manager.startReplacing(previous, background, nil, "/project", kind, claudeSelection{}, nil, func() (terminalPTY, error) {
+	session, err := manager.startReplacing(terminalRequest{afterLogin: previous, BackgroundLogin: background}, nil, "/project", kind, claudeSelection{}, nil, func() (terminalPTY, error) {
 		return file, nil
 	})
 	if err != nil {

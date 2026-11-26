@@ -55,6 +55,7 @@ Claude Cage réunit terminal, navigateur, éditeur, Claude Desktop officiel et m
 
 ## Ce que vous pouvez faire avec Cage
 
+- **Utilisez Claude Code depuis le terminal de votre ordinateur (v0.2.2).** `cage login` ouvre le navigateur de Cage pour vous connecter à votre compte Claude. Lancez `cage` dans le dossier du projet pour le partager et ouvrir une session. Vous pouvez démarrer le service en arrière-plan à l’avance avec `cage start`. [Commandes et exemples](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **Travaillez dans une seule fenêtre.** Exécutez Claude Code dans le terminal, examinez les modifications dans l'éditeur et utilisez le navigateur Cage pour prévisualiser les services et vous connecter.
 - **Débloquez toutes les capacités avec le marché de plugins.** Le [marché de plugins ouvert (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) suit la formule « plugin = MCP + extension » : Claude peut utiliser en toute sécurité et sous contrôle les outils de votre ordinateur (écran et clavier/souris, documents Office, Blender, commandes) et ajouter des vues isolées à Cage avec permissions déclarées et confirmation système. [Guide des plugins](docs/guide/plugins.md) · [Spécification](docs/plugins.md)
 - **Un même environnement léger sur toutes les plateformes.** Cage utilise le même environnement Debian 13 léger sous macOS, Windows et Linux, sans maintenir plusieurs systèmes invités complexes, avec les mêmes outils et le même fonctionnement. [Environnement Debian](docs/guide/guest-systems.md)

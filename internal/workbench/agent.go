@@ -9,10 +9,10 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/remotehost"
@@ -217,31 +217,43 @@ func agentHTTPError(code int) *AgentError {
 // or stops an existing controller as a side effect of an agent call.
 func AgentStartService(ctx context.Context, configPath string) error {
 	profile := filepath.Dir(configPath)
-	c, err := connectController(profile)
-	if err == nil {
-		defer c.close()
-		return agentCheckController(c, configPath)
-	}
-	if !errors.Is(err, errControllerUnavailable) || !controllerLockFree(profile) {
+	// A simultaneous start can hold the profile lock before publishing its
+	// control record. Reuse that controller once it is ready.
+	c, err := waitControllerReady(ctx, profile)
+	if errors.Is(err, errControllerUnavailable) {
+		c, err = startController(ctx, configPath)
+		if err != nil {
+			if ctx.Err() != nil {
+				return &AgentError{Code: "service_start_timeout", Message: "The controller has not become ready. It may still be starting.", NextAction: "doctor", Retryable: true}
+			}
+			return &AgentError{Code: "service_start_failed", Message: "Cage could not start its controller.", NextAction: "doctor"}
+		}
+	} else if err != nil {
 		return &AgentError{Code: "service_unavailable", Message: "The controller cannot be authenticated. Preserve its data and inspect diagnostics.", NextAction: "doctor"}
 	}
-	if err := startController(configPath); err != nil {
-		return &AgentError{Code: "service_start_failed", Message: "Cage could not start its controller.", NextAction: "doctor"}
+	defer c.close()
+	return agentCheckController(c, configPath)
+}
+
+// A native launcher can spell the same profile directory through a system
+// alias (such as /tmp on macOS). Keep the configuration filename pinned.
+func sameControllerConfig(a, b string) bool {
+	if a == "" || b == "" {
+		return false
 	}
-	timer := time.NewTicker(100 * time.Millisecond)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return &AgentError{Code: "service_start_timeout", Message: "The controller has not become ready. It may still be starting.", NextAction: "doctor", Retryable: true}
-		case <-timer.C:
-			c, err := connectController(profile)
-			if err == nil {
-				defer c.close()
-				return agentCheckController(c, configPath)
-			}
-		}
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if a == b {
+		return true
 	}
+	if filepath.Base(a) != filepath.Base(b) {
+		return false
+	}
+	left, err := os.Stat(filepath.Dir(a))
+	if err != nil {
+		return false
+	}
+	right, err := os.Stat(filepath.Dir(b))
+	return err == nil && os.SameFile(left, right)
 }
 
 func agentCheckController(c *controllerClient, configPath string) error {
@@ -249,7 +261,7 @@ func agentCheckController(c *controllerClient, configPath string) error {
 	if err != nil || !want.matches(c.launch.Controller) || c.launch.DesktopGateway || c.launch.ClientOnly {
 		return &AgentError{Code: "controller_mismatch", Message: "Use the CLI shipped with the running workload. No controller was replaced.", NextAction: "open_desktop"}
 	}
-	if filepath.Clean(c.launch.ConfigPath) != filepath.Clean(configPath) {
+	if !sameControllerConfig(c.launch.ConfigPath, configPath) {
 		return &AgentError{Code: "config_path_mismatch", Message: "This directory's controller uses a different configuration filename. Use its original absolute config path.", NextAction: "doctor"}
 	}
 	return nil

@@ -381,6 +381,7 @@ function App() {
   const accountLogin = useRef("");
   const tabsBeforeLogin = useRef("");
   const [enrollmentID, setEnrollmentID] = useState("");
+  const lastHostCLIFocus = useRef("");
   const terminalAccounts = [...new Set(tabs.map(t=>t.claude_account_id).filter(Boolean))].sort().join(",");
   useEffect(() => {
     if (terminalAccounts && terminalAccounts.split(",").some(id => !claudeProfiles.accounts?.some(a => a.id === id))) {
@@ -983,6 +984,19 @@ function App() {
               setActive(b.active || all[0]?.id || "");
           }
           browserIds.current = new Set(b.tabs.map((item) => item.id));
+          const focus = next.host_cli_browser;
+          if (focus?.id && focus.id !== lastHostCLIFocus.current) {
+            const tab = b.tabs.find(item => focus.tab ? item.id === focus.tab : item.id === b.active && item.login);
+            if (tab) {
+              lastHostCLIFocus.current = focus.id;
+              browserDismissed.current = false;
+              setSettingsOpen(false);
+              setManagementPage("");
+              setDesktopOpen(false);
+              setHome(false);
+              setActive(tab.id);
+            }
+          }
           initialized.current = true;
         }
       } catch (e) {

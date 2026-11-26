@@ -18,6 +18,9 @@ import (
 	"unicode/utf8"
 )
 
+var errNoClaudeAllocation = errors.New("暂无可分配的 Claude 账号。请在账号面板检查登录、参与状态和额度重置时间")
+var errClaudeNeedsLogin = errors.New("所选 Claude 账号需要重新登录")
+
 // A profile ID selects a guest CLI configuration directory. Only public status
 // fields enter this registry; the official CLI owns authentication in the VM.
 type claudeAccount struct {
@@ -455,7 +458,7 @@ func (s *Server) selectClaudeAccount(requestedID string, login bool, workspace s
 	if requestedID != "" && requestedID != "auto" {
 		a := list.find(requestedID)
 		if a == nil || a.Status != "ready" || a.Email == "" {
-			return empty, errors.New("所选 Claude 账号需要重新登录")
+			return empty, errClaudeNeedsLogin
 		}
 		// Participation controls automatic scheduling only. The official runner
 		// checks this subject again in the launch directory, including defaults.
@@ -549,7 +552,7 @@ func (s *Server) allocateClaudeAccount(previous claudeAccountList, workspace str
 			return empty, err
 		}
 	}
-	active := s.mobileCLI.activeAccounts()
+	active := s.activeAccountRuns()
 	logins := make(map[string]bool)
 	for _, session := range s.terminals.snapshot() {
 		if session["closed"] == true {
@@ -576,7 +579,7 @@ func (s *Server) allocateClaudeAccount(previous claudeAccountList, workspace str
 	}
 	selected := pickClaudeAccount(list, active, logins, m.lastPick, preferred, now)
 	if selected == "" {
-		return empty, errors.New("暂无可分配的 Claude 账号。请在账号面板检查登录、参与状态和额度重置时间")
+		return empty, errNoClaudeAllocation
 	}
 	a := list.find(selected)
 	return claudeSelection{ID: selected, GuestID: a.guestID(), Subject: claudeIdentityHash(a.Email, a.Organization)}, nil

@@ -38,3 +38,32 @@ for (const [format, base] of [
   } finally { await browser.close(); }
 }
 console.log("Printed and OSC 8 authorization links open the guest login tab on click.");
+
+// A native CLI can ask for a specific existing browser tab while the
+// workbench is displaying settings. A repeated status poll must not steal
+// focus again after the user has moved on.
+const { browser, page, state, errors } = await createWorkbench();
+try {
+  await page.getByRole("button", { name: "启动 Cage 环境", exact: true }).click();
+  const settings = page.getByRole("button", { name: "设置", exact: true });
+  const groups = page.getByRole("navigation", { name: "设置分组" });
+  await settings.click();
+  await groups.waitFor();
+  state.tabs.push({ id: "cli-login", kind: "web", title: "Claude", url: "https://claude.ai" });
+  state.active = "cli-login";
+  state.status.host_cli_browser = { id: "from-terminal", tab: "cli-login" };
+  await groups.waitFor({ state: "hidden" });
+  await page.getByRole("tab", { name: /Claude/, selected: true }).waitFor();
+  await settings.click();
+  await groups.waitFor();
+  await page.waitForResponse(response => new URL(response.url()).pathname === "/api/browser/tabs");
+  assert.ok(await groups.isVisible());
+  state.tabs.push({ id: "cli-auth", kind: "web", title: "账号授权", url: "", login: true });
+  state.active = "cli-auth";
+  state.status.host_cli_browser = { id: "new-authorization" };
+  await groups.waitFor({ state: "hidden" });
+  await page.getByRole("tab", { name: /账号授权/, selected: true }).waitFor();
+  assert.equal(page.context().pages().length, 1);
+  assert.deepEqual(errors, []);
+} finally { await browser.close(); }
+console.log("Native CLI login focuses the guest tab once per request.");

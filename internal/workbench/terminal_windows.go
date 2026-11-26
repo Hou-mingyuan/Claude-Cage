@@ -109,7 +109,11 @@ func startTerminal(cmd *exec.Cmd, cols, rows uint16) (terminalPTY, error) {
 	}
 	success = true
 	go func() {
-		_, p.waitErr = p.process.Wait()
+		state, err := p.process.Wait()
+		p.waitErr = err
+		if err == nil && !state.Success() {
+			p.waitErr = &exec.ExitError{ProcessState: state}
+		}
 		p.closeConsole()
 		close(p.done)
 	}()

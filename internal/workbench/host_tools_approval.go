@@ -23,8 +23,9 @@ const (
 // grants, for one project's commands or one plugin, until the user takes it
 // back.
 type hostApprovals struct {
-	ask       func(ctx context.Context, title, msg string) (desktop.Scope, bool)
-	remoteAsk func(ctx context.Context, prompt remoteApprovalPrompt) (desktop.Scope, bool)
+	checkProject func(string) error
+	ask          func(ctx context.Context, title, msg string) (desktop.Scope, bool)
+	remoteAsk    func(ctx context.Context, prompt remoteApprovalPrompt) (desktop.Scope, bool)
 	// grants is nil where nothing is remembered beyond this start.
 	grants *hostGrants
 	// permissions are those each loaded plugin declares.
@@ -51,8 +52,17 @@ func (a *hostApprovals) approve(ctx context.Context, request hostbridge.CommandR
 		Dir:     request.Dir,
 		Command: request.Command,
 	}
-	return a.decide(ctx, hostGrantProject+request.Project, []string{"commands"}, request.Command+request.Dir, len(request.Command),
+	if a.checkProject != nil {
+		if err := a.checkProject(request.Project); err != nil {
+			return err
+		}
+	}
+	err := a.decide(ctx, hostGrantProject+request.Project, []string{"commands"}, request.Command+request.Dir, len(request.Command),
 		"允许 Claude 在这台电脑上运行命令？", hostApprovalMessage(request), prompt)
+	if err == nil && a.checkProject != nil {
+		return a.checkProject(request.Project)
+	}
+	return err
 }
 
 // approveTool asks about one call to a plugin's tool. "Always" covers that

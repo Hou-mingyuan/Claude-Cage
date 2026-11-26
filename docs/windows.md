@@ -26,7 +26,9 @@ DISM /Online /Enable-Feature /FeatureName:HypervisorPlatform /All
 3. 在“快捷方式”页选择“添加桌面快捷方式”和“添加到开始菜单”。首次安装默认勾选两项，覆盖安装沿用上次选择，旧安装按已有快捷方式恢复选择。卸载会清理 Cage 创建的快捷方式。
 4. 从选中的快捷方式启动 Cage。如果 C 盘空间有限，在初始化界面的“存储目录”中选择其他磁盘的专用空文件夹，再导入代理并启动环境；已有环境也可以从设置迁移。见[选盘与迁移步骤](getting-started.md#选择环境存储位置)。
 
-安装器不设置系统代理，不安装 SSH 服务，不把随附工具加入系统 PATH。WebView2 是 Microsoft 提供的系统浏览器运行时，其安装与维护由 Microsoft 安装程序负责。
+v0.2.2 完整版安装成功后会将终端命令所在的 `resources` 目录加入当前用户的 PATH。在新开的 PowerShell 或命令提示符中运行 `cage --help` 核对命令，`cage login` 登录 Claude 账号，进入项目文件夹后输入 `cage` 开始工作。卸载时只清理安装器添加的 PATH 项。[终端命令与项目共享](guide/workbench.md#在本机终端使用-claude-code)
+
+安装器不设置系统代理，不安装 SSH 服务，也不修改系统级 PATH。WebView2 是 Microsoft 提供的系统浏览器运行时，其安装与维护由 Microsoft 安装程序负责。
 
 安装器逐文件解压到安装位置所在磁盘的暂存目录，成功后替换应用，避免在系统临时目录生成整包解压副本。Windows 临时目录仍可能保存少量安装器辅助文件；缺少 WebView2 时，Microsoft 安装程序会管理其共享运行组件的位置。
 

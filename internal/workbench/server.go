@@ -118,6 +118,8 @@ type Server struct {
 	audioClients                                     int
 	audioInputClients                                int
 	projectShares                                    map[string]*projectShare
+	hostCLIUses                                      map[*hostCLIUse]bool
+	hostCLIBrowser                                   hostCLIFocus
 	hostTools                                        *hostTools
 	hostToolsRemoved                                 bool
 	hostMarket                                       hostMarketCache
@@ -411,6 +413,7 @@ func (s *Server) handler() http.Handler {
 		jsonReply(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("GET /api/status", s.status)
+	mux.HandleFunc("GET /api/host-cli", s.hostCLI)
 	mux.HandleFunc("GET /api/environment/initialization", s.initialization)
 	mux.HandleFunc("POST /api/environment/initialization", s.initialization)
 	mux.HandleFunc("GET /api/remote/manifest", s.remoteManifest)
@@ -618,7 +621,12 @@ func (s *Server) handler() http.Handler {
 			mux.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/mobile/") {
+		if r.URL.Path == "/api/host-cli" {
+			if s.desktopEntry || s.clientOnly || !equalSecret(r.Header.Get(hostCLIHeader), hostCLIProof(s.token)) {
+				http.Error(w, "Local CLI authentication required", http.StatusForbidden)
+				return
+			}
+		} else if strings.HasPrefix(r.URL.Path, "/api/mobile/") {
 			// Device trust is scoped to this host. Never forward a paired phone
 			// into a different host selected by the desktop SSH client.
 			if s.desktopEntry && !s.clientOnly && s.remote != nil && s.remote.desktop != nil && r.Header.Get(connectionHeader) != "" {
@@ -820,6 +828,9 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		"network_paused": s.networkPaused, "network_open": s.networkOpenLocked(time.Now()),
 		"safety": s.safety, "environment_update_required": s.guestUpdateRequired, "environment_update_error": s.guestUpdateError,
 		"abandoned_guests": s.abandonedGuestList(), "abandoned_environment": s.abandonedEnvironmentSystem(),
+	}
+	if time.Now().Before(s.hostCLIBrowser.until) {
+		view["host_cli_browser"] = s.hostCLIBrowser
 	}
 	if system, err := s.installedLinuxSystem(); err != nil {
 		view["guest_system_error"] = err.Error()
