@@ -67,6 +67,8 @@ Cage 支持含中文的安装目录。启动时优先读取随附 QEMU 的 UEFI 
 - 提示权限或路径不可用：使用当前用户有权限访问的本地目录，不把 Cage 安装目录、私有配置或磁盘根目录作为共享项目。更新器拒绝含符号链接或目录联接的安装路径。
 - Go 或运行时进程无报错挂起且 CPU 为 0%：检查本机是否安装了企业/高校同步盘客户端（如基于 AnyShare 的同步盘）或其他向新建进程注入监控 DLL 的软件；可在 PowerShell 中用 `(Get-Process cage).Modules`（构建期查看 `compile`）确认是否被注入非系统 DLL，并将 `cage.exe`、`Cage.exe`、`mihomo.exe`、`qemu-system-x86_64.exe`、`qemu-img.exe`、`ssh.exe` 加入其排除列表或暂停相关监控服务后重试。
 
+Windows 同时安装了原生 Claude Desktop（MSIX）或 CLI 时，先确认连接来自哪个进程，可在任务管理器中核对程序路径和启动项。Cage 的联网状态只描述 Cage 环境。若 Windows 防火墙已设为默认阻止出站，仍需查看当前网络配置文件下按程序路径或应用包匹配的有效规则：显式允许规则可放行匹配的连接，匹配的显式阻止规则优先。[Windows 防火墙规则优先级](https://learn.microsoft.com/en-us/windows/security/operating-system-security/network-security/windows-firewall/rules) · [程序和应用包规则筛选](https://learn.microsoft.com/en-us/powershell/module/netsecurity/get-netfirewallapplicationfilter)
+
 反馈问题时提供 Cage 版本、Windows 版本与内部版本号、CPU 架构、失败步骤和错误原文。不要附带代理密码、订阅链接、会话地址或未脱敏的配置文件。
 
 ## Windows 源码构建
