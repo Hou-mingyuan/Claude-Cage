@@ -36,6 +36,19 @@ if (args is ["--app-updater-only"]) return;
 #if WINDOWS
 NativeInputTests.Run();
 TrayMenuTests.Run();
+// Use an in-memory data object to leave the developer's clipboard intact.
+using (var preview = new System.Drawing.Bitmap(2, 2))
+{
+    var data = new DataObject();
+    data.SetImage(preview);
+    data.SetText("https://example.com/image");
+    if (SharedClipboard.RichText(data) != null) throw new Exception("Image with a URL lost its image priority");
+    data.SetData("Biff8", false, new MemoryStream());
+    data.SetText("A\tB\r\n1\t2");
+    if (SharedClipboard.RichText(data) != "A\tB\r\n1\t2") throw new Exception("Spreadsheet preview took priority over cells without RTF");
+    data.SetData(DataFormats.UnicodeText, false, "");
+    if (SharedClipboard.RichText(data) != "") throw new Exception("Empty formatted cell fell back to its preview");
+}
 #endif
 
 var assertions = 0;
