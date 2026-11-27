@@ -668,6 +668,7 @@ export function AppearanceSettings() {
           ...value,
           customThemes: previous.customThemes,
           syncGuestTheme: previous.syncGuestTheme,
+          blurStatusNetwork: previous.blurStatusNetwork,
         }))
       )
         setSynced(true);
@@ -815,6 +816,20 @@ export function AppearanceSettings() {
                 aria-label={tr("字体平滑")}
                 checked={appearance.fontSmoothing}
                 onChange={(e) => patch({ fontSmoothing: e.target.checked })}
+              />
+            </label>
+          </SettingRow>
+          <SettingRow
+            label={tr("模糊状态栏中的 IP 与位置")}
+            description={tr("截图或共享屏幕时模糊底部状态栏中的出口 IP 和位置，鼠标悬停或键盘聚焦时显示。")}
+          >
+            <label className="appearance-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={tr("模糊状态栏中的 IP 与位置")}
+                checked={appearance.blurStatusNetwork}
+                onChange={(e) => patch({ blurStatusNetwork: e.target.checked })}
               />
             </label>
           </SettingRow>

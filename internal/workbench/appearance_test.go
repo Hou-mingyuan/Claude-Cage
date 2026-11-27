@@ -188,3 +188,35 @@ func TestAppearanceLegacyFileKeepsDerivedDefaults(t *testing.T) {
 		t.Fatalf("legacy appearance lost: %s", w.Body.String())
 	}
 }
+
+func TestAppearanceBlurStatusNetworkPersistsAndDefaultsOff(t *testing.T) {
+	s := &Server{profile: t.TempDir()}
+	if defaultAppearance().BlurStatusNetwork {
+		t.Fatal("status bar network blur must default to off")
+	}
+	legacy := `{"mode":"system","lightTheme":{"preset":"codex","accent":"#339cff","surface":"#ffffff","ink":"#1a1c1f","contrast":45,"opaqueWindows":false,"fonts":{"ui":"","code":""}},"darkTheme":{"preset":"codex","accent":"#339cff","surface":"#181818","ink":"#ffffff","contrast":60,"opaqueWindows":false,"fonts":{"ui":"","code":""}},"uiFontSize":14,"codeFontSize":13,"pointerCursors":false,"fontSmoothing":true,"reducedMotion":"system","syncGuestTheme":true}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/appearance", strings.NewReader(legacy))
+	req.Header.Set("Content-Type", "application/json")
+	s.saveAppearance(w, req)
+	var saved Appearance
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &saved) != nil || saved.BlurStatusNetwork {
+		t.Fatalf("appearance without blurStatusNetwork should save with blur off: %d %s", w.Code, w.Body.String())
+	}
+	a := defaultAppearance()
+	a.BlurStatusNetwork = true
+	b, _ := json.Marshal(a)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/appearance", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	s.saveAppearance(w, req)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	s.getAppearance(w, httptest.NewRequest("GET", "/api/appearance", nil))
+	var loaded Appearance
+	if err := json.Unmarshal(w.Body.Bytes(), &loaded); err != nil || !loaded.BlurStatusNetwork {
+		t.Fatalf("blurStatusNetwork did not persist: %s", w.Body.String())
+	}
+}

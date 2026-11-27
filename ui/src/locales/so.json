@@ -3356,5 +3356,7 @@
   "链式代理需要至少 2 个不同节点（1 个中转 + 1 个出口），当前只有 {0} 个可用节点。": "Proxy silsilad ah wuxuu u baahan yahay ugu yaraan 2 node oo kala duwan (1 gudbiye + 1 bixitaan); hadda waxaad haysataa {0} keliya.",
   "首次配置还没有已应用的 Cage 代理，建议勾选上方选项通过主机网络获取订阅。": "Dejinta ugu horreysa weli ma jiro proxy Cage oo shaqaynaya; waxaa lagu talinayaa inaad saxdo ikhtiyaarka sare si aad uga soo dejiso shabakadda kombiyuutarka.",
   "高级：端口与代理诊断": "Sare: dekedda iyo baaritaanka proxy-ga",
-  "正在本机终端输入。关闭本机终端后可在这里继续。": "Waxaad wax ku qoraysaa terminalka maxalliga ah. Xir si aad halkan uga sii waddo."
+  "正在本机终端输入。关闭本机终端后可在这里继续。": "Waxaad wax ku qoraysaa terminalka maxalliga ah. Xir si aad halkan uga sii waddo.",
+  "模糊状态栏中的 IP 与位置": "Ka dhig IP-ga iyo goobta baarka xaaladda kuwo aan caddayn",
+  "截图或共享屏幕时模糊底部状态栏中的出口 IP 和位置，鼠标悬停或键盘聚焦时显示。": "Wuxuu ka dhigaa IP-ga ka bixidda iyo goobta baarka xaaladda hoose kuwo aan caddayn marka aad sawir shaashadeed qaadayso ama shaashadda wadaagayso. Dul mari tilmaamaha ama kiiboodhka ku dooro si aad u aragto."
 }

@@ -35,16 +35,17 @@ type SavedAppearanceTheme struct {
 	Dark  AppearanceTheme `json:"darkTheme"`
 }
 type Appearance struct {
-	CustomThemes   []SavedAppearanceTheme `json:"customThemes,omitempty"`
-	Mode           string                 `json:"mode"`
-	Light          AppearanceTheme        `json:"lightTheme"`
-	Dark           AppearanceTheme        `json:"darkTheme"`
-	UIFontSize     int                    `json:"uiFontSize"`
-	CodeFontSize   int                    `json:"codeFontSize"`
-	PointerCursors bool                   `json:"pointerCursors"`
-	FontSmoothing  bool                   `json:"fontSmoothing"`
-	ReducedMotion  string                 `json:"reducedMotion"`
-	SyncGuestTheme bool                   `json:"syncGuestTheme"`
+	CustomThemes      []SavedAppearanceTheme `json:"customThemes,omitempty"`
+	Mode              string                 `json:"mode"`
+	Light             AppearanceTheme        `json:"lightTheme"`
+	Dark              AppearanceTheme        `json:"darkTheme"`
+	UIFontSize        int                    `json:"uiFontSize"`
+	CodeFontSize      int                    `json:"codeFontSize"`
+	PointerCursors    bool                   `json:"pointerCursors"`
+	FontSmoothing     bool                   `json:"fontSmoothing"`
+	ReducedMotion     string                 `json:"reducedMotion"`
+	SyncGuestTheme    bool                   `json:"syncGuestTheme"`
+	BlurStatusNetwork bool                   `json:"blurStatusNetwork"`
 }
 
 func defaultAppearance() Appearance {

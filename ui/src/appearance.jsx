@@ -92,6 +92,7 @@ export function AppearanceProvider({ children }) {
     root.dataset.preset = theme.preset || "custom";
     root.dataset.translucent = String(!theme.opaqueWindows);
     root.dataset.fontSmoothing = String(appearance.fontSmoothing);
+    root.dataset.blurStatusNetwork = String(appearance.blurStatusNetwork);
     root.dataset.reducedMotion = String(
       appearance.reducedMotion === "on" ||
         (appearance.reducedMotion === "system" && systemReduced),
