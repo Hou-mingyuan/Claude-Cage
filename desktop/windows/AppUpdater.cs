@@ -207,6 +207,7 @@ internal sealed class AppUpdater : IDisposable
         var token = cancellation.Token;
         Change("checking", "正在检查更新，优先使用主机网络");
         string? archive = null;
+        string? failure = null;
         string retryAt = "";
         using var process = new Process();
         var started = false;
@@ -271,12 +272,17 @@ internal sealed class AppUpdater : IDisposable
                 Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks, Guid.NewGuid().ToString(), unsignedSource);
             archive = null;
         }
-        catch (OperationCanceledException) { Change("failed", "更新已暂停，可稍后重试", true); }
-        catch (Exception error) { Change("failed", error.Message, true, retryAt); }
+        catch (OperationCanceledException) { failure = "更新已暂停，可稍后重试"; retryAt = ""; }
+        catch (Exception error) { failure = error.Message; }
         finally
         {
-            if (started && !process.HasExited) process.Kill();
+            if (started && !process.HasExited)
+            {
+                process.Kill();
+                await process.WaitForExitAsync();
+            }
             if (archive != null) { try { Directory.Delete(Path.GetDirectoryName(archive)!, true); } catch (IOException) { } }
+            if (failure != null) Change("failed", failure, true, retryAt);
             cancellation.Dispose(); cancellation = null;
         }
         if (prepared != null) Ready(prepared);

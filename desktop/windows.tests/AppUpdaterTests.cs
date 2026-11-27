@@ -12,7 +12,14 @@ internal static class AppUpdaterTests
         if (phase == null) return false;
         File.AppendAllText(Path.Combine(Backend.Root, "update-requests"), operation + "\n");
         if (phase == "early-current") { Console.WriteLine("""{"phase":"current"}"""); Environment.Exit(1); }
-        if (phase == "invalid-handoff") { Console.WriteLine("""{"phase":"handed_off"}"""); return true; }
+        if (phase == "invalid-handoff")
+        {
+            // Keep the file open after the invalid result until the updater stops this process.
+            using var held = File.Open(Path.Combine(Backend.Root, "downloader.lock"), FileMode.Create, FileAccess.Write, FileShare.None);
+            Console.WriteLine("""{"phase":"handed_off"}""");
+            Thread.Sleep(TimeSpan.FromSeconds(10));
+            return true;
+        }
         Console.WriteLine(JsonSerializer.Serialize(new {
             phase = operation == "download" && phase != "current" ? "failed" : phase,
             latestVersion = "99.0.0", message = "fixture response",
@@ -46,14 +53,31 @@ internal static class AppUpdaterTests
                 phases.Clear();
                 File.WriteAllText(requests, "");
                 Environment.SetEnvironmentVariable("CAGE_UPDATER_TEST_PHASE", backendPhase);
-                using var updater = new AppUpdater(s => phases.Enqueue(s.GetValueOrDefault("phase") as string ?? ""),
-                    () => throw new Exception("unexpected installation"), () => throw new Exception("unexpected restart"), publisher, null, canUpgradeUnsigned);
+                var downloaderReleased = false;
+                void OnChange(Dictionary<string, object?> state)
+                {
+                    var phase = state.GetValueOrDefault("phase") as string ?? "";
+                    phases.Enqueue(phase);
+                    if (backendPhase == "invalid-handoff" && phase == "failed")
+                    {
+                        try
+                        {
+                            using var probe = File.OpenRead(Path.Combine(root, "downloader.lock"));
+                            downloaderReleased = true;
+                        }
+                        catch (IOException) { }
+                    }
+                }
+                using var updater = new AppUpdater(OnChange, () => throw new Exception("unexpected installation"),
+                    () => throw new Exception("unexpected restart"), publisher, null, canUpgradeUnsigned);
                 updater.Handle(operation);
                 // Wait for both terminal state publication and subprocess cleanup.
                 var running = typeof(AppUpdater).GetField("cancellation", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 while (running.GetValue(updater) != null) await Task.Delay(10, deadline.Token);
                 var state = updater.Handle("status");
+                if (backendPhase == "invalid-handoff")
+                    Check(downloaderReleased, "update failed before the downloader released its files");
                 Check(File.ReadAllText(requests) == expectedOperation + "\n", "unexpected backend operation");
                 if (backendPhase == "failed")
                 {
