@@ -21,6 +21,7 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
+	"github.com/sylvinus/agent-vm/internal/managedproxy"
 	"github.com/sylvinus/agent-vm/internal/usererror"
 )
 
@@ -34,8 +35,12 @@ func ProbeExitIP(ctx context.Context, cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return probeExitIP(ctx, e, exitProbeReachabilityURL)
+	return probeExitIP(context.WithValue(ctx, selectedRouteProbe{}, true), e, exitProbeReachabilityURL)
 }
+
+// selectedRouteProbe marks a probe through the applied route, whose hops are
+// the ones the core log consumer maps REALITY failures to.
+type selectedRouteProbe struct{}
 
 // exitProbeService is a fixed public IPv4 echo endpoint. Each one is reached
 // only through the selected proxy, so any of them measures the same egress.
@@ -106,6 +111,9 @@ var (
 	// same proxy reached the fixed reachability target, so the exit most
 	// likely blocks the echo services rather than the node being down.
 	ErrExitProbeBlocked = errors.New("exit probe services blocked by the proxy exit")
+	// ErrRealityAuthFailed reports that the managed proxy core logged a failed
+	// REALITY handshake with a proxy server while the exit probe ran.
+	ErrRealityAuthFailed = errors.New("proxy REALITY authentication failed")
 )
 
 type exitProbeStageTiming struct {
@@ -129,6 +137,7 @@ type exitProbeResult struct {
 // service. Every request uses the same proxied client; no result is accepted
 // unless it passes the same validation, so a fallback never widens the check.
 func probeExitIPServices(ctx context.Context, client *http.Client, services []exitProbeService, stagger time.Duration, reachability string) (string, error) {
+	probeStarted := time.Now()
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan exitProbeResult, len(services))
@@ -201,6 +210,15 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return "", usererror.Wrap("通过所选代理查询出口 IP", ctx.Err(), "外网保持关闭。")
 	}
+	if failed, hop := coreRealityAuthFailure(probeStarted); failed {
+		// The core failed to authenticate with the proxy server itself, so
+		// the tunnel never reached a target site; any timeout or EOF seen by
+		// the services is a consequence, and ClientHello hints would not help.
+		if selected, _ := ctx.Value(selectedRouteProbe{}).(bool); !selected {
+			hop = ""
+		}
+		return "", realityAuthError(reported, hop)
+	}
 	if allSchemeMismatch {
 		// A plain HTTP answer proves the node is reachable, so the
 		// connectivity check and the ClientHello hints would not help. Trojan
@@ -248,6 +266,52 @@ func probeExitIPServices(ctx context.Context, client *http.Client, services []ex
 		return "", usererror.New("代理连接失败", strings.Join(reported, "；"), "未能通过所选代理建立连接，请检查代理核心与节点状态；外网保持关闭。", ErrProxyConnectFailed)
 	}
 	return "", errors.New("通过所选代理查询出口 IP 失败：" + strings.Join(reported, "；") + "。未能确认出口时，外网保持关闭。")
+}
+
+// coreRealityAuthFailure reports whether the managed proxy core logged a
+// REALITY authentication failure since the probe started, and the hop role
+// when every hop record in that window names the same one.
+func coreRealityAuthFailure(since time.Time) (failed bool, hop string) {
+	store := diagnostics.Default()
+	if store == nil {
+		return false, ""
+	}
+	events, err := store.EventsSince(since, "proxy")
+	if err != nil {
+		return false, ""
+	}
+	hops := map[string]bool{}
+	for _, event := range events {
+		if role, ok := strings.CutPrefix(event.Message, managedproxy.RealityHopMarker); ok {
+			hops[role] = true
+		} else if managedproxy.RealityAuthFailed(event.Message) {
+			failed = true
+		}
+	}
+	if failed && len(hops) == 1 {
+		for role := range hops {
+			hop = role
+		}
+	}
+	return failed, hop
+}
+
+func realityAuthError(reported []string, hop string) error {
+	node := "代理节点"
+	switch hop {
+	case managedproxy.RealityHopSingle:
+		node = "所选代理节点"
+	case managedproxy.RealityHopRelay:
+		node = "代理链中的中转节点"
+	case managedproxy.RealityHopExit:
+		node = "代理链中的最终出口节点"
+	}
+	reason := "代理核心与" + node + "握手时 REALITY 认证未通过（核心日志：REALITY authentication failed），隧道未建立，检测请求没有到达目标网站"
+	if len(reported) > 0 {
+		reason += "；" + strings.Join(reported, "；")
+	}
+	next := "常见原因是" + node + "的 public-key、short-id 或 servername 与服务端不一致，或代理核心版本与服务端不兼容；这不是目标网站的 TLS 问题，开启“TLS ClientHello 分段传输兼容模式”不会有帮助。请核对该节点的 REALITY 参数后重新导入并应用，或切换代理节点；外网保持关闭。"
+	return usererror.New("代理节点 REALITY 认证", reason, next, ErrRealityAuthFailed)
 }
 
 // proxyReaches reports whether one GET to endpoint returned HTTP 204 through
@@ -547,6 +611,8 @@ func (g *EgressGate) serveDiagnostic(parent context.Context, conn net.Conn, faul
 // addresses, or credentials.
 func diagnosticProbeReason(err error) string {
 	switch {
+	case errors.Is(err, ErrRealityAuthFailed):
+		return "reality_auth"
 	case errors.Is(err, ErrTLSHandshakeFailed) && errors.Is(err, ErrExitProbeTimeout):
 		return "tls_timeout"
 	case errors.Is(err, ErrTLSHandshakeFailed):

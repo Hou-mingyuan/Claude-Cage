@@ -865,9 +865,11 @@ func relay(configPath, kind string) int {
 	configureRelayCommand(cmd)
 	cmd.Env = relayEnv(kind, configPath, os.Environ())
 	store := diagnostics.New(filepath.Dir(configPath))
-	out := store.Stream(source, "info")
+	out, stderr := store.Stream(source, "info"), store.Stream(source, "error")
+	if kind == "proxy" {
+		out, stderr = managedproxy.CoreLogStream(store, filepath.Dir(configPath), "info"), managedproxy.CoreLogStream(store, filepath.Dir(configPath), "error")
+	}
 	defer out.Close()
-	stderr := store.Stream(source, "error")
 	defer stderr.Close()
 	cmd.Stdout, cmd.Stderr = out, stderr
 	if err := cmd.Start(); err != nil {
