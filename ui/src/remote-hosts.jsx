@@ -785,8 +785,10 @@ function Environment({ context, refresh, children }) {
           <div className="client-loading" role="status">{tr("正在打开 Cage 工作台…")}</div>
         ) : (
           <main className="environment-picker">
-            <div>
+            <div className="environment-picker-header">
               <div className="startup-language-slot"><LanguageSettings compact /></div>
+            </div>
+            <div className="environment-picker-body">
               <img className="environment-logo" src={logo} alt="" />
               <h1>
                 {localLost

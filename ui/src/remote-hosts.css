@@ -31,8 +31,9 @@
 .ssh-local-action, .ssh-help { border-top:1px solid var(--line); padding-top:13px; margin:18px 0 10px; }
 .ssh-sidebar-body button, .environment-picker button, .ssh-fallback { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
 .ssh-sidebar-body .ssh-host-row { justify-content:flex-start; }
-.environment-picker { flex:1; min-width:0; overflow:auto; display:grid; align-items:start; justify-items:center; padding:clamp(40px,12vh,140px) 24px 32px; background:var(--paper); }
-.environment-picker > div { width:min(100%,492px); }
+.environment-picker { flex:1; min-width:0; overflow:auto; display:flex; flex-direction:column; padding:20px 24px 32px; background:var(--paper); }
+.environment-picker-header { display:flex; align-items:center; justify-content:flex-end; width:100%; flex:none; }
+.environment-picker-body { width:min(100%,492px); margin:clamp(24px,10vh,116px) auto 0; }
 .environment-logo { width:40px; height:40px; object-fit:contain; margin-bottom:12px; }
 .environment-picker h1 { font-size:1.7rem; margin:0 0 8px; color:var(--strong); }
 .environment-picker p { line-height:1.65; margin:0 0 18px; color:var(--muted); }
