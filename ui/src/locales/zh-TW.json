@@ -2882,6 +2882,8 @@
   "分享链接的传输方式暂不支持；请改用 Clash/Mihomo YAML": "分享連結的傳輸方式暫不支援；請改用 Clash/Mihomo YAML",
   "分享链接的伪装头类型暂不支持；请改用 Clash/Mihomo YAML": "分享連結的偽裝標頭類型暫不支援；請改用 Clash/Mihomo YAML",
   "分享链接的协议暂不支持；请改用 Clash/Mihomo YAML": "分享連結的通訊協定暫不支援；請改用 Clash/Mihomo YAML",
+  "MASQUE 分享链接暂不支持：随附 Mihomo 核心的 masque 节点需要 ECDSA 客户端私钥和服务器公钥，这类链接只提供用户认证和 HTTP/3 传输参数，无法转换。Cage 目前也不能导入 MASQUE 节点，请向服务商获取其他协议的节点": "MASQUE 分享連結暫不支援：隨附 Mihomo 核心的 masque 節點需要 ECDSA 用戶端私鑰和伺服器公鑰，這類連結只提供使用者認證和 HTTP/3 傳輸參數，無法轉換。Cage 目前也不能匯入 MASQUE 節點，請向服務商取得其他協定的節點",
+  "MASQUE 节点暂不支持：Cage 目前不能导入 masque 协议节点，请向服务商获取同一出口的其他协议节点后重新导入": "MASQUE 節點暫不支援：Cage 目前不能匯入 masque 協定節點，請向服務商取得同一出口的其他協定節點後重新匯入",
   "创建连接地址": "建立連線位址",
   "删除旧环境归档": "刪除舊環境歸檔",
   "刷新 Tailscale 状态": "重新整理 Tailscale 狀態",

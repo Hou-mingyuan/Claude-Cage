@@ -22,6 +22,8 @@ test("localizeBackendMessage translates ErrLocalProxyNode and dynamic backend er
     `节点 "local-socks" 需要迁移：${errLocalNode}`,
     `没有可导入的节点，已跳过 2 个；第 1 个节点 "socks1"：${errLocalNode}；第 2 个节点 "bad"：节点协议暂不支持`,
     `没有可导入的节点，已跳过 1 个；第 1 个节点 "hk"：Clash Verge Ninja 专用的 ninja 协议，Cage 随附的标准 Mihomo 核心无法解析，请向服务商获取同一出口的标准 Mihomo 节点后重新导入`,
+    `没有可导入的节点，已跳过 1 个；第 1 个节点 ""：MASQUE 分享链接暂不支持：随附 Mihomo 核心的 masque 节点需要 ECDSA 客户端私钥和服务器公钥，这类链接只提供用户认证和 HTTP/3 传输参数，无法转换。Cage 目前也不能导入 MASQUE 节点，请向服务商获取其他协议的节点`,
+    `没有可导入的节点，已跳过 1 个；第 1 个节点 "warp"：MASQUE 节点暂不支持：Cage 目前不能导入 masque 协议节点，请向服务商获取同一出口的其他协议节点后重新导入`,
     `没有可导入的节点，已跳过 1 个；第 1 个节点 "neo"：Clash Neo 专用的 nexo 协议，Cage 随附的标准 Mihomo 核心无法解析，请向服务商获取同一出口的标准 Mihomo 节点后重新导入`,
     `订阅更新移除或跳过了当前出口或中转节点 "HK-01"：节点未包含在更新中；原配置已保留，请先应用其他节点再更新`,
     "订阅服务器返回 HTTP 403",
