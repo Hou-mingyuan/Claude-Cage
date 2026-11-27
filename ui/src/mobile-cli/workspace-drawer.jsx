@@ -27,7 +27,7 @@ export function CodeNavigation({catalog, project, sessions, current, creating, o
   </section>;
 }
 
-export function ProjectTree({catalog, projectPath, sessionID, expanded, toggle, creating, onNew, onSession, onAction}) {
+export function ProjectTree({catalog, projectPath, sessionID, expanded, toggle, creating, onNew, onSession, onAction, formatTime}) {
   const projects = catalog?.projects || [];
   return <section className="project-tree" aria-label="Claude Code 项目和会话">
     <h2>Claude Code</h2>
@@ -52,7 +52,7 @@ export function ProjectTree({catalog, projectPath, sessionID, expanded, toggle, 
             </button>
           </div>
           {open && <ul className="tree-sessions" aria-label={name + "的会话"}>
-            {sessions.length ? sessions.map(s => <SessionRow key={s.id} session={s} current={s.id === sessionID} disabled={creating}
+            {sessions.length ? sessions.map(s => <SessionRow key={s.id} session={s} current={s.id === sessionID} disabled={creating} detail={s.paused && formatTime(s.updated_at)}
               onSelect={() => onSession(s.workspace, s.id)} onAction={onAction}/>) : <li className="tree-empty">暂无会话</li>}
           </ul>}
         </div>;

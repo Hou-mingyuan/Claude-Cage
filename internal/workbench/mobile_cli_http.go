@@ -15,6 +15,7 @@ func (s *Server) mobileCLIRoutes(mux routeRegistrar) {
 	mux.HandleFunc("GET /api/cli/sessions", s.mobileSessions)
 	mux.HandleFunc("GET /api/cli/sessions/{id}", s.mobileSessionView)
 	mux.HandleFunc("POST /api/cli/sessions/{id}/open", s.mobileOpenTerminal)
+	mux.HandleFunc("POST /api/cli/sessions/{id}/continue", s.mobileContinueTerminal)
 	mux.HandleFunc("POST /api/cli/sessions/{id}/metadata", s.mobileSessionMetadata)
 	mux.HandleFunc("POST /api/cli/sessions/{id}/account", s.mobileSessionAccount)
 	mux.HandleFunc("POST /api/cli/sessions/{id}/archive", s.mobileArchiveSession)
@@ -29,6 +30,7 @@ func (s *Server) mobileCLIRoutes(mux routeRegistrar) {
 	mux.HandleFunc("POST /api/mobile/cli/sessions/{id}/stop", s.mobileStop)
 	mux.HandleFunc("POST /api/mobile/cli/sessions/{id}/approval", s.mobileApprovalResponse)
 	mux.HandleFunc("POST /api/mobile/cli/sessions/{id}/open", s.mobileOpenTerminal)
+	mux.HandleFunc("POST /api/mobile/cli/sessions/{id}/continue", s.mobileContinueTerminal)
 	mux.HandleFunc("POST /api/mobile/cli/sessions/{id}/metadata", s.mobileSessionMetadata)
 	mux.HandleFunc("POST /api/mobile/cli/sessions/{id}/account", s.mobileSessionAccount)
 	mux.HandleFunc("POST /api/mobile/cli/sessions/{id}/delete", s.mobileArchiveSession)
@@ -44,10 +46,30 @@ func (s *Server) mobileOpenTerminal(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &input) {
 		return
 	}
+	s.connectTerminal(w, r, input.Automatic, false)
+}
+
+func (s *Server) mobileContinueTerminal(w http.ResponseWriter, r *http.Request) {
+	var input struct{}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	s.connectTerminal(w, r, true, true)
+}
+
+func (s *Server) connectTerminal(w http.ResponseWriter, r *http.Request, automatic, explicitContinue bool) {
 	s.mobileConnectMu.Lock()
 	defer s.mobileConnectMu.Unlock()
 	view, ok := s.authorizedMobileSession(w, r)
 	if !ok {
+		return
+	}
+	if view.Paused {
+		if explicitContinue {
+			s.continuePausedTerminal(w, r, view.ID)
+		} else {
+			jsonReply(w, view)
+		}
 		return
 	}
 	if !s.isTerminalConversation(view.ID) {
@@ -65,6 +87,12 @@ func (s *Server) mobileOpenTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	existing := s.terminals.get(record.TerminalID)
 	needsTerminal := existing == nil || !existing.ownsConversation()
+	// A concurrent phone/desktop click may arrive after the job has already
+	// taken the foreground. Do not hand off or relaunch this managed session.
+	if explicitContinue && view.Running && record.Connection != "" && !needsTerminal {
+		jsonReply(w, view)
+		return
+	}
 	if needsTerminal {
 		s.mu.Lock()
 		launcher := claudeTerminalCommand(s.preferences)
@@ -77,11 +105,12 @@ func (s *Server) mobileOpenTerminal(w http.ResponseWriter, r *http.Request) {
 	if (record.Resume || record.Connection != "") && needsTerminal {
 		var state struct {
 			Running      bool   `json:"running"`
+			Paused       bool   `json:"paused"`
 			ChannelReady bool   `json:"channel_ready"`
 			Error        string `json:"error"`
 		}
 		mode := "active"
-		if input.Automatic {
+		if automatic {
 			if err := s.terminals.canStart(); err != nil {
 				http.Error(w, err.Error(), 409)
 				return
@@ -97,8 +126,17 @@ func (s *Server) mobileOpenTerminal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, state.Error, 409)
 			return
 		}
+		if state.Paused {
+			if explicitContinue {
+				s.continuePausedTerminal(w, r, view.ID)
+			} else {
+				view.Paused, view.Running, view.Active, view.CanSend = true, true, false, new(bool)
+				jsonReply(w, view)
+			}
+			return
+		}
 		if state.Running {
-			if input.Automatic {
+			if automatic {
 				if state.ChannelReady {
 					var result struct {
 						OK bool `json:"ok"`
@@ -108,6 +146,8 @@ func (s *Server) mobileOpenTerminal(w http.ResponseWriter, r *http.Request) {
 						http.Error(w, "会话恢复暂未完成，请重试", 503)
 						return
 					}
+				} else {
+					view.ConnectionNotice = "其他窗口占用中，退出原会话后可接续"
 				}
 				view.ConnectionWaiting = true
 				jsonReply(w, view)
@@ -123,12 +163,58 @@ func (s *Server) mobileOpenTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view.DesktopTerminalID = terminal.id
-	if input.Automatic {
+	if automatic {
 		view, err = s.terminalConversationView(r.Context(), view.ID)
 		if err != nil {
 			http.Error(w, err.Error(), 503)
 			return
 		}
+	}
+	jsonReply(w, view)
+}
+
+// Only a deliberate continue request may transfer the guest's foreground
+// process group. Serialize with close/archive and bind to the host record
+// again after admission; a phone never supplies a PID or terminal identity.
+func (s *Server) continuePausedTerminal(w http.ResponseWriter, r *http.Request, id string) {
+	s.op.Lock()
+	defer s.op.Unlock()
+	s.account.mu.Lock()
+	authorized := s.mobileAuthorized(r.Context())
+	s.account.mu.Unlock()
+	if !authorized {
+		http.Error(w, errMobileLocked.Error(), http.StatusLocked)
+		return
+	}
+	s.mobileCLI.mu.Lock()
+	record, err := s.mobileCLI.record(s.profile, id)
+	s.mobileCLI.mu.Unlock()
+	if err != nil || record.Deleted || record.Archived || !record.Terminal || record.Connection == "" {
+		http.Error(w, "terminal_unavailable", http.StatusConflict)
+		return
+	}
+	query := map[string]string{"cli_id": record.CLIID, "config": record.GuestConfig,
+		"workspace": record.GuestWorkspace, "connection": record.Connection}
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := s.runCLIChannel(r.Context(), "continue", query, &result); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if !result.OK {
+		if result.Error != "terminal_conflict" {
+			result.Error = "terminal_unavailable"
+		}
+		http.Error(w, result.Error, http.StatusConflict)
+		return
+	}
+	s.invalidateConversationDiscovery()
+	view, err := s.terminalConversationView(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
 	}
 	jsonReply(w, view)
 }
@@ -241,6 +327,7 @@ func (s *Server) mobileSessions(w http.ResponseWriter, r *http.Request) {
 	if !ready || notice != "" {
 		for i := range sessions {
 			sessions[i].Active = false
+			sessions[i].Paused = false
 		}
 	}
 	jsonReply(w, map[string]any{"sessions": sessions, "notice": notice})

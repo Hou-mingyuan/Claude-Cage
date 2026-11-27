@@ -162,3 +162,24 @@ export function setupGuideProgress({
     blockReason,
   };
 }
+
+/**
+ * Stable key identifying the currently applied, running proxy route.
+ * Any route, relay-group, port, or running-state change invalidates prior test results.
+ */
+export function appliedRouteTestKey(proxy, active) {
+  if (!active || !proxy?.running || !proxy?.selected) return "";
+  const descriptor = Array.isArray(proxy.route_hops) && proxy.route_hops.length
+    ? JSON.stringify(proxy.route_hops.map((hop) => (hop?.relay ? hop.relay : hop?.node_id || "")))
+    : (Array.isArray(proxy.route) && proxy.route.length ? proxy.route : [proxy.selected]).join("->");
+  return `${proxy.port || ""}|${proxy.selected}|${descriptor}`;
+}
+
+/**
+ * Return the route test result only when it belongs to the currently applied
+ * route and there are no unapplied draft changes.
+ */
+export function visibleRouteTestResult(routeTest, routeKey, routeChanged) {
+  if (!routeTest || !routeKey || routeChanged) return null;
+  return routeTest.key === routeKey ? routeTest : null;
+}

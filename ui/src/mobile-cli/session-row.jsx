@@ -1,10 +1,12 @@
 import React, { useRef, useState } from "react";
+import { useTranslation } from "../interface-language.mjs";
 import { Archive, LoaderCircle, MoreHorizontal, Pencil, Pin, PinOff, Terminal } from "lucide-react";
 
 export const sortSessions = (a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)) || Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) ||
   String(b.updated_at).localeCompare(String(a.updated_at));
 
 export function SessionRow({ session, current, disabled, onSelect, onAction, detail }) {
+  const tr = useTranslation();
   const [revealed, setRevealed] = useState(false);
   const [offset, setOffset] = useState(null);
   const gesture = useRef(null);
@@ -63,11 +65,12 @@ export function SessionRow({ session, current, disabled, onSelect, onAction, det
         if (event.key === "ArrowLeft") { event.preventDefault(); setRevealed(true); }
         if (event.key === "ArrowRight" || event.key === "Escape" && revealed) { event.preventDefault(); event.stopPropagation(); setRevealed(false); }
       }}>
-      <button ref={selection} type="button" className="session-select" aria-label={session.title || "新会话"} aria-current={current ? "page" : undefined} disabled={disabled}
+      <button ref={selection} type="button" className="session-select" aria-label={session.title || "新会话"} aria-description={session.paused ? tr("已暂停") : undefined} aria-current={current ? "page" : undefined} disabled={disabled}
         onClick={() => { if (revealed) setRevealed(false); else onSelect(); }}>
         <Terminal size={15}/><span className="row-detail"><strong>{session.title || "新会话"}</strong>{detail && <small>{detail}</small>}</span>
         {session.pinned && <Pin size={12} aria-label="已置顶"/>}
-        {session.active && <LoaderCircle size={13} className="spin" role="img" aria-label="会话正在运行"/>}
+        {session.paused ? <small className="session-paused-label">{tr("已暂停")}</small> :
+          session.active && <LoaderCircle size={13} className="spin" role="img" aria-label="会话正在运行"/>}
       </button>
       <button type="button" className="session-more" aria-label={(session.title || "新会话") + "的更多操作"}
         aria-expanded={revealed} style={{display:reveal ? "none" : undefined}} disabled={disabled} onClick={toggle}><MoreHorizontal size={17}/></button>

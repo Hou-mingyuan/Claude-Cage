@@ -60,6 +60,10 @@ export function httpErrorMessage(path, status, text = "", contentType = "", meth
   // Proxy HTML pages, stack traces and untranslated runtime errors are not UI
   // explanations. Preserve short Chinese messages supplied by Cage itself.
   const message = text.trim();
+  if (status === 409 && /\/cli\/sessions\/[^/]+\/continue$/.test(path) && contentType.startsWith("text/plain")) {
+    if (message === "terminal_conflict") return localize("原终端正在处理其他任务或会话已变化，请检查原终端。");
+    if (message === "terminal_unavailable") return localize("无法在原终端恢复，请检查终端状态。");
+  }
   if (contentType.startsWith("text/plain") && message.length <= 2000 && /\p{Script=Han}/u.test(message) && !/<(?:html|body|script|!doctype)\b/i.test(message)) {
     return localizeBackendMessage(message, localize);
   }

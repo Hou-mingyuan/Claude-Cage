@@ -2,6 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { recoverPendingMessage } from "./mobile-cli/session-recovery.mjs";
 
+test("reconnection may read paused history but cannot resend a pending message", async () => {
+  const pending = {request_id:"original",text:"hello"};
+  let reads = 0;
+  const confirmed = await recoverPendingMessage({
+    signal:new AbortController().signal, pending:() => pending, progress:() => {}, wait:async () => {},
+    read:async () => { reads++; return {paused:true,turns:[]}; },
+    send:async () => assert.fail("resent while paused"),
+  });
+  assert.ok(reads > 0);
+  assert.equal(confirmed,false);
+});
+
 test("a lost send receipt is resolved by reading before resending", async () => {
   let message = {request_id:"original",text:"hello"};
   let sends = 0;

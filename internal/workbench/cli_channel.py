@@ -87,28 +87,88 @@ def save(path, value):
 
 
 @contextlib.contextmanager
-def state_file(connection, readonly=False):
+def state_file(connection, readonly=False, nonblocking=False):
     folder = ROOT / identifier(connection)
     if readonly:
         yield read_json(folder / "state.json", {})
         return
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (folder / "lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        operation = fcntl.LOCK_EX
+        if nonblocking and os.name == "posix":
+            operation |= fcntl.LOCK_NB
+        fcntl.flock(lock, operation)
         path = folder / "state.json"
         state = read_json(path, {})
         yield state
         save(path, state)
 
 
-def live(pid):
+def process_status(pid):
+    """A stopped job still owns its session, but cannot receive channel input."""
     if os.name == "nt":
-        return _platform["process_live"](pid)
+        return "running" if _platform["process_live"](pid) else "exited"
+    if not isinstance(pid, int) or pid <= 0:
+        return "exited"
+    if pid == os.getpid():
+        return "running"
     try:
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, ValueError, TypeError):
-        return False
+        if sys.platform.startswith("linux"):
+            # The comm field is parenthesized and may contain spaces or ')'.
+            stat = Path("/proc", str(pid), "stat").read_bytes().rpartition(b") ")[2][:1]
+        else:
+            stat = subprocess.check_output(["ps", "-o", "stat=", "-p", str(pid)],
+                                           stderr=subprocess.DEVNULL, timeout=2).strip()[:1]
+    except (FileNotFoundError, ProcessLookupError, subprocess.CalledProcessError):
+        return "exited"
+    if stat in (b"T", b"t"):
+        return "paused"
+    return "exited" if stat in (b"", b"Z", b"X", b"x") else "running"
+
+
+def live(pid):
+    return process_status(pid) != "exited"
+
+
+def process_birth(pid):
+    """Stable across exec from the account wrapper to the official CLI."""
+    try:
+        if sys.platform.startswith("linux"):
+            fields = Path("/proc", str(pid), "stat").read_bytes().rpartition(b") ")[2].split()
+            boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            return boot_id + ":" + fields[19].decode()
+        if os.name == "posix":
+            return subprocess.check_output(["ps", "-o", "lstart=", "-p", str(pid)],
+                                           stderr=subprocess.DEVNULL, timeout=2, text=True,
+                                           env={**os.environ, "LC_ALL": "C"}).strip()
+    except (IndexError, OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
+def terminal_status(state):
+    if state.get("closed"):
+        return "exited"
+    pid = state.get("pid")
+    status = process_status(pid)
+    if status == "exited" or os.name != "posix":
+        return status
+    if state.get("pid_birth"):
+        return status if state["pid_birth"] == process_birth(pid) else "exited"
+    if status == "paused":
+        # Old records have no birth stamp. A stopped process with a recycled
+        # PID must not attach its pause flag to an unrelated conversation.
+        try:
+            rows = active_sessions(state["cli_id"], state["config"])
+        except (KeyError, OSError, ValueError, subprocess.SubprocessError):
+            return "exited"
+        if not any(row.get("pid") == pid for row in rows):
+            return "exited"
+    return status
+
+
+def any_paused(rows):
+    return any(process_status(row.get("pid")) == "paused" for row in rows)
 
 
 def config_directory(account):
@@ -291,7 +351,22 @@ def connection_for(session_id, config, states=None):
     for name, state in connection_states() if states is None else states:
         if state.get("cli_id") == session_id and state.get("config") == str(config):
             matches.append((name, state))
-    return max(matches, key=lambda item: (live(item[1].get("pid")) and not item[1].get("closed"), live(item[1].get("channel_pid")), item[1].get("updated_at", 0)), default=("", {}))
+    return max(matches, key=lambda item: (terminal_status(item[1]) != "exited", live(item[1].get("channel_pid")), item[1].get("updated_at", 0)), default=("", {}))
+
+
+def observed_status(config, session_id, status):
+    if status != "exited" or os.name == "nt" or not (config / "sessions").is_dir():
+        return status
+    # A manual /resume has a CLI registration but no mobile channel. The last
+    # managed terminal may still have an old, closed state for the same UUID.
+    try:
+        rows = running_sessions_cached(str(config))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return status
+    statuses = {process_status(row.get("pid")) for row in rows if row.get("sessionId") == session_id}
+    if "paused" in statuses:
+        return "paused"
+    return "running" if "running" in statuses else "exited"
 
 
 def view(config, session_id, path=None):
@@ -308,11 +383,20 @@ def view(config, session_id, path=None):
             turns, workspace, title, received = transcript(path)
     has_history = bool(turns)
     if connection and any(sent["id"] in received for sent in state.get("sent", [])):
-        with state_file(connection) as latest:
-            latest["sent"] = [sent for sent in latest.get("sent", []) if sent["id"] not in received]
-            state = dict(latest)
-    running = live(state.get("pid")) and not state.get("closed")
-    channel = running and live(state.get("channel_pid")) and not state.get("blocked") and not state.get("policy_unavailable") and not state.get("native_ccs_unverified")
+        # The hook holding this lock may be stopped with the rest of the
+        # foreground job. Display its last committed snapshot immediately.
+        try:
+            with state_file(connection, nonblocking=True) as latest:
+                latest["sent"] = [sent for sent in latest.get("sent", []) if sent["id"] not in received]
+                state = dict(latest)
+        except BlockingIOError:
+            pass
+    managed_status = terminal_status(state)
+    status = observed_status(config, session_id, managed_status)
+    running = status != "exited"
+    external = running and managed_status == "exited"
+    managed = managed_status == "running"
+    channel = managed and live(state.get("channel_pid")) and not state.get("blocked") and not state.get("policy_unavailable") and not state.get("native_ccs_unverified")
     known = {turn["id"] for turn in turns}
     queued_title = ""
     for sent in state.get("sent", []):
@@ -330,12 +414,12 @@ def view(config, session_id, path=None):
             turns[-1]["status"] = "failed"
         elif state.get("stopped"):
             turns[-1]["status"] = "stopped"
-        elif running and state.get("busy"):
+        elif managed and state.get("busy"):
             turns[-1]["status"] = "running"
         elif not running and turns[-1]["status"] == "queued":
             turns[-1]["status"] = "interrupted"
         approvals = state.get("approvals", [])
-        if running and approvals:
+        if managed and approvals:
             turns[-1]["status"] = "running"
             turns[-1]["approval"] = {key: value for key, value in approvals[0].items() if key != "relay_id"}
     shortened = any(turn.get("prompt_truncated") for turn in turns)
@@ -348,9 +432,9 @@ def view(config, session_id, path=None):
         notice = "这台主机的 Claude Code 管理策略关闭了 Channels，请由主机管理员处理。"
     elif state.get("policy_unavailable"):
         notice = "Cage 默认环境的通道配置未能更新，请在电脑更新环境组件。"
-    return {"cli_id": session_id, "config": str(config), "connection": connection, "native_ccs_unverified": bool(state.get("native_ccs_unverified")),
+    return {"cli_id": session_id, "config": str(config), "connection": "" if external else connection, "external_running": external, "native_ccs_unverified": bool(state.get("native_ccs_unverified")),
             "workspace": workspace or state.get("workspace", ""), "title": title or queued_title or "Claude Code",
-            "updated_at": modified, "turns": turns, "running": bool(running), "active": bool(running and (state.get("busy") or state.get("approvals"))), "channel_ready": bool(channel), "can_send": bool(channel and not state.get("resume_task")), "has_history": has_history, "history_truncated": shortened,
+            "updated_at": modified, "turns": turns, "running": running, "paused": status == "paused", "active": bool(managed and (state.get("busy") or state.get("approvals"))), "channel_ready": bool(channel), "can_send": bool(channel and not state.get("resume_task")), "has_history": has_history, "history_truncated": shortened,
             "connection_notice": "" if channel else notice, "account_failure": state.get("account_failure", ""),
             "resume_pending": bool(state.get("resume_task")), "native_history": native_history}
 
@@ -370,9 +454,10 @@ def view_token(config, session_id):
         except (OSError, AttributeError, TypeError):
             return [str(t or "")]
     frozen = state.get("resume_transcript")
-    parts = [str(config), session_id, conn, st(path), st(Path(frozen)) if isinstance(frozen, str) and frozen else None,
-             [[n, v, live(v.get("pid")), live(v.get("channel_pid"))] for n, v in states]]
-    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest(), bool(live(state.get("pid")) and not state.get("closed"))
+    status = observed_status(config, session_id, terminal_status(state))
+    parts = [str(config), session_id, status, conn, st(path), st(Path(frozen)) if isinstance(frozen, str) and frozen else None,
+             [[n, v, terminal_status(v), live(v.get("channel_pid"))] for n, v in states]]
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest(), status != "exited"
 
 
 def history_summary(path):
@@ -462,7 +547,7 @@ def discover(request):
             return running
         def process_state(session_id):
             rows = [row for row in observed_running() if row.get("sessionId") == session_id]
-            return {"running": bool(rows), "claude_desktop": any(
+            return {"running": bool(rows), "paused": any_paused(rows), "claude_desktop": any(
                 session_entrypoint(row, config) in ("claude-desktop", "claude-desktop-3p", "local-agent", "local_agent", "remote_desktop")
                 for row in rows)}
         summary_path = cache_path("summaries", config_name)
@@ -496,11 +581,12 @@ def discover(request):
                 continue
             connection, state = connection_for(session_id, config, states)
             process = process_state(session_id)
-            alive = bool(live(state.get("pid")) and not state.get("closed"))
-            sessions.append({"cli_id": session_id, "config": config_name, "connection": connection,
+            status = terminal_status(state)
+            external = os.name != "nt" and status == "exited" and process["running"]
+            sessions.append({"cli_id": session_id, "config": config_name, "connection": "" if external else connection, "external_running": external,
                              "workspace": workspace, "title": title or "Claude Code", "updated_at": info.st_mtime,
-                             "running": process["running"] or alive, "claude_desktop": process["claude_desktop"],
-                             "active": bool(alive and (state.get("busy") or state.get("approvals")))})
+                             "running": process["running"] or status != "exited", "paused": status == "paused" or (external and process["paused"]), "claude_desktop": process["claude_desktop"],
+                             "active": bool(status == "running" and (state.get("busy") or state.get("approvals")))})
             found.add(session_id)
         stale = set(summaries) - current
         for key in stale:
@@ -517,6 +603,8 @@ def discover(request):
                 continue
             item = view(config, session_id)
             process = process_state(session_id)
+            if os.name != "nt" and process["running"] and (not item["running"] or item["external_running"]):
+                item.update(connection="", external_running=True, paused=process["paused"])
             item["running"] = item["running"] or process["running"]
             item["claude_desktop"] = process["claude_desktop"]
             item.pop("turns")
@@ -622,7 +710,20 @@ if value == {"permissions": {"defaultMode": "bypassPermissions"}, "tui": "fullsc
 
 
 def active_session(session_id, config=""):
-    return bool(active_sessions(session_id, config))
+    return active_session_state(session_id, config)["running"]
+
+
+def active_session_state(session_id, config=""):
+    if os.name == "nt":
+        return {"running": bool(active_sessions(session_id, config)), "paused": False}
+    config = config or str(config_directory("default"))
+    _, state = connection_for(session_id, Path(config))
+    if state.get("pid_birth"):
+        status = terminal_status(state)
+        if status != "exited":
+            return {"running": True, "paused": status == "paused"}
+    rows = active_sessions(session_id, config)
+    return {"running": bool(rows), "paused": any_paused(rows)}
 
 
 def active_sessions(session_id, config=""):
@@ -662,10 +763,17 @@ def handoff_session(request):
     session_id = identifier(request["cli_id"])
     config = request["config"]
     workspace = request["workspace"]
-    rows = active_sessions(session_id, config)
     # A live shared channel is reusable even after the host service restarts.
     _, state = connection_for(session_id, Path(config))
-    if live(state.get("pid")) and live(state.get("channel_pid")) and not state.get("closed"):
+    paused = {"running": True, "paused": True, "channel_ready": False}
+    status = terminal_status(state)
+    if status == "paused":
+        return paused
+    rows = active_sessions(session_id, config)
+    if any_paused(rows):
+        return paused
+    if (status == "running" and live(state.get("channel_pid")) and
+            (os.name != "posix" or state.get("pid_birth") or any(row.get("pid") == state["pid"] for row in rows))):
         return {"running": True, "channel_ready": True}
     for row in rows:
         if not workspace_within(row.get("cwd") or "", workspace):
@@ -681,6 +789,8 @@ def handoff_session(request):
         matched = next((item for item in current if item.get("pid") == row["pid"] and workspace_within(item.get("cwd") or "", workspace) and item.get("kind") == "interactive" and item.get("status") in ("idle", "waiting")), None)
         if matched is None:
             return {"running": bool(current)}
+        if process_status(matched["pid"]) == "paused":
+            return paused
         if matched["status"] == "waiting":
             save(handoff_receipt(config, session_id), {"resume_task": True, "permission_mode": "manual" if matched.get("waitingFor") != "input needed" else ""})
         try:
@@ -719,21 +829,34 @@ def prepare_account_switch(request):
             raise ValueError("账号交接编号已用于另一项操作")
         return {"transcript": str(folder / "history.jsonl")}
     state = {}
+    paused_notice = "Claude 已暂停，原会话仍占用此账号，请先继续对话"
     if not connection:
-        if connection_for(sid, config)[0] or active_sessions(sid, str(config)):
+        existing_connection, existing_state = connection_for(sid, config)
+        rows = active_sessions(sid, str(config))
+        if terminal_status(existing_state) == "paused" or any_paused(rows):
+            raise ValueError(paused_notice)
+        if existing_connection or rows:
             raise ValueError("原会话正在运行或已在其他终端打开，请先结束后再用其他账号继续")
     else:
+        if terminal_status(read_json(ROOT / connection / "state.json", {})) == "paused":
+            raise ValueError(paused_notice)
         with state_file(connection) as state:
             if state.get("cli_id") != sid or state.get("config") != str(config) or state.get("workspace") != workspace:
                 raise ValueError("原会话身份或项目已变化，请刷新后重试")
+            if terminal_status(state) == "paused":
+                raise ValueError(paused_notice)
             if state.get("busy") or state.get("approvals") or state.get("pending_send") or state.get("sent"):
                 raise ValueError("原会话仍有任务、待发消息或审批，请结束后再切换账号")
             existing = state.get("account_switch")
             if existing and existing != switch_id:
                 raise ValueError("此会话已有账号交接尚未完成")
+            # A manually reopened Claude may own the session after the original
+            # terminal closed. Inspect it before fencing the old connection.
+            rows = active_sessions(sid, str(config))
+            if terminal_status(state) == "paused" or any_paused(rows):
+                raise ValueError(paused_notice)
             state["account_switch"] = switch_id
             save(ROOT / connection / "state.json", state)
-    rows = active_sessions(sid, str(config))
     # Any other live worker in this account can represent a background
     # child of the source. The registry does not expose a complete ancestry.
     listing = subprocess.run(["claude", "agents", "--json"], env={**os.environ, "CLAUDE_CONFIG_DIR": str(config)}, capture_output=True, text=True, timeout=10)
@@ -747,7 +870,7 @@ def prepare_account_switch(request):
     for row in rows:
         if not workspace_within(row.get("cwd") or "", workspace) or row.get("status") != "idle" or row.get("kind") != "interactive":
             raise ValueError("原 Claude Code 尚未安全停止，请先结束本轮任务")
-    pid = state.get("pid")
+    pid = state.get("pid") if terminal_status(state) != "exited" else None
     fingerprint = process_fingerprint(pid) if live(pid) else ""
     def executing():
         if not live(pid):
@@ -759,6 +882,12 @@ def prepare_account_switch(request):
     if executing() and not any(row.get("pid") == pid for row in rows):
         raise ValueError("无法核对原进程状态，请先退出原 Claude Code 后重试")
     for row in rows:
+        if process_status(row["pid"]) == "paused":
+            if connection:
+                with state_file(connection) as current:
+                    if current.get("account_switch") == switch_id:
+                        current.pop("account_switch")
+            raise ValueError(paused_notice)
         terminate_cli(row["pid"])
     deadline = time.monotonic() + 5
     while executing() and time.monotonic() < deadline:
@@ -867,7 +996,7 @@ def purge_session(request):
     for path in ROOT.glob("*/state.json"):
         state = read_json(path, {})
         if state.get("cli_id") == session_id and state.get("config") == str(config):
-            if live(state.get("pid")) and not state.get("closed"):
+            if terminal_status(state) != "exited":
                 raise ValueError("会话通道尚未退出，请稍后重试")
             shutil.rmtree(path.parent)
     identity = ROOT.parent / "mobile-cli-identities" / session_id
@@ -879,6 +1008,35 @@ def purge_session(request):
         if binding.get("cli_id") == session_id or binding.get("target_cli_id") == session_id:
             shutil.rmtree(saved.parent)
     return {"ok": True}
+
+
+def start_terminal(request, shell_umask):
+    # Only the short helper path and a descriptor survive exec. Account launch
+    # arguments stay in this private, anonymous file for the real CLI child.
+    module = Path(__file__).with_suffix(".terminal.py")
+    if not module.exists():
+        module = Path(__file__).with_name("terminal_job.py")
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as data:
+        json.dump([__file__, request, shell_umask], data)
+        data.seek(0)
+        os.set_inheritable(data.fileno(), True)
+        os.execv(sys.executable, [sys.executable, "-I", client_runtime()["path"](module), str(data.fileno())])
+
+
+def continue_terminal(request):
+    if os.name != "posix":
+        return {"error": "terminal_unavailable"}
+    try:
+        # Like the channel RPC, a relative socket path also works in long home directories.
+        os.chdir(ROOT / identifier(request["connection"]))
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(2)
+            client.connect("job")
+            client.sendall(json.dumps(request).encode() + b"\n")
+            with client.makefile("rb") as stream:
+                return json.loads(stream.readline(8192))
+    except (OSError, KeyError, ValueError):
+        return {"error": "terminal_unavailable"}
 
 
 def launch(request):
@@ -932,12 +1090,14 @@ def launch(request):
     config = {"mcpServers": {connection: {"command": argv[0], "args": argv[1:]}}}
     save(folder / "mcp.json", config)
     with state_file(connection) as state:
-        if live(state.get("pid")) and not state.get("closed"):
+        if terminal_status(state) != "exited":
             raise ValueError("目标会话已有进程，未重复启动")
         state.update(codex_enabled=request.get("codex_enabled") is True, cli_id=session_id, config=str(config_directory("default")), login_subject=_controller_context.get("CAGE_CLAUDE_SUBJECT"),
                      workspace=str(Path.cwd()), pid=os.getpid(), closed=False, updated_at=time.time(), approvals=[], busy=False,
                      channel_pid=None, pending_send=None, display=None, stopped=False,
                      requests=previous.get("requests", {}), sent=previous.get("sent", []))
+        if os.name == "posix":
+            state["pid_birth"] = process_birth(os.getpid())
         receipt = handoff_receipt(config_directory("default"), session_id)
         transfer = read_json(receipt, {})
         state["resume_task"] = previous.get("resume_task", False) or transfer.get("resume_task", False)
@@ -986,6 +1146,11 @@ def launch(request):
 
 def rpc(request):
     connection = identifier(request["connection"])
+    # Claude's MCP child can be stopped in the same foreground group. Reject
+    # input before trying its socket; recheck under the lock in serve as well.
+    state = read_json(ROOT / connection / "state.json", {})
+    if terminal_status(state) == "paused":
+        return {"error": "Claude 已暂停，请先继续对话"}
     os.chdir(ROOT / connection)
     with socket.socket(socket.AF_UNIX) as client:
         client.settimeout(12 if request.get("action") == "codex-read" else 5)
@@ -1022,6 +1187,8 @@ def serve(connection):
                         raise ValueError("终端已切换会话，请重新读取列表")
                     if state.get("account_switch"):
                         raise ValueError("此会话正在切换账号，请等待交接完成")
+                    if terminal_status(state) == "paused" and not delegate:
+                        raise ValueError("Claude 已暂停，请先继续对话")
                     if delegate:
                         self.wfile.write(json.dumps(mailbox.exchange(request)).encode() + b"\n")
                         return
@@ -1136,7 +1303,7 @@ def serve(connection):
 
 
 def main():
-    os.umask(0o077)
+    shell_umask = os.umask(0o077)
     mode, argument = sys.argv[1:3]
     if mode == "ccs-live" and os.name == "nt":
         return _platform["launch_ccs_live"](argument, globals())
@@ -1148,6 +1315,8 @@ def main():
         request = json.load(sys.stdin) if argument == "-" else json.loads(argument)
         if mode == "launch":
             return launch(request)
+        if mode == "terminal":
+            return start_terminal(request, shell_umask) if os.name == "posix" else launch(request)
         if mode == "discover":
             result = discover(request)
         elif mode == "view":
@@ -1177,7 +1346,12 @@ def main():
             result = rpc(request)
         elif mode == "active":
             config = request.get("config") or str(config_directory(request.get("account") or "default"))
-            result = {"running": active_session(identifier(request["cli_id"]), config)}
+            result = active_session_state(identifier(request["cli_id"]), config)
+        elif mode == "continue":
+            try:
+                result = continue_terminal(request)
+            except (OSError, ValueError, KeyError) as error:
+                result = {"error": str(error)}
         elif mode == "handoff":
             try:
                 result = handoff_session(request)

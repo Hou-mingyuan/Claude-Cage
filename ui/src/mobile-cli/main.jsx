@@ -11,6 +11,8 @@ import { activeTurn as active, activeTurnIdForQueue, canDrainQueue, canSendImmed
 import { SessionActionDialog, sortSessions } from "./session-row";
 import { ArchivedSessions } from "../cli-sessions";
 import { SessionAccount } from "../session-account";
+import { PausedSession } from "../paused-session";
+import { useTranslation } from "../interface-language.mjs";
 import "./mobile.css";
 import { IconHints } from "../icon-hints.jsx";
 import { MessageBody, ToolActivity, TranscriptContext } from "./transcript";
@@ -41,7 +43,9 @@ function saveRoute(next, push) {
   history[push ? "pushState" : "replaceState"]({ ...history.state, cageCLI: next }, "");
 }
 
-function Status({ value, awaitingApproval }) {
+function Status({ value, awaitingApproval, paused }) {
+  const tr = useTranslation();
+  if (paused) return <span className="status-label" role="status">{tr("已暂停")}</span>;
   const tone = active(value) ? "live" : value === "failed" || value === "interrupted" ? "bad" : "";
   return <span className={"status-label " + tone} role="status"><i className="status-dot" />{awaitingApproval ? "等待审批" : labels[value] || "就绪"}</span>;
 }
@@ -168,11 +172,11 @@ function App() {
   const updateSession = useCallback((snapshot) => {
     setCatalog((old) => {
       if (!old) return old;
-      const { id, workspace, title, revision, updated_at, generation, pinned, custom_title, metadata_set, active } = snapshot;
+      const { id, workspace, title, revision, updated_at, generation, pinned, custom_title, metadata_set, active, paused } = snapshot;
       if (archivedSessions.current.has(id)) return old;
       const previous = old.sessions.find((s) => s.id === id);
-      if (previous && previous.generation === generation && previous.revision >= revision) return old;
-      return { ...old, sessions: [{ id, workspace, title, revision, updated_at, generation, pinned, custom_title, metadata_set, active }, ...old.sessions.filter((s) => s.id !== id)] };
+      if (previous && previous.generation === generation && (previous.revision > revision || previous.revision === revision && previous.paused === paused)) return old;
+      return { ...old, sessions: [{ ...previous, id, workspace, title, revision, updated_at, generation, pinned, custom_title, metadata_set, active, paused }, ...old.sessions.filter((s) => s.id !== id)] };
     });
   }, []);
   const projects = catalog?.projects || [];
@@ -293,7 +297,7 @@ function App() {
   const sidebarChildren = <>
     {error && <Notice onRetry={refreshAll}>{error}</Notice>}
     {gate ? <Notice onRetry={refreshAll}>{gate}</Notice> : <ProjectTree catalog={catalog} projectPath={current.project}
-      sessionID={current.tool === "code" ? session : ""} creating={creating || actionBusy} onNew={start} onAction={chooseSessionAction}
+      sessionID={current.tool === "code" ? session : ""} creating={creating || actionBusy} onNew={start} onAction={chooseSessionAction} formatTime={displayTime}
       onSession={(path,id) => {open(path,id,true); setDrawer(false);}} expanded={expanded}
       toggle={(path,next) => setExpanded(previous => new Map(previous).set(path,next))} />}
   </>;
@@ -340,6 +344,7 @@ function App() {
 }
 
 function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMissing, onSnapshot, onBack }) {
+  const tr = useTranslation();
   const [session, setSession] = useState(null);
   const [readError, setReadError] = useState("");
   const [connectionError, setConnectionError] = useState("");
@@ -464,7 +469,7 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
     }
   }, [id, accept, onDenied, onMissing]);
   useEffect(() => {
-    if (!visible || uncertain) return;
+    if (!visible || (uncertain && !session?.paused)) return;
     readFailures.current = 0;
     const controller = new AbortController();
     let timer, incremental = false;
@@ -475,9 +480,9 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
     };
     void poll();
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [fetchSession, visible, refresh, reload, uncertain]);
+  }, [fetchSession, visible, refresh, reload, uncertain, session?.paused]);
   useEffect(() => {
-    if (!uncertain || !visible || !ready) return;
+    if (!uncertain || !visible || !ready || session?.paused) return;
     const controller = new AbortController();
     setConfirming(true); setActionError(""); setReadError(""); setReadProgress("");
     const recovering = recoverPendingMessage({
@@ -502,8 +507,8 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
       if (accessDenied(error)) onDenied(error); else if ([404,410].includes(error.status)) onMissing(); else setActionError(sessionFailureMessage(error));
     }).finally(() => { if (!controller.signal.aborted) { setConfirming(false); setSendProgress(""); } });
     return () => { controller.abort(); setConfirming(false); setSendProgress(""); };
-  }, [id, uncertain, visible, ready, accept, onDenied, onMissing, refresh, reload]);
-  const needsConnection = ready && visible && session?.terminal_available && session.can_send === false;
+  }, [id, uncertain, visible, ready, session?.paused, accept, onDenied, onMissing, refresh, reload]);
+  const needsConnection = ready && visible && session?.terminal_available && !session.paused && session.can_send === false;
   useEffect(() => {
     if (!needsConnection) { setConnectionError(""); setConnectionProgress(""); return; }
     setConnectionError("");
@@ -518,8 +523,8 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
         const snapshot = await request(sessionPath(id) + "/open", { body: {automatic:true}, signal:controller.signal });
         if (controller.signal.aborted) return;
         if (snapshot) accept(snapshot, generation);
-        failures = 0; setConnectionProgress("");
-        if (snapshot?.can_send) return;
+        failures = 0; setConnectionProgress(snapshot?.connection_waiting ? snapshot.connection_notice || "" : "");
+        if (snapshot?.paused || snapshot?.can_send) return;
         if (snapshot?.connection_waiting) started = Date.now();
         if (!snapshot?.connection_waiting && Date.now() - started > 60000) {
           setConnectionError("会话连接暂未就绪，请重试。");
@@ -670,7 +675,7 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
   const send = async (event) => {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || !ready || !session || session.single_turn || session.can_send === false) return;
+    if (!text || !ready || !session || session.single_turn || session.paused || session.can_send === false) return;
     const item = { request_id: crypto.randomUUID(), text };
     draftRef.current = "";
     setDraft("");
@@ -707,7 +712,7 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
     }
   };
   const stop = async () => {
-    if (actionBusy.current || last?.status !== "running") return;
+    if (actionBusy.current || latest.current?.paused || last?.status !== "running") return;
     if (queueRef.current.length > 0 && !queuePausedRef.current) {
       queuePausedRef.current = true;
       waitingTurnIdRef.current = null;
@@ -725,7 +730,7 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
   };
   const decide = async (turnId, approvalId, allow) => {
     const turn = latest.current?.turns?.at(-1);
-    if (actionBusy.current || checkApproval.current?.id === approvalId || turn?.id !== turnId || turn?.status !== "running" || turn.approval?.id !== approvalId) return;
+    if (actionBusy.current || latest.current?.paused || checkApproval.current?.id === approvalId || turn?.id !== turnId || turn?.status !== "running" || turn.approval?.id !== approvalId) return;
     actionBusy.current = true; setBusy(true); setApprovalFeedback(null);
     try {
       const generation = latest.current?.generation;
@@ -753,13 +758,13 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
   });
   return <>
     <section className="chat-header">
-      <div className="title-line">{onBack && <button type="button" className="icon-button" aria-label="返回会话列表" onClick={onBack}><ArrowLeft size={18} /></button>}<h1>{session?.title || "Claude Code 会话"}</h1>{session && <Status value={last?.status} awaitingApproval={last?.status === "running" && last.approval} />}</div>
+      <div className="title-line">{onBack && <button type="button" className="icon-button" aria-label="返回会话列表" onClick={onBack}><ArrowLeft size={18} /></button>}<h1>{session?.title || "Claude Code 会话"}</h1>{session && <Status value={last?.status} paused={session.paused} awaitingApproval={last?.status === "running" && last.approval} />}</div>
       {session && <p className="note">{session.workspace}</p>}
     </section>
     {!uncertain && (readError || connectionError) && <Notice onRetry={() => retry(true)} label="再次连接">{readError || connectionError}</Notice>}
-    {session && <SessionAccount id={id} request={request} onChanged={()=>setReload(n=>n+1)} compact />}
-    {(sendProgress || connectionProgress || readProgress) && <p className="note" role="status">{sendProgress || connectionProgress || readProgress}</p>}
-    {session?.connection_notice && <Notice>{session.connection_notice}</Notice>}
+    {session && <SessionAccount id={id} request={request} paused={session.paused} onChanged={()=>setReload(n=>n+1)} compact />}
+    {(sendProgress || connectionProgress || readProgress) && <p className="note" role="status">{sendProgress || tr(connectionProgress) || readProgress}</p>}
+    {session?.connection_notice && session.connection_notice !== connectionProgress && <Notice>{tr(session.connection_notice)}</Notice>}
     {session?.history_truncated && <p className="note">手机显示的历史已截断，完整内容保存在电脑 Claude Code 中。</p>}
     <section className="transcript" ref={transcript} aria-label="会话消息" onScroll={(e) => {
       const box = e.currentTarget; follow.current = box.scrollHeight - box.scrollTop - box.clientHeight < 64;
@@ -774,7 +779,7 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
           {turn.truncated && <p className="note">本轮输出超过记录上限，仅显示已保存的部分。</p>}
           {!turn.text && !turn.approval && active(turn.status) && <p className="note">等待输出…</p>}
           {turn.id === last.id && turn.status === "running" && turn.approval?.id && <Approval
-            key={turn.approval.id} approval={turn.approval} busy={busy} feedback={approvalFeedback?.id === turn.approval.id ? approvalFeedback : null}
+            key={turn.approval.id} approval={turn.approval} busy={busy || session.paused} feedback={approvalFeedback?.id === turn.approval.id ? approvalFeedback : null}
             onDecide={(allow) => decide(turn.id, turn.approval.id, allow)} />}
           {turn.error && <div className="turn-error">{turn.error}</div>}
           {turn.denied_tools?.length > 0 && <div className="turn-tools">以下工具需要授权，本次调用已拒绝。<span>{turn.denied_tools.join("、")}</span></div>}
@@ -799,11 +804,13 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
       </article>)}</TranscriptContext.Provider>
     </section>
     <form className="compose" onSubmit={send}>
-      {actionError && <Notice onRetry={uncertain ? () => retry(false) : undefined} label="再次连接">{actionError}</Notice>}
+      {actionError && <Notice onRetry={uncertain ? () => retry(false) : undefined} label="再次连接">{tr(actionError)}</Notice>}
       {session?.single_turn && <p className="note">当前凭据或路由只能验证本轮。请返回会话列表，新建会话后继续。</p>}
       {!ready && <p className="note">请在电脑上启动 Cage 环境。</p>}
+      {session?.paused && <PausedSession id={id} request={request} disabled={!ready || busy}
+        onContinued={snapshot => accept(snapshot, session.generation)} />}
       <div className="composer-field">
-        <textarea ref={composerInput} aria-label="消息" rows="1" placeholder={running ? "正在运行，可继续输入排队发送" : willQueue ? "可继续输入，将按顺序排队发送" : "给 Claude Code 发消息"} value={draft} disabled={!session || session.single_turn || !ready}
+        <textarea ref={composerInput} aria-label="消息" rows="1" placeholder={session?.paused ? tr("Claude 已暂停") : running ? "正在运行，可继续输入排队发送" : willQueue ? "可继续输入，将按顺序排队发送" : "给 Claude Code 发消息"} value={draft} disabled={!session || session.single_turn || session.paused || session.can_send === false || !ready}
           onChange={(e) => {
             const value = e.target.value;
             draftRef.current = value;
@@ -812,8 +819,8 @@ function Chat({ id, drafts, ready, visible, refresh, onOpenWeb, onDenied, onMiss
           }} onKeyDown={(e) => {
             if (e.key === "Enter" && !e.nativeEvent.isComposing && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send(); }
           }} />
-        {running && <button type="button" className={draft.trim() ? "composer-action secondary" : "composer-action"} aria-label={last.status === "stopping" ? "正在停止" : "停止运行"} title={last.status === "stopping" ? "正在停止" : "停止运行"} disabled={busy || last.status !== "running"} onClick={stop}><Square size={17} /></button>}
-        {(!running || draft.trim()) && <button type="submit" className="composer-action" aria-label={willQueue ? "加入待发队列" : "发送"} title={willQueue ? "加入待发队列" : "发送"} disabled={!ready || !session || session.single_turn || session.can_send === false || !draft.trim()}><ArrowUp size={21} /></button>}
+        {running && !session?.paused && <button type="button" className={draft.trim() ? "composer-action secondary" : "composer-action"} aria-label={last.status === "stopping" ? "正在停止" : "停止运行"} title={last.status === "stopping" ? "正在停止" : "停止运行"} disabled={busy || last.status !== "running"} onClick={stop}><Square size={17} /></button>}
+        {(!running || draft.trim()) && <button type="submit" className="composer-action" aria-label={willQueue ? "加入待发队列" : "发送"} title={willQueue ? "加入待发队列" : "发送"} disabled={!ready || !session || session.single_turn || session.paused || session.can_send === false || !draft.trim()}><ArrowUp size={21} /></button>}
       </div>
     </form>
   </>;

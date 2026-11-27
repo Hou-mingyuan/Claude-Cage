@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  appliedRouteTestKey,
   emptyFormDefaults,
   emptyManualDefaults,
   isSourceFormDirty,
@@ -9,6 +10,7 @@ import {
   setupGuideProgress,
   singleNodeFromRoute,
   swapTwoHopRoute,
+  visibleRouteTestResult,
 } from "./proxy-setup-guide.mjs";
 
 test("isSourceFormDirty ignores untouched new and edit forms while catching real edits", () => {
@@ -124,4 +126,39 @@ test("setupGuideProgress reports accurate checklist progression and block reason
       blockReason: "ready",
     },
   );
+});
+
+test("appliedRouteTestKey and visibleRouteTestResult invalidate stale route tests", () => {
+  const singleProxy = { active: true, running: true, selected: "exit1", route: ["exit1"], port: 17896 };
+  const chainProxy = { active: true, running: true, selected: "exit1", route: ["relay1", "exit1"], port: 17896 };
+  const stoppedProxy = { ...chainProxy, running: false };
+
+  assert.equal(appliedRouteTestKey(singleProxy, false), "");
+  assert.equal(appliedRouteTestKey(stoppedProxy, true), "");
+  assert.equal(appliedRouteTestKey({ ...singleProxy, selected: "" }, true), "");
+
+  const singleKey = appliedRouteTestKey(singleProxy, true);
+  const chainKey = appliedRouteTestKey(chainProxy, true);
+  assert.ok(singleKey);
+  assert.ok(chainKey);
+  assert.notEqual(singleKey, chainKey);
+
+  const result = { key: chainKey, ok: true, delay: 128, error: "" };
+  assert.deepEqual(visibleRouteTestResult(result, chainKey, false), result);
+  assert.equal(visibleRouteTestResult(result, chainKey, true), null);
+  assert.equal(visibleRouteTestResult(result, singleKey, false), null);
+  assert.equal(visibleRouteTestResult(result, "", false), null);
+
+  // Relay-group hop metadata changes also invalidate the key.
+  const relayA = {
+    ...chainProxy,
+    route: ["CAGE-RELAY-0", "exit1"],
+    route_hops: [{ relay: { strategy: "fallback", node_ids: ["r1", "r2"] } }, { node_id: "exit1" }],
+  };
+  const relayB = {
+    ...chainProxy,
+    route: ["CAGE-RELAY-0", "exit1"],
+    route_hops: [{ relay: { strategy: "url-test", node_ids: ["r1", "r2"] } }, { node_id: "exit1" }],
+  };
+  assert.notEqual(appliedRouteTestKey(relayA, true), appliedRouteTestKey(relayB, true));
 });
