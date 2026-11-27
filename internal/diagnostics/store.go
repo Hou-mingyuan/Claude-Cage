@@ -215,6 +215,45 @@ func (s *Store) Record(level, source, message string) error {
 	return s.appendEvents([]Event{{Level: level, Source: source, Message: message}})
 }
 
+// EventsSince returns the stored, already redacted events of one source
+// recorded at or after since, oldest file first.
+func (s *Store) EventsSince(since time.Time, source string) ([]Event, error) {
+	var events []Event
+	err := s.withLock(func() error {
+		files, err := s.files()
+		if err != nil {
+			return err
+		}
+		for _, info := range files {
+			if info.ModTime().Before(since) {
+				continue
+			}
+			f, err := privateFile(filepath.Join(s.dir, info.Name()), os.O_RDONLY)
+			if err != nil {
+				return err
+			}
+			scanner := bufio.NewScanner(f)
+			scanner.Buffer(make([]byte, 0, 64<<10), MaxMessage*8)
+			for scanner.Scan() {
+				var event Event
+				if json.Unmarshal(scanner.Bytes(), &event) != nil || event.Source != source {
+					continue
+				}
+				if stamp, err := time.Parse(time.RFC3339Nano, event.Time); err == nil && !stamp.Before(since) {
+					events = append(events, event)
+				}
+			}
+			err = scanner.Err()
+			f.Close()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return events, err
+}
+
 // appendEvents amortizes filesystem and permission checks across one bounded
 // stream chunk. Rotation still applies between records, under the process lock.
 func (s *Store) appendEvents(events []Event) error {

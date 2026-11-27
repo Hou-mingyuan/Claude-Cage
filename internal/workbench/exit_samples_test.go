@@ -33,6 +33,7 @@ func TestIncompleteExitSamplesIdentifyRoutesAndRedactPrivateErrors(t *testing.T)
 		{networkObservation{Status: 503, Error: "proxy_unavailable", Reason: "timeout"}, "内部检测超时"},
 		{networkObservation{Status: 503, Error: "proxy_unavailable", Reason: "tls_timeout"}, "内部检测 TLS 握手超时"},
 		{networkObservation{Status: 503, Error: "proxy_unavailable", Reason: "tls_handshake"}, "内部检测 TLS 握手失败"},
+		{networkObservation{Status: 503, Error: "proxy_unavailable", Reason: "reality_auth"}, "内部检测代理节点 REALITY 认证失败"},
 		{networkObservation{Status: 503, Error: "proxy_unavailable", Reason: "proxy_connect"}, "内部检测代理连接失败"},
 		{networkObservation{Status: 503, Error: "proxy_unavailable", Reason: "probe_failed"}, "内部检测未能经代理取得出口"},
 		{networkObservation{Status: 200}, "没有返回出口地址"},

@@ -57,6 +57,8 @@ func diagnosticFailureDetail(obs networkObservation) string {
 		return "内部检测 TLS 握手超时"
 	case "tls_handshake":
 		return "内部检测 TLS 握手失败"
+	case "reality_auth":
+		return "内部检测代理节点 REALITY 认证失败"
 	case "proxy_connect":
 		return "内部检测代理连接失败"
 	case "probe_failed":
