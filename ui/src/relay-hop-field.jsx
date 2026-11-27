@@ -102,9 +102,7 @@ export function RelayHopField({
             <span className="proxy-hop-token is-source">
               <Layers size={12} aria-hidden="true" />
               <strong className="proxy-hop-token-name">{sourceName(hop.source_id)}</strong>
-              <span className="proxy-hop-token-meta">
-                {tr("整份订阅 · {0} 节点", candidateIDs.length)}
-              </span>
+              <span className="proxy-hop-token-meta">{tr("整份订阅")}</span>
               <button
                 type="button"
                 className="proxy-hop-token-btn"
@@ -331,10 +329,10 @@ export function RelayHopField({
               {tr("最低延迟")}
             </button>
           </div>
-          {liveActiveID && (
+          {isSourceMode && liveActiveID && (
             <span className="proxy-relay-live">
               <span className="proxy-relay-live-dot" aria-hidden="true" />
-              <span>{tr("当前生效：{0}", routeName(liveActiveID))}</span>
+              <span>{routeName(liveActiveID)}</span>
             </span>
           )}
         </div>

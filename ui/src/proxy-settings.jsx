@@ -570,16 +570,8 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     const liveID = includeLive ? liveActiveNodeForHop(index, hop) : "";
     const count = hopCandidateIDs(hop, hopsList, sources, usableIDs).length;
     if (!hop.source_id && count === 0) return tr("待选择");
-    const base = hop.source_id
-      ? sourceName(hop.source_id)
-      : tr("自选 {0} 节点", count);
-    if (liveID) {
-      return tr("{0}（{1} · 当前 {2}）", base, strategyLabel(hop.strategy), routeName(liveID));
-    }
-    if (includeLive) {
-      return tr("{0}（{1} · {2} 节点）", base, strategyLabel(hop.strategy), count);
-    }
-    return base;
+    if (liveID) return routeName(liveID);
+    return hop.source_id ? sourceName(hop.source_id) : tr("中转组");
   };
   const hopIssueMessage = (code, index) => {
     switch (code) {
@@ -687,6 +679,31 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     isChainMode &&
     hop0EligibleVisible.length > 0 &&
     hop0EligibleVisible.every((n) => transitCandidateSets[0].has(n.id));
+  const renderDelayButton = (n) => {
+    if (n.blocked_reason) return null;
+    const delayRaw = delays[n.id] || "";
+    const delayIsError = delayRaw === "不可用 / 未载入";
+    const delayLabel = delayRaw ? (delayIsError ? tr("不可用") : tr(delayRaw)) : tr("未测速");
+    const delayTitle = delayReasons.current[n.id]
+      ? localizeBackendMessage(delayReasons.current[n.id], tr)
+      : tr("检测此节点到 www.gstatic.com 的 HTTP 往返延迟，通常不含建连开销，不代表网页首开耗时");
+    return (
+      <button
+        type="button"
+        className={`proxy-delay-btn${delayRaw ? (delayIsError ? " is-error" : " is-measured") : ""}`}
+        aria-label={tr("测速 {0}", n.name)}
+        title={delayTitle}
+        disabled={busy || !proxy.running}
+        onClick={() => measure([n.id])}
+      >
+        <span className="proxy-delay-value">{delayLabel}</span>
+        <span className="proxy-delay-action" aria-hidden="true">
+          <Activity size={13} />
+          <span>{tr("测速")}</span>
+        </span>
+      </button>
+    );
+  };
   const renderNodeRow = (n) => {
     const isDraftExit = !n.blocked_reason && n.id === draftExitID;
     const inAnyTransit = !n.blocked_reason && transitCandidateSets.some((set) => set.has(n.id));
@@ -731,17 +748,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
               {roleBadge.text}
             </span>
           )}
-          <span className="proxy-delay" title={n.blocked_reason ? undefined : (delayReasons.current[n.id] ? localizeBackendMessage(delayReasons.current[n.id], tr) : undefined)}>
-            {!n.blocked_reason && (delays[n.id] ? tr(delays[n.id]) : tr("未测速"))}
-          </span>
-          <button
-            aria-label={tr("测速 {0}", (n.name))}
-            title={tr("检测此节点到 www.gstatic.com 的 HTTP 往返延迟，通常不含建连开销，不代表网页首开耗时")}
-            disabled={busy || !proxy.running || Boolean(n.blocked_reason)}
-            onClick={() => measure([n.id])}
-          >
-            <Activity size={14} />
-          </button>
+          {renderDelayButton(n)}
         </div>
       );
     }
@@ -814,17 +821,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
             <span>{isDraftExit ? tr("出口") : tr("设为出口")}</span>
           </button>
         </div>
-        <span className="proxy-delay" title={n.blocked_reason ? undefined : (delayReasons.current[n.id] ? localizeBackendMessage(delayReasons.current[n.id], tr) : undefined)}>
-          {!n.blocked_reason && (delays[n.id] ? tr(delays[n.id]) : tr("未测速"))}
-        </span>
-        <button
-          aria-label={tr("测速 {0}", (n.name))}
-          title={tr("检测此节点到 www.gstatic.com 的 HTTP 往返延迟，通常不含建连开销，不代表网页首开耗时")}
-          disabled={busy || !proxy.running || Boolean(n.blocked_reason)}
-          onClick={() => measure([n.id])}
-        >
-          <Activity size={14} />
-        </button>
+        {renderDelayButton(n)}
       </div>
     );
   };
@@ -1390,11 +1387,11 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                             <small>
                               {multiNode
                                 ? hop.strategy === RELAY_STRATEGY_URL_TEST
-                                  ? tr("定期测速并自动切换到最低延迟节点；不会改变最终出口 IP，全部不可用时保持断网。")
-                                  : tr("按顺序优先使用靠前节点，连不上时自动切换下一个；不会改变最终出口 IP，全部不可用时保持断网。")
+                                  ? tr("自动选最低延迟节点，不影响最终出口 IP")
+                                  : tr("按顺序自动顺延，不影响最终出口 IP")
                                 : index === 0
-                                  ? tr("本机先连这里；选 1 个为固定中转，多选或选整份订阅时自动切换")
-                                  : tr("经上一跳中转后再转发至下一跳；多选或选整份订阅时自动切换")}
+                                  ? tr("多选节点或选整份订阅时自动切换")
+                                  : tr("经上一跳中转；多选或选整份订阅时自动切换")}
                             </small>
                           </>
                         )}
@@ -1471,7 +1468,13 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                   const singleID = singleNodeIDOfHop(hop);
                   const roleShort = final ? tr("出口") : multiNode ? tr("中转组") : tr("中转");
                   const liveID = liveActiveNodeForHop(index, hop);
-                  const count = routeValidation.candidateCounts[index] || 0;
+                  const chipText = singleID
+                    ? routeName(singleID)
+                    : liveID
+                      ? routeName(liveID)
+                      : hop.source_id
+                        ? sourceName(hop.source_id)
+                        : strategyLabel(hop.strategy);
                   return (
                     <React.Fragment key={index}>
                       <ArrowRight size={13} className="proxy-flow-arrow" aria-hidden="true" />
@@ -1479,20 +1482,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                         <span className={`proxy-flow-chip ${final ? "is-exit" : multiNode ? "is-relay-group" : "is-relay"}`}>
                           {multiNode && <Layers size={11} aria-hidden="true" />}
                           {route.length > 1 && <em>{roleShort}</em>}
-                          <strong>
-                            {singleID
-                              ? routeName(singleID)
-                              : hop.source_id
-                                ? sourceName(hop.source_id)
-                                : tr("自选 {0} 节点", count)}
-                          </strong>
-                          {multiNode && (
-                            <small className="proxy-flow-meta">
-                              {liveID
-                                ? tr("当前: {0}", routeName(liveID))
-                                : `${strategyLabel(hop.strategy)} · ${count}`}
-                            </small>
-                          )}
+                          <strong>{chipText}</strong>
                         </span>
                       ) : (
                         <button

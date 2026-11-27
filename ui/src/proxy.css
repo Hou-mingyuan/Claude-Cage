@@ -548,6 +548,70 @@ button.proxy-node-push-btn:disabled {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.settings-page .settings-content .proxy-manager button.proxy-delay-btn,
+button.proxy-delay-btn {
+  display: inline-grid;
+  place-items: center;
+  min-width: 68px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    background-color 140ms var(--ease-out),
+    border-color 140ms var(--ease-out),
+    color 140ms var(--ease-out);
+}
+.proxy-delay-btn > span {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: opacity 120ms var(--ease-out);
+}
+.proxy-delay-btn .proxy-delay-action {
+  opacity: 0;
+  pointer-events: none;
+  color: var(--strong);
+  font-weight: 540;
+}
+.proxy-delay-btn.is-measured .proxy-delay-value {
+  color: var(--success);
+  font-weight: 550;
+}
+.proxy-delay-btn.is-error .proxy-delay-value {
+  color: var(--danger, #bc4c4c);
+}
+.settings-page .settings-content .proxy-manager button.proxy-delay-btn:hover:not(:disabled),
+.settings-page .settings-content .proxy-manager button.proxy-delay-btn:focus-visible:not(:disabled),
+button.proxy-delay-btn:hover:not(:disabled),
+button.proxy-delay-btn:focus-visible:not(:disabled) {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--strong);
+  box-shadow: var(--shadow-xs);
+}
+.proxy-delay-btn:hover:not(:disabled) .proxy-delay-value,
+.proxy-delay-btn:focus-visible:not(:disabled) .proxy-delay-value {
+  opacity: 0;
+}
+.proxy-delay-btn:hover:not(:disabled) .proxy-delay-action,
+.proxy-delay-btn:focus-visible:not(:disabled) .proxy-delay-action {
+  opacity: 1;
+}
+.settings-page .settings-content .proxy-manager button.proxy-delay-btn:disabled,
+button.proxy-delay-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
 .proxy-empty {
   display: flex;
   flex-direction: column;

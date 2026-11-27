@@ -3482,5 +3482,10 @@
   "链路测速失败": "Tijaabinta waddadu way fashilantay",
   "经当前已应用的代理链路测速，检查链路是否可用": "Wuxuu cabbiraa dib-u-dhaca waddada proxy ee la dabaqay si loo hubiyo inay shaqaynayso",
   "测速中…": "Waa la tijaabinayaa…",
-  "链路测速": "Tijaabi waddada"
+  "链路测速": "Tijaabi waddada",
+  "不可用": "Ma shaqaynayo",
+  "自动选最低延迟节点，不影响最终出口 IP": "Wuxuu si toos ah u doortaa node-ka ugu dib-u-dhaca yar; IP-ga bixitaanka kama dambaysta ah isma beddelo",
+  "按顺序自动顺延，不影响最终出口 IP": "Marka uu go'o wuxuu si isku xiga ugu wareegaa midka xiga; IP-ga bixitaanka kama dambaysta ah isma beddelo",
+  "多选节点或选整份订阅时自动切换": "Marka la doorto node-yo badan ama isdiiwaangelinta oo dhan si toos ah ayuu u beddelmaa",
+  "经上一跳中转；多选或选整份订阅时自动切换": "Wuxuu sii maraa tallaabadii hore; marka la doorto node-yo badan ama isdiiwaangelinta oo dhan si toos ah ayuu u beddelmaa"
 }
