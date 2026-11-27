@@ -201,6 +201,24 @@ func TestDesktopAppResizeHTTP(t *testing.T) {
 	}
 }
 
+func TestDesktopAppSessionUsesHiDPIAndDynamicScaling(t *testing.T) {
+	for _, want := range []string{
+		`display_scale=2`,
+		`printf '%s\n' "$display_scale" > "$XDG_RUNTIME_DIR/display-scale"`,
+		`printf '%s\n' "$display_scale" > "$XDG_RUNTIME_DIR/base-display-scale"`,
+		`geometry=$(awk -v scale="$display_scale" 'BEGIN {printf "%dx%d", 1280 * scale, 800 * scale}')`,
+		`-geometry "$geometry"`,
+		`/usr/local/bin/cage-display-governor`,
+		`Xft/DPI %s\nGdk/WindowScalingFactor 1\nGdk/UnscaledDPI %s\n`,
+		`printf '%s\n' "$!" > "$XDG_RUNTIME_DIR/xsettings.pid"`,
+		`theme-variant`,
+	} {
+		if !strings.Contains(linuxAppDesktop, want) {
+			t.Fatalf("linux-app-desktop.sh missing HiDPI/desktop alignment piece %q", want)
+		}
+	}
+}
+
 func TestDesktopAppDownloadResumesTransientErrorsAndStopsOn403(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the installer Bash script runs in the Linux guest, not the Windows host")

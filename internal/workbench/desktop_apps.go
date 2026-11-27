@@ -216,13 +216,17 @@ func (s *Server) desktopApp(w http.ResponseWriter, r *http.Request) {
 	case "vnc-credentials":
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		b, err := s.guest(ctx, "systemctl is-active --quiet desktop-"+target.id+".service && cat "+run+`/password && { if test -S "$HOME/.local/share/desktop-apps/`+target.id+`/input/.cache/cage-input/input.sock"; then printf 1; else printf 0; fi; }`)
-		if err != nil || len(b) != 9 || (b[8] != '0' && b[8] != '1') {
+		// A session with a settings manager renders at the density its viewer
+		// names. One started by an earlier version keeps 96 DPI: its viewer
+		// sizes the display in CSS pixels.
+		b, err := s.guest(ctx, "systemctl is-active --quiet desktop-"+target.id+".service && cat "+run+`/password && { if test -S "$HOME/.local/share/desktop-apps/`+target.id+`/input/.cache/cage-input/input.sock"; then printf 1; else printf 0; fi; } && if test -f `+run+`/xsettings.pid; then printf ' %s' "$(cat `+run+`/base-display-scale 2>/dev/null)"; fi`)
+		reply, ok := accountDesktopCredentials(b)
+		if err != nil || !ok {
 			http.Error(w, "应用尚未打开", 409)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		jsonReply(w, map[string]any{"password": string(b[:8]), "native_input": b[8] == '1'})
+		jsonReply(w, reply)
 		return
 	case "clipboard":
 		s.sharedDesktopClipboard(w, r, target.id)
