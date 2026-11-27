@@ -1,6 +1,6 @@
 {
   "name": "claude-cage",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Install Cage and run its isolated Claude Code from your terminal",
   "license": "MIT",
   "repository": "github:Lee-xeo/Claude-Cage",
