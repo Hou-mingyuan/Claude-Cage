@@ -18,6 +18,7 @@ const (
 	defaultCommandTimeout = 2 * time.Minute
 	maxCommandTimeout     = 30 * time.Minute
 	commandOutputLimit    = 64 << 10
+	jobRingBufferLimit    = 256 << 10
 
 	defaultBackgroundTimeout = 30 * time.Minute
 	maxBackgroundTimeout     = 6 * time.Hour
@@ -46,27 +47,31 @@ type Command struct {
 
 // CommandRequest is one command awaiting approval. Dir is the directory it
 // would run in and Project the allowed directory that contains it, both with
-// symlinks resolved.
+// symlinks resolved. Shell is empty when the platform's default shell is used.
 type CommandRequest struct {
 	Command string
+	Shell   string
 	Dir     string
 	Project string
 }
 
 type commandInput struct {
 	Command        string `json:"command" jsonschema:"the shell command to run"`
+	Shell          string `json:"shell,omitempty" jsonschema:"optional shell name; omit or use default for the system shell, or choose bash, sh, zsh on Unix or powershell, pwsh, bash, cmd on Windows"`
 	Dir            string `json:"dir,omitempty" jsonschema:"absolute directory to run in; defaults to the first project directory"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"stop the command after this many seconds; default 120, at most 1800; a background command defaults to 1800, at most 21600"`
 	Background     bool   `json:"background,omitempty" jsonschema:"return at once with a job id instead of waiting; use for builds, test suites and anything that may take more than a minute, then read the result with command_job"`
 }
 
 type commandOutput struct {
-	Job       string `json:"job,omitempty"`
-	Running   bool   `json:"running,omitempty"`
-	ExitCode  int    `json:"exit_code"`
-	Output    string `json:"output"`
-	Truncated bool   `json:"truncated,omitempty"`
-	TimedOut  bool   `json:"timed_out,omitempty"`
+	Job          string `json:"job,omitempty"`
+	Running      bool   `json:"running,omitempty"`
+	ExitCode     int    `json:"exit_code"`
+	Output       string `json:"output"`
+	Truncated    bool   `json:"truncated,omitempty"`
+	TimedOut     bool   `json:"timed_out,omitempty"`
+	NextOffset   int    `json:"next_offset,omitempty"`
+	SkippedBytes int    `json:"skipped_bytes,omitempty"`
 }
 
 func (c Command) tool() *mcp.Tool {
@@ -112,12 +117,16 @@ func (c Command) run(ctx context.Context, in commandInput) (commandOutput, error
 	if strings.TrimSpace(in.Command) == "" {
 		return commandOutput{}, errors.New("command is empty")
 	}
+	shell, err := normalizeShell(in.Shell)
+	if err != nil {
+		return commandOutput{}, err
+	}
 	dir, project, err := c.resolveDir(in.Dir)
 	if err != nil {
 		return commandOutput{}, err
 	}
 	if c.Approve != nil {
-		if err := c.Approve(ctx, CommandRequest{Command: in.Command, Dir: dir, Project: project}); err != nil {
+		if err := c.Approve(ctx, CommandRequest{Command: in.Command, Shell: shell, Dir: dir, Project: project}); err != nil {
 			return commandOutput{}, err
 		}
 	}
@@ -129,23 +138,32 @@ func (c Command) run(ctx context.Context, in commandInput) (commandOutput, error
 		if in.TimeoutSeconds > 0 {
 			timeout = min(time.Duration(in.TimeoutSeconds)*time.Second, maxBackgroundTimeout)
 		}
-		return c.Jobs.start(in.Command, dir, timeout)
+		return c.Jobs.start(in.Command, shell, dir, timeout)
 	}
 	timeout := defaultCommandTimeout
 	if in.TimeoutSeconds > 0 {
 		timeout = min(time.Duration(in.TimeoutSeconds)*time.Second, maxCommandTimeout)
 	}
 	output := &cappedBuffer{limit: commandOutputLimit}
-	return execute(ctx, in.Command, dir, timeout, output)
+	return execute(ctx, in.Command, shell, dir, timeout, output)
+}
+
+type commandOutputSink interface {
+	Write([]byte) (int, error)
+	String() string
+	truncated() bool
 }
 
 // execute runs the command until it exits, the timeout passes or ctx ends,
 // collecting its output in output, which may be read meanwhile.
-func execute(ctx context.Context, command, dir string, timeout time.Duration, output *cappedBuffer) (commandOutput, error) {
+func execute(ctx context.Context, command, shell, dir string, timeout time.Duration, output commandOutputSink) (commandOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := shellCommand(command)
+	cmd, err := shellCommand(command, shell)
+	if err != nil {
+		return commandOutput{}, err
+	}
 	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = output, output
 	cmd.WaitDelay = 2 * time.Second

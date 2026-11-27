@@ -46,7 +46,7 @@ func (s *Server) startClaudePanelUsage(list claudeAccountList) {
 	}
 	var targets []claudeUsageTarget
 	for _, a := range list.Accounts {
-		if a.Status != "ready" || a.Email == "" || !claudeUsageDue(a.UsageCheckedAt) {
+		if a.CodeUnlinked || a.Status != "ready" || a.Email == "" || !claudeUsageDue(a.UsageCheckedAt) {
 			continue
 		}
 		subject := claudeIdentityHash(a.Email, a.Organization)
@@ -139,6 +139,9 @@ func (s *Server) refreshClaudeUsage(ctx context.Context, input claudeAccountInpu
 	a := list.find(input.ID)
 	if a == nil {
 		return errors.New("未找到要检查的账号")
+	}
+	if a.CodeUnlinked {
+		return errors.New("Code 待授权")
 	}
 	if a.Email == "" {
 		if err = s.refreshClaudeAccount(ctx, input.ID); err != nil {
@@ -279,7 +282,7 @@ func (s *Server) checkClaudeUsage(parent context.Context, target claudeUsageTarg
 // Under the manager lock, resolve only the original guest source and identity.
 func (s *Server) usageOwner(list claudeAccountList, target claudeUsageTarget) *claudeAccount {
 	if a := list.bySubject(target.subject); a != nil {
-		if a.guestID() == target.guest && (target.id == "" || target.id == a.ID) {
+		if !a.CodeUnlinked && a.guestID() == target.guest && (target.id == "" || target.id == a.ID) {
 			return a
 		}
 		return nil

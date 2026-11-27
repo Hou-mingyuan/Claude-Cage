@@ -7,6 +7,30 @@ cage_tool_version() {
   awk '$1 ~ /^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$/ && !found { print $1; found=1 }'
 }
 
+# Both desktop installers use APT's own partial cache and signature checks.
+# Index refreshes keep the maintenance channel's shorter timeout. Only package
+# transfers need longer to recover from a stalled read.
+cage_desktop_apt() {
+  local status archives='' options=(-o DPkg::Lock::Timeout=60)
+  if [[ $1 == install ]]; then
+    options+=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+  fi
+  if sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get "${options[@]}" "$@" </dev/null; then
+    return 0
+  else
+    status=$?
+  fi
+  if [[ $1 == install ]]; then
+    eval "$(APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-config shell archives Dir::Cache::archives/d 2>/dev/null || :)"
+    if [[ -n $archives ]]; then
+      sudo find "${archives%/}/partial" -maxdepth 1 -type f -name '*.deb' -exec wc -c {} \; 2>/dev/null |
+        awk '{ total += $1 } END { if (total > 0) printf "APT_PARTIAL bytes=%.0f\n", total }' >&2 || :
+    fi
+  fi
+  printf 'APT_FAILED exit=%s command=apt-get %s\n' "$status" "$*" >&2
+  return "$status"
+}
+
 # The caller holds the checksum directory lock. Partial files survive a failed
 # attempt; only a complete checksum-verified artifact is eligible for install.
 cage_download_tool() (

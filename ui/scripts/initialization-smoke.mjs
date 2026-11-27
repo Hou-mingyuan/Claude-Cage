@@ -114,6 +114,8 @@ for (const platform of ["darwin", "windows", "linux"]) {
       // Audio is outside this initialization flow; avoid unrelated in-flight audio requests during reload.
       await page.addInitScript(() => localStorage.setItem("cage.audio", JSON.stringify({ muted: true })));
       state.status.local_vm_storage = true;
+      await page.route("**/api/host-tools", route => route.fulfill({ json: { plugins: [], catalog: [] } }));
+      await page.route("**/api/host/debian-mirrors", route => route.fulfill({ json: { decided: true } }));
       await page.route("**/api/environment/storage", route => {
         if (route.request().method() === "POST") {
           assert.equal(route.request().postDataJSON().previous, directory);
@@ -174,12 +176,25 @@ for (const platform of ["darwin", "windows", "linux"]) {
     state.status.job = { ...state.status.job, running: false, error: "下载中断，已保存部分文件" };
     await progress.getByRole("alert").waitFor();
     if (evidence) await page.screenshot({ path: `${evidence}/${platform}-failed.png`, fullPage: true });
+    const mirrorHelp = page.getByText("系统镜像遵循主机代理设置。", { exact: false });
+    await mirrorHelp.waitFor();
+    const failedDownload = state.status.job;
+    const preflightError = "启动环境失败：启动前的代理出口检查未通过。连接在返回完整结果前中断";
+    state.status.job = { id: "failed-preflight", running: false, kind: "start", error: preflightError };
+    await page.getByRole("alert").filter({ hasText: preflightError }).waitFor();
+    await page.reload();
+    await page.getByRole("alert").filter({ hasText: preflightError }).waitFor();
+    assert.equal(await mirrorHelp.count(), 0, "a proxy preflight failure must not show image download troubleshooting");
+    state.status.job = failedDownload;
+    await progress.getByRole("alert").waitFor();
     await progress.getByRole("button", { name: "继续安装", exact: true }).click();
     await progress.getByRole("progressbar").waitFor();
     assert.equal(starts, 2);
+    const desktopViewport = page.viewportSize();
     await page.setViewportSize({ width: 600, height: 650 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     if (evidence) await page.screenshot({ path: `${evidence}/${platform}-progress-compact.png`, fullPage: true });
+    await page.setViewportSize(desktopViewport);
     state.status.job = { id: "install-2", kind: "start", running: false, message: "环境已启动，联网检查未通过", error: "联网检查未通过：浏览器检测通道返回 HTTP 503，外网保持关闭" };
     Object.assign(state.status, { ready: true, vm_running: true, safety: { gate: { mode: "closed" } } });
     await page.getByRole("heading", { name: "系统已安装，完成使用检查", exact: true }).waitFor();
@@ -277,7 +292,7 @@ for (const platform of ["darwin", "windows", "linux"]) {
     await page.getByRole("button", { name: "手动节点", exact: true }).click();
     await page.getByLabel("来源名称", { exact: true }).fill("自有节点");
     await page.getByLabel("节点名称", { exact: true }).fill("本机测试代理");
-    await page.getByLabel("服务器", { exact: true }).fill("127.0.0.1");
+    await page.getByLabel("服务器", { exact: true }).fill("192.0.2.10");
     await page.getByRole("button", { name: "导入并验证", exact: true }).click();
     await page.getByRole("tab", { name: "节点", exact: true }).click();
     await page.locator('.proxy-node-list').waitFor();

@@ -440,6 +440,8 @@ func TestLinuxAccountDesktopScriptWiresPortalAndIsolatedInput(t *testing.T) {
 		`printf '%s\n' "$!" > "$XDG_RUNTIME_DIR/xsettings.pid"`,
 		`"$XDG_RUNTIME_DIR/base-display-scale"`,
 		`"$XDG_RUNTIME_DIR/xsettings.fixed"`,
+		`/usr/local/bin/cage-display-governor &`,
+		`Gtk/EnableAnimations 0`,
 	} {
 		if !strings.Contains(linuxAccountDesktop, want) {
 			t.Fatalf("linux-account-desktop.sh missing %q", want)

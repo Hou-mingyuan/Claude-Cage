@@ -85,3 +85,60 @@ func TestGuestShellProfileExportsOnlyStandardSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestGuestEnvConfiguresCrossFilesystemGitDefaults(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	_, snippet, ok := strings.Cut(guestEnv, "if command -v git >/dev/null 2>&1; then\n")
+	if !ok {
+		t.Fatal("missing git performance defaults in guest-env.sh")
+	}
+	snippet = "if command -v git >/dev/null 2>&1; then\n" + snippet
+	dir := t.TempDir()
+	sysCfg := filepath.Join(dir, "gitconfig")
+	script := strings.ReplaceAll(snippet, "sudo git ", "git ")
+	run := func() {
+		cmd := exec.Command("bash", "-euo", "pipefail", "-c", script)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_SYSTEM="+sysCfg, "GIT_CONFIG_GLOBAL=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git defaults snippet failed: %v\n%s", err, out)
+		}
+	}
+	run()
+	get := func(key string) string {
+		cmd := exec.Command("git", "config", "--file", sysCfg, "--get", key)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("read %s: %v (%s)", key, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got := get("core.checkStat"); got != "minimal" {
+		t.Fatalf("core.checkStat=%q, want minimal", got)
+	}
+	if got := get("core.trustctime"); got != "false" {
+		t.Fatalf("core.trustctime=%q, want false", got)
+	}
+	if got := get("core.preloadIndex"); got != "true" {
+		t.Fatalf("core.preloadIndex=%q, want true", got)
+	}
+	data, err := os.ReadFile(sysCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lower := strings.ToLower(string(data))
+	for _, forbidden := range []string{"cage", "guest", "virtual machine", "vm"} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("system gitconfig leaked %q: %s", forbidden, data)
+		}
+	}
+	// Existing explicit overrides must be preserved on subsequent starts.
+	if out, err := exec.Command("git", "config", "--file", sysCfg, "core.checkStat", "default").CombinedOutput(); err != nil {
+		t.Fatalf("override core.checkStat: %v (%s)", err, out)
+	}
+	run()
+	if got := get("core.checkStat"); got != "default" {
+		t.Fatalf("existing core.checkStat was overwritten: %q", got)
+	}
+}

@@ -357,3 +357,83 @@ func TestClaudeUsageFailedBatchOnlyRetriesOnOpeningAfterDebounce(t *testing.T) {
 		t.Fatal("did not retry on the next real panel open")
 	}
 }
+
+func TestClaudeDesktopOnlyUsageBeforeAndAfterCodeLogin(t *testing.T) {
+	s, list := usageServer(t, 2)
+	desktop, code := &list.Accounts[0], &list.Accounts[1]
+	desktop.CodeUnlinked, desktop.Status, desktop.UsageStatus = true, "changed", "identity_changed"
+	desktop.DesktopInstanceID, desktop.DesktopStatus = desktop.ID, "ready"
+	desktop.UsageCheckedAt = time.Now().Unix()
+	desktop.Quota = &claudeQuota{FiveHour: &claudeWindow{UsedPercentage: 35}}
+	code.Status, code.UsageStatus, code.Enabled = "changed", "identity_changed", false
+	if err := s.saveClaudeAccounts(list); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := s.loadClaudeAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := list.find(desktop.ID); a.Status != "signed_out" || a.DesktopStatus != "ready" || a.UsageStatus != "" || a.UsageCheckedAt != 0 || a.Quota.FiveHour.UsedPercentage != 35 {
+		t.Fatalf("incorrect Desktop-only status or lost historical quota: %+v", a)
+	}
+	if a := list.find(code.ID); a.Status != "changed" || a.UsageStatus != "identity_changed" {
+		t.Fatalf("lost genuine Code identity change: %+v", a)
+	}
+
+	s.claudeAccounts.probe = func(context.Context, string) (claudeGuestSnapshot, error) {
+		t.Error("polled a Code profile before authorization")
+		return claudeGuestSnapshot{}, nil
+	}
+	s.claudeAccounts.usageProbe = func(context.Context, string, string) (claudeGuestSnapshot, error) {
+		t.Error("queried usage before Code authorization")
+		return claudeGuestSnapshot{}, nil
+	}
+	ctx := context.Background()
+	s.pollClaudeAccounts(list)
+	s.startClaudePanelUsage(list)
+	s.activities.Wait()
+	input := claudeAccountInput{Action: "refresh", ID: desktop.ID}
+	if err := s.refreshClaudeUsage(ctx, input); err == nil {
+		t.Fatal("manual refresh accepted an unbound Code profile")
+	}
+
+	reading := claudeGuestSnapshot{LoggedIn: true, Email: desktop.Email, UsageStatus: "unavailable"}
+	s.claudeAccounts.probe = func(context.Context, string) (claudeGuestSnapshot, error) { return reading, nil }
+	if err := s.confirmClaudeLogin(ctx, desktop.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.claudeAccounts.usageProbe = func(context.Context, string, string) (claudeGuestSnapshot, error) { return reading, nil }
+	if err := s.refreshClaudeUsage(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	list, err = s.loadClaudeAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := list.find(desktop.ID); len(list.Accounts) != 2 || a == nil || a.CodeUnlinked || a.Status != "ready" || a.DesktopStatus != "ready" || a.UsageStatus != "unavailable" {
+		t.Fatalf("completed Code login did not bind to the original card: %+v", a)
+	}
+}
+
+func TestClaudeUsageDropsResultAfterCodeUnlinked(t *testing.T) {
+	s, list := usageServer(t, 1)
+	a := &list.Accounts[0]
+	s.claudeAccounts.usageProbe = func(context.Context, string, string) (claudeGuestSnapshot, error) {
+		// Simulate replacing the account with a Desktop-only record while the guest runs.
+		a.CodeUnlinked, a.Status = true, "signed_out"
+		if err := s.saveClaudeAccounts(list); err != nil {
+			t.Fatal(err)
+		}
+		return claudeGuestSnapshot{LoggedIn: true, Email: a.Email, UsageStatus: "reported", Quota: &claudeQuota{
+			ObservedAt: time.Now().Unix(), FiveHour: &claudeWindow{UsedPercentage: 12},
+		}}, nil
+	}
+	if err := s.refreshClaudeUsage(context.Background(), claudeAccountInput{Action: "refresh", ID: a.ID}); err == nil {
+		t.Fatal("accepted a stale result for an unbound Code profile")
+	}
+	saved, err := s.loadClaudeAccounts()
+	if err != nil || saved.Accounts[0].Quota != nil {
+		t.Fatal("stale result wrote quota", saved, err)
+	}
+}

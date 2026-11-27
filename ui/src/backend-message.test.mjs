@@ -22,6 +22,8 @@ test("localizeBackendMessage translates ErrLocalProxyNode and dynamic backend er
     `节点 "local-socks" 需要迁移：${errLocalNode}`,
     `没有可导入的节点，已跳过 2 个；第 1 个节点 "socks1"：${errLocalNode}；第 2 个节点 "bad"：节点协议暂不支持`,
     `没有可导入的节点，已跳过 1 个；第 1 个节点 "hk"：Clash Verge Ninja 专用的 ninja 协议，Cage 随附的标准 Mihomo 核心无法解析，请向服务商获取同一出口的标准 Mihomo 节点后重新导入`,
+    `没有可导入的节点，已跳过 1 个；第 1 个节点 ""：MASQUE 分享链接暂不支持：随附 Mihomo 核心的 masque 节点需要 ECDSA 客户端私钥和服务器公钥，这类链接只提供用户认证和 HTTP/3 传输参数，无法转换。Cage 目前也不能导入 MASQUE 节点，请向服务商获取其他协议的节点`,
+    `没有可导入的节点，已跳过 1 个；第 1 个节点 "warp"：MASQUE 节点暂不支持：Cage 目前不能导入 masque 协议节点，请向服务商获取同一出口的其他协议节点后重新导入`,
     `没有可导入的节点，已跳过 1 个；第 1 个节点 "neo"：Clash Neo 专用的 nexo 协议，Cage 随附的标准 Mihomo 核心无法解析，请向服务商获取同一出口的标准 Mihomo 节点后重新导入`,
     `订阅更新移除或跳过了当前出口或中转节点 "HK-01"：节点未包含在更新中；原配置已保留，请先应用其他节点再更新`,
     "订阅服务器返回 HTTP 403",
@@ -36,6 +38,8 @@ test("localizeBackendMessage translates ErrLocalProxyNode and dynamic backend er
     "另一个操作仍在进行，请稍候：当前正在应用代理节点。请等待完成，或先停止当前操作。",
     "已取消：已被启动环境替换",
     "应用代理节点失败",
+    "启动环境失败：启动前的代理出口检查未通过。连接在返回完整结果前中断",
+    "启动环境失败：代理出口预检未通过，首跳状态未确定，请检查宿主机经物理网卡到首跳节点端口的连接。等待响应超时",
     "恢复联网失败：等待响应超时。请重新检测；仍失败时导出诊断包。",
     "恢复代理连接失败：程序提前结束（退出码 1），未返回可识别的原因。连接恢复后会自动重试，也可手动重新检测。",
   ];

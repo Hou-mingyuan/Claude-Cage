@@ -36,10 +36,6 @@ type Shares struct {
 	VM       string
 	Dir      string // the project
 	Writable bool   // false for --readonly, every share
-	// Names are read-only on every share (none with .git left writable).
-	// Every share is served by the builtin SFTP server: the one confined to
-	// its folder (vm.Confined).
-	Names    []string
 	Entries  []Entry // see Entries
 	StateDir string  // where single files are staged
 	Warn     io.Writer
@@ -48,10 +44,12 @@ type Shares struct {
 // Build is the shares of the project's VM: the project first, then the
 // entries, read-only unless rw (and never writable under --readonly: a
 // writable volume holding the project would be a second way to write it).
+// Every share is served by the builtin SFTP server, confined to its folder
+// (vm.Confined).
 func Build(s Shares) ([]vm.Mount, []FileMount) {
 	w := func(format string, a ...any) { fmt.Fprintf(s.Warn, format+"\n", a...) }
 	opts := func(writable bool) *vm.SSHFS {
-		o := &vm.SSHFS{SFTPDriver: "builtin", ReadonlyNames: append([]string(nil), s.Names...)}
+		o := &vm.SSHFS{SFTPDriver: "builtin"}
 		if writable && !CacheOn() {
 			off := false
 			o.Cache = &off

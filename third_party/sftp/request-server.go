@@ -97,6 +97,18 @@ func WithRSSequential() RequestServerOption {
 	}
 }
 
+// WithRSSequentialWrites runs read-only, side-effect-free requests (LSTAT,
+// STAT, FSTAT, READLINK, REALPATH, READ) concurrently across workers while
+// serializing every mutating or handle-lifecycle request behind a full barrier.
+// This preserves strict write ordering (writes, renames, FSETSTAT, and
+// subsequent reads/FSTATs never reorder) while allowing concurrent directory
+// metadata scans and reads to saturate host I/O.
+func WithRSSequentialWrites() RequestServerOption {
+	return func(rs *RequestServer) {
+		rs.pktMgr.sequentialWrites = true
+	}
+}
+
 // NewRequestServer creates/allocates/returns new RequestServer.
 // Normally there will be one server per user-session.
 func NewRequestServer(rwc io.ReadWriteCloser, h Handlers, options ...RequestServerOption) *RequestServer {

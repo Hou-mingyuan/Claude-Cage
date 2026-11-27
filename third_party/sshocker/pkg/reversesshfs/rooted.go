@@ -72,9 +72,9 @@ func newRootedServerAt(rwc io.ReadWriteCloser, localPath, exportedPath string, r
 		h.foldedNames = append(h.foldedNames, FoldName(n))
 	}
 	handlers := sftp.Handlers{FileGet: h, FilePut: h, FileCmd: h, FileList: h}
-	// Sequential, as OpenSSH's sftp-server: otherwise two writes to the same range, or a write
-	// and the FSTAT or FSETSTAT sent after it, can run in either order.
-	srv := sftp.NewRequestServer(rwc, handlers, sftp.WithStartDirectory(startDirectory(h.rootPath)), sftp.WithRSSequential(),
+	// Serialize writes and handle lifecycle behind a full barrier while allowing
+	// read-only metadata queries and reads to run concurrently across workers.
+	srv := sftp.NewRequestServer(rwc, handlers, sftp.WithStartDirectory(startDirectory(h.rootPath)), sftp.WithRSSequentialWrites(),
 		// Each handle holds a file descriptor of this process, which may be the one running the VM.
 		sftp.WithRSMaxHandles(maxHandles),
 		// sshfs reads up to 64 KiB (max_read), and takes a shorter answer for the end of the file.

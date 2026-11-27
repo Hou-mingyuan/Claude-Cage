@@ -16,7 +16,7 @@ func TestProjectShareOptionsCacheNamesAndAttributes(t *testing.T) {
 	if !strings.Contains(off, "cache=no") || strings.Contains(off, "timeout") {
 		t.Fatalf("uncached share: %q", off)
 	}
-	if on != off+",entry_timeout=20,attr_timeout=20" {
+	if on != off+",entry_timeout=20,attr_timeout=20,negative_timeout=20" {
 		t.Fatalf("cached share: %q", on)
 	}
 }

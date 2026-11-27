@@ -29,3 +29,9 @@ CAGE_SHELL_PROMPT
 if [ -n "${CAGE_INSTALL_PROXY:-}" ]; then
   export http_proxy="$CAGE_INSTALL_PROXY" https_proxy="$CAGE_INSTALL_PROXY" HTTP_PROXY="$CAGE_INSTALL_PROXY" HTTPS_PROXY="$CAGE_INSTALL_PROXY"
 fi
+
+if command -v git >/dev/null 2>&1; then
+  git config --system --get core.checkStat >/dev/null 2>&1 || sudo git config --system core.checkStat minimal
+  git config --system --get core.trustctime >/dev/null 2>&1 || sudo git config --system core.trustctime false
+  git config --system --get core.preloadIndex >/dev/null 2>&1 || sudo git config --system core.preloadIndex true
+fi

@@ -99,6 +99,7 @@ func TestShareLinkRejectsAmbiguousEntries(t *testing.T) {
 		{"ss-obfs-raw-bad-mode", "ss://YWVzLTEyOC1nY206cA@h.example.com:80?plugin=obfs-local;obfs=bogus#O", "obfs 模式无效"},
 		{"ss-plugin-bad-escape", "ss://YWVzLTEyOC1nY206cA@h.example.com:80?plugin=obfs-local%3Bobfs%3Dhttp%ZZ#O", "插件参数无效"},
 		{"tuic-v4-token", "tuic://token@h.example.com:443#T", "uuid:password"},
+		{"masque", "masque://user-id@proxy.example.test:443?user=user-id&sni=proxy.example.test&insecure=0&mode=flow&network=h3&ech", "MASQUE 分享链接暂不支持"},
 		{"no-port", "trojan://p@h.example.com#N", "格式无效"},
 		{"bad-port", "anytls://p@h.example.com:70000#N", "格式无效"},
 		{"no-credential", "anytls://h.example.com:443#N", "格式无效"},

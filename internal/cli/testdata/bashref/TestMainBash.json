@@ -516,23 +516,6 @@
 				"PATH={T0}/061"
 			],
 			"Args": [
-				"--unsafe-writable-git=1",
-				"name"
-			],
-			"Files": null,
-			"Stdout": "",
-			"Stderr": "Error: --unsafe-writable-git=1 is an option for the commands that start a VM (claude, opencode, codex, vibe, pi, shell, run, code), not for 'name'.\n",
-			"Code": 1
-		},
-		{
-			"Dir": "{T0}/002",
-			"Stdin": "",
-			"Snippet": "agent-vm \"$@\"",
-			"Env": [
-				"HOME={T0}/064",
-				"PATH={T0}/063"
-			],
-			"Args": [
 				"--unsafe-disable-security-prompts",
 				"doctor"
 			],

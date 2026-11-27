@@ -22,6 +22,9 @@ type packetManager struct {
 	alloc *allocator
 	// sequential processes every packet in a single worker, in the order received
 	sequential bool
+	// sequentialWrites runs read-only queries concurrently and enforces a full
+	// barrier around every mutating or handle-lifecycle packet.
+	sequentialWrites bool
 }
 
 type packetSender interface {
@@ -130,6 +133,41 @@ func (s *packetManager) workerChan(runWorker func(chan orderedRequest),
 		return pktChan
 	}
 
+	if s.sequentialWrites {
+		readChan := make(chan orderedRequest, SftpServerWorkerCount)
+		for i := 0; i < SftpServerWorkerCount; i++ {
+			runWorker(readChan)
+		}
+		cmdChan := make(chan orderedRequest)
+		runWorker(cmdChan)
+
+		pktChan := make(chan orderedRequest, SftpServerWorkerCount)
+		go func() {
+			lastWasMutation := false
+			for pkt := range pktChan {
+				if isConcurrentReadPacket(pkt.requestPacket) {
+					if lastWasMutation {
+						s.working.Wait()
+						lastWasMutation = false
+					}
+					s.incomingPacket(pkt)
+					readChan <- pkt
+					continue
+				}
+				// Barrier: finish every in-flight read or prior mutation before
+				// running a mutating or handle-lifecycle packet sequentially.
+				s.working.Wait()
+				lastWasMutation = true
+				s.incomingPacket(pkt)
+				cmdChan <- pkt
+			}
+			close(readChan)
+			close(cmdChan)
+			s.close()
+		}()
+		return pktChan
+	}
+
 	// multiple workers for faster read/writes
 	rwChan := make(chan orderedRequest, SftpServerWorkerCount)
 	for i := 0; i < SftpServerWorkerCount; i++ {
@@ -168,6 +206,16 @@ func (s *packetManager) workerChan(runWorker func(chan orderedRequest),
 	}()
 
 	return pktChan
+}
+
+func isConcurrentReadPacket(p requestPacket) bool {
+	switch p.(type) {
+	case *sshFxpLstatPacket, *sshFxpStatPacket, *sshFxpFstatPacket,
+		*sshFxpReadlinkPacket, *sshFxpRealpathPacket, *sshFxpReadPacket:
+		return true
+	default:
+		return false
+	}
 }
 
 // process packets

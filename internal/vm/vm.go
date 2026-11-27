@@ -76,7 +76,7 @@ type Mount = spec.Mount
 type SSHFS = spec.SSHFS
 
 // ReverseSSHFS is the mount type whose shares the host serves over SFTP,
-// which is where readonlyNames are enforced.
+// confining each mount to its host directory.
 const ReverseSSHFS = "reverse-sshfs"
 
 // Settings change a VM. A zero field is left as it is.

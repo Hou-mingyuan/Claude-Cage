@@ -26,7 +26,6 @@ func TestEntryDropsInheritedUnsafeSwitchesBeforeDispatch(t *testing.T) {
 	// Git configuration changes, or access to the user's Cage profile.
 	unsafe := []string{
 		"AGENT_VM_UNSAFE_OPEN_NETWORK",
-		"AGENT_VM_UNSAFE_WRITABLE_GIT",
 		"AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS",
 	}
 	for _, name := range unsafe {

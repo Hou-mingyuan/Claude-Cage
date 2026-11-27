@@ -24,7 +24,7 @@ func (sourceNodeDNSError) Is(target error) bool { return target == ErrSourceNode
 // resolver list (up to 4 unique entries). Unsupported, local, non-HTTPS,
 // credentialed, or fragmented Clash/Mihomo resolvers (such as plain IPs,
 // system, dhcp://, udp://, tcp://, tls://, quic://, h3://, http://, or DoH
-// URLs carrying #skip-cert-verify=true, #DIRECT, #h3=true, etc.) are ignored
+// URLs carrying #skip-cert-verify=true, #h3=true, etc.) are ignored
 // rather than blocking node import or subscription refresh, so Cage falls back
 // to its own verified node DNS when none can be safely adopted.
 func subscriptionNodeDNS(data []byte) ([]string, error) {
@@ -45,13 +45,18 @@ func subscriptionNodeDNS(data []byte) ([]string, error) {
 
 // FilterNodeDNS returns up to 4 unique, safe remote HTTPS DoH resolver URLs
 // from servers, ignoring non-HTTPS, local/private, credentialed, fragmented
-// (e.g. #skip-cert-verify=true, #DIRECT, #h3=true), malformed, or excess
-// entries so real-world Clash/Mihomo profiles never block proxy import.
+// (e.g. #skip-cert-verify=true, #h3=true), malformed, or excess entries so
+// real-world Clash/Mihomo profiles never block proxy import. A bare #DIRECT
+// suffix is stripped and the URL kept: the core already dials node resolvers
+// directly over the bound physical interface, which is what DIRECT selects.
 func FilterNodeDNS(servers []string) []string {
 	var out []string
 	local := newLocalServers()
 	for _, raw := range servers {
 		raw = strings.TrimSpace(raw)
+		if base, fragment, ok := strings.Cut(raw, "#"); ok && fragment == "DIRECT" {
+			raw = base
+		}
 		if !isSafeSourceDNS(raw, local) {
 			continue
 		}
