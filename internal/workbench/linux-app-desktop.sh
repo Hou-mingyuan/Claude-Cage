@@ -84,8 +84,19 @@ cookie=$(mcookie)
 xauth -f "$XAUTHORITY" add :0 . "$cookie"
 od -An -N4 -tx1 /dev/urandom | tr -d ' \n' > "$XDG_RUNTIME_DIR/password"
 tigervncpasswd -f < "$XDG_RUNTIME_DIR/password" > "$XDG_RUNTIME_DIR/vnc-password"
+# The viewer sets the density of the screen showing it through the settings
+# manager; until then the configured one applies. Record both for the viewer.
+display_scale=2
+if [[ -r /etc/claude-cage/display-scale && $(< /etc/claude-cage/display-scale) == 1.5 ]]; then
+  display_scale=1.5
+fi
+printf '%s\n' "$display_scale" > "$XDG_RUNTIME_DIR/display-scale"
+printf '%s\n' "$display_scale" > "$XDG_RUNTIME_DIR/base-display-scale"
+dpi=$(awk -v scale="$display_scale" 'BEGIN {printf "%.0f", scale * 96 * 1024}')
+# Start with the logical size an earlier version had at 96 DPI.
+geometry=$(awk -v scale="$display_scale" 'BEGIN {printf "%dx%d", 1280 * scale, 800 * scale}')
 # -displayfd picks a free X display under concurrent launches.
-Xtigervnc -displayfd 3 3>"$XDG_RUNTIME_DIR/display" -geometry 1280x800 -depth 24 -rfbport -1 -rfbunixpath "$XDG_RUNTIME_DIR/vnc.sock" -rfbunixmode 0600 -auth "$XAUTHORITY" -nolisten tcp -SecurityTypes VncAuth -PasswordFile "$XDG_RUNTIME_DIR/vnc-password" &
+Xtigervnc -displayfd 3 3>"$XDG_RUNTIME_DIR/display" -geometry "$geometry" -depth 24 -rfbport -1 -rfbunixpath "$XDG_RUNTIME_DIR/vnc.sock" -rfbunixmode 0600 -auth "$XAUTHORITY" -nolisten tcp -SecurityTypes VncAuth -PasswordFile "$XDG_RUNTIME_DIR/vnc-password" &
 for _ in {1..100}; do test -s "$XDG_RUNTIME_DIR/display" && break; sleep .05; done
 export DISPLAY=":$(cat "$XDG_RUNTIME_DIR/display")"
 xauth -f "$XAUTHORITY" add "$DISPLAY" . "$cookie"
@@ -97,9 +108,117 @@ cat > "$XDG_RUNTIME_DIR/windows.xml" <<'XML'
 <openbox_config xmlns="http://openbox.org/3.4/rc"><desktops><number>1</number></desktops><applications><application type="normal"><decor>no</decor><maximized>yes</maximized></application></applications></openbox_config>
 XML
 openbox --config-file "$XDG_RUNTIME_DIR/windows.xml" >/dev/null 2>&1 &
-# Electron draws its own GTK controls; Openbox decorations alone do not hide them.
-printf 'Gtk/DecorationLayout ":"\n' > "$XDG_RUNTIME_DIR/xsettings.conf"
+# Some desktop apps (for example Electron onboarding windows) call setBounds
+# right after mapping, which unmaximizes them in Openbox and exposes the black
+# X11 root window around the edges. Keep top-level normal windows maximized
+# without touching dialogs, transient popups or fullscreen windows.
+python3 -I - <<'PYMAX' >/dev/null 2>&1 &
+from Xlib import X, display, protocol
+
+conn = display.Display()
+root = conn.screen().root
+a_clients = conn.intern_atom('_NET_CLIENT_LIST')
+a_state = conn.intern_atom('_NET_WM_STATE')
+a_max_h = conn.intern_atom('_NET_WM_STATE_MAXIMIZED_HORZ')
+a_max_v = conn.intern_atom('_NET_WM_STATE_MAXIMIZED_VERT')
+a_full = conn.intern_atom('_NET_WM_STATE_FULLSCREEN')
+a_hidden = conn.intern_atom('_NET_WM_STATE_HIDDEN')
+a_type = conn.intern_atom('_NET_WM_WINDOW_TYPE')
+a_normal = conn.intern_atom('_NET_WM_WINDOW_TYPE_NORMAL')
+a_transient = conn.intern_atom('WM_TRANSIENT_FOR')
+
+root.change_attributes(event_mask=X.PropertyChangeMask)
+watched = set()
+attempts = {}
+
+def ensure(wid):
+    if attempts.get(wid, 0) >= 8:
+        return
+    try:
+        win = conn.create_resource_object('window', wid)
+        if win.get_full_property(a_transient, X.AnyPropertyType):
+            return
+        wtype = win.get_full_property(a_type, X.AnyPropertyType)
+        if wtype and wtype.value and a_normal not in wtype.value:
+            return
+        if wid not in watched:
+            win.change_attributes(event_mask=X.PropertyChangeMask | X.StructureNotifyMask)
+            watched.add(wid)
+        st = win.get_full_property(a_state, X.AnyPropertyType)
+        vals = set(st.value) if st and st.value else set()
+        if a_full in vals or a_hidden in vals or (a_max_h in vals and a_max_v in vals):
+            return
+        attempts[wid] = attempts.get(wid, 0) + 1
+        ev = protocol.event.ClientMessage(
+            window=win,
+            client_type=a_state,
+            data=(32, [1, a_max_h, a_max_v, 2, 0]),
+        )
+        root.send_event(ev, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+        conn.flush()
+    except Exception:
+        pass
+
+def sync_clients():
+    prop = root.get_full_property(a_clients, X.AnyPropertyType)
+    wids = list(prop.value) if prop and prop.value else []
+    for wid in wids:
+        ensure(wid)
+    stale = watched - set(wids)
+    watched.difference_update(stale)
+    for wid in stale:
+        attempts.pop(wid, None)
+
+sync_clients()
+while True:
+    ev = conn.next_event()
+    if ev.type == X.PropertyNotify:
+        if ev.window == root and ev.atom == a_clients:
+            sync_clients()
+        elif ev.atom == a_state and ev.window.id in watched:
+            ensure(ev.window.id)
+    elif ev.type == X.ConfigureNotify and ev.window.id in watched:
+        ensure(ev.window.id)
+    elif ev.type == X.DestroyNotify:
+        watched.discard(ev.window.id)
+        attempts.pop(ev.window.id, None)
+PYMAX
+# Pace this instance's display independently of the other Desktop sessions.
+if [ -x /usr/local/bin/cage-display-governor ]; then
+  /usr/local/bin/cage-display-governor &
+fi
+# Settings that stay as they are when the density changes. Electron draws its
+# own GTK controls; Openbox decorations alone do not hide them.
+printf 'Gtk/DecorationLayout ":"\n' > "$XDG_RUNTIME_DIR/xsettings.fixed"
+if [ "$display_scale" = 1.5 ]; then
+  printf 'Gtk/EnableAnimations 0\n' >> "$XDG_RUNTIME_DIR/xsettings.fixed"
+fi
+guest_theme=
+if [ -r "$HOME/.config/claude-cage/theme-variant" ]; then
+  read -r guest_theme < "$HOME/.config/claude-cage/theme-variant" || true
+  if [ "$guest_theme" = dark ]; then
+    printf 'Net/ThemeName "Adwaita-dark"\nGtk/ApplicationPreferDarkTheme 1\n' >> "$XDG_RUNTIME_DIR/xsettings.fixed"
+  elif [ "$guest_theme" = light ]; then
+    printf 'Net/ThemeName "Adwaita"\nGtk/ApplicationPreferDarkTheme 0\n' >> "$XDG_RUNTIME_DIR/xsettings.fixed"
+  fi
+fi
+if [ -n "$guest_theme" ]; then
+  if [ -x /usr/local/bin/cage-apply-theme ]; then
+    /usr/local/bin/cage-apply-theme "$guest_theme" >/dev/null 2>&1 || true
+  fi
+  if command -v gsettings >/dev/null 2>&1; then
+    if [ "$guest_theme" = dark ]; then
+      gsettings set org.gnome.desktop.interface color-scheme prefer-dark 2>/dev/null || true
+      gsettings set org.gnome.desktop.interface gtk-theme Adwaita-dark 2>/dev/null || true
+    elif [ "$guest_theme" = light ]; then
+      gsettings set org.gnome.desktop.interface color-scheme prefer-light 2>/dev/null || true
+      gsettings set org.gnome.desktop.interface gtk-theme Adwaita 2>/dev/null || true
+    fi
+  fi
+fi
+{ printf 'Xft/DPI %s\nGdk/WindowScalingFactor 1\nGdk/UnscaledDPI %s\n' "$dpi" "$dpi"; cat "$XDG_RUNTIME_DIR/xsettings.fixed"; } > "$XDG_RUNTIME_DIR/xsettings.conf"
 xsettingsd --config="$XDG_RUNTIME_DIR/xsettings.conf" &
+printf '%s\n' "$!" > "$XDG_RUNTIME_DIR/xsettings.pid"
 python3 -I - <<'PYSETTINGS'
 from Xlib import display
 import time

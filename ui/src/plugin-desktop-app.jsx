@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Download, Monitor, Power, RefreshCw, Trash2 } from "lucide-react";
+import { Download, Monitor, PanelLeftOpen, RefreshCw, Trash2 } from "lucide-react";
 import { api, nativeAvailable } from "./api";
 import { DesktopPane } from "./account-desktops";
 import { BrowserUploads } from "./browser-uploads";
@@ -16,7 +16,7 @@ export const desktopAppPath = (plugin, app) =>
 // PluginDesktopApp is a vendor's application that a plugin runs in the
 // environment: installed from the vendor's source at its latest release,
 // updated from here, and shown in a display of its own.
-export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = true, keyboard, systemClipboard = true,
+export function PluginDesktopApp({ plugin, app, titleId, sidebarCollapsed = false, onExpand, autoStart = true, refreshSignal = 0, onRunningChange, status, uploads = [], visible = true, keyboard, systemClipboard = true,
   onStatus, onFallback, onConfirm, onDetails, onProjectOpened }) {
   const tr = useTranslation();
   const path = desktopAppPath(plugin, app.id);
@@ -29,6 +29,7 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
   const [closedChooser, setClosedChooser] = useState("");
   const opened = useRef(false);
   const seenJob = useRef(false);
+  const lastRunning = useRef(null);
   const {
     ownJob,
     ownGlobalJobRunning,
@@ -84,10 +85,23 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
   useEffect(() => {
     opened.current = false;
     seenJob.current = false;
+    lastRunning.current = null;
     setJobID("");
     setError("");
     setState(null);
   }, [path]);
+  useEffect(() => {
+    if (!state) return;
+    const isRunning = Boolean(state.running);
+    if (lastRunning.current !== isRunning) {
+      lastRunning.current = isRunning;
+      onRunningChange?.(isRunning);
+    }
+  }, [state, onRunningChange]);
+  useEffect(() => {
+    if (!refreshSignal || !status?.vm_running) return;
+    void refresh();
+  }, [refreshSignal, status?.vm_running]);
   useEffect(() => {
     if (ownJob && status?.job?.running && status.job.id && jobID !== status.job.id) {
       seenJob.current = true;
@@ -101,10 +115,10 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
       const value = await refresh(() => !disposed);
       if (disposed) return;
       if (value && !opened.current) {
-        if (value.installed && !value.running && !value.failed && !value.busy && !sessionBlockedByGlobalJob && !ownGlobalJobRunning && !jobID) {
+        if (autoStart && value.installed && !value.running && !value.failed && !value.busy && !sessionBlockedByGlobalJob && !ownGlobalJobRunning && !jobID) {
           opened.current = true;
           await run("start");
-        } else if (value.running || value.busy || value.failed || !value.installed) {
+        } else if (!autoStart || value.running || value.busy || value.failed || !value.installed) {
           opened.current = true;
         }
       }
@@ -146,6 +160,19 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
   const visibleError = error || state?.error || "";
   return (
     <section className="claude-desktop-view plugin-desktop-app" aria-label={app.title}>
+      <h1 id={titleId} className="sr-only" tabIndex={-1}>{app.title}</h1>
+      {sidebarCollapsed && onExpand && (
+        <div className="desktop-sidebar-reveal">
+          <button
+            className="icon-button"
+            aria-label={tr("展开侧栏")}
+            title={tr("展开侧栏")}
+            onClick={onExpand}
+          >
+            <PanelLeftOpen size={15} />
+          </button>
+        </div>
+      )}
       {!nativeAvailable() && <BrowserUploads requests={appUploads} onStatus={onStatus} />}
       {directoryRequest && status && <ProjectDialog
         key={directoryRequest.id}
@@ -161,18 +188,6 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
           await onProjectOpened?.(workspace);
         }}
       />}
-      <header className="claude-desktop-toolbar">
-        <span className="desktop-version">{state?.version ? `v${state.version}` : tr("官方最新版")}</span>
-        <span className="desktop-toolbar-spacer" />
-        {state?.installed && <button className="quiet-button" disabled={maintenanceBusy} title={maintenanceHint} onClick={update}>{tr("更新应用")}</button>}
-        {state?.installed && !state.running && <button className="quiet-button" disabled={maintenanceBusy} title={maintenanceHint} onClick={remove}><Trash2 size={15} />{tr("卸载")}</button>}
-        {state?.running && <button className="quiet-button" disabled={sessionBusy} onClick={async () => {
-          if (await onConfirm({ title: tr("关闭 {0}？", app.title), body: tr("请先保存应用内的工作。浏览器和终端会继续运行。"), confirm: tr("关闭应用") })) run("stop");
-        }}><Power size={15} />{tr("关闭应用")}</button>}
-        <button className="icon-button" aria-label={tr("刷新") + " " + app.title + " " + tr("状态")} disabled={refreshDisabled} onClick={() => refresh()}>
-          <RefreshCw size={15} />
-        </button>
-      </header>
       {(visibleError || state?.failed) && (
         <div className="connection-banner" role="alert">
           <SafetyMessage message={visibleError || (state?.failure_reason === "oom-kill"
@@ -214,7 +229,10 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
         ) : (
           <div className="desktop-empty">
             <Monitor size={36} />
-            <h2>{app.title}</h2>
+            <div className="desktop-empty-heading">
+              <h2>{app.title}</h2>
+              {state?.version && <span className="desktop-version">{`v${state.version}`}</span>}
+            </div>
             <p>{tr("在环境中运行官方应用。应用从官方渠道安装，默认使用最新版本，登录与数据保留在环境里。")}</p>
             <div className="desktop-actions">
               {state ? (
@@ -223,9 +241,17 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
                     <Download size={16} />{tr("下载并安装")}
                   </button>
                 ) : (
-                  <button className="primary" disabled={sessionBusy || !status?.vm_running} onClick={() => run("start")}>
-                    <Monitor size={16} />{tr("打开应用")}
-                  </button>
+                  <>
+                    <button className="primary" disabled={sessionBusy || !status?.vm_running} onClick={() => run("start")}>
+                      <Monitor size={16} />{tr("打开应用")}
+                    </button>
+                    <button className="quiet-button" disabled={maintenanceBusy} title={maintenanceHint} onClick={update}>
+                      {tr("更新应用")}
+                    </button>
+                    <button className="quiet-button" disabled={maintenanceBusy} title={maintenanceHint} onClick={remove}>
+                      <Trash2 size={15} />{tr("卸载")}
+                    </button>
+                  </>
                 )
               ) : !status?.vm_running ? (
                 <button className="primary" disabled>
