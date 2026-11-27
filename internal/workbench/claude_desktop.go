@@ -89,30 +89,8 @@ func (s *Server) claudeDesktopAction(w http.ResponseWriter, r *http.Request) {
 			if !allowed {
 				return errors.New("工作台正在退出，请稍后重试安装")
 			}
-			monitorContext, stopMonitor := context.WithCancel(s.operationContext())
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				ticker := time.NewTicker(10 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-monitorContext.Done():
-						return
-					case <-ticker.C:
-						s.monitorSafety()
-					}
-				}
-			}()
-			defer func() {
-				stopMonitor()
-				s.mu.Lock()
-				if s.monitorCancel != nil {
-					s.monitorCancel()
-				}
-				s.mu.Unlock()
-				<-done
-			}()
+			stopMonitor := s.keepNetworkAliveDuringInstall(s.operationContext())
+			defer stopMonitor()
 			s.setMessage("正在下载并安装 Claude Desktop，可在操作详情查看进度…")
 			s.mu.Lock()
 			tls12Compat := s.preferences.InstallTLS12Compat
