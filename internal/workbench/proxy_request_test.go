@@ -41,6 +41,11 @@ func TestProxyMutationRejectsInvalidInputBeforeQueueingJob(t *testing.T) {
 		{"/api/proxy/select", `{"node_id":`, "不是完整的 JSON"},
 		{"/api/proxy/route", `{"node_id":"n"}`, "node_ids"},
 		{"/api/proxy/route", `{"node_ids":[]}`, "请至少选择一个最终出口"},
+		{"/api/proxy/route", `{"node_ids":["a"],"hops":[{"node_id":"a"}]}`, "只能填写一个"},
+		{"/api/proxy/route", `{"hops":[{"relay":{"strategy":"fallback","source_id":"s"}}]}`, "最终出口必须为单个固定节点"},
+		{"/api/proxy/route", `{"hops":[{"relay":{"strategy":"bad","source_id":"s"}},{"node_id":"e"}]}`, "自动切换中转策略无效"},
+		{"/api/proxy/route", `{"hops":[{"relay":{"strategy":"fallback"}},{"node_id":"e"}]}`, "指定来源或自选节点列表"},
+		{"/api/proxy/select", `{"hops":[{"node_id":"a"}]}`, "proxy.route"},
 		{"/api/proxy/restart", `{"port":80}`, "代理端口应为 1024–65535"},
 	} {
 		w := request(s, "POST", c.path, s.origin, c.body, true)

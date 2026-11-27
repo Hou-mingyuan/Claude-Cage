@@ -257,6 +257,27 @@ func checkRunningSocket(ctx context.Context, socketPath, bound string, s Store) 
 	if group.Now != s.Selected {
 		return &coreError{stage: "readiness.selection"}
 	}
+	if s.HasRelayGroups() {
+		hops, err := s.ResolveRoute()
+		if err != nil {
+			return err
+		}
+		for _, hop := range hops {
+			if hop.Relay == nil {
+				continue
+			}
+			var relayGroup struct {
+				Type string   `json:"type"`
+				All  []string `json:"all"`
+			}
+			if err := apiOnSocket(ctx, socketPath, "GET", "/proxies/"+hop.GroupName, nil, &relayGroup); err != nil {
+				return &coreError{stage: "readiness.relay-group", err: err}
+			}
+			if !relayGroupMatches(relayGroup.Type, relayGroup.All, hop) {
+				return &coreError{stage: "readiness.relay-group"}
+			}
+		}
+	}
 	return nil
 }
 func label(profile string) string {

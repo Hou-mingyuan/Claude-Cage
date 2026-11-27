@@ -249,3 +249,120 @@ func TestSingleNodeRouteKeepsImportedDialer(t *testing.T) {
 		}
 	}
 }
+
+func TestProxyRelayGroupRouteAPIValidationRefreshAndDelete(t *testing.T) {
+	s := testServer(t)
+	p, _ := managedproxy.Load(s.profile)
+	if err := p.Import("airport", "https://example.com/sub?secret=sub-token", []byte(`proxies:
+  - {name: hk-1, type: http, server: 198.51.100.1, port: 8080, password: pw1}
+  - {name: hk-2, type: http, server: 198.51.100.2, port: 8080, password: pw2}
+  - {name: jp-1, type: http, server: 198.51.100.3, port: 8080, password: pw3}
+`), "airport", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Import("home", "", []byte(`proxies:
+  - {name: exit, type: socks5, server: 203.0.113.10, port: 1080, password: exit-password}
+`), "home", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	hk1, hk2, jp1 := p.Sources[1].Nodes[0].ID, p.Sources[1].Nodes[1].ID, p.Sources[1].Nodes[2].ID
+	exitID := p.Sources[2].Nodes[0].ID
+	if err := p.Save(s.profile); err != nil {
+		t.Fatal(err)
+	}
+
+	oldValidate, oldStart, oldFetch, oldActive := validateProxyCore, startProxyCore, fetchProxySource, readRelayGroupActive
+	t.Cleanup(func() {
+		validateProxyCore, startProxyCore, fetchProxySource, readRelayGroupActive = oldValidate, oldStart, oldFetch, oldActive
+	})
+	validateProxyCore = func(_ context.Context, profile string, p managedproxy.Store) error {
+		_, err := p.Runtime(profile)
+		return err
+	}
+	startProxyCore = func(context.Context, string, managedproxy.Store) error { return nil }
+	readRelayGroupActive = func(_ context.Context, _ string, group string) string {
+		if group == "CAGE-RELAY-0" {
+			return hk2
+		}
+		return ""
+	}
+
+	// 1. Apply source-based relay group route.
+	hops := []managedproxy.RouteHop{
+		{Relay: &managedproxy.RelayGroup{Strategy: managedproxy.RelayStrategyFallback, SourceID: "airport"}},
+		{NodeID: exitID},
+	}
+	if err := s.changeProxy("route", proxyInput{Hops: hops}, nil); err != nil {
+		t.Fatal(err)
+	}
+	w := request(s, "GET", "/api/proxy", s.origin, "", true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/proxy: %d %s", w.Code, w.Body.String())
+	}
+	var view struct {
+		Selected  string                     `json:"selected"`
+		Route     []string                   `json:"route"`
+		RouteHops []managedproxy.ResolvedHop `json:"route_hops"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Selected != exitID || len(view.RouteHops) != 2 || view.RouteHops[0].Relay == nil || view.RouteHops[0].Relay.SourceID != "airport" || view.RouteHops[0].CandidateCount != 3 || view.RouteHops[1].NodeID != exitID {
+		t.Fatalf("unexpected relay route_hops: %+v", view)
+	}
+	for _, secret := range []string{"sub-token", "pw1", "exit-password", p.Auth} {
+		if strings.Contains(w.Body.String(), secret) {
+			t.Fatalf("GET /api/proxy leaked secret %q", secret)
+		}
+	}
+
+	// 2. Deleting a source referenced by an active relay group must be rejected.
+	if err := s.changeProxy("delete", proxyInput{ID: "airport"}, nil); err == nil {
+		t.Fatal("deleting active relay source should fail")
+	}
+
+	// 3. Apply custom ordered node pool route and test Option A refresh pruning.
+	customHops := []managedproxy.RouteHop{
+		{Relay: &managedproxy.RelayGroup{Strategy: managedproxy.RelayStrategyURLTest, NodeIDs: []string{jp1, hk1, hk2}}},
+		{NodeID: exitID},
+	}
+	if err := s.changeProxy("route", proxyInput{Hops: customHops}, nil); err != nil {
+		t.Fatal(err)
+	}
+	fetchProxySource = func(context.Context, *http.Client, string) ([]byte, string, error) {
+		return []byte(`proxies:
+  - {name: hk-1, type: http, server: 198.51.100.1, port: 8080}
+  - {name: jp-1, type: http, server: 198.51.100.3, port: 8080}
+`), "", nil
+	}
+	if err := s.changeProxy("refresh", proxyInput{ID: "airport", HostDownload: true}, nil); err != nil {
+		t.Fatalf("relaxed refresh pruning failed: %v", err)
+	}
+	afterRefresh, _ := managedproxy.Load(s.profile)
+	if !reflect.DeepEqual(afterRefresh.RouteHops[0].Relay.NodeIDs, []string{jp1, hk1}) {
+		t.Fatalf("expected pruned custom pool [jp1 hk1], got %v", afterRefresh.RouteHops[0].Relay.NodeIDs)
+	}
+
+	// 4. Refresh removing all remaining candidates must fail and keep previous pool.
+	fetchProxySource = func(context.Context, *http.Client, string) ([]byte, string, error) {
+		return []byte(`proxies:
+  - {name: brand-new, type: http, server: 198.51.100.9, port: 8080}
+`), "", nil
+	}
+	if err := s.changeProxy("refresh", proxyInput{ID: "airport", HostDownload: true}, nil); err == nil {
+		t.Fatal("refresh emptying custom relay pool should fail")
+	}
+	kept, _ := managedproxy.Load(s.profile)
+	if !reflect.DeepEqual(kept.RouteHops[0].Relay.NodeIDs, []string{jp1, hk1}) {
+		t.Fatalf("rejected refresh changed route_hops: %+v", kept.RouteHops)
+	}
+
+	// 5. proxy.select clears RouteHops cleanly.
+	if err := s.changeProxy("select", proxyInput{NodeID: exitID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	single, _ := managedproxy.Load(s.profile)
+	if len(single.RouteHops) != 0 || len(single.Chain) != 0 || single.Selected != exitID {
+		t.Fatalf("select did not clear relay route: %+v", single)
+	}
+}
