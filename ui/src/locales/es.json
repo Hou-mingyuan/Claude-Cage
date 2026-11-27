@@ -2882,6 +2882,8 @@
   "分享链接的传输方式暂不支持；请改用 Clash/Mihomo YAML": "El método de transporte del enlace compartido aún no es compatible; usa Clash/Mihomo YAML en su lugar",
   "分享链接的伪装头类型暂不支持；请改用 Clash/Mihomo YAML": "El tipo de cabecera de camuflaje del enlace compartido aún no es compatible; usa Clash/Mihomo YAML en su lugar",
   "分享链接的协议暂不支持；请改用 Clash/Mihomo YAML": "El protocolo del enlace compartido aún no es compatible; usa Clash/Mihomo YAML en su lugar",
+  "MASQUE 分享链接暂不支持：随附 Mihomo 核心的 masque 节点需要 ECDSA 客户端私钥和服务器公钥，这类链接只提供用户认证和 HTTP/3 传输参数，无法转换。Cage 目前也不能导入 MASQUE 节点，请向服务商获取其他协议的节点": "Los enlaces compartidos MASQUE aún no son compatibles: un nodo masque del núcleo Mihomo incluido requiere una clave privada de cliente ECDSA y la clave pública del servidor, pero este enlace solo contiene la autenticación de usuario y los parámetros de transporte HTTP/3, por lo que no se puede convertir; Cage tampoco puede importar nodos MASQUE por ahora, pide a tu proveedor nodos de otro protocolo",
+  "MASQUE 节点暂不支持：Cage 目前不能导入 masque 协议节点，请向服务商获取同一出口的其他协议节点后重新导入": "Los nodos MASQUE aún no son compatibles: Cage no puede importar nodos del protocolo masque por ahora; pide a tu proveedor nodos de otro protocolo para la misma salida y vuelve a importarlos",
   "创建连接地址": "Crear dirección de conexión",
   "删除旧环境归档": "Eliminar archivo del entorno anterior",
   "刷新 Tailscale 状态": "Actualizar estado de Tailscale",

@@ -303,3 +303,41 @@ func TestImportNamesClientOnlyNinjaNodes(t *testing.T) {
 		t.Fatalf("all-ninja import: %v", err)
 	}
 }
+
+// #974: MASQUE share links and YAML masque nodes name the protocol and why it
+// cannot be imported instead of a generic unsupported protocol.
+func TestImportExplainsMASQUENodes(t *testing.T) {
+	link := "masque://secret-user@proxy.example.test:443?user=secret-user&sni=proxy.example.test&insecure=0&mode=flow&network=h3&ech"
+	_, _, err := parseNodes([]byte(link), "link")
+	if err == nil || !strings.Contains(err.Error(), "MASQUE 分享链接暂不支持") || !strings.Contains(err.Error(), "ECDSA") {
+		t.Fatalf("masque link: %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-user") || strings.Contains(err.Error(), "proxy.example.test") {
+		t.Fatal("masque link error leaked link text")
+	}
+
+	data := `proxies:
+ - {name: good, type: socks5, server: 203.0.113.10, port: 1080}
+ - {name: warp, type: masque, server: 203.0.113.20, port: 443, private-key: secret-private, public-key: secret-public, ip: 172.16.0.2}
+ - {name: upper, type: MASQUE, server: 203.0.113.21, port: 443}
+`
+	_, skipped, err := parseNodes([]byte(data), "yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := unsupportedCoreTypes["masque"]
+	if len(skipped) != 2 {
+		t.Fatalf("skipped = %+v", skipped)
+	}
+	for _, issue := range skipped {
+		if issue.Reason != want || issue.Type != "masque" {
+			t.Fatalf("issue = %+v", issue)
+		}
+	}
+	report, _ := json.Marshal(skipped)
+	for _, secret := range []string{"secret-private", "secret-public"} {
+		if strings.Contains(string(report), secret) {
+			t.Fatal("import diagnosis leaked a field value")
+		}
+	}
+}
