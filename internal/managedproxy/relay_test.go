@@ -1,6 +1,7 @@
 package managedproxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -310,6 +312,23 @@ func findTestMihomo(t *testing.T) string {
 	return ""
 }
 
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // startTestConnectProxy runs a minimal HTTP CONNECT + plain HTTP proxy for
 // end-to-end Mihomo chaining and failover verification.
 func startTestConnectProxy(t *testing.T, hits *atomic.Int32) (addr string, stop func()) {
@@ -317,6 +336,10 @@ func startTestConnectProxy(t *testing.T, hits *atomic.Int32) (addr string, stop 
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
+	}
+	directTransport := &http.Transport{
+		Proxy:             nil,
+		DisableKeepAlives: true,
 	}
 	srv := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -333,7 +356,7 @@ func startTestConnectProxy(t *testing.T, hits *atomic.Int32) (addr string, stop 
 					http.Error(w, "no hijack", http.StatusInternalServerError)
 					return
 				}
-				conn, _, err := hj.Hijack()
+				conn, rw, err := hj.Hijack()
 				if err != nil {
 					up.Close()
 					return
@@ -342,7 +365,7 @@ func startTestConnectProxy(t *testing.T, hits *atomic.Int32) (addr string, stop 
 				go func() {
 					defer up.Close()
 					defer conn.Close()
-					_, _ = io.Copy(up, conn)
+					_, _ = io.Copy(up, rw)
 				}()
 				go func() {
 					defer up.Close()
@@ -354,7 +377,7 @@ func startTestConnectProxy(t *testing.T, hits *atomic.Int32) (addr string, stop 
 			// Plain HTTP proxy request (used by Mihomo url-test / fallback probes).
 			req := r.Clone(r.Context())
 			req.RequestURI = ""
-			resp, err := http.DefaultTransport.RoundTrip(req)
+			resp, err := directTransport.RoundTrip(req)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
@@ -375,6 +398,7 @@ func startTestConnectProxy(t *testing.T, hits *atomic.Int32) (addr string, stop 
 		defer cancel()
 		_ = srv.Shutdown(ctx)
 		_ = ln.Close()
+		directTransport.CloseIdleConnections()
 	}
 	t.Cleanup(stop)
 	return ln.Addr().String(), stop
@@ -514,6 +538,10 @@ func TestRelayGroupRealMihomoValidationAndFailover(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cmd := exec.CommandContext(ctx, mihomoPath, "-d", sockDir, "-f", liveCfgPath)
+	cmd.Env = coreEnvironment(sockDir)
+	var mihomoLogs lockedBuffer
+	cmd.Stdout = &mihomoLogs
+	cmd.Stderr = &mihomoLogs
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -522,25 +550,49 @@ func TestRelayGroupRealMihomoValidationAndFailover(t *testing.T) {
 		_ = cmd.Wait()
 	})
 
-	// Wait for Mihomo control socket to come up.
+	// Wait for Mihomo ApplyConfig to finish completely (control API, mixed-port,
+	// unified-delay, routing rules, CAGE group, and CAGE-RELAY-0 group).
+	// Mihomo opens the Unix controller socket before ApplyConfig finishes loading
+	// rules and activating the tunnel; sending proxy traffic as soon as only
+	// /proxies/CAGE-RELAY-0 responds can race with rule/tunnel activation and
+	// receive HTTP 502 on slower hosts.
+	hops, _ := s.ResolveRoute()
 	deadline := time.Now().Add(8 * time.Second)
 	for {
+		var cfg struct {
+			Port         int  `json:"mixed-port"`
+			UnifiedDelay bool `json:"unified-delay"`
+		}
+		var rules struct {
+			Rules []any `json:"rules"`
+		}
+		var mainGroup struct {
+			Now string `json:"now"`
+		}
 		var pg struct {
 			Type string   `json:"type"`
 			All  []string `json:"all"`
 			Now  string   `json:"now"`
 		}
-		if err := apiOnSocket(ctx, sockPath, "GET", "/proxies/CAGE-RELAY-0", nil, &pg); err == nil {
-			hops, _ := s.ResolveRoute()
+		if apiOnSocket(ctx, sockPath, "GET", "/configs", nil, &cfg) == nil &&
+			cfg.Port == mixedPort &&
+			cfg.UnifiedDelay &&
+			apiOnSocket(ctx, sockPath, "GET", "/rules", nil, &rules) == nil &&
+			len(rules.Rules) > 0 &&
+			apiOnSocket(ctx, sockPath, "GET", "/proxies/"+Group, nil, &mainGroup) == nil &&
+			mainGroup.Now == exitID &&
+			apiOnSocket(ctx, sockPath, "GET", "/proxies/CAGE-RELAY-0", nil, &pg) == nil {
 			if !relayGroupMatches(pg.Type, pg.All, hops[0]) {
-				t.Fatalf("relayGroupMatches failed on live mihomo response: %+v", pg)
+				t.Fatalf("relayGroupMatches failed on live mihomo response: %+v\nmihomo logs:\n%s", pg, mihomoLogs.String())
 			}
-			break
+			if pg.Now == r1 {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("mihomo control socket did not become ready")
+			t.Fatalf("mihomo did not finish startup readiness\nmihomo logs:\n%s", mihomoLogs.String())
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	proxyURL, err := url.Parse(fmt.Sprintf("http://cage:%s@127.0.0.1:%d", s.Auth, mixedPort))
@@ -567,10 +619,10 @@ func TestRelayGroupRealMihomoValidationAndFailover(t *testing.T) {
 	// Phase 1: traffic goes through relay-1 -> exit -> target.
 	body, err := getTarget()
 	if err != nil || body != "via-fixed-exit" {
-		t.Fatalf("phase 1 failed: body=%q err=%v", body, err)
+		t.Fatalf("phase 1 failed: body=%q err=%v\nmihomo logs:\n%s", body, err, mihomoLogs.String())
 	}
 	if r1Hits.Load() == 0 || exitHits.Load() == 0 {
-		t.Fatalf("phase 1 did not traverse relay1 and exit: r1=%d exit=%d", r1Hits.Load(), exitHits.Load())
+		t.Fatalf("phase 1 did not traverse relay1 and exit: r1=%d exit=%d\nmihomo logs:\n%s", r1Hits.Load(), exitHits.Load(), mihomoLogs.String())
 	}
 
 	// Phase 2: stop relay-1; Mihomo fallback must automatically switch to relay-2 while keeping exit!
@@ -592,8 +644,8 @@ func TestRelayGroupRealMihomoValidationAndFailover(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	if phase2Err != nil || r2Hits.Load() <= r2Before || exitHits.Load() <= exitBefore {
-		t.Fatalf("phase 2 failover did not switch to relay2->exit: err=%v r2=%d->%d exit=%d->%d",
-			phase2Err, r2Before, r2Hits.Load(), exitBefore, exitHits.Load())
+		t.Fatalf("phase 2 failover did not switch to relay2->exit: err=%v r2=%d->%d exit=%d->%d\nmihomo logs:\n%s",
+			phase2Err, r2Before, r2Hits.Load(), exitBefore, exitHits.Load(), mihomoLogs.String())
 	}
 
 	// Phase 3: stop relay-2 as well; requests must fail strictly with 0 direct connections to target.
@@ -601,9 +653,9 @@ func TestRelayGroupRealMihomoValidationAndFailover(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 	hitsBefore := targetHits.Load()
 	if _, err := getTarget(); err == nil {
-		t.Fatal("phase 3 succeeded after all relays stopped (unexpected direct fallback)")
+		t.Fatalf("phase 3 succeeded after all relays stopped (unexpected direct fallback)\nmihomo logs:\n%s", mihomoLogs.String())
 	}
 	if targetHits.Load() != hitsBefore {
-		t.Fatalf("phase 3 leaked direct traffic to target: hits %d -> %d", hitsBefore, targetHits.Load())
+		t.Fatalf("phase 3 leaked direct traffic to target: hits %d -> %d\nmihomo logs:\n%s", hitsBefore, targetHits.Load(), mihomoLogs.String())
 	}
 }
