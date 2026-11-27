@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   defaultAppearance,
   normalizeAppearance,
@@ -297,4 +298,22 @@ test("syncGuestTheme defaults to true, preserves explicit false, and stays exclu
     syncGuestTheme: false,
   });
   assert.equal("syncGuestTheme" in doc, false);
+});
+
+test("blurStatusNetwork defaults to off, only explicit true enables it, and stays out of theme documents", () => {
+  assert.equal(defaultAppearance.blurStatusNetwork, false);
+  assert.equal(normalizeAppearance({}).blurStatusNetwork, false);
+  assert.equal(normalizeAppearance({ blurStatusNetwork: "true" }).blurStatusNetwork, false);
+  assert.equal(normalizeAppearance({ blurStatusNetwork: true }).blurStatusNetwork, true);
+  const doc = themeDocument("Theme Export", { ...defaultAppearance, blurStatusNetwork: true });
+  assert.equal("blurStatusNetwork" in doc, false);
+});
+
+test("status bar exit IP and location blur only when enabled and reveal on hover or keyboard focus", () => {
+  const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  assert.match(read("./appearance.jsx"), /root\.dataset\.blurStatusNetwork = String\(appearance\.blurStatusNetwork\)/);
+  assert.match(read("./main.jsx"), /className=\{[^}]*status\.location \|\| status\.safety\?\.exit_ip\) \? "status-network-value"/);
+  const css = read("./appearance.css");
+  assert.match(css, /:root\[data-blur-status-network="true"\] \.status-network-value \{\s*filter: blur\(/);
+  assert.match(css, /button:hover \.status-network-value,\s*:root\[data-blur-status-network="true"\] \.status-bar button:focus-visible \.status-network-value \{\s*filter: none;/);
 });

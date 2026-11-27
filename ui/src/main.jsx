@@ -2306,7 +2306,7 @@ function App() {
             <span className="status-divider" />
             <button onClick={() => openSettings("network")}>
               <MapPin size={12} />
-              <span>
+              <span className={!status.network_error && (status.location || status.safety?.exit_ip) ? "status-network-value" : undefined}>
                 {status.network_error
                   ? tr("出口待确认")
                   : status.location || status.safety?.exit_ip
