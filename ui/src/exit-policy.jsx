@@ -31,6 +31,7 @@ export function ExitPolicyFields({
   onProbe,
   busy,
   probing,
+  showProbe = true,
 }) {
   const tr = useTranslation();
   const policy = { ...canonicalExitPolicy(), ...value };
@@ -149,27 +150,30 @@ export function ExitPolicyFields({
           )}
         </>
       )}
-      <div className="probe-line">
-        <button disabled={busy} onClick={onProbe}>
-          {probing ? (
-            <LoaderCircle size={15} className="spin" />
-          ) : (
-            <Globe2 size={15} />
+      {(showProbe || (observation && (policy.mode === "static" || policy.scope !== "any"))) && (
+        <div className="probe-line">
+          {showProbe && (
+            <button disabled={busy} onClick={onProbe}>
+              {probing ? (
+                <LoaderCircle size={15} className="spin" />
+              ) : (
+                <Globe2 size={15} />
+              )}
+              {tr("检测当前出口")}
+            </button>
           )}
-          {tr("检测当前出口")}
-        </button>
-        <button
-          disabled={
-            busy ||
-            !observation ||
-            (policy.mode === "dynamic" && policy.scope === "any")
-          }
-          onClick={bind}
-        >
-          {tr("用检测结果填写")}
-        </button>
-      </div>
-      {observation && (
+          {observation && (policy.mode === "static" || policy.scope !== "any") && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={bind}
+            >
+              {tr("用检测结果填写")}
+            </button>
+          )}
+        </div>
+      )}
+      {showProbe && observation && (
         <div className="exit-observation">
           <strong>
             {observation.country} · {observation.region} · {observation.city}

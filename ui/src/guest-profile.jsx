@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { api } from "./api";
 import { InlineSelect } from "./inline-select";
 import { SafetyMessage } from "./safety-message";
@@ -63,10 +64,16 @@ export function GuestProfileOptions({ value, onChange, disabled, system }) {
     catch (error) { setError(error.message); }
     finally { setGenerating(false); }
   }
-  return <details className="guest-profile-options"><summary>{tr("客机名称与初始设备配置")}</summary>
-    <p>{tr("建议选择自然、易记、与你以往环境身份不同的名称。用户名、主目录、主机名和尺寸可自行填写；留空时生成一组初始值，后续重启保持一致。")}</p>
-    {error && <p role="alert"><SafetyMessage message={error} /></p>}
-    {loaded && !editable && <p>{saved ? tr("此环境的创建配置已保存，继续安装将复用以下设置。") : tr("已有环境沿用原配置；这些选项用于创建独立的新环境。")}</p>}
+  return <details className="guest-profile-options">
+    <summary>
+      <SlidersHorizontal size={15} />
+      <span>{tr("客机名称与初始设备配置")}</span>
+      <ChevronDown size={15} className="guest-profile-chevron" />
+    </summary>
+    <div className="guest-profile-body">
+    <p className="field-help">{tr("建议选择自然、易记、与你以往环境身份不同的名称。用户名、主目录、主机名和尺寸可自行填写；留空时生成一组初始值，后续重启保持一致。")}</p>
+    {error && <p className="account-error" role="alert"><SafetyMessage message={error} /></p>}
+    {loaded && !editable && <p className="field-help">{saved ? tr("此环境的创建配置已保存，继续安装将复用以下设置。") : tr("已有环境沿用原配置；这些选项用于创建独立的新环境。")}</p>}
     {loaded && (editable || saved) && <fieldset disabled={locked}>
       {textFields.filter(([key]) => !native || key === "hostname").map(([key, label, placeholder, maxLength]) => <label key={key}>{tr(label)}<input value={options[key] || ""} maxLength={maxLength} placeholder={tr(placeholder)} onChange={event => set(key, event.target.value)} autoComplete="off" /></label>)}
       {dimensions.filter(([key]) => !native || key === "browser").map(([key, label]) => <label key={key}>{tr(label)}<span className="guest-profile-size">{["width", "height"].map((axis, i) => <React.Fragment key={axis}>{i > 0 && " × "}<input type="number" min={i ? 600 : 800} max={i ? 2160 : 3840} placeholder={i ? tr("高（随机）") : tr("宽（随机）")} value={options[`${key}_${axis}`] || ""} onChange={event => set(`${key}_${axis}`, event.target.value === "" ? 0 : Number(event.target.value))} /></React.Fragment>)}</span></label>)}
@@ -76,8 +83,9 @@ export function GuestProfileOptions({ value, onChange, disabled, system }) {
       {!native && capabilities?.host_os === "linux" && !capabilities.container && <label>{tr("虚拟 GPU")}<InlineSelect inline aria-label={tr("虚拟 GPU")} value={options.gpu_backend || "default"} onValueChange={value => set("gpu_backend", value)}><option value="default">{tr("使用现有虚拟设备")}</option><option value="virgl">{tr("QEMU VirGL + DRI3（实验性，需要宿主 GPU）")}</option></InlineSelect></label>}
       <label>WebGL<InlineSelect inline aria-label="WebGL" value={options.webgl || "native"} onValueChange={value => set("webgl", value)}><option value="native">{tr("使用客机原生图形能力")}</option><option value="disabled">{tr("关闭网页 3D 图形能力")}</option></InlineSelect></label>
       <label>{tr("Canvas 图像读取")}<InlineSelect inline aria-label={tr("Canvas 图像读取")} value={options.canvas || "native"} onValueChange={value => set("canvas", value)}><option value="native">{tr("允许网页读取 Canvas 图像")}</option><option value="blocked">{tr("阻止网页读取 Canvas 图像")}</option></InlineSelect></label>
-      <p>{tr("后端名称表示实际渲染路径，是否获得硬件加速需在环境检测中核实。关闭 WebGL 或阻止 Canvas 读取会影响部分网站；这些选项不替换真实驱动报告的显卡型号。")}</p>
+      <p className="field-help">{tr("后端名称表示实际渲染路径，是否获得硬件加速需在环境检测中核实。关闭 WebGL 或阻止 Canvas 读取会影响部分网站；这些选项不替换真实驱动报告的显卡型号。")}</p>
       <button type="button" onClick={randomize}>{generating ? tr("正在生成…") : tr("重新随机生成名称和尺寸")}</button>
     </fieldset>}
+    </div>
   </details>;
 }

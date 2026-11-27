@@ -24,7 +24,6 @@ import { useWindowVisibility } from "./window-visibility";
 import { followDisplaySize } from "./remote-display.mjs";
 import { guestKeys } from "./guest-keys.mjs";
 import { RefreshCw, Clipboard, ArrowUpRight } from "lucide-react";
-import { SessionAccount } from "./session-account";
 import { PausedSession } from "./paused-session";
 import "@xterm/xterm/css/xterm.css";
 import { useTranslation, translate } from "./interface-language.mjs";
@@ -624,8 +623,6 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
       {session.workspace_notice && <p className="connection-banner" role="status">{session.workspace_notice}</p>}
       {session.paused && <PausedSession id={session.cli_session_id} request={terminalAccountRequest} onContinued={onContinued} disabled={!connected} />}
       {session.host_input && <p className="connection-banner" role="status">{tr("正在本机终端输入。关闭本机终端后可在这里继续。")}</p>}
-      {visible && session.cli_session_id && <SessionAccount id={session.cli_session_id} request={terminalAccountRequest} paused={session.paused} compact
-        onChanged={onAccountChanged} />}
       <div className={`terminal-host ${preparing ? "terminal-preparing" : ""}`} ref={box} aria-hidden={preparing || undefined} />
       {preparing && (
         <div className="terminal-startup" role="status">

@@ -3495,5 +3495,7 @@
   "按顺序自动顺延，不影响最终出口 IP": "Cambia en orden ante fallos sin cambiar la IP de salida final",
   "多选节点或选整份订阅时自动切换": "Cambia automáticamente al seleccionar varios nodos o una suscripción completa",
   "经上一跳中转；多选或选整份订阅时自动切换": "Pasa por el salto anterior; cambia automáticamente al elegir varios nodos o una suscripción completa",
-  "拖动调整优先级": "Arrastra para cambiar la prioridad"
+  "拖动调整优先级": "Arrastra para cambiar la prioridad",
+  "拖动调整优先顺序（支持上下方向键）": "Arrastra para cambiar la prioridad (compatible con las teclas de flecha arriba/abajo)",
+  "直接拖动下方账号卡片调整优先顺序。": "Arrastra directamente las tarjetas de cuenta de abajo para ajustar el orden de prioridad."
 }

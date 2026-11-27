@@ -23,7 +23,7 @@ export const ExpandPane = ({ onClick }) => { const tr = useTranslation(); return
   aria-label={tr("退出分屏")} title={tr("在整个工作区显示此页")} onClick={onClick}><Maximize2 size={14} /></button>; };
 
 export function TerminalHeader({ tab, contentWorkspace, project, metadata, terminalDetail, terminalDetailHint,
-  onHome, busy, onClose, sidebarButton, exitButton, location, triggerRef, menu }) {
+  accountControl, onHome, busy, onClose, sidebarButton, exitButton, location, triggerRef, menu }) {
   const tr = useTranslation();
   // Matches closeTab: only a running conversation terminal is archived; an ended one is just closed.
   const archives = tab?.cli_session_id && !tab.closed;
@@ -51,6 +51,7 @@ export function TerminalHeader({ tab, contentWorkspace, project, metadata, termi
         )}
       </div>
       <div className="heading-actions">
+        {accountControl}
         {tab && (
           <button
             className="icon-button"

@@ -1630,15 +1630,30 @@ function App() {
   const focusHeader = tab => {
     if (tab && tab.id !== activeRef.current) void select(tab.id, false);
   };
+  const terminalAccountRequest = (path, options) => api("/cli" + path, options.body);
   const terminalHeader = tab => {
     const path = tab?.workspace || workspace;
     const account = tab?.claude_account_id && terminalAccountName(tab);
     const detail = tab?.terminalKind === "claude-login" ? tr("登录 · {0}", account || tr("新账号"))
       : account ? tab.claude_account_source === "default" ? tr("Claude · {0}（启动时账号）", account) : `Claude · ${account}` : "";
     const location = split && tab ? `heading-${tab.id}` : "heading";
+    const accountControl = tab?.cli_session_id ? (
+      <SessionAccount
+        id={tab.cli_session_id}
+        request={terminalAccountRequest}
+        inline
+        paused={tab.paused}
+        onChanged={(view) => {
+          if (view?.desktop_terminal_id && view.desktop_terminal_id !== tab.sessionId) {
+            void openSessionTerminal({ id: tab.cli_session_id });
+          }
+        }}
+      />
+    ) : null;
     return <TerminalHeader tab={tab} project={tr(projectName(path, groups, tr("新项目")))} metadata={metadata}
       contentWorkspace={path} terminalDetail={detail} terminalDetailHint={tab?.claude_account_source === "default"
         ? "此终端按启动时的普通终端登录标记。若普通终端已换号，请重新打开工作会话确认身份。" : detail}
+      accountControl={accountControl}
       busy={busy} onHome={() => setHome(true)}
       sidebarButton={sidebarButton(paneSide(tab?.id))} exitButton={expandButton(tab)}
       location={location} triggerRef={!tab || tab.id === active ? terminalTrigger : undefined}
@@ -2142,7 +2157,7 @@ function App() {
                           : tr("{0}。终端与本地文件仍可使用。", tr(network.label))} />
                     </p>
                   )}
-                  {!running && (
+                  {!running && (setupProxy || !projects.length) && (
                     <ol className="onboarding-steps" aria-label={tr("开始使用 Cage")}>
                       {["配置代理", "启动环境", "开始工作"].map(
                         (label, index) => (
@@ -2355,16 +2370,18 @@ function App() {
                 <MoreHorizontal size={15} />
               </button>
             )}
-            <button
-              onClick={stop}
-              disabled={
-                Boolean(startRequest) || (!running && !busy) || (status?.job?.kind === "stop" && busy)
-              }
-              title={tr("停止当前环境")}
-            >
-              <Power size={12} />
-              <span>{tr("停止环境")}</span>
-            </button>
+            {(running || busy) && (
+              <button
+                onClick={stop}
+                disabled={
+                  Boolean(startRequest) || (status?.job?.kind === "stop" && busy)
+                }
+                title={tr("停止当前环境")}
+              >
+                <Power size={12} />
+                <span>{tr("停止环境")}</span>
+              </button>
+            )}
           </footer>
         </div>
         {floatingPages.map((page, index) => (

@@ -26,7 +26,6 @@ import {
   Trash2,
   UsersRound,
 } from "lucide-react";
-import { EnvironmentShield } from "./environment-shield";
 import logo from "./logo.png";
 import claudeLogo from "./claude-logo.svg";
 import { dropAfter, isClientProjectPath, moveItem, orderedProjects as sortProjects, projectName } from "./workspace-state.mjs";
@@ -682,7 +681,6 @@ export function WorkspaceSidebar({
         <button className="sidebar-status" onClick={onSafety}>
           <i className={`status-dot ${network.mode}`} />
           <span>{healthy ? tr("环境运行正常") : runtimeLabel}</span>
-          <EnvironmentShield size={17} healthy={healthy} />
         </button>
         <div className="sidebar-footer-actions">
           <AccountMenu onSettings={onSettings} onConfirm={onAccountConfirm} onStatus={onAccountStatus} busy={busy} />
