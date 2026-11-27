@@ -1,6 +1,9 @@
 package containerenv
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMountPropagationDistinguishesPrivateAndIsolatedSharedRoot(t *testing.T) {
 	host := "24 1 8:1 / / rw,relatime shared:1 - ext4 /dev/root rw\n"
@@ -21,6 +24,20 @@ func TestMountPropagationDistinguishesPrivateAndIsolatedSharedRoot(t *testing.T)
 	} {
 		if _, err := rootMountPropagation(unsafe, host); err == nil {
 			t.Fatalf("accepted unsafe propagation: %s", unsafe)
+		}
+	}
+}
+
+func TestPrepareShareMountCommandHandlesStaleFuse(t *testing.T) {
+	cmd := prepareShareMountCommand("'/tmp/my project'")
+	for _, want := range []string{
+		"findmnt -rn --nocanonicalize --mountpoint '/tmp/my project'",
+		"fusermount3 -uz '/tmp/my project'",
+		"sudo -n umount -l -- '/tmp/my project'",
+		"sudo mkdir -p -- '/tmp/my project'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("prepareShareMountCommand missing %q in %q", want, cmd)
 		}
 	}
 }

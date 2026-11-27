@@ -15,8 +15,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -112,12 +114,27 @@ func validAccountPassword(password string) error {
 	return nil
 }
 
+var accountCleanupPending atomic.Bool
+
+func accountWrappingKey(password string, salt []byte) []byte {
+	key := argon2.IDKey([]byte(password), salt, 3, 64*1024, 2, 32)
+	// Give the Argon2 workers time to exit before reclaiming their 64 MiB
+	// workspace. A password change can derive several keys in one request.
+	if accountCleanupPending.CompareAndSwap(false, true) {
+		time.AfterFunc(time.Second, func() {
+			accountCleanupPending.Store(false)
+			debug.FreeOSMemory()
+		})
+	}
+	return key
+}
+
 func sealAccountKey(record *accountRecord, password string, key []byte) error {
 	record.Salt = make([]byte, 16)
 	if _, err := rand.Read(record.Salt); err != nil {
 		return err
 	}
-	derived := argon2.IDKey([]byte(password), record.Salt, 3, 64*1024, 2, 32)
+	derived := accountWrappingKey(password, record.Salt)
 	defer clear(derived)
 	block, err := aes.NewCipher(derived)
 	if err != nil {
@@ -139,7 +156,7 @@ func openAccountKey(record *accountRecord, password string) ([]byte, error) {
 	if len(password) > 1024 {
 		return nil, errors.New("密码不正确")
 	}
-	derived := argon2.IDKey([]byte(password), record.Salt, 3, 64*1024, 2, 32)
+	derived := accountWrappingKey(password, record.Salt)
 	defer clear(derived)
 	block, _ := aes.NewCipher(derived)
 	aead, _ := cipher.NewGCM(block)

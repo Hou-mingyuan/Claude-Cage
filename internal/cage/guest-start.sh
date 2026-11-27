@@ -3,15 +3,15 @@ set -euo pipefail
 missing_tool() {
   echo "Missing $1; this environment may have been created from an older base." >&2
   case "$1" in
-    chromium|code-server) echo 'Run cage update-tools, then cage up to install the missing tool in this VM.' >&2 ;;
+    chromium) echo 'Update the environment tools from Cage settings or run cage update-tools, then cage start.' >&2 ;;
   esac
-  echo 'To rebuild from the base, run cage setup --preinstall=default, then cage up --reset (files and logins on its disk are lost).' >&2
+  echo 'To rebuild from the base, run cage setup --preinstall=default, then cage start --reset (files and logins on its disk are lost).' >&2
   exit 1
 }
 if [[ ! -x /usr/bin/chromium ]]; then
   missing_tool chromium
 fi
-for app in code-server Xtigervnc openbox websockify; do
+for app in Xtigervnc openbox; do
   command -v "$app" >/dev/null || missing_tool "$app"
 done
 # English text keeps its requested fonts. For missing Han glyphs, prefer the
@@ -105,7 +105,7 @@ d['editorPassword']=next(line.split(':',1)[1].strip() for line in yaml.read_text
 atomic_write(p, json.dumps(d), 0o640, grp.getgrnam('cage-browser').gr_gid)
 atomic_write(p.with_name('desktop-downloads.json'), json.dumps({'workspace': d['workspace']}), 0o644)
 PYCONTROL
-sudo -u cage-browser env CAGE_LANGUAGE="$CAGE_LANGUAGE" python3 - <<'PYCODE'
+sudo -u cage-browser env CAGE_LANGUAGE="$CAGE_LANGUAGE" CAGE_GUEST_THEME="${CAGE_GUEST_THEME:-}" python3 - <<'PYCODE'
 import json, os
 from pathlib import Path
 p = Path.home() / "profile/Default/Preferences"
@@ -132,6 +132,13 @@ d["credentials_enable_service"] = False
 if not isinstance(d.get("profile"), dict):
     d["profile"] = {}
 d["profile"]["password_manager_enabled"] = False
+theme = os.environ.get("CAGE_GUEST_THEME", "")
+if theme in ("light", "dark"):
+    if not isinstance(d.get("browser"), dict):
+        d["browser"] = {}
+    if not isinstance(d["browser"].get("theme"), dict):
+        d["browser"]["theme"] = {}
+    d["browser"]["theme"]["color_scheme2"] = 2 if theme == "dark" else 1
 fd, name = tempfile.mkstemp(prefix=".Preferences-", dir=p.parent)
 try:
     with os.fdopen(fd, "w") as f:
@@ -151,9 +158,31 @@ except Exception:
         pass
     raise
 PYCODE
+if [ "${CAGE_GUEST_THEME:-}" = light ] || [ "${CAGE_GUEST_THEME:-}" = dark ]; then
+  # Appearance never decides whether the session starts.
+  sudo -u cage-browser env CAGE_GUEST_THEME="$CAGE_GUEST_THEME" python3 - <<'PYTHEME' || echo 'theme: browser preference not updated' >&2
+import json, os, tempfile
+from pathlib import Path
+p = Path("/home/cage-browser/theme.json")
+theme = os.environ["CAGE_GUEST_THEME"]
+fd, name = tempfile.mkstemp(prefix=".theme-", dir=p.parent)
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"variant": theme}))
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(name, p)
+except Exception:
+    try:
+        os.unlink(name)
+    except OSError:
+        pass
+    raise
+PYTHEME
+fi
 sudo systemctl reset-failed cage-display cage-window-manager cage-browser cage-webvnc 2>/dev/null || true
 sudo systemctl reset-failed cage-display-governor 2>/dev/null || true
-sudo systemctl restart cage-display cage-window-manager cage-browser cage-webvnc
 # Seed only appearance settings for a new editor profile. Existing preferences stay intact.
 python3 - <<'PYEDITOR'
 import shutil
@@ -165,9 +194,19 @@ if not p.exists():
 PYEDITOR
 # Systemd owns the editor independently of the SSH session and restarts crashes.
 (umask 077; tmp=$(mktemp "$HOME/.config/claude-cage/.editor-workspace.XXXXXX"); printf '%s' "$PWD" > "$tmp"; sync "$tmp" 2>/dev/null || true; mv -f "$tmp" "$HOME/.config/claude-cage/editor-workspace"; sync "$HOME/.config/claude-cage" 2>/dev/null || true)
+if ! systemctl is-active --quiet cage-editor.socket && systemctl is-active --quiet cage-editor.service; then
+  # Release an older editor's TCP port before systemd takes the listener.
+  sudo systemctl stop cage-editor.service
+fi
 if ! systemctl is-active --quiet cage-editor.service; then
   sudo /usr/local/bin/cage-editor-migrate
-  sudo systemctl start cage-editor.service
+fi
+sudo systemctl reset-failed cage-editor.socket cage-editor-forward.service cage-editor.service cage-webvnc.socket 2>/dev/null || true
+sudo systemctl start cage-editor.socket cage-webvnc.socket
+# Restored editor tabs can request their original URL as soon as Chromium starts.
+sudo systemctl restart cage-display cage-window-manager cage-browser
+if [ "${CAGE_GUEST_THEME:-}" = light ] || [ "${CAGE_GUEST_THEME:-}" = dark ]; then
+  /usr/local/bin/cage-apply-theme "$CAGE_GUEST_THEME" || echo 'theme: some preferences not updated' >&2
 fi
 sudo python3 /usr/local/lib/cage-wait-services.py
 printf 'Cage services ready. Timezone=%s Locale=%s Browser=%s\n' "$CAGE_TZ" "$CAGE_LOCALE" "$CAGE_LANGUAGE"

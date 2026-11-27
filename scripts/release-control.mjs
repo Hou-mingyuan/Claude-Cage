@@ -10,7 +10,7 @@ import { compareVersions, nextVersion, parseVersion, versionFiles } from './rele
 import { prepareReleaseAssets } from './prepare-release-assets.mjs';
 import { isMainModule } from './is-main-module.mjs';
 
-export const versionPaths = ['VERSION', 'ui/package.json', 'ui/package-lock.json', 'www/package.json', 'www/package-lock.json'];
+export const versionPaths = ['VERSION', 'package.json', 'ui/package.json', 'ui/package-lock.json', 'www/package.json', 'www/package-lock.json'];
 const repoRoot = fileURLToPath(new URL('../', import.meta.url));
 const shaPattern = /^[0-9a-f]{40}$/;
 const platforms = ['macos', 'macos-intel', 'windows', 'linux'];
@@ -82,7 +82,7 @@ export async function verifyCandidate(api, context, expected) {
   const diff = await api('GET', `${base}/compare/${context.sourceSha}...${context.commitSha}`);
   if (diff.status !== 'ahead' || diff.ahead_by !== 1 || diff.files?.length !== versionPaths.length ||
       diff.files.some(file => file.status !== 'modified' || !versionPaths.includes(file.filename))) {
-    throw new Error('Release candidate must change only the five application version files.');
+    throw new Error('Release candidate must change only the application version files.');
   }
   for (const [path, content] of expected) {
     const file = await api('GET', `${base}/contents/${path}?ref=${context.commitSha}`);

@@ -39,6 +39,7 @@ async function repositoryFixture(t) {
   }).trimEnd();
   git(['init', '--quiet', '--initial-branch=main']);
   await writeFile(join(root, 'VERSION'), currentVersion + '\n');
+  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'claude-cage', version: currentVersion }));
   for (const directory of ['ui', 'www']) {
     await mkdir(join(root, directory));
     const manifest = { name: directory, version: currentVersion, dependencies: { fixture: '1.0.0' } };
@@ -256,7 +257,7 @@ test('candidate verification rejects extra files and dependency edits hidden in 
     const treeSha = await f.tree(f.git(['rev-parse', `${candidate.sourceSha}^{tree}`]), [...changed].map(([path, content]) => ({ path, content })));
     const message = f.git(['show', '-s', '--format=%B', candidate.commitSha]);
     const commitSha = f.git(['commit-tree', treeSha, '-p', candidate.sourceSha], { input: message });
-    await assert.rejects(verifyCandidate(f.api, { ...candidate, commitSha }, expected), /only the five|unexpected change/);
+    await assert.rejects(verifyCandidate(f.api, { ...candidate, commitSha }, expected), /only the application version files|unexpected change/);
   });
 });
 

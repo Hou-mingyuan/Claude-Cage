@@ -46,6 +46,18 @@ func TestShareLinkProtocols(t *testing.T) {
 			"name": "Legacy", "type": "ss", "server": "legacy.example.com", "port": 8000, "cipher": "chacha20-ietf-poly1305", "password": "legacy"}},
 		{"ss-obfs", "ss://" + base64.RawURLEncoding.EncodeToString([]byte("aes-128-gcm:p")) + "@obfs.example.com:80/?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Dcdn.example.com#Obfs", map[string]any{
 			"name": "Obfs", "type": "ss", "server": "obfs.example.com", "port": 80, "cipher": "aes-128-gcm", "password": "p", "plugin": "obfs", "plugin-opts": map[string]any{"mode": "http", "host": "cdn.example.com"}}},
+		{"ss-obfs-shadowrocket-raw-semicolons", "ss://" + base64.RawURLEncoding.EncodeToString([]byte("aes-128-gcm:p")) + "@obfs.example.com:80?plugin=obfs-local;obfs=http;obfs-host=cdn.example.com#Obfs", map[string]any{
+			"name": "Obfs", "type": "ss", "server": "obfs.example.com", "port": 80, "cipher": "aes-128-gcm", "password": "p", "plugin": "obfs", "plugin-opts": map[string]any{"mode": "http", "host": "cdn.example.com"}}},
+		{"ss-obfs-with-other-params", "ss://" + base64.RawURLEncoding.EncodeToString([]byte("aes-128-gcm:p")) + "@obfs.example.com:80/?foo=bar&plugin=simple-obfs;obfs=tls;obfs-host=cdn.example.com&baz=1#Obfs", map[string]any{
+			"name": "Obfs", "type": "ss", "server": "obfs.example.com", "port": 80, "cipher": "aes-128-gcm", "password": "p", "plugin": "obfs", "plugin-opts": map[string]any{"mode": "tls", "host": "cdn.example.com"}}},
+		{"ss-obfs-then-other-params", "ss://" + base64.RawURLEncoding.EncodeToString([]byte("aes-128-gcm:p")) + "@obfs.example.com:80?plugin=obfs-local;obfs=http;obfs-host=cdn.example.com&foo=bar#Obfs", map[string]any{
+			"name": "Obfs", "type": "ss", "server": "obfs.example.com", "port": 80, "cipher": "aes-128-gcm", "password": "p", "plugin": "obfs", "plugin-opts": map[string]any{"mode": "http", "host": "cdn.example.com"}}},
+		{"ss-empty-plugin", "ss://" + base64.RawURLEncoding.EncodeToString([]byte("aes-128-gcm:p")) + "@ss.example.com:8388/?plugin=&foo=bar#Plain", map[string]any{
+			"name": "Plain", "type": "ss", "server": "ss.example.com", "port": 8388, "cipher": "aes-128-gcm", "password": "p"}},
+		{"ss-no-plugin-other-params", "ss://" + base64.RawURLEncoding.EncodeToString([]byte("aes-128-gcm:p")) + "@ss.example.com:8388/?foo=bar#Plain", map[string]any{
+			"name": "Plain", "type": "ss", "server": "ss.example.com", "port": 8388, "cipher": "aes-128-gcm", "password": "p"}},
+		{"ss-legacy-obfs-raw-semicolons", "ss://" + base64.StdEncoding.EncodeToString([]byte("aes-128-gcm:p@legacy.example.com:80")) + "?plugin=obfs-local;obfs=http;obfs-host=cdn.example.com#Legacy", map[string]any{
+			"name": "Legacy", "type": "ss", "server": "legacy.example.com", "port": 80, "cipher": "aes-128-gcm", "password": "p", "plugin": "obfs", "plugin-opts": map[string]any{"mode": "http", "host": "cdn.example.com"}}},
 		{"hysteria2", "hysteria2://auth-pass@hy.example.com:443/?sni=hy.example.com&insecure=1&obfs=salamander&obfs-password=ob&mport=20000-30000#HY2", map[string]any{
 			"name": "HY2", "type": "hysteria2", "server": "hy.example.com", "port": 443, "password": "auth-pass", "sni": "hy.example.com", "skip-cert-verify": true,
 			"obfs": "salamander", "obfs-password": "ob", "mport": "20000-30000"}},
@@ -83,7 +95,11 @@ func TestShareLinkRejectsAmbiguousEntries(t *testing.T) {
 		{"vmess-not-json", "vmess://not-base64!!", "v2rayN"},
 		{"vmess-quic", vmessLink(t, map[string]any{"add": "h.example.com", "port": 443, "id": "u", "net": "quic"}), "传输方式暂不支持"},
 		{"ss-v2ray-plugin", "ss://YWVzLTEyOC1nY206cA@h.example.com:443/?plugin=v2ray-plugin%3Bmode%3Dwebsocket#V", "插件暂不支持"},
+		{"ss-v2ray-plugin-raw-semicolons", "ss://YWVzLTEyOC1nY206cA@h.example.com:443?plugin=v2ray-plugin;mode=websocket;host=h.example.com#V", "插件暂不支持"},
+		{"ss-obfs-raw-bad-mode", "ss://YWVzLTEyOC1nY206cA@h.example.com:80?plugin=obfs-local;obfs=bogus#O", "obfs 模式无效"},
+		{"ss-plugin-bad-escape", "ss://YWVzLTEyOC1nY206cA@h.example.com:80?plugin=obfs-local%3Bobfs%3Dhttp%ZZ#O", "插件参数无效"},
 		{"tuic-v4-token", "tuic://token@h.example.com:443#T", "uuid:password"},
+		{"masque", "masque://user-id@proxy.example.test:443?user=user-id&sni=proxy.example.test&insecure=0&mode=flow&network=h3&ech", "MASQUE 分享链接暂不支持"},
 		{"no-port", "trojan://p@h.example.com#N", "格式无效"},
 		{"bad-port", "anytls://p@h.example.com:70000#N", "格式无效"},
 		{"no-credential", "anytls://h.example.com:443#N", "格式无效"},
@@ -216,5 +232,106 @@ func TestShareLinkHysteria2MultiPortSurvivesImport(t *testing.T) {
 	nodes, _, err := parseNodes([]byte("hysteria2://pw@hy.example.com:443,5000-6000/?mport=443,5000-6000#Multi\nhy2://pw@hy.example.com#Default\n"), "paste")
 	if err != nil || len(nodes) != 2 || nodes[0].Config["ports"] != "443,5000-6000" || nodes[0].Config["port"] != 443 || nodes[1].Config["port"] != 443 {
 		t.Fatalf("imported = %+v, %v", nodes, err)
+	}
+}
+
+const srUUID = "00000000-0000-4000-8000-000000000001"
+
+func srLink(scheme string, enc *base64.Encoding, authority, query string) string {
+	link := scheme + "://" + enc.EncodeToString([]byte(authority))
+	if query != "" {
+		link += "?" + query
+	}
+	return link
+}
+
+// Shadowrocket exports scheme://Base64(method:uuid@server:port)?remarks=…
+// with transport and TLS settings as its own query parameters (#1000, #982).
+func TestShareLinkShadowrocketForms(t *testing.T) {
+	for _, tc := range []struct {
+		name, link string
+		want       map[string]any
+	}{
+		{"vless-grpc-tls", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=SR%20VLESS&obfs=grpc&tls=1&peer=sni.example.com&path=svc"), map[string]any{
+			"name": "SR VLESS", "type": "vless", "server": "192.0.2.10", "port": 443, "uuid": srUUID, "tls": true, "servername": "sni.example.com",
+			"network": "grpc", "grpc-opts": map[string]any{"grpc-service-name": "svc"}}},
+		{"vless-ws-url-safe-unpadded", srLink("vless", base64.RawURLEncoding, "none:"+srUUID+"@vless.example.com:8443", "remarks=WS&obfs=websocket&obfsParam=cdn.example.com&path=%2Fws&tls=1&peer=cdn.example.com&allowInsecure=1&udp=1&tfo=1&alpn=h2,http/1.1&fp=chrome&mux=0&xtls=0"), map[string]any{
+			"name": "WS", "type": "vless", "server": "vless.example.com", "port": 8443, "uuid": srUUID, "tls": true, "servername": "cdn.example.com",
+			"skip-cert-verify": true, "alpn": []string{"h2", "http/1.1"}, "client-fingerprint": "chrome", "tfo": true,
+			"network": "ws", "ws-opts": map[string]any{"path": "/ws", "headers": map[string]any{"Host": "cdn.example.com"}}}},
+		{"vless-fragment-name-plain-tcp", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "obfs=none&tls=0&peer=ignored.example.com") + "#Frag", map[string]any{
+			"name": "Frag", "type": "vless", "server": "192.0.2.10", "port": 443, "uuid": srUUID}},
+		{"vmess-http", srLink("vmess", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:80", "remarks=demo&obfs=http&udp=1&alterId=0"), map[string]any{
+			"name": "demo", "type": "vmess", "server": "192.0.2.10", "port": 80, "uuid": srUUID, "alterId": 0, "cipher": "auto",
+			"network": "http", "http-opts": map[string]any{"path": []string{"/"}}}},
+		{"vmess-http-host-path", srLink("vmess", base64.URLEncoding, "aes-128-gcm:"+srUUID+"@192.0.2.10:8080", "remarks=H&obfs=http&obfsParam=a.example.com&path=%2Fv&alterId=2"), map[string]any{
+			"name": "H", "type": "vmess", "server": "192.0.2.10", "port": 8080, "uuid": srUUID, "alterId": 2, "cipher": "aes-128-gcm",
+			"network": "http", "http-opts": map[string]any{"path": []string{"/v"}, "headers": map[string]any{"Host": []string{"a.example.com"}}}}},
+		{"vmess-ws-tls", srLink("vmess", base64.StdEncoding, "chacha20-poly1305:"+srUUID+"@192.0.2.10:443", "remarks=VW&obfs=websocket&obfsParam=cdn.example.com&path=%2Fv&tls=1&peer=cdn.example.com&alterId=0"), map[string]any{
+			"name": "VW", "type": "vmess", "server": "192.0.2.10", "port": 443, "uuid": srUUID, "alterId": 0, "cipher": "chacha20-poly1305", "tls": true, "servername": "cdn.example.com",
+			"network": "ws", "ws-opts": map[string]any{"path": "/v", "headers": map[string]any{"Host": "cdn.example.com"}}}},
+		{"vless-fragment-only", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "") + "#a@b", map[string]any{
+			"name": "a@b", "type": "vless", "server": "192.0.2.10", "port": 443, "uuid": srUUID}},
+		{"vmess-no-query-ipv6", srLink("vmess", base64.RawStdEncoding, "none:"+srUUID+"@[2001:db8::1]:8443", ""), map[string]any{
+			"name": "vmess [2001:db8::1]:8443", "type": "vmess", "server": "2001:db8::1", "port": 8443, "uuid": srUUID, "alterId": 0, "cipher": "none"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseShareLink(tc.link)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got  %#v\nwant %#v", got, tc.want)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, link, reason string }{
+		{"vless-unknown-param", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&obfs=grpc&tls=1&keepalive=1"), "参数"},
+		{"vless-xtls", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&tls=1&xtls=2"), "参数"},
+		{"vless-duplicate-param", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&path=a&path=b"), "参数"},
+		{"vless-bad-bool", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&tls=maybe"), "参数"},
+		{"vless-http-obfs", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&obfs=http"), "传输方式暂不支持"},
+		{"vless-cipher", srLink("vless", base64.StdEncoding, "aes-128-gcm:"+srUUID+"@192.0.2.10:443", "remarks=X"), "encryption"},
+		{"vless-no-port", srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10", "remarks=X"), "格式无效"},
+		{"vless-no-method", srLink("vless", base64.StdEncoding, srUUID+"@192.0.2.10:443", "remarks=X"), "格式无效"},
+		{"vless-not-base64", "vless://not-base64!!?remarks=X", "格式无效"},
+		{"vmess-mux", srLink("vmess", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&mux=1"), "参数"},
+		{"vmess-unknown-param", srLink("vmess", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&aid=0"), "参数"},
+		{"vmess-cipher", srLink("vmess", base64.StdEncoding, "rc4-md5:"+srUUID+"@192.0.2.10:443", "remarks=X"), "参数"},
+		{"vmess-kcp", srLink("vmess", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&obfs=mkcp"), "传输方式暂不支持"},
+		{"vmess-bad-port", srLink("vmess", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:70000", "remarks=X"), "格式无效"},
+		{"vmess-bad-alterid", srLink("vmess", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=X&alterId=x"), "格式无效"},
+		{"vmess-empty-uuid", srLink("vmess", base64.StdEncoding, "auto:@192.0.2.10:443", "remarks=X"), "格式无效"},
+		{"vmess-neither-form", srLink("vmess", base64.StdEncoding, "hello world", "remarks=X"), "v2rayN"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseShareLink(tc.link)
+			if err == nil || !strings.Contains(err.Error(), tc.reason) {
+				t.Fatalf("error = %v, want %q", err, tc.reason)
+			}
+		})
+	}
+}
+
+func TestShareLinkShadowrocketImport(t *testing.T) {
+	links := strings.Join([]string{
+		srLink("vless", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=GRPC&obfs=grpc&tls=1&peer=sni.example.com&path=svc"),
+		srLink("vmess", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:80", "remarks=demo&obfs=http&udp=1&alterId=0"),
+		srLink("vmess", base64.StdEncoding, "auto:"+srUUID+"@192.0.2.10:443", "remarks=Skipped&mux=1"),
+	}, "\n")
+	nodes, err := Parse([]byte(links), "shadowrocket")
+	if err != nil || len(nodes) != 2 || nodes[0].Name != "GRPC" || nodes[0].Type != "vless" || nodes[1].Name != "demo" || nodes[1].Type != "vmess" {
+		t.Fatalf("imported = %+v, %v", nodes, err)
+	}
+	if nodes[1].Config["network"] != "http" || nodes[0].Config["servername"] != "sni.example.com" {
+		t.Fatalf("vmess config = %+v", nodes[1].Config)
+	}
+	_, skipped, err := parseNodes([]byte(links), "shadowrocket")
+	if err != nil || len(skipped) != 1 {
+		t.Fatalf("skipped = %+v, %v", skipped, err)
+	}
+	report, _ := json.Marshal(skipped)
+	if !strings.Contains(string(report), "Skipped") || strings.Contains(string(report), srUUID) || strings.Contains(string(report), "192.0.2.10") {
+		t.Fatalf("skip report = %s", report)
 	}
 }

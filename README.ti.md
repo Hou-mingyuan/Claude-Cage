@@ -55,6 +55,7 @@ Claude Cage ተርሚናል፣ መርበብ መዳህሰሲ፣ ኣርታዒ፣ �
 
 ## ብCage እንታይ ክትገብር ትኽእል
 
+- **Claude Code ካብ ተርሚናል ኮምፒዩተርኩም ተጠቐሙ (v0.2.2)።** `cage login` ናብ ናይ Claude መለያኹም ንምእታው መርበብ መዳህሰሲ Cage ይኸፍት። ኣብ ማህደር እቲ ፕሮጀክት `cage claude` ምስ እተካይዱ፣ እቲ ማህደር ምስ Cage ይካፈልን ብነባሪ ሕሳብኩም ሓድሽ ክፍለ ግዜ ይጅምርን። ንሓደ ሕሳብ `sarah` ኢልኩም ምስ እትሰምይዎ፣ `cage sarah` ነዛ ግዜ ጥራይ በቲ ሕሳብ ይጥቀም። `cage` ጥራይ ምስ እትጽሕፉ ሓገዝ ይረአ። `cage start` ነቲ ናይ Cage ኣገልግሎትን ነታ ኣብ ኮምፒዩተርኩም ዘላ ቨርቹዋል ማሽንን ኣብ ድሕረ ባይታ የበግስ፣ እቲ ናይ ስራሕ ከባቢ ድሉው ክሳብ ዝኸውን ድማ ይጽበ። `cage up` ነቲ ናይ Cage ዴስክቶፕ መተግበሪ ይኸፍቶ ወይ ነቲ ክፉት መስኮቱ ናብ ቅድሚት የምጽኦ። Cage ካብ ተርሚናል ንምሕዳስ `cage update` ኣካይዱ። ናይ v0.2.2 npm ጥቕሊ ምስ ተዘርግሐ፣ ብ`npm install -g claude-cage` ክትጽዕንዎ ትኽእሉ። [ትእዛዛትን ኣብነታትን](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **ኣብ ሓደ መስኮት ስራሕ።** ኣብቲ ተርሚናል ክላውድ ኮድ ኣካይድ፣ ኣብ ኤዲተር ለውጢ ዳግም፣ ከምኡ’ውን ኣገልግሎታት ቅድመ-ምርኢትን ንምእታውን ንCage ዳህሳሲ ተጠቐም።
 - **ብዕዳጋ ፕለጊን ኩሉ ዓቕሚ ክፈት።** ክፉት [ዕዳጋ ፕለጊን (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) ብ«ፕለጊን = MCP + ምስፋሕ» ንClaude መሳርሒታት ኮምፒውተርካ (ስክሪንን ኪቦርድ/ማውስን፣ ሰነዳት Office፣ Blender፣ ትእዛዛት) ብግልጺ ፍቓድን ምርግጋጽን ከም ዝጥቀምን ንCage ዝተፈለዩ ገጻት ከም ትውስኽን ይገብር። [መምርሒ ፕለጊን](docs/guide/plugins.md) · [መግለጺ ልምዓት](docs/plugins.md)
 - **ኣብ ኩሉ መድረኻት ሓደ ቀሊል ከባቢ።** Cage ኣብ macOS፣ Windows ን Linux ን ውስብስብ ብዙሕ ጋሻ ስርዓታት ከይሓለወ ነቲ ሓደ ቀሊል Debian 13 ከባቢ ምስ ተመሳሳሊ መሳርሒታትን ኣሰራርሓን ይጥቀም። [Debian ከባቢ](docs/guide/guest-systems.md)
@@ -71,8 +72,10 @@ Claude Cage ተርሚናል፣ መርበብ መዳህሰሲ፣ ኣርታዒ፣ �
 ነዚ ሕቶ ናብ AI ወኪልካ ስደዶ (codex, dsh, workbuddy — ምናልባት ክላውድ ኮድ ኣይኮነን 😁):
 
 ```markdown
-ካብ https://github.com/Lee-xeo/Claude-Cage እቲ ሓድሽ ምንጪ ኮድ ኣምጽእ፣ ሃንጾ፣ ጠቕሊልካ ኣትክሎ። ፕሮክሲ Cage ብናይ ኣካባቢየይ Clash xx ኖድ ኣቢሉ ብናተይ xx IP ክወጽእ ኣዋቕሮ። ንብምሉኡ ሂደት ተኸታተል፣ ጸገማት ብቐጥታ ኣርም፣ እንተድልዩ ድማ ምስምማዕ ንምምሕያሽ ኣብ ፕሮጀክቱ issue ኣቕርብ።
+ካብ https://github.com/Lee-xeo/Claude-Cage እቲ ሓድሽ ምንጪ ኮድ ኣምጽእ፣ ሃንጾ፣ ጠቕሊልካ ኣትክሎ። ነቲ ናብ [መንገዲ ፋይል] ዝሰደድክዎ ቅጥዒ ኖድ ናብ Cage ኣእትዎ። ሰንሰለት ፕሮክሲ እንተተጠቒመ፣ መጀመርታ ነቲ መተሓላለፊ ኖድ፣ ቀጺልካ ነቲ መውጽኢ ኖድ ኣዋቕር። ናይ መውጽኢ ህዝባዊ IP ምስ [ትጽቢት ዝግበረሉ IP] ከም ዝሰማማዕ ኣረጋግጽ። ንብምሉኡ ሂደት ተኸታተል፣ ጸገማት ብቐጥታ ኣርም፣ እንተድልዩ ድማ ምስምማዕ ንምምሕያሽ ኣብ ፕሮጀክቱ issue ኣቕርብ።
 ```
+
+Clash/Mihomo ወይ sing-box ኣብ ከባቢኻ ምትእስሳራት ዝቕበለሉ ኣድራሻ (ንኣብነት `127.0.0.1:7890`) ከም ናይ ላዕሊ ኖድ ክትጥቀመሉ ኣይከኣልን። [ሰንሰለት ፕሮክሲ ናብ Cage ምግዓዝ](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 ዘድልየካ ዘተኣማምን ናይ መርበብ ፕሮክሲ መወዳእታ ነጥቢ ጥራይ እዩ። እዚ ፕሮጀክት ንዝኾነ ፕሮክሲ ወሃቢ ዘስፋሕፍሕ ኣይኮነን፤ ባዕልኻ ኣቕራቢ ክትረክብ ትኽእል ኢኻ፣ ንኣብነት ኣብ መርበብ ሓበሬታ Black Error ብምድላይ።
 
@@ -130,9 +133,9 @@ macOS እና ዝተፈረሙ Windows ስሪቶች ብዝተመርጸ ፕሮክ�
 
 እቲ ፕሮጀክት ብቕልጡፍ ይምዕብል ኣሎ። ርእይቶ ንምክፋል ኣብቲ ናይ ማሕበረሰብ ጉጅለ ​​ተጸንበሩ፤ ሕብረተሰብ ዝሕልዉ ሰባት ድሉዋት እዮም።
 
-| QQ group · 112745758 | WeChat |
+| QQ group · 782087179 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

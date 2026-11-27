@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { KeyRound, Plus, Search, ShieldCheck } from "lucide-react";
+import { Copy, Eye, EyeOff, KeyRound, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api, writeClipboard } from "./api";
 import "./password-vault.css";
 import { useTranslation } from "./interface-language.mjs";
@@ -128,7 +128,6 @@ export function PasswordVaultSettings({ onConfirm, onDirty }) {
   const entries = store.entries.filter(entry => `${entry.origin} ${entry.username}`.toLowerCase().includes(search.toLowerCase()));
   return <section className="vault-settings">
     <div className="section-title"><h3>{tr("密码保险箱")}</h3><p>{tr("账号密码加密保存在这台设备，随 Cage 一起解锁和锁定。")}</p></div>
-    <div className="vault-note"><ShieldCheck size={17} /><span>{tr("查看或复制密码需要再次验证 Cage 账户密码。填充后由你提交登录。")}</span></div>
     {error && <p className="account-error" role="alert">{tr(error)}</p>}
     {message && <p role="status">{message}</p>}
     <div className="vault-toolbar"><label className="vault-search"><span><Search size={14} />{tr("搜索网站或账号")}</span>
@@ -143,23 +142,76 @@ export function PasswordVaultSettings({ onConfirm, onDirty }) {
         <div className="vault-actions"><button className="primary" type="submit">{tr("保存记录")}</button><button type="button" onClick={() => setDraft(null)}>{tr("取消")}</button></div>
       </fieldset>
     </form>}
-    {verify && <form className="vault-editor" onSubmit={event => { event.preventDefault(); void run({ action: "reveal", id: verify.entry.id, account_password: accountPassword }); }}>
-      <h4>{verify.mode === "copy" ? tr("验证后复制密码") : tr("验证后查看密码")}</h4><p>{verify.entry.origin} · {verify.entry.username}</p>
-      <label>{tr("Cage 账户密码")}<input type="password" autoComplete="off" autoFocus required maxLength={1024} value={accountPassword} onChange={event => setAccountPassword(event.target.value)} /></label>
-      <div className="vault-actions"><button className="primary" disabled={busy} type="submit">{verify.mode === "copy" ? tr("验证并复制") : tr("验证并查看")}</button>
-        <button type="button" disabled={busy} onClick={() => { setVerify(null); setAccountPassword(""); }}>{tr("取消验证")}</button></div>
-    </form>}
     {loading ? <p>{tr("正在读取密码保险箱…")}</p> : !entries.length ? <div className="vault-empty"><KeyRound size={24} /><p>{search ? tr("没有找到匹配的账号") : tr("还没有保存密码")}</p><small>{tr("网页登录后可以确认保存，也可以手动添加。")}</small></div> :
-      <div className="vault-list">{entries.map(entry => <article className="vault-entry" key={entry.id}>
-        <div><strong>{entry.origin}</strong><span>{entry.username || tr("未填写用户名")}</span></div>
-        {revealed?.id === entry.id && <div className="vault-revealed"><output aria-label={tr("已保存的网站密码")}>{revealed.password}</output><button onClick={() => setRevealed(null)}>{tr("隐藏密码")}</button></div>}
-        <div className="vault-actions">
-          <button disabled={busy || Boolean(draft)} onClick={() => askReveal(entry, "view")}>{tr("查看密码")}</button>
-          <button disabled={busy || Boolean(draft)} onClick={() => askReveal(entry, "copy")}>{tr("复制密码")}</button>
-          <button disabled={busy || Boolean(draft)} onClick={() => { setDraft({ ...entry, password: "" }); setVerify(null); setRevealed(null); }}>{tr("编辑")}</button>
-          <button disabled={busy || Boolean(draft)} onClick={async () => { if (await onConfirm({ title: tr("删除此密码？"), body: tr("{0} · {1}。删除后无法恢复。", entry.origin, entry.username || tr("未填写用户名")), confirm: tr("删除密码") })) await run({ action: "delete", id: entry.id }, tr("密码记录已删除")); }}>{tr("删除")}</button>
-        </div>
-      </article>)}</div>}
+      <div className="vault-list">{entries.map(entry => {
+        const verifyingThis = verify?.entry?.id === entry.id;
+        return <article className={`vault-entry${verifyingThis ? " is-verifying" : ""}`} key={entry.id}>
+          <div className="vault-entry-row">
+            <div className="vault-entry-meta">
+              <strong>{entry.origin}</strong>
+              <span>{entry.username || tr("未填写用户名")}</span>
+            </div>
+            <div className="vault-entry-actions">
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={tr("查看密码")}
+                title={tr("查看密码")}
+                disabled={busy || Boolean(draft)}
+                onClick={() => askReveal(entry, "view")}
+              >
+                <Eye size={15} />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={tr("复制密码")}
+                title={tr("复制密码")}
+                disabled={busy || Boolean(draft)}
+                onClick={() => askReveal(entry, "copy")}
+              >
+                <Copy size={14} />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={tr("编辑")}
+                title={tr("编辑")}
+                disabled={busy || Boolean(draft)}
+                onClick={() => { setDraft({ ...entry, password: "" }); setVerify(null); setRevealed(null); }}
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                type="button"
+                className="icon-button vault-delete-btn"
+                aria-label={tr("删除")}
+                title={tr("删除")}
+                disabled={busy || Boolean(draft)}
+                onClick={async () => { if (await onConfirm({ title: tr("删除此密码？"), body: tr("{0} · {1}。删除后无法恢复。", entry.origin, entry.username || tr("未填写用户名")), confirm: tr("删除密码") })) await run({ action: "delete", id: entry.id }, tr("密码记录已删除")); }}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+          {verifyingThis && <form className="vault-inline-verify" onSubmit={event => { event.preventDefault(); void run({ action: "reveal", id: verify.entry.id, account_password: accountPassword }); }}>
+            <label className="vault-inline-verify-field">
+              <span>{tr("Cage 账户密码")}</span>
+              <input type="password" autoComplete="off" autoFocus required maxLength={1024} placeholder={tr("验证账户密码")} value={accountPassword} onChange={event => setAccountPassword(event.target.value)} />
+            </label>
+            <div className="vault-inline-verify-actions">
+              <button className="primary" disabled={busy} type="submit">{verify.mode === "copy" ? tr("验证并复制") : tr("验证并查看")}</button>
+              <button type="button" disabled={busy} onClick={() => { setVerify(null); setAccountPassword(""); }}>{tr("取消验证")}</button>
+            </div>
+          </form>}
+          {revealed?.id === entry.id && <div className="vault-revealed">
+            <output aria-label={tr("已保存的网站密码")}>{revealed.password}</output>
+            <button type="button" className="icon-button" aria-label={tr("隐藏密码")} title={tr("隐藏密码")} onClick={() => setRevealed(null)}>
+              <EyeOff size={15} />
+            </button>
+          </div>}
+        </article>;
+      })}</div>}
     {store.blocked.length > 0 && <section className="vault-blocked"><h4>{tr("不再提示保存的网站")}</h4>{store.blocked.map(origin => <div key={origin}><span>{origin}</span><button disabled={busy} onClick={() => run({ action: "unblock", origin }, tr("已恢复此网站的保存提示"))}>{tr("恢复提示")}</button></div>)}</section>}
     <p className="footnote">{tr("目前支持 HTTPS 顶层网页的常见登录表单。密码不会同步到其他设备；备份时需同时保留本地账户文件与密码库。")}</p>
   </section>;

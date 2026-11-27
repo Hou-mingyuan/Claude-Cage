@@ -28,14 +28,29 @@ import (
 
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/durable"
+	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/limaembed"
 	"github.com/sylvinus/agent-vm/internal/paths"
 )
 
 func newTestLima(t *testing.T) *Lima {
 	t.Helper()
-	home := t.TempDir()
+	// Testing's name-based TempDir can exceed Lima's socket budget.
+	base := ""
+	if runtime.GOOS == "darwin" {
+		base = "/tmp"
+	}
+	home, err := os.MkdirTemp(base, "lima-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := host.RemoveAllWritable(home); err != nil {
+			t.Error(err)
+		}
+	})
 	t.Setenv("LIMA_HOME", home)
+	t.Setenv("CAGE_LOGICAL_LIMA_HOME", "")
 	t.Setenv("LIMA_TEMPLATES_PATH", "")
 	l, err := NewLima(home, t.TempDir())
 	if err != nil {
@@ -47,6 +62,29 @@ func newTestLima(t *testing.T) *Lima {
 		t.Fatal(err)
 	}
 	return l
+}
+
+func TestLimaCreateRejectsSocketPathTooLong(t *testing.T) {
+	home := filepath.Join(t.TempDir(), strings.Repeat("private-path-", 9))
+	t.Setenv("LIMA_HOME", home)
+	t.Setenv("CAGE_LOGICAL_LIMA_HOME", "")
+	lima, err := NewLima(home, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Path validation must run before trying to load this nonexistent template.
+	err = lima.Create(context.Background(), "base-building", "missing.yaml", Settings{}, io.Discard)
+	if !errors.Is(err, ErrNameTooLong) || !errors.Is(err, cage.ErrLimaSocketPathTooLong) ||
+		strings.Contains(err.Error(), home) || !strings.Contains(err.Error(), "最多") {
+		t.Fatalf("Create should return a path-free length error: %v", err)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("Create touched Lima home: %v", err)
+	}
+	err = lima.Create(context.Background(), strings.Repeat("x", 77), "missing.yaml", Settings{}, io.Discard)
+	if !errors.Is(err, ErrNameTooLong) || errors.Is(err, cage.ErrLimaSocketPathTooLong) {
+		t.Fatalf("Create should distinguish Lima's instance-name limit: %v", err)
+	}
 }
 
 func TestCageDebianMirrors(t *testing.T) {
@@ -274,9 +312,10 @@ func TestLimaLifecycle(t *testing.T) {
 	}
 }
 
-// Start gives a VM, made before or not, the rule leaving the guest's
-// ephemeral ports unforwarded: on 127.0.0.1, 0.0.0.0, ::, TCP or UDP, as
-// Lima's forwarder reads it. Other ports are forwarded still.
+// Start gives a VM, made before or not, the rules leaving the guest's
+// ephemeral ports, the host tools port and the guest-only service ports
+// unforwarded: on 127.0.0.1, 0.0.0.0, ::, TCP or UDP, as Lima's forwarder
+// reads it. Other ports are forwarded still.
 func TestLimaEphemeralPorts(t *testing.T) {
 	ctx := context.Background()
 	l := newTestLima(t)
@@ -300,7 +339,7 @@ func TestLimaEphemeralPorts(t *testing.T) {
 	if err != nil || inst.Config == nil {
 		t.Fatalf("inspect: %v %v", err, inst.Errors)
 	}
-	if n := len(inst.Config.PortForwards); n != 3 || inst.Config.PortForwards[0].GuestPort != 40000 {
+	if n := len(inst.Config.PortForwards); n != 5 || inst.Config.PortForwards[0].GuestPort != 40000 {
 		t.Errorf("port forwards: %+v", inst.Config.PortForwards)
 	}
 	def := limatype.PortForward{}
@@ -316,6 +355,8 @@ func TestLimaEphemeralPorts(t *testing.T) {
 		{Protocol: "tcp", Ip: "::", Port: 60999},
 		{Protocol: "udp", Ip: "0.0.0.0", Port: 50000},
 		{Protocol: "tcp", Ip: "127.0.0.1", Port: 18962},
+		{Protocol: "tcp", Ip: "127.0.0.1", Port: 18080},
+		{Protocol: "tcp", Ip: "127.0.0.1", Port: 16080},
 	} {
 		got = nil
 		fw.OnEvent(cctx, nil, &api.Event{AddedLocalPorts: []*api.IPPort{p}})
@@ -329,12 +370,18 @@ func TestLimaEphemeralPorts(t *testing.T) {
 	if len(got) != 1 || got[0].Type == events.PortForwardEventNotForwarding {
 		t.Errorf("32767: %+v", got)
 	}
+	// The host's VNC reaches the guest's 15900 through Lima: forwarded.
+	got = nil
+	fw.OnEvent(cctx, nil, &api.Event{AddedLocalPorts: []*api.IPPort{{Protocol: "tcp", Ip: "127.0.0.1", Port: 15900}}})
+	if len(got) != 1 || got[0].Type == events.PortForwardEventNotForwarding {
+		t.Errorf("15900: %+v", got)
+	}
 
 	// Once there, not written again.
 	y := filepath.Join(inst.Dir, "lima.yaml")
 	before, _ := os.ReadFile(y)
 	l.Start(ctx, "p-12345678", io.Discard)
-	if after, _ := os.ReadFile(y); string(after) != string(before) || strings.Count(string(after), "ignore: true") != 2 {
+	if after, _ := os.ReadFile(y); string(after) != string(before) || strings.Count(string(after), "ignore: true") != 4 {
 		t.Errorf("rewritten:\n%s", after)
 	}
 }

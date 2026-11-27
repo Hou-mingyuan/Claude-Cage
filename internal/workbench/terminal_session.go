@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -27,6 +28,7 @@ type terminalSession struct {
 	sharedID              string
 	connectionID          string
 	conversationEnded     bool
+	paused                bool
 	workspace             string
 	kind, claudeAccountID string
 	loginGuestID          string
@@ -39,9 +41,16 @@ type terminalSession struct {
 	cmd                   *exec.Cmd
 	file                  terminalPTY
 	history               []byte
+	outputEnd             uint64
+	viewEpoch             context.Context
+	viewGeneration        string
+	viewStream            uint64
+	replay                *terminalReplay
 	loginNotice           string
 	dismissed             bool
 	exitOK                bool
+	exitCode              int
+	hostInput             bool
 	closed                bool
 	clients               map[chan []byte]bool
 	done                  chan struct{}
@@ -102,8 +111,8 @@ func (t *terminalSession) summary() map[string]any {
 		}
 	}
 	return map[string]any{"id": t.id, "title": t.title, "closed": closed, "workspace": t.workspace, "kind": t.kind,
-		"claude_account_id": t.claudeAccountID, "claude_account_source": t.claudeAccountSource, "cli_session_id": t.sharedID,
-		"background_login": t.backgroundLogin, "login_notice": t.loginNotice, "cli_starting": t.cliStartupPendingLocked()}
+		"claude_account_id": t.claudeAccountID, "claude_account_source": t.claudeAccountSource, "cli_session_id": t.sharedID, "paused": t.paused,
+		"background_login": t.backgroundLogin, "login_notice": t.loginNotice, "cli_starting": t.cliStartupPendingLocked(), "host_input": t.hostInput}
 }
 
 func (t *terminalSession) cliStartupPendingLocked() bool {
@@ -146,6 +155,7 @@ func (t *terminalSession) stopPTY() {
 func (t *terminalSession) close() {
 	t.mu.Lock()
 	t.dismissed = true
+	t.forgetReplayLocked()
 	t.mu.Unlock()
 	t.stopPTY()
 	if t.done != nil {
@@ -196,6 +206,11 @@ func (t *terminalSession) enqueueInput(ctx context.Context, input string) error 
 	defer t.mu.Unlock()
 	if t.closed {
 		return os.ErrClosed
+	}
+	// A stale viewer can still send keystrokes after a stop. Keep its stream
+	// open, but never queue that line for the job or its eventual shell.
+	if t.paused {
+		return nil
 	}
 	select {
 	case t.inputs <- input:
@@ -255,15 +270,23 @@ type terminalSubscription struct {
 func (t *terminalSession) subscribe() *terminalSubscription {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.subscribeLocked(t.history)
+}
+
+const terminalLoginHistory = "请在 Cage 浏览器的临时登录页完成授权。若页面提供验证码，可返回此终端输入。\r\n"
+
+func (t *terminalSession) subscribeLocked(tail []byte) *terminalSubscription {
 	channel := make(chan []byte, 64)
 	if t.closed {
 		close(channel)
 	} else {
 		t.clients[channel] = true
 	}
-	history := append([]byte(nil), t.history...)
+	var history []byte
 	if t.kind == "claude-login" {
-		history = []byte("请在 Cage 浏览器的临时登录页完成授权。若页面提供验证码，可返回此终端输入。\r\n")
+		history = []byte(terminalLoginHistory)
+	} else {
+		history = bytes.Clone(tail)
 	}
 	return &terminalSubscription{History: history, Output: channel, CLIStartup: t.cliStartupDone,
 		CLIStarting: t.cliStartupPendingLocked(), session: t, channel: channel}
@@ -295,6 +318,7 @@ func (t *terminalSession) run() {
 	}
 	t.mu.Lock()
 	t.exitOK = waitErr == nil
+	t.exitCode = hostCLIExitCode(waitErr)
 	for channel := range t.clients {
 		close(channel)
 		delete(t.clients, channel)
@@ -308,13 +332,13 @@ func (t *terminalSession) read() {
 	for {
 		n, err := t.file.Read(buffer)
 		if n > 0 {
-			chunk := append([]byte(nil), buffer[:n]...)
 			t.mu.Lock()
 			if t.kind != "claude-login" {
-				t.history = append(t.history, chunk...)
-				if len(t.history) > 512<<10 {
-					t.history = t.history[len(t.history)-(512<<10):]
-				}
+				t.recordOutputLocked(buffer[:n])
+			}
+			var chunk []byte
+			if len(t.clients) != 0 {
+				chunk = bytes.Clone(buffer[:n])
 			}
 			for channel := range t.clients {
 				select {

@@ -24,6 +24,9 @@ func TestDesktopLocalProbeLeavesColdProfileUntouched(t *testing.T) {
 	if err != nil || !st.Available || !st.Known || st.Running || st.ServiceRunning {
 		t.Fatalf("cold probe: %+v %v", st, err)
 	}
+	if _, err = d.Attach(context.Background(), "departed-controller"); !errors.Is(err, errControllerUnavailable) {
+		t.Fatalf("window-only attach to a stopped service: %v", err)
+	}
 	if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
 		t.Fatalf("probe initialized a local workload: %v %v", entries, err)
 	}
@@ -153,6 +156,14 @@ func TestDesktopLocalAuthenticatedViewAndIdleExit(t *testing.T) {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+	if _, err := d.Attach(ctx, "previous-controller"); err == nil {
+		t.Fatal("window-only attach accepted a replaced controller")
+	}
+	attached, err := d.Attach(ctx, st.ControllerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = attached.Close()
 	session, err := d.Connect(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -275,5 +286,146 @@ func TestDesktopLocalReleaseIdleStandaloneRestartsOnlyNonDesktopIdleController(t
 				<-done
 			}
 		})
+	}
+}
+
+func TestDesktopLocalPreserveVMReleaseGuards(t *testing.T) {
+	s := testServer(t)
+	marker := filepath.Join(s.profile, "state", "lima", "fixture", "cage-running.json")
+	if err := os.MkdirAll(filepath.Dir(marker), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivate(marker, map[string]int{"pid": os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	s.shutdown = func() { close(exited) }
+	s.account.lock()
+
+	// Stop + PreserveVM together must be rejected.
+	view := s.desktopLocalSnapshot()
+	b, _ := json.Marshal(desktopLocalRequest{Token: s.token, ControllerID: view.ControllerID, Running: true, Stop: true, PreserveVM: true})
+	if w := request(s, "POST", "/api/desktop-local/release", s.origin, string(b), false); w.Code != http.StatusConflict {
+		t.Fatalf("stop+preserve_vm returned %d, want 409", w.Code)
+	}
+
+	// Live terminals must refuse PreserveVM handoff.
+	s.terminals.sessions = map[string]*terminalSession{"live": {id: "live"}}
+	view = s.desktopLocalSnapshot()
+	b, _ = json.Marshal(desktopLocalRequest{Token: s.token, ControllerID: view.ControllerID, Running: true, Terminals: 1, PreserveVM: true})
+	if w := request(s, "POST", "/api/desktop-local/release", s.origin, string(b), false); w.Code != http.StatusConflict {
+		t.Fatalf("preserve_vm with live terminal returned %d, want 409", w.Code)
+	}
+	s.terminals.sessions = nil
+
+	// Running VM with no live terminals and no active job may hand off even while locked.
+	view = s.desktopLocalSnapshot()
+	b, _ = json.Marshal(desktopLocalRequest{Token: s.token, ControllerID: view.ControllerID, Running: true, PreserveVM: true})
+	if w := request(s, "POST", "/api/desktop-local/release", s.origin, string(b), false); w.Code != http.StatusOK {
+		t.Fatalf("preserve_vm returned %d %s, want 200", w.Code, w.Body.String())
+	}
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("preserve_vm handoff did not trigger controller shutdown")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("running VM marker was disturbed: %v", err)
+	}
+}
+
+func TestDesktopLocalReleaseStaleSessionPreservesRunningVM(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := filepath.Join(t.TempDir(), "local")
+	config := filepath.Join(profile, "config.json")
+	marker := filepath.Join(profile, "state", "lima", "fixture", "cage-running.json")
+	if err := os.MkdirAll(filepath.Dir(marker), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivate(marker, map[string]int{"pid": os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "-test.run=^TestServeShutdownHandoff$", "-test.timeout=25s")
+	cmd.Env = append(os.Environ(),
+		"CAGE_TEST_SHUTDOWN_CONFIG="+config,
+		"CAGE_DESKTOP_START_ID=desktop-launch-old",
+		"CAGE_TEST_DESKTOP_SESSION=darwin-gui:100002",
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	var waitErr error
+	go func() { waitErr = cmd.Wait(); close(done) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+		}
+	})
+
+	d := NewDesktopLocalController(config, exe).(*desktopLocal)
+	var st DesktopLocalStatus
+	for {
+		st, err = d.Status(ctx)
+		if err == nil && st.Known && st.ServiceRunning && st.Running {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("controller did not start with running VM: %+v %v", st, err)
+		case <-done:
+			t.Fatalf("controller exited early: %v", waitErr)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	// Same desktop session must keep the running controller untouched.
+	replaced, err := d.releaseStaleSession(ctx, st, "darwin-gui:100002")
+	if err != nil || replaced {
+		t.Fatalf("same session releaseStaleSession = (%v, %v), want (false, nil)", replaced, err)
+	}
+
+	// Different desktop session must hand off the controller while preserving the VM.
+	replaced, err = d.releaseStaleSession(ctx, st, "darwin-gui:111303")
+	if err != nil || !replaced {
+		t.Fatalf("stale session releaseStaleSession = (%v, %v), want (true, nil)", replaced, err)
+	}
+	<-done
+	if waitErr != nil {
+		t.Fatalf("stale controller did not exit cleanly: %v", waitErr)
+	}
+	if _, err := os.Stat(filepath.Join(profile, "control.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale controller record still exists: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("running VM marker was removed: %v", err)
+	}
+}
+
+func TestSessionChangedHelper(t *testing.T) {
+	orig := desktopSessionID
+	t.Cleanup(func() { desktopSessionID = orig })
+
+	desktopSessionID = func() string { return "darwin-gui:111303" }
+	if sessionChanged("") {
+		t.Fatal("empty controller session should not trigger handoff")
+	}
+	if sessionChanged("darwin-gui:111303") {
+		t.Fatal("matching session should not trigger handoff")
+	}
+	if !sessionChanged("darwin-gui:100002") {
+		t.Fatal("mismatched session should trigger handoff")
+	}
+	desktopSessionID = func() string { return "" }
+	if sessionChanged("darwin-gui:100002") {
+		t.Fatal("empty current session should not trigger handoff")
 	}
 }

@@ -366,6 +366,7 @@ printf '%s\\n' "$@"
         cases = [
             (helper.SubscriptionStatusTimeout(private), "读取 Claude 订阅状态超时"),
             (helper.SubscriptionStatusError(private), "无法读取 Claude 订阅状态"),
+            (helper.ClaudeCLINotInstalled(private), "未找到官方 Claude Code CLI"),
             (helper._runtime["RuntimePathConflict"](Path(private), Path(private)), "运行路径"),
             (OSError(private), "准备终端"),
         ]
@@ -385,6 +386,22 @@ printf '%s\\n' "$@"
             with patch.object(helper.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, raw)):
                 with self.assertRaises(helper.SubscriptionStatusError):
                     helper.identity("claude", self.env, self.home)
+
+    def test_native_argv_has_no_generated_settings_and_still_checks_identity(self):
+        binary = self.home / ".local/bin/claude"
+        original = binary.read_text()
+        # Keep the fixture's official identity response and capture the exact
+        # argument array on the subsequent invocation.
+        offset = original.index('if [ -n "$original_settings" ]')
+        binary.write_text(original[:offset] + 'printf "%s\\0" "$@"\n')
+        args = ["-p", "--model", "sonnet", "你好", "", "--", "login"]
+        output = self.run_helper("native", FIRST, *args).stdout
+        self.assertEqual(output.split("\0"), [*args, ""])
+        changed = {**self.env, "TEST_EMAIL": "different@example.test"}
+        denied = self.run_helper("native", FIRST, *args, env=changed, check=False)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertEqual(denied.stdout, "")
+        self.assertEqual(self.run_helper("native", FIRST, "auth", "logout", env=changed).stdout, "auth\0logout\0")
 
     def test_official_process_receives_no_controller_flags_and_callbacks_still_work(self):
         capture = self.home / "child-environment"

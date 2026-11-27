@@ -65,13 +65,27 @@ type hostContributesView struct {
 	Views       []hostViewView   `json:"views"`
 	URIHandlers []hostSchemeView `json:"uri_handlers"`
 	MCPServers  []hostServerView `json:"mcp_servers"`
+	DesktopApps []hostAppView    `json:"desktop_apps"`
+}
+
+// hostAppView is a desktop application the plugin installs in the
+// environment.
+type hostAppView struct {
+	ID      string   `json:"id"`
+	Title   string   `json:"title"`
+	Icon    bool     `json:"icon"`
+	Source  string   `json:"source"`
+	Schemes []string `json:"schemes"`
 }
 
 type hostViewView struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Icon     bool     `json:"icon"`
-	OpenURLs []string `json:"open_urls"`
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	Icon         bool     `json:"icon"`
+	OpenURLs     []string `json:"open_urls"`
+	Presentation string   `json:"presentation,omitempty"`
+	Width        int      `json:"width,omitempty"`
+	Height       int      `json:"height,omitempty"`
 	// URL is where the page is loaded from. Empty when the plugin cannot be
 	// used as it is.
 	URL string `json:"url,omitempty"`
@@ -89,19 +103,34 @@ func hostContributes(c *hostbridge.Contributes) *hostContributesView {
 	if c == nil {
 		return nil
 	}
-	view := &hostContributesView{Views: []hostViewView{}, URIHandlers: []hostSchemeView{}, MCPServers: []hostServerView{}}
+	view := &hostContributesView{Views: []hostViewView{}, URIHandlers: []hostSchemeView{}, MCPServers: []hostServerView{}, DesktopApps: []hostAppView{}}
 	for _, page := range c.Views {
 		urls := page.OpenURLs
 		if urls == nil {
 			urls = []string{}
 		}
-		view.Views = append(view.Views, hostViewView{ID: page.ID, Title: page.Title, Icon: page.Icon != "", OpenURLs: urls})
+		view.Views = append(view.Views, hostViewView{
+			ID:           page.ID,
+			Title:        page.Title,
+			Icon:         page.Icon != "",
+			OpenURLs:     urls,
+			Presentation: page.Presentation,
+			Width:        page.Width,
+			Height:       page.Height,
+		})
 	}
 	for _, handler := range c.URIHandlers {
 		view.URIHandlers = append(view.URIHandlers, hostSchemeView{Scheme: handler.Scheme})
 	}
 	for _, server := range c.MCPServers {
 		view.MCPServers = append(view.MCPServers, hostServerView{ID: server.ID})
+	}
+	for _, app := range c.DesktopApps {
+		schemes := app.Schemes
+		if schemes == nil {
+			schemes = []string{}
+		}
+		view.DesktopApps = append(view.DesktopApps, hostAppView{ID: app.ID, Title: app.Title, Icon: app.Icon != "", Source: app.Source.Type, Schemes: schemes})
 	}
 	return view
 }
@@ -461,12 +490,18 @@ func (s *Server) setHostTools(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Install != "" {
 		if err := s.installFromMarket(r.Context(), body.Install, body.Replace); err != nil {
+			if ready || !s.hostToolsView().Enabled {
+				s.ensureHostTools()
+			}
 			requestError(w, errors.New("插件安装失败："+err.Error()))
 			return
 		}
 	}
 	if body.RestoreDefault != "" {
 		if err := s.restoreDefaultPlugin(body.RestoreDefault, body.Replace); err != nil {
+			if ready || !s.hostToolsView().Enabled {
+				s.ensureHostTools()
+			}
 			requestError(w, errors.New("默认插件安装失败："+err.Error()))
 			return
 		}
@@ -475,6 +510,9 @@ func (s *Server) setHostTools(w http.ResponseWriter, r *http.Request) {
 		// Stop the plugin's program before its folder moves.
 		s.closeHostTools()
 		if err := s.removeHostPlugin(body.Remove); err != nil {
+			if ready || !s.hostToolsView().Enabled {
+				s.ensureHostTools()
+			}
 			requestError(w, err)
 			return
 		}

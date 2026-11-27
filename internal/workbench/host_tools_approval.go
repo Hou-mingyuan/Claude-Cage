@@ -23,8 +23,9 @@ const (
 // grants, for one project's commands or one plugin, until the user takes it
 // back.
 type hostApprovals struct {
-	ask       func(ctx context.Context, title, msg string) (desktop.Scope, bool)
-	remoteAsk func(ctx context.Context, prompt remoteApprovalPrompt) (desktop.Scope, bool)
+	checkProject func(string) error
+	ask          func(ctx context.Context, title, msg string) (desktop.Scope, bool)
+	remoteAsk    func(ctx context.Context, prompt remoteApprovalPrompt) (desktop.Scope, bool)
 	// grants is nil where nothing is remembered beyond this start.
 	grants *hostGrants
 	// permissions are those each loaded plugin declares.
@@ -49,10 +50,20 @@ func (a *hostApprovals) approve(ctx context.Context, request hostbridge.CommandR
 		Kind:    "command",
 		Project: request.Project,
 		Dir:     request.Dir,
+		Shell:   request.Shell,
 		Command: request.Command,
 	}
-	return a.decide(ctx, hostGrantProject+request.Project, []string{"commands"}, request.Command+request.Dir, len(request.Command),
+	if a.checkProject != nil {
+		if err := a.checkProject(request.Project); err != nil {
+			return err
+		}
+	}
+	err := a.decide(ctx, hostGrantProject+request.Project, []string{"commands"}, request.Command+request.Dir+request.Shell, len(request.Command),
 		"允许 Claude 在这台电脑上运行命令？", hostApprovalMessage(request), prompt)
+	if err == nil && a.checkProject != nil {
+		return a.checkProject(request.Project)
+	}
+	return err
 }
 
 // approveTool asks about one call to a plugin's tool. "Always" covers that
@@ -151,6 +162,10 @@ func (a *hostApprovals) alwaysAllowed(key string, permissions []string) bool {
 }
 
 func hostApprovalMessage(request hostbridge.CommandRequest) string {
-	return "项目「" + filepath.Base(request.Project) + "」\n目录　" + request.Dir + "\n\n" + request.Command +
+	shellLine := ""
+	if request.Shell != "" {
+		shellLine = "\nShell　" + request.Shell
+	}
+	return "项目「" + filepath.Base(request.Project) + "」\n目录　" + request.Dir + shellLine + "\n\n" + request.Command +
 		"\n\n命令以你的用户权限运行，可以访问这台电脑上的任何内容。「始终允许」会记住对该项目的授权，以后在这个项目里运行命令不再询问；可以在插件页随时撤销。"
 }

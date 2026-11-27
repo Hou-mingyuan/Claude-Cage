@@ -17,6 +17,11 @@ import (
 func TestServeShutdownHandoff(t *testing.T) {
 	const helperConfig = "CAGE_TEST_SHUTDOWN_CONFIG"
 	if configPath := os.Getenv(helperConfig); configPath != "" {
+		if session := os.Getenv("CAGE_TEST_DESKTOP_SESSION"); session != "" {
+			prev := desktopSessionID
+			desktopSessionID = func() string { return session }
+			defer func() { desktopSessionID = prev }()
+		}
 		if err := Serve(configPath); err != nil {
 			t.Fatal(err)
 		}

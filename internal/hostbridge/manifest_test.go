@@ -52,7 +52,7 @@ func TestManifestSecondFormat(t *testing.T) {
 
 	// Each change to the example breaks one rule.
 	broken := map[string][2]string{
-		"unknown field in a view":      {`"server": "node",`, `"server": "node", "width": 3,`},
+		"unknown field in a view":      {`"server": "node",`, `"server": "node", "unknown": 3,`},
 		"unknown field at the top":     {`"kind": "guest",`, `"kind": "guest", "main": "x",`},
 		"engines missing":              {`"engines": { "cage": "^1.0.0" },`, ``},
 		"engines range":                {`^1.0.0`, `~1.0.0`},
@@ -113,6 +113,23 @@ func TestManifestSecondFormat(t *testing.T) {
 	if _, err := parseManifest([]byte(`{"name":"notes","version":"1","description":"A plugin.","permissions":[],"engines":{"cage":">=0.1.0"},"kind":"host",
 		"contributes":{"views":[{"id":"notes","title":"Notes","entry":"index.html"}]}}`)); err != nil {
 		t.Errorf("static page: %v", err)
+	}
+	// A floating view declares presentation: "floating" with optional dimensions and needs >=0.2.1.
+	floating, err := parseManifest([]byte(`{"name":"hud","version":"1","description":"A floating view.","permissions":[],"engines":{"cage":">=0.2.1"},"kind":"guest",
+		"contributes":{"views":[{"id":"hud","title":"HUD","entry":"view/index.html","presentation":"floating","width":312,"height":260}]}}`))
+	if err != nil || floating.Contributes.Views[0].Presentation != ViewPresentationFloating || floating.Contributes.Views[0].Width != 312 || floating.Contributes.Views[0].Height != 260 {
+		t.Errorf("floating view: %+v %v", floating, err)
+	}
+	for name, raw := range map[string]string{
+		"floating needs 0.2.1":      `{"name":"hud","version":"1","description":"A floating view.","permissions":[],"engines":{"cage":">=0.2.0"},"kind":"guest","contributes":{"views":[{"id":"hud","title":"HUD","entry":"view/index.html","presentation":"floating"}]}}`,
+		"unknown presentation":      `{"name":"hud","version":"1","description":"A floating view.","permissions":[],"engines":{"cage":">=0.2.1"},"kind":"guest","contributes":{"views":[{"id":"hud","title":"HUD","entry":"view/index.html","presentation":"modal"}]}}`,
+		"width on page view":        `{"name":"hud","version":"1","description":"A floating view.","permissions":[],"engines":{"cage":">=0.2.0"},"kind":"guest","contributes":{"views":[{"id":"hud","title":"HUD","entry":"view/index.html","width":320}]}}`,
+		"width too small":           `{"name":"hud","version":"1","description":"A floating view.","permissions":[],"engines":{"cage":">=0.2.1"},"kind":"guest","contributes":{"views":[{"id":"hud","title":"HUD","entry":"view/index.html","presentation":"floating","width":120}]}}`,
+		"height too large":          `{"name":"hud","version":"1","description":"A floating view.","permissions":[],"engines":{"cage":">=0.2.1"},"kind":"guest","contributes":{"views":[{"id":"hud","title":"HUD","entry":"view/index.html","presentation":"floating","height":900}]}}`,
+	} {
+		if _, err := parseManifest([]byte(raw)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
 
@@ -245,5 +262,44 @@ func TestLoadPluginsCanLeaveHostPluginsOut(t *testing.T) {
 		Guest: func(context.Context, Manifest, string) (*exec.Cmd, error) { started = true; return nil, nil }})
 	if len(plugins) != 0 || len(failures) != 0 || started {
 		t.Fatalf("a plugin on this computer was started: %d %v", len(plugins), failures)
+	}
+}
+
+func TestEngineSatisfiedEnforcesFeatureFloors(t *testing.T) {
+	floating := Manifest{
+		Kind:    KindGuest,
+		Engines: &Engines{Cage: ">=0.2.0"},
+		Contributes: &Contributes{
+			Views: []View{{ID: "status", Title: "Status", Entry: "view/index.html", Presentation: ViewPresentationFloating, Width: 316, Height: 286}},
+		},
+	}
+	if floating.EngineSatisfied("0.2.0") || floating.Unavailable("0.2.0", true) != NeedsNewerApplication {
+		t.Fatalf("floating view with stale engines.cage was treated as supported on 0.2.0")
+	}
+	if !floating.EngineSatisfied("0.2.1") || floating.Unavailable("0.2.1", true) != "" {
+		t.Fatalf("floating view should satisfy 0.2.1")
+	}
+	if !floating.EngineSatisfied("") || floating.Unavailable("", true) != "" {
+		t.Fatalf("floating view should satisfy an unversioned build")
+	}
+	entry := MarketEntry{
+		Name:        "system-status",
+		Version:     "0.2.0",
+		Kind:        KindGuest,
+		Engines:     floating.Engines,
+		Contributes: floating.Contributes,
+	}
+	if entry.EngineSatisfied("0.2.0") || !entry.EngineSatisfied("0.2.1") {
+		t.Fatalf("MarketEntry.EngineSatisfied did not enforce floating view floor")
+	}
+	desktopApp := Manifest{
+		Kind:    KindGuest,
+		Engines: &Engines{Cage: ">=0.2.0"},
+		Contributes: &Contributes{
+			DesktopApps: []DesktopApp{{ID: "demo", Title: "Demo"}},
+		},
+	}
+	if desktopApp.EngineSatisfied("0.2.0") || !desktopApp.EngineSatisfied("0.2.1") {
+		t.Fatalf("Manifest.EngineSatisfied did not enforce desktopApps floor")
 	}
 }

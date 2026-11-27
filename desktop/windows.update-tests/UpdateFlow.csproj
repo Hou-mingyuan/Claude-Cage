@@ -9,6 +9,7 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../windows/CliUpdate.cs" Link="CliUpdate.cs" />
     <Compile Include="../windows/AppUpdater.cs" Link="AppUpdater.cs" />
     <Compile Include="../windows/Backend.cs" Link="Backend.cs" />
     <Compile Include="../windows/Authenticode.cs" Link="Authenticode.cs" />

@@ -46,8 +46,10 @@ try {
     });
     ws.send(JSON.stringify({ type: "cli-startup", pending: false }));
     ws.send(JSON.stringify({ type: "history" }));
-    ws.send(Buffer.from(("\x1b[c\x1b]11;?\x07\x1b[6n").repeat(500) + "\r\nRestored history " + connections));
-    ws.send(Buffer.from("\r\nLive ready " + connections + "\x1b[c"));
+    ws.send(Buffer.from(("\x1b[c\x1b]11;?\x07\x1b[6n").repeat(500) + "\r\nRestored history " + connections + "\x1b[6"));
+    // DSR starts in replay and finishes in live data; only the new DA in
+    // the same live frame may reach the shell.
+    ws.send(Buffer.from("n\r\nLive ready " + connections + "\x1b[c"));
   });
   await page.reload();
   await page.getByRole("button", { name: "启动 Cage 环境", exact: true }).waitFor();

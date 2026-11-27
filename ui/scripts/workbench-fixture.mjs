@@ -294,7 +294,7 @@ export async function createWorkbench({
       state.split = body.left ? { left: body.left, right: body.right, fraction: 0.5 } : null;
       result = { split: state.split };
     }
-    else if (path === "/browser/events")
+    else if (path === "/browser/events" || path === "/notifications/events")
       return route.fulfill({
         contentType: "text/event-stream",
         body: ": fixture\n\n",
@@ -399,7 +399,7 @@ export async function createWorkbench({
   });
   if (beforeNavigate) await beforeNavigate(page, state);
   await page.goto(url || process.env.CAGE_UI_URL || "http://127.0.0.1:5198");
-  if (waitForReady && !startupFailure && !state.status.vm_running && clientContext.mode !== "none") await page.getByRole("heading", { name: state.initialization.required ? state.initialization.started ? "安装并检查客机环境" : "为 Cage 准备独立环境" : "先启动 Cage 环境" }).waitFor();
+  if (waitForReady && !startupFailure && !state.status.vm_running && clientContext.mode !== "none") await page.getByRole("heading", { name: state.initialization.required ? state.initialization.started ? "安装并检查客机环境" : "为 Cage 准备独立环境" : /^(先启动 Cage 环境|Claude Cage)$/ }).waitFor();
   return { browser, context, page, state, errors };
 }
 

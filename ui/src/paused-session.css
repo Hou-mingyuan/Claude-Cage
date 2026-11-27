@@ -1,0 +1,5 @@
+.paused-session { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; color: var(--ink); background: var(--paper); }
+.paused-session > button { font: inherit; color: inherit; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); padding: 5px 10px; cursor: pointer; }
+.paused-session > button:disabled { opacity: .65; cursor: default; }
+.paused-session > [role=alert] { flex-basis: 100%; overflow-wrap: anywhere; }
+.session-paused-label { flex: none; font-size: .8em; color: var(--muted); }

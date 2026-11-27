@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Globe2, Layers, Pencil, Plus, RefreshCw, SlidersHorizontal, TerminalSquare, Timer, Trash2 } from "lucide-react";
+import { Check, Globe2, GripVertical, Layers, Pencil, Plus, RefreshCw, SlidersHorizontal, TerminalSquare, Timer, Trash2 } from "lucide-react";
 import { api } from "./api";
 import { InlineSelect } from "./inline-select";
 import crabIcon from "./claude-account-crab.svg";
@@ -197,6 +197,32 @@ function UsageNote({ profile, state }) {
   </small>;
 }
 
+function UsageRefreshControl({ profile, usage, disabled }) {
+  const tr = useTranslation();
+  const checking = usage.state === "checking";
+  return (
+    <button
+      type="button"
+      className={`claude-usage-trigger${checking ? " is-checking" : ""}`}
+      aria-label={tr("检查状态")}
+      title={tr("检查状态")}
+      disabled={disabled || checking}
+      onClick={usage.check}
+    >
+      <span className="claude-usage-idle">
+        {checking && <RefreshCw size={12} className="spin" aria-hidden="true" />}
+        <UsageNote profile={profile} state={usage.state} />
+      </span>
+      {!checking && (
+        <span className="claude-usage-hover" aria-hidden="true">
+          <RefreshCw size={13} />
+          <span>{tr("检查状态")}</span>
+        </span>
+      )}
+    </button>
+  );
+}
+
 function DetectedProfile({ profile, usageEnvironment, busy, join, perform, change }) {
   const tr = useTranslation();
   const usage = useUsageCheck(profile, usageEnvironment, perform, change);
@@ -217,9 +243,7 @@ function DetectedProfile({ profile, usageEnvironment, busy, join, perform, chang
     <ProfileUsage quota={profile.quota} state={usage.state} />
     <div className="claude-profile-actions">
       <button className="quiet-button" disabled={busy} onClick={join}><Plus size={14} />{tr("加入调度")}</button>
-      <button className="quiet-button" disabled={busy || !!usageEnvironment || usage.state === "checking"} onClick={usage.check}>
-        <RefreshCw size={14} />{tr("检查状态")}</button>
-      <UsageNote profile={profile} state={usage.state} />
+      <UsageRefreshControl profile={profile} usage={usage} disabled={busy || !!usageEnvironment} />
     </div>
   </article>;
 }
@@ -253,12 +277,38 @@ function ProfileNotices({ notices }) {
   });
 }
 
+const accountNumber = number => "#" + String(number).padStart(2, "0");
+
 function accountCaption(profile) {
   const label = profile.label || profile.email;
-  return profile.number ? `#${String(profile.number).padStart(2, "0")} ${label}` : label;
+  return profile.number ? `${accountNumber(profile.number)} ${label}` : label;
 }
 
-function ProfileCard({ proxySources, desktopNetwork, profile, environment, usageEnvironment, busy, active, defaultActive, perform, change, login, cancelDraft, removeAccount }) {
+function AccountNameForm({ profile, busy, perform, change }) {
+  const tr = useTranslation();
+  const [draft, setDraft] = useState(null);
+  const saved = profile.name || "";
+  const value = draft ?? saved;
+  return <form className="claude-account-setting-form" onSubmit={event => {
+    event.preventDefault();
+    if (!busy && value.trim() && value !== saved) perform(async () => {
+      const accounts = await change({ action: "update", id: profile.id, name: value });
+      if (!accounts?.some(account => account.id === profile.id && account.name === value)) {
+        throw new Error(tr("当前后台没有提供所需功能。请确认应用与后台已完成更新。"));
+      }
+      setDraft(null);
+    });
+  }}>
+    <label><span>{tr("账号命令名")}</span>
+      <input dir="auto" autoCapitalize="none" autoComplete="off" spellCheck={false} required
+        placeholder="sarah" value={value} readOnly={busy} onChange={event => setDraft(event.target.value)}
+        onKeyDown={event => { if (event.key === "Escape" && !busy && !event.nativeEvent.isComposing) { event.preventDefault(); setDraft(null); } }} />
+    </label>
+    <button type="submit" aria-label={tr("保存名称")} disabled={busy || !value.trim() || value === saved}>{tr("保存")}</button>
+  </form>;
+}
+
+function ProfileCard({ proxySources, desktopNetwork, profile, index, total, reorderable, dragState, onDragStart, onDragOver, onDrop, onDragEnd, onMove, environment, usageEnvironment, busy, active, defaultActive, perform, change, login, cancelDraft, removeAccount }) {
   const tr = useTranslation();
   const [renaming, setRenaming] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
@@ -281,8 +331,42 @@ function ProfileCard({ proxySources, desktopNetwork, profile, environment, usage
     return tr("已绑定节点不可用");
   }, [profile.proxy_node_id, profile.desktop_dedicated_network, proxySources, tr]);
   const hasRoutingConfig = Boolean((desktopNetwork && boundNodeName) || profile.handoff_group);
-  return <article className="claude-profile" aria-label={accountCaption(profile)} data-enabled={profile.enabled}>
-    <div className="claude-profile-heading">
+  const canDrag = reorderable && !busy && !renaming;
+  const isDragging = dragState?.fromId === profile.id;
+  const dropPos = dragState?.overId === profile.id && dragState.fromId !== profile.id ? dragState.position : undefined;
+  return <article
+    className={`claude-profile${canDrag ? " is-reorderable" : ""}${isDragging ? " is-dragging" : ""}`}
+    aria-label={accountCaption(profile)}
+    data-enabled={profile.enabled}
+    data-drop-position={dropPos}
+    draggable={canDrag}
+    onDragStart={(e) => { if (canDrag) onDragStart?.(e, profile.id); }}
+    onDragOver={(e) => { if (canDrag) onDragOver?.(e, profile.id); }}
+    onDrop={(e) => { if (canDrag) onDrop?.(e, profile.id); }}
+    onDragEnd={() => onDragEnd?.()}
+  >
+    <div className={`claude-profile-heading${reorderable ? " has-reorder" : ""}`}>
+      {reorderable && (
+        <button
+          type="button"
+          className="icon-button claude-drag-handle"
+          disabled={busy}
+          aria-label={`${tr("账号优先顺序")} · ${displayName}`}
+          title={tr("拖动调整优先顺序（支持上下方向键）")}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowUp" && index > 0) {
+              e.preventDefault();
+              onMove?.(index, index - 1);
+            } else if (e.key === "ArrowDown" && index < total - 1) {
+              e.preventDefault();
+              onMove?.(index, index + 1);
+            }
+          }}
+        >
+          <GripVertical size={14} />
+          <span className="claude-rank-badge">{index + 1}</span>
+        </button>
+      )}
       <span className="claude-profile-avatar" aria-hidden="true"><img src={crabIcon} alt="" /></span>
       <div className="claude-profile-identity">
         {renaming ? <form className="claude-profile-rename" onSubmit={(e) => {
@@ -301,7 +385,7 @@ function ProfileCard({ proxySources, desktopNetwork, profile, environment, usage
             onClick={() => { setLabel(profile.label === profile.email ? "" : profile.label || ""); setRenaming(true); }}><Pencil size={13} /></button>
         </div>}
         <div className="claude-profile-meta">
-          <span className="claude-status-pill" data-ready={profile.status === "ready"} title={codeStatusTitle}>Code</span>
+          <span className="claude-status-pill" data-ready={!profile.code_unlinked && profile.status === "ready"} title={codeStatusTitle}>{profile.code_unlinked ? codeStatusTitle : "Code"}</span>
           <span className="claude-status-pill" data-ready={profile.desktop_status === "ready"} title={desktopStatusTitle}>Desktop</span>
           {profile.email && (profile.email !== displayName || profile.organization) && <span className="claude-profile-email" title={[profile.email, profile.organization].filter(Boolean).join(" · ")}>
             {[profile.email !== displayName && profile.email, profile.organization].filter(Boolean).join(" · ")}
@@ -314,6 +398,10 @@ function ProfileCard({ proxySources, desktopNetwork, profile, environment, usage
         <span className="claude-switch-track" aria-hidden="true" />
       </label>
     </div>
+    <p className="claude-profile-command">
+      <span>{tr(profile.name ? "终端" : "账号命令名")}</span>
+      {profile.name ? <code dir="ltr">cage {profile.name}</code> : <span>{tr("未设置")}</span>}
+    </p>
     <ProfileUsage quota={profile.quota} state={usage.state} />
     {hasRoutingConfig && !configOpen && (
       <div className="claude-config-chips">
@@ -331,6 +419,12 @@ function ProfileCard({ proxySources, desktopNetwork, profile, environment, usage
     )}
     {configOpen && (
       <div className="claude-profile-config">
+        <dl className="claude-account-details">
+          {!!profile.number && <div><dt>{tr("Cage 编号")}</dt><dd><bdi>{accountNumber(profile.number)}</bdi></dd></div>}
+          <div><dt>{tr("Cage ID")}</dt><dd><code dir="ltr">{profile.id}</code></dd></div>
+          <div><dt>{tr("Claude 邮箱")}</dt><dd>{profile.email ? <bdi>{profile.email}</bdi> : "—"}</dd></div>
+        </dl>
+        <AccountNameForm profile={profile} busy={busy} perform={perform} change={change} />
         {desktopNetwork && <label className="claude-config-field"><span>{tr("账号出口")}</span>
           <InlineSelect inline aria-label={displayName + " " + tr("的代理节点")}
             value={profile.proxy_node_id || (profile.desktop_dedicated_network ? "legacy" : "")} disabled={busy}
@@ -344,7 +438,7 @@ function ProfileCard({ proxySources, desktopNetwork, profile, environment, usage
             </optgroup>)}
           </InlineSelect>
         </label>}
-        <form className="claude-handoff-group" onSubmit={event => { event.preventDefault(); perform(() => change({action:"update",id:profile.id,handoff_group:group})); }}>
+        <form className="claude-account-setting-form" onSubmit={event => { event.preventDefault(); perform(() => change({action:"update",id:profile.id,handoff_group:group})); }}>
           <label><span>{tr("接续分组")}</span><input aria-label={tr("{0} 的接续分组", (displayName))} value={group} maxLength={32} placeholder={tr("未分组，不跨账号接续")} onChange={event => setGroup(event.target.value)} /></label>
           <button disabled={busy || group === (profile.handoff_group || "")}>{tr("保存")}</button>
         </form>
@@ -357,20 +451,18 @@ function ProfileCard({ proxySources, desktopNetwork, profile, environment, usage
       {profile.status === "changed" ? tr("普通终端已换号，此账号暂不参与分配。新身份将单独归档。") : tr("普通终端已退出。要继续使用此账号，请先重新登录原身份。")}
       {active > 0 && " " + tr("原工作终端仍保留首次分配的标签。请重新打开工作会话确认身份。")}
     </p>}
-    {!fromTerminal && profile.status === "changed" && <p className="field-help">{tr("请用原账号重新登录。")}</p>}
+    {!fromTerminal && !profile.code_unlinked && profile.status === "changed" && <p className="field-help">{tr("请用原账号重新登录。")}</p>}
     {profile.status === "duplicate" && <p className="field-help">{tr("同一订阅只参与一次分配。请在此位置登录另一个账号。")}</p>}
     <ProfileNotices notices={profile.notices} />
     <div className="claude-profile-actions">
       {fromTerminal ? <span className="claude-profile-source">{tr("普通终端账号")}</span> :
         <button className="quiet-button" disabled={busy || !!environment || active > 0} onClick={() => perform(() => login(profile.id))}>
           <TerminalSquare size={14} />{profile.status === "ready" ? tr("重新授权 Code") : tr("授权 Code")}</button>}
-      <button className="quiet-button" disabled={busy || !!usageEnvironment || usage.state === "checking"} onClick={usage.check}>
-        <RefreshCw size={14} className={usage.state === "checking" ? "spin" : undefined} />{tr("检查状态")}</button>
       <button type="button" className={`quiet-button claude-config-toggle ${configOpen ? "open" : ""}`} aria-expanded={configOpen} onClick={() => setConfigOpen(!configOpen)}>
         <SlidersHorizontal size={13} />{tr("设置")}
         {hasRoutingConfig && <i className="claude-config-dot" aria-hidden="true" />}
       </button>
-      <UsageNote profile={profile} state={usage.state} />
+      <UsageRefreshControl profile={profile} usage={usage} disabled={busy || !!usageEnvironment || profile.code_unlinked} />
       {isDraft ? (
         !active && <button className="text-button" disabled={busy} onClick={() => perform(() => cancelDraft(profile))}>{tr("撤销添加")}</button>
       ) : (
@@ -399,6 +491,50 @@ export function ClaudeAccountsPanel({ proxySources, desktopNetwork, store, runni
   const nodeAvailable = !node || proxySources.some(source => source.nodes.some(n => n.id === node && !n.blocked_reason));
   const [requestingUsage, setRequestingUsage] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [dragState, setDragState] = useState(null);
+  const reorderable = store.scheduling.mode === "sequential" && (accounts?.length || 0) > 1;
+  const applyOrder = (order) => {
+    perform(() => load({ action: "scheduling", scheduling: store.scheduling, order }));
+  };
+  const moveAccount = (fromIndex, toIndex) => {
+    if (!accounts || fromIndex === toIndex || toIndex < 0 || toIndex >= accounts.length) return;
+    const order = accounts.map((a) => a.id);
+    const [moved] = order.splice(fromIndex, 1);
+    order.splice(toIndex, 0, moved);
+    applyOrder(order);
+  };
+  const onDragStart = (event, id) => {
+    event.dataTransfer.effectAllowed = "move";
+    try { event.dataTransfer.setData("text/plain", id); } catch {}
+    setDragState({ fromId: id, overId: id, position: "before" });
+  };
+  const onDragOver = (event, id) => {
+    if (!dragState || dragState.fromId === id) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position = event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+    if (dragState.overId !== id || dragState.position !== position) {
+      setDragState({ ...dragState, overId: id, position });
+    }
+  };
+  const onDrop = (event, targetId) => {
+    event.preventDefault();
+    if (!dragState || !accounts) { setDragState(null); return; }
+    const { fromId, position } = dragState;
+    setDragState(null);
+    if (fromId === targetId) return;
+    const order = accounts.map((a) => a.id);
+    const fromIdx = order.indexOf(fromId);
+    if (fromIdx < 0) return;
+    order.splice(fromIdx, 1);
+    let toIdx = order.indexOf(targetId);
+    if (toIdx < 0) return;
+    if (position === "after") toIdx += 1;
+    order.splice(toIdx, 0, fromId);
+    applyOrder(order);
+  };
+  const onDragEnd = () => setDragState(null);
   const visibleProfiles = useMemo(() => detected ? [detected, ...(accounts || [])] : accounts, [accounts, detected]);
   const environment = !running || detectionStatus === "offline" ? "offline" :
     detectionStatus === "update_required" ? "update_required" : "";
@@ -511,13 +647,7 @@ export function ClaudeAccountsPanel({ proxySources, desktopNetwork, store, runni
             <option value="ask">{tr("每次询问")}</option><option value="allow">{tr("额度耗尽后自动接续")}</option><option value="wait">{tr("始终等待原账号")}</option>
           </InlineSelect></label>
         </div>
-        {store.scheduling.mode === "sequential" && accounts?.length > 1 && <div className="claude-account-order" aria-label={tr("账号优先顺序")}>
-          {accounts.map((profile,index) => <div key={profile.id}><span>{index+1}. {accountCaption(profile)}</span>
-            <button disabled={busy || index===0} aria-label={tr("提高 {0} 的优先级", (profile.label))} onClick={() => {
-              const order=accounts.map(a=>a.id); [order[index-1],order[index]]=[order[index],order[index-1]];
-              perform(() => load({action:"scheduling",scheduling:store.scheduling,order}));
-            }}>{tr("上移")}</button></div>)}
-        </div>}
+        {reorderable && <p className="claude-order-hint">{tr("直接拖动下方账号卡片调整优先顺序。")}</p>}
       </div>
     )}
     {adding && <form className="claude-add-form" onSubmit={e=>{
@@ -548,7 +678,7 @@ export function ClaudeAccountsPanel({ proxySources, desktopNetwork, store, runni
         {detected && <DetectedProfile key={detected.identity} profile={detected} usageEnvironment={usageEnvironment} busy={busy || environmentBusy || !!environment}
           perform={perform} change={load}
           join={() => perform(joinDetected)} />}
-        {accounts?.map((profile) => <ProfileCard proxySources={proxySources} desktopNetwork={desktopNetwork} key={profile.id} profile={profile} environment={environment} usageEnvironment={usageEnvironment}
+        {accounts?.map((profile, index) => <ProfileCard proxySources={proxySources} desktopNetwork={desktopNetwork} key={profile.id} profile={profile} index={index} total={accounts.length} reorderable={reorderable} dragState={dragState} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDragEnd={onDragEnd} onMove={moveAccount} environment={environment} usageEnvironment={usageEnvironment}
           busy={busy || environmentBusy} perform={perform} change={load} login={login} cancelDraft={cancelDraft} removeAccount={removeAccount}
           active={activeCounts.get(profile.id)?.all || 0} defaultActive={activeCounts.get(profile.id)?.fromDefault || 0} />)}
       </QuotaClock>

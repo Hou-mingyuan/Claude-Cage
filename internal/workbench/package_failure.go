@@ -1,7 +1,9 @@
 package workbench
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
@@ -10,6 +12,7 @@ import (
 
 const (
 	aptFailureMarker  = "APT_FAILED "
+	aptPartialMarker  = "APT_PARTIAL bytes="
 	aptTailLines      = 6
 	aptTailLineBytes  = 200
 	aptCommandBytes   = 300
@@ -23,6 +26,8 @@ type aptEvidence struct {
 	exit, command string
 	packages      []string
 	tail          []string
+	// partialBytes is the size of unfinished downloads APT keeps for resuming.
+	partialBytes int64
 }
 
 // parseAPTFailure reads the last APT failure marker written by
@@ -60,7 +65,21 @@ func parseAPTFailure(log string) *aptEvidence {
 			ev.packages = append(ev.packages, arg)
 		}
 	}
-	for i := at - 1; i >= 0 && len(ev.tail) < aptTailLines; i-- {
+	start := at - 1
+	for start >= 0 && strings.TrimSpace(lines[start]) == "" {
+		start--
+	}
+	// The installer reports kept downloads on the line just before the marker;
+	// an earlier report belongs to another APT call.
+	if start >= 0 {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(lines[start]), aptPartialMarker); ok {
+			if n, err := strconv.ParseInt(rest, 10, 64); err == nil && n > 0 {
+				ev.partialBytes = n
+			}
+			start--
+		}
+	}
+	for i := start; i >= 0 && len(ev.tail) < aptTailLines; i-- {
 		if line := strings.TrimSpace(lines[i]); line != "" {
 			ev.tail = append([]string{clip(line, aptTailLineBytes)}, ev.tail...)
 		}
@@ -73,6 +92,13 @@ func clip(s string, n int) string {
 		return s
 	}
 	return strings.ToValidUTF8(s[:n], "") + "…"
+}
+
+func aptPartialSize(n int64) string {
+	if n < 1<<20 {
+		return strconv.FormatInt(max((n+1023)/1024, 1), 10) + " KiB"
+	}
+	return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
 }
 
 // packageInstallFailure explains a failed base package stage. Only fields the
@@ -122,6 +148,10 @@ func packageInstallFailure(action string, cause error, log string) error {
 	}
 	if tail != "" {
 		detail += "；错误输出末尾：" + strings.ReplaceAll(tail, "\n", " | ")
+	}
+	if ev.partialBytes > 0 {
+		next += "APT 缓存中有 " + aptPartialSize(ev.partialBytes) + " 未完成的软件包。重新点击安装时，若软件源支持续传，APT 会尝试复用匹配的缓存。"
+		detail += "；已保留未完成的下载 " + strconv.FormatInt(ev.partialBytes, 10) + " 字节"
 	}
 	diagnostics.Log("error", "package-install", "reason="+reason+" "+detail)
 	return usererror.New(action, reason, diagnostics.Redact(detail)+"。"+next, cause)

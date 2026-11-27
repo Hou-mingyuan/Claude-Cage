@@ -431,6 +431,148 @@ class ChannelTests(unittest.TestCase):
             channel.discover(request)
         self.assertEqual(calls.call_count, 3)
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX job control")
+    def test_paused_terminal_owns_session_without_channel_input_or_handoff(self):
+        config = self.home / ".claude"
+        self.history(self.session, self.project, [{"type": "user", "message": {"content": "retain history"}}])
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        connection = str(uuid.uuid4())
+        request = {"cli_id": self.session, "config": str(config), "workspace": self.project,
+                   "connection": connection, "switch_id": str(uuid.uuid4()), "target_cli_id": str(uuid.uuid4())}
+        catalog = {"accounts": ["default"], "workspaces": [self.project]}
+        with channel.state_file(connection) as state:
+            state.update(cli_id=self.session, config=str(config), workspace=self.project, pid=child.pid,
+                         pid_birth=channel.process_birth(child.pid), busy=True, channel_pid=os.getpid())
+        running_token = channel.view_token(config, self.session)[0]
+        os.kill(child.pid, channel.signal.SIGSTOP)
+        self.assertTrue(os.WIFSTOPPED(os.waitpid(child.pid, os.WUNTRACED)[1]))
+        with patch.object(channel, "running_sessions", return_value=[]), patch.object(channel, "terminate_cli") as terminate:
+            self.assertEqual(channel.active_session_state(self.session, str(config)), {"running": True, "paused": True})
+            self.assertTrue(channel.active_session(self.session, str(config)))
+            paused_view = channel.view(config, self.session)
+            self.assertNotEqual(channel.view_token(config, self.session)[0], running_token)
+            for item in (paused_view, channel.discover(catalog)[0]):
+                self.assertTrue(item["paused"])
+                self.assertTrue(item["running"])
+                self.assertFalse(item["active"])
+                self.assertEqual(item["workspace"], self.project)
+            self.assertEqual(paused_view["turns"][0]["prompt"], "retain history")
+            self.assertFalse(paused_view["can_send"])
+            self.assertFalse(paused_view["channel_ready"])
+            for action in ("send", "approve", "stop", "resume"):
+                self.assertIn("暂停", channel.rpc({**request, "action": action})["error"])
+            self.assertTrue(channel.handoff_session(request)["paused"])
+            with self.assertRaisesRegex(ValueError, "暂停"):
+                channel.prepare_account_switch(request)
+            terminate.assert_not_called()
+            self.assertNotIn("account_switch", channel.read_json(self.root / connection / "state.json"))
+            self.assertFalse(channel.handoff_receipt(config, self.session).exists())
+        os.kill(child.pid, channel.signal.SIGCONT)
+        self.assertTrue(os.WIFCONTINUED(os.waitpid(child.pid, os.WCONTINUED)[1]))
+        resumed = channel.view(config, self.session)
+        self.assertFalse(resumed["paused"])
+        self.assertTrue(resumed["can_send"])
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX job control")
+    def test_view_stays_readable_when_suspended_hook_holds_receipt_lock(self):
+        config = self.home / ".claude"
+        row_id = str(uuid.uuid4())
+        connection = str(uuid.uuid4())
+        self.history(self.session, self.project, [{"type": "user", "uuid": row_id, "message": {"content": "delivered"}}])
+        folder = self.root / connection
+        folder.mkdir(parents=True)
+        # Freeze a real lock owner, just as Ctrl+Z can stop a foreground hook.
+        child = subprocess.Popen([sys.executable, "-c", (
+            "import fcntl, os, signal, sys\n"
+            "with open(sys.argv[1], 'a') as lock:\n"
+            "    fcntl.flock(lock, fcntl.LOCK_EX)\n"
+            "    os.kill(os.getpid(), signal.SIGSTOP)\n"), str(folder / "lock")])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        self.assertTrue(os.WIFSTOPPED(os.waitpid(child.pid, os.WUNTRACED)[1]))
+        path = folder / "state.json"
+        channel.save(path, {"cli_id": self.session, "config": str(config), "workspace": self.project,
+                            "pid": child.pid, "pid_birth": channel.process_birth(child.pid),
+                            "sent": [{"id": row_id, "text": "delivered"}]})
+        read = subprocess.run([sys.executable, "-I", str(source), "view", "-"],
+                              input=json.dumps({"cli_id": self.session, "connection": connection, "config": str(config)}),
+                              text=True, env=self.env, capture_output=True, check=True, timeout=3)
+        view = json.loads(read.stdout)
+        self.assertTrue(view["paused"])
+        self.assertEqual([turn["prompt"] for turn in view["turns"]], ["delivered"])
+        self.assertTrue(channel.read_json(path)["sent"])
+        os.kill(child.pid, channel.signal.SIGCONT)
+        child.wait(timeout=3)
+        channel.view(config, self.session)
+        self.assertEqual(channel.read_json(path)["sent"], [])
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX job control")
+    def test_stale_pid_cannot_occupy_or_handoff_an_unrelated_stopped_process(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        os.kill(child.pid, channel.signal.SIGSTOP)
+        self.assertTrue(os.WIFSTOPPED(os.waitpid(child.pid, os.WUNTRACED)[1]))
+        connection = str(uuid.uuid4())
+        config = self.home / ".claude"
+        state = {"cli_id": self.session, "config": str(config), "workspace": self.project,
+                 "pid": child.pid, "channel_pid": os.getpid()}
+        path = self.root / connection / "state.json"
+        with patch.object(channel, "running_sessions", return_value=[]) as registry, patch.object(channel, "terminate_cli") as terminate:
+            for metadata in ({}, {"pid_birth": "previous-process"}):
+                with self.subTest(metadata=metadata):
+                    channel.save(path, {**state, **metadata})
+                    self.assertFalse(channel.active_session(self.session, str(config)))
+                    self.assertFalse(channel.view(config, self.session)["paused"])
+                    self.assertFalse(channel.handoff_session(state)["running"])
+                    terminate.assert_not_called()
+            self.assertTrue(registry.called)
+        channel.save(path, state)
+        with patch.object(channel, "running_sessions", return_value=[{"sessionId": self.session, "pid": child.pid}]):
+            self.assertTrue(channel.view(config, self.session)["paused"])
+            self.assertTrue(channel.active_session_state(self.session, str(config))["paused"])
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX job control")
+    def test_paused_manually_reopened_session_blocks_handoff_and_switch(self):
+        config = self.home / ".claude"
+        self.history(self.session, self.project, [{"type": "user", "message": {"content": "history"}}])
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        os.kill(child.pid, channel.signal.SIGSTOP)
+        self.assertTrue(os.WIFSTOPPED(os.waitpid(child.pid, os.WUNTRACED)[1]))
+        row = {"sessionId": self.session, "pid": child.pid, "cwd": self.project,
+               "status": "waiting", "kind": "interactive"}
+        channel.save(config / "sessions" / (str(child.pid) + ".json"), row)
+        old = str(uuid.uuid4())
+        channel.save(self.root / old / "state.json",
+                     {"cli_id": self.session, "config": str(config), "workspace": self.project,
+                      "pid": os.getpid(), "closed": True, "busy": True, "channel_pid": os.getpid()})
+        req = {"cli_id": self.session, "config": str(config), "workspace": self.project,
+               "connection": "", "switch_id": str(uuid.uuid4()), "target_cli_id": str(uuid.uuid4())}
+        with patch.object(channel, "running_sessions", return_value=[row]), patch.object(channel, "terminate_cli") as terminate:
+            self.assertTrue(channel.active_session_state(self.session, str(config))["paused"])
+            detail = channel.view(config, self.session)
+            listing = channel.discover({"accounts": ["default"], "workspaces": [self.project]})[0]
+            for item in (detail, listing):
+                self.assertTrue(item["running"])
+                self.assertTrue(item["external_running"])
+                self.assertTrue(item["paused"])
+                self.assertFalse(item["active"])
+                self.assertEqual(item["connection"], "")
+            self.assertFalse(detail["can_send"])
+            token = channel.view_token(config, self.session)[0]
+            self.assertTrue(channel.handoff_session(req)["paused"])
+            with self.assertRaisesRegex(ValueError, "暂停"):
+                channel.prepare_account_switch(req)
+            self.assertFalse(channel.handoff_receipt(config, self.session).exists())
+            terminate.assert_not_called()
+            os.kill(child.pid, channel.signal.SIGCONT)
+            self.assertTrue(os.WIFCONTINUED(os.waitpid(child.pid, os.WCONTINUED)[1]))
+            self.assertNotEqual(channel.view_token(config, self.session)[0], token)
+            detail = channel.view(config, self.session)
+            self.assertTrue(detail["external_running"])
+            self.assertFalse(detail["paused"])
+            self.assertFalse(detail["channel_ready"])
+
     def test_discovery_fresh_request_bypasses_guest_listing_cache(self):
         # A forced refresh from the workbench ("fresh") must rerun the process
         # listing even when the guest's cached listing is still valid.

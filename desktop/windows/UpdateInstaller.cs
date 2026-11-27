@@ -30,6 +30,7 @@ internal static class UpdateInstaller
         var committed = false;
         var succeeded = false;
         Process? launched = null;
+        Mutex? transaction = null;
         try
         {
             using var inputTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
@@ -46,6 +47,7 @@ internal static class UpdateInstaller
             Directory.SetCurrentDirectory(AppUpdater.Root);
             if (File.ReadAllText(Path.Combine(plan.Target, "Cage.install-id")).Trim() != "io.github.lee-xeo.claude-cage")
                 throw new IOException("请先使用 Cage 安装程序安装应用，再自动更新");
+            UpdateRecovery.EnsureNoPendingTransaction(plan.Target);
             var original = Path.Combine(plan.Target, "Cage.exe");
             string targetPublisher;
             if (plan.UnsignedSource)
@@ -68,10 +70,14 @@ internal static class UpdateInstaller
             // installer exits. Another process cannot swap it after verification.
             await using var archiveLock = new FileStream(plan.Archive, FileMode.Open, FileAccess.Read, FileShare.Read);
             VerifyArchive(plan.Archive, plan.Digest, plan.Version, targetPublisher);
-            using var parent = Process.GetProcessById(plan.ParentPid);
-            if (parent.StartTime.ToUniversalTime().Ticks != plan.ParentStartTicks ||
-                !string.Equals(parent.MainModule?.FileName, original, StringComparison.OrdinalIgnoreCase))
-                throw new IOException("更新请求进程身份不匹配");
+            using var parent = new UpdateProcess(plan.ParentPid, plan.ParentStartTicks).Pin(original);
+            using var relay = plan.Clients?.Relay?.Pin(original);
+            using var terminal = plan.Clients?.Terminal?.Pin(UpdateRecovery.BackendPath(plan.Target));
+            // Different profiles can refer to one installed program. Keep its
+            // snapshot, replacement and potential recovery in a single transaction.
+            var targetKey = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plan.Target.ToUpperInvariant())));
+            transaction = new Mutex(false, @"Global\Cage.Update-" + targetKey, out bool onlyInstaller);
+            if (!onlyInstaller) { Console.WriteLine("BUSY"); await Console.Out.FlushAsync(); return 1; }
             backup = Path.Combine(AppUpdater.Root, "previous-" + plan.Confirmation);
             if (Directory.Exists(backup)) throw new IOException("更新备份目录已存在");
             // Preparation is reversible and completes before the controller stops.
@@ -89,7 +95,14 @@ internal static class UpdateInstaller
             Console.WriteLine("READY"); await Console.Out.FlushAsync();
             if (await Console.In.ReadLineAsync(inputTimeout.Token) != "COMMIT") return 1;
             committed = true;
-            await parent.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(45));
+            if (plan.Clients != null)
+            {
+                // The caller may release its executable as soon as it receives this acknowledgement.
+                try { Console.WriteLine("COMMITTED"); await Console.Out.FlushAsync(); }
+                catch (IOException) { } // An accepted installation survives its caller disconnecting.
+            }
+            await Task.WhenAll(new[] { parent, relay, terminal }.OfType<Process>().Select(process => process.WaitForExitAsync()))
+                .WaitAsync(TimeSpan.FromSeconds(45));
             VerifyArchive(plan.Archive, plan.Digest, plan.Version, targetPublisher);
             // NSIS requires /D= to be the final, unquoted argument; the executable
             // path is passed separately and no command shell is involved.
@@ -191,6 +204,7 @@ internal static class UpdateInstaller
                         await PreserveFiles("complete", "", plan.Target, receipt);
                         throw;
                     }
+                    await UpdateRecovery.StopDetachedCandidate(backup, failed, TimeSpan.FromSeconds(30));
                     await PreserveFiles("cleanup", failed, plan.Target, receipt);
                     EnsureInstallationComplete(plan.Target);
                     UpdateRecovery.CleanupDirectory(backup); backup = null;
@@ -217,6 +231,7 @@ internal static class UpdateInstaller
             if (succeeded && plan != null && backup != null)
                 UpdateRecovery.CleanupAfterSuccess(backup, Path.GetDirectoryName(plan.Archive)!, Path.Combine(AppUpdater.Root, "launch-" + plan.Confirmation + ".json"));
             else if (!committed) UpdateRecovery.CleanupDirectory(backup);
+            transaction?.Dispose();
         }
     }
 

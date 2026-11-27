@@ -15,6 +15,8 @@ import (
 // an unconfigured or temporarily unavailable upstream.
 var ErrLocalProxyNode = errors.New("本机代理端口不能用作节点。请导入原客户端的具体节点，在 Cage 中按中转到最终出口的顺序重新配置并应用")
 
+var localInterfaceAddrs = net.InterfaceAddrs
+
 type localServers struct {
 	hostname  string
 	addresses map[netip.Addr]bool
@@ -52,7 +54,7 @@ func (local *localServers) contains(server string) bool {
 	}
 	if local.addresses == nil {
 		local.addresses = make(map[netip.Addr]bool)
-		addrs, _ := net.InterfaceAddrs()
+		addrs, _ := localInterfaceAddrs()
 		for _, addr := range addrs {
 			if prefix, err := netip.ParsePrefix(addr.String()); err == nil {
 				local.addresses[prefix.Addr().Unmap()] = true

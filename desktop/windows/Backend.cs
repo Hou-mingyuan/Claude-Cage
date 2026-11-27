@@ -8,6 +8,9 @@ namespace Cage.Windows;
 
 internal static class Backend
 {
+    // Allow the Go stop-job deadline plus backend handoff and startup.
+    internal static readonly TimeSpan UpdateStopDeadline = TimeSpan.FromMinutes(9);
+
     public static bool ClientOnly => File.Exists(Path.Combine(AppContext.BaseDirectory, "resources", "client-only"));
     private static string ConfigPath => Path.GetFullPath(
         Environment.GetEnvironmentVariable("CLAUDE_CAGE_CONFIG") is { Length: > 0 } configured
@@ -34,7 +37,7 @@ internal static class Backend
                     // A released profile lock alone does not release its image.
                     _ = process.SafeHandle;
                     if (process.HasExited) { process.Dispose(); continue; }
-                    if (!string.Equals(Path.GetFullPath(ProcessImage(process.SafeHandle)), Path.GetFullPath(Executable), StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(Path.GetFullPath(ProcessImage(process)), Path.GetFullPath(Executable), StringComparison.OrdinalIgnoreCase))
                         throw new IOException("自检后台身份与当前应用不符，未等待其他程序");
                     processes.Add(process);
                 }
@@ -50,12 +53,14 @@ internal static class Backend
 
     // Read the image path through the handle pinned above. MainModule enumerates
     // modules and is null for a process that has just started.
-    private static string ProcessImage(SafeProcessHandle handle)
+    internal static string ProcessImage(Process process)
     {
+        var handle = process.SafeHandle;
+        if (!OperatingSystem.IsWindows()) return process.MainModule?.FileName ?? throw new IOException("无法读取进程的程序路径");
         var size = 32768;
         var name = new StringBuilder(size);
         if (!QueryFullProcessImageName(handle, 0, name, ref size))
-            throw new IOException($"无法读取自检后台的程序路径（Win32 错误 {Marshal.GetLastWin32Error()}）");
+            throw new IOException($"无法读取进程的程序路径（Win32 错误 {Marshal.GetLastWin32Error()}）");
         return name.ToString(0, size);
     }
 

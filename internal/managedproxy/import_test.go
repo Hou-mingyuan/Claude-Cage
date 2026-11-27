@@ -264,3 +264,80 @@ proxy-providers:
 		t.Fatalf("inline-only config did not import: %v %v", nodes, err)
 	}
 }
+
+// #837, #790: Clash Verge Ninja's and Clash Neo's own node types is named, with the migration path,
+// instead of a generic unsupported protocol; its fields never appear.
+func TestImportNamesClientOnlyNinjaNodes(t *testing.T) {
+	s, _ := Load(t.TempDir())
+	data := `proxies:
+ - {name: good, type: socks5, server: 203.0.113.10, port: 1080}
+ - {name: hk-ninja, type: ninja, server: example.com, port: 443, password: secret-password, ninja-obf: secret-obf}
+ - {name: upper, type: NINJA, server: example.com, port: 443}
+ - {name: neo, type: nexo, server: example.com, port: 443}
+ - {name: other, type: unknown-proto, server: example.com, port: 443}
+`
+	if err := s.Import("ninja", "", []byte(data), "ninja", 0, ""); err != nil || s.Count() != 1 {
+		t.Fatalf("count=%d err=%v", s.Count(), err)
+	}
+	reasons, types := map[string]string{}, map[string]string{}
+	for _, issue := range s.Sources[0].Skipped {
+		reasons[issue.Name], types[issue.Name] = issue.Reason, issue.Type
+	}
+	ninja := clientOnlyTypes["ninja"]
+	if reasons["hk-ninja"] != ninja || reasons["upper"] != ninja || reasons["neo"] != clientOnlyTypes["nexo"] || reasons["other"] != "节点协议暂不支持" {
+		t.Fatalf("reasons = %v", reasons)
+	}
+	// #790: only the fixed client-only names are reported as the type.
+	if types["hk-ninja"] != "ninja" || types["upper"] != "ninja" || types["neo"] != "nexo" || types["other"] != "" {
+		t.Fatalf("types = %v", types)
+	}
+	report, _ := json.Marshal(s.Sources[0].Skipped)
+	for _, secret := range []string{"secret-password", "secret-obf"} {
+		if strings.Contains(string(report), secret) {
+			t.Fatal("import diagnosis leaked a field value")
+		}
+	}
+	only, _ := Load(t.TempDir())
+	err := only.Import("ninja", "", []byte("proxies:\n - {name: a, type: ninja, server: example.com, port: 443}\n"), "ninja", 0, "")
+	if err == nil || !strings.Contains(err.Error(), "Clash Verge Ninja") {
+		t.Fatalf("all-ninja import: %v", err)
+	}
+}
+
+// #974: MASQUE share links and YAML masque nodes name the protocol and why it
+// cannot be imported instead of a generic unsupported protocol.
+func TestImportExplainsMASQUENodes(t *testing.T) {
+	link := "masque://secret-user@proxy.example.test:443?user=secret-user&sni=proxy.example.test&insecure=0&mode=flow&network=h3&ech"
+	_, _, err := parseNodes([]byte(link), "link")
+	if err == nil || !strings.Contains(err.Error(), "MASQUE 分享链接暂不支持") || !strings.Contains(err.Error(), "ECDSA") {
+		t.Fatalf("masque link: %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-user") || strings.Contains(err.Error(), "proxy.example.test") {
+		t.Fatal("masque link error leaked link text")
+	}
+
+	data := `proxies:
+ - {name: good, type: socks5, server: 203.0.113.10, port: 1080}
+ - {name: warp, type: masque, server: 203.0.113.20, port: 443, private-key: secret-private, public-key: secret-public, ip: 172.16.0.2}
+ - {name: upper, type: MASQUE, server: 203.0.113.21, port: 443}
+`
+	_, skipped, err := parseNodes([]byte(data), "yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := unsupportedCoreTypes["masque"]
+	if len(skipped) != 2 {
+		t.Fatalf("skipped = %+v", skipped)
+	}
+	for _, issue := range skipped {
+		if issue.Reason != want || issue.Type != "masque" {
+			t.Fatalf("issue = %+v", issue)
+		}
+	}
+	report, _ := json.Marshal(skipped)
+	for _, secret := range []string{"secret-private", "secret-public"} {
+		if strings.Contains(string(report), secret) {
+			t.Fatal("import diagnosis leaked a field value")
+		}
+	}
+}

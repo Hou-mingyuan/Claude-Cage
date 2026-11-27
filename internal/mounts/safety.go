@@ -12,16 +12,13 @@ import (
 	"github.com/sylvinus/agent-vm/internal/paths"
 )
 
-// BaseNames are always read-only in every share. .hg: Mercurial runs the
-// hooks of .hg/hgrc in a repository the user owns, which files written
-// through a share are. .sl (Sapling) and .jj (Jujutsu) keep a repository's
-// config, which names commands to run, in the same way. .lfsconfig is not
-// one: git-lfs reads only a few URL and filter keys from it, no command.
+// BaseNames are repository metadata directory names that must not be selected
+// directly as a shared project root. Normal project shares keep them writable
+// so Git and other VCS commands work inside the environment.
 var BaseNames = []string{".git", ".hg", ".sl", ".jj"}
 
 // UnderName reports whether the relative path rel goes through one of names
-// (BaseNames when nil), matched as the SFTP server does: per component,
-// whatever the case.
+// (BaseNames when nil), matched per component regardless of case.
 func UnderName(rel string, names []string) bool {
 	if names == nil {
 		names = BaseNames

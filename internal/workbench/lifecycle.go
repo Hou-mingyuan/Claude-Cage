@@ -133,6 +133,7 @@ func (s *Server) closeService() error {
 		s.terminals.close()
 		s.remoteApprovals.close()
 		s.clientBridge.close()
+		s.desktopAppOps.close()
 		s.closeBackground()
 		s.activities.Wait()
 		s.op.Lock()

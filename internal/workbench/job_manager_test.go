@@ -259,10 +259,11 @@ func TestJobManagerFinalizationAndOutput(t *testing.T) {
 	if manager.snapshot() != (Job{}) {
 		t.Fatal("output without an execution changed state")
 	}
+	const setupHint = "run cage agent call network.check --wait 5m"
 	_, err := manager.submit(&operation, "stop", 0, nil, func() error {
 		return errors.New("无法写入账户锁定状态")
 	}, func() error {
-		_, _ = manager.execution().Write([]byte(strings.Repeat("a\n", 12500) + "tail"))
+		_, _ = manager.execution().Write([]byte(strings.Repeat("a\n", 12500) + setupHint))
 		return nil
 	})
 	if err != nil {
@@ -272,7 +273,7 @@ func TestJobManagerFinalizationAndOutput(t *testing.T) {
 	// output under -race must not depend on the short polling deadline.
 	manager.workers.Wait()
 	state := manager.snapshot()
-	if state.Running || state.Error != "无法写入账户锁定状态" || len(state.Log) > 24000 || !strings.Contains(state.Log, "12499 additional times") || !strings.HasSuffix(state.Log, "tail\n") {
+	if state.Running || state.Error != "无法写入账户锁定状态" || len(state.Log) > 24000 || !strings.Contains(state.Log, "12499 additional times") || !strings.HasSuffix(state.Log, setupHint+"\n") {
 		t.Fatalf("finalization error or bounded log lost: %+v", state)
 	}
 	_, err = manager.submit(&operation, "stop", 0, nil, nil, func() error {

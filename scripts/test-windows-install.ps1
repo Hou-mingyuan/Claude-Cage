@@ -4,7 +4,8 @@
 param([Parameter(Mandatory)][string]$Installer, [switch]$RequireSignedQemu)
 . (Join-Path $PSScriptRoot 'windows-common.ps1')
 if (-not $IsWindows) { throw 'Installation smoke tests must run on Windows.' }
-$target = Join-Path $env:LOCALAPPDATA ('Programs/Cage-test-' + [guid]::NewGuid().ToString('N'))
+# Exercise QEMU's bundled firmware lookup from a path outside Windows-1252.
+$target = Join-Path $env:LOCALAPPDATA ('Programs/Cage-测试-' + [guid]::NewGuid().ToString('N'))
 $savedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ClaudeCage'
 if (Test-Path $savedKey) { throw 'Use a disposable Windows user without an existing Cage installation.' }
 $fixture = Join-Path $PSScriptRoot 'personal-data-fixture.mjs'
@@ -45,8 +46,12 @@ function Assert-Shortcuts {
         if ((Test-Path -LiteralPath (Join-Path $startMenuDirectory $name)) -ne $StartMenu) { throw "Start menu shortcut differs from the installer selection: $name" }
     }
     if ($Desktop) {
-        $shell = New-Object -ComObject WScript.Shell
-        if ($shell.CreateShortcut($desktopShortcut).TargetPath -ne (Join-Path $target 'Cage.exe')) { throw 'Desktop shortcut targets a different installation.' }
+        $shell = New-Object -ComObject Shell.Application
+        $desktopFolder = $shell.NameSpace((Split-Path $desktopShortcut -Parent))
+        $shortcut = $desktopFolder.ParseName((Split-Path $desktopShortcut -Leaf))
+        $actual = $shortcut.ExtendedProperty('System.Link.TargetParsingPath')
+        $expected = Join-Path $target 'Cage.exe'
+        if ($actual -ne $expected) { throw "Expected the desktop shortcut to target '$expected', got '$actual'." }
     }
 }
 # Cover the directory-picker path where the user creates an empty folder first.

@@ -9,10 +9,10 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/remotehost"
@@ -102,7 +102,9 @@ func AgentOperations() []AgentOperation {
 	get("appearance.get", "Read complete appearance and saved themes", "/api/appearance")
 	post("appearance.set", "Save complete appearance using the workbench validator", "/api/appearance", from(Appearance{}))
 	get("appearance.codex", "Read the same local Codex appearance import as the UI", "/api/appearance/codex")
+	post("appearance.guest-theme", "Record and sync the resolved light or dark appearance variant to the guest environment when guest theme sync is enabled", "/api/appearance/guest-theme", object(map[string]string{"variant": "string"}))
 	post("settings.probe", "Probe actual exit location for a complete settings draft", "/api/settings/probe", from(Settings{}))
+	post("settings.dns_check", "Test configured encrypted DNS endpoints through the selected proxy for a complete settings draft", "/api/settings/dns-check", from(Settings{}))
 	get("proxy.connections", "Inspect live proxy connections", "/api/proxy/connections")
 	get("proxy.logs", "Inspect proxy logs", "/api/proxy/logs")
 	post("proxy.delay", "Measure one node (node_id) or up to 300 nodes four at a time (node_ids); returns per-node results and the fastest working node as best without changing the selection", "/api/proxy/delay", object(map[string]string{"node_id": "string", "node_ids": "array"}))
@@ -113,9 +115,9 @@ func AgentOperations() []AgentOperation {
 	post("vault.change", "Save/delete/unblock; reveal requires the same account_password reauthentication as the UI", "/api/vault", object(map[string]string{"action": "string", "entry": "object", "id": "string", "origin": "string", "account_password": "string"}))
 	ops[len(ops)-1].InputSchema["properties"].(map[string]any)["entry"] = from(vaultEntry{})
 	post("vault.browser", "Use the browser vault's existing save/fill/block actions", "/api/vault/browser", from(vaultBrowserInput{}))
-	get("mobile.get", "Inspect phone pairing", "/api/mobile-pair")
-	post("mobile.pair", "Generate the same phone pairing invitation", "/api/mobile-pair", object(map[string]string{"admin": "string", "relay": "string"}))
-	add("mobile.remove", "Remove the same paired device", "DELETE", "/api/mobile-pair", object(nil))
+	get("mobile.get", "Inspect paired mobile devices", "/api/mobile-pair")
+	post("mobile.pair", "Generate a phone pairing invitation", "/api/mobile-pair", object(map[string]string{"admin": "string", "relay": "string"}))
+	add("mobile.remove", "Remove one paired device by id, or all paired devices when id is omitted", "DELETE", "/api/mobile-pair", object(map[string]string{"id": "string"}))
 	get("tailscale.get", "Read guest private-network state", "/api/tailscale")
 	for _, action := range []string{"install", "connect", "login", "disconnect", "logout", "control-server", "add-key", "remove-key"} {
 		schema := object(nil)
@@ -178,8 +180,11 @@ func agentHTTPError(code int) *AgentError {
 	e := &AgentError{Code: "request_rejected", Message: "Cage rejected the operation. Check the input and run doctor.", NextAction: "doctor", HTTPStatus: code}
 	switch code {
 	case 401:
+		// service.start reuses a running controller, so it cannot renew a
+		// rejected session.
 		e.Code = "authentication_failed"
-		e.NextAction = "service.start"
+		e.Message = "The controller rejected this session. Reopen the workbench from the Cage app, then retry."
+		e.NextAction = "open_desktop"
 	case 423:
 		e.Code = "account_locked"
 		e.Message = "Unlock Cage before configuring the environment."
@@ -212,31 +217,43 @@ func agentHTTPError(code int) *AgentError {
 // or stops an existing controller as a side effect of an agent call.
 func AgentStartService(ctx context.Context, configPath string) error {
 	profile := filepath.Dir(configPath)
-	c, err := connectController(profile)
-	if err == nil {
-		defer c.close()
-		return agentCheckController(c, configPath)
-	}
-	if !errors.Is(err, errControllerUnavailable) || !controllerLockFree(profile) {
+	// A simultaneous start can hold the profile lock before publishing its
+	// control record. Reuse that controller once it is ready.
+	c, err := waitControllerReady(ctx, profile)
+	if errors.Is(err, errControllerUnavailable) {
+		c, err = startController(ctx, configPath)
+		if err != nil {
+			if ctx.Err() != nil {
+				return &AgentError{Code: "service_start_timeout", Message: "The controller has not become ready. It may still be starting.", NextAction: "doctor", Retryable: true}
+			}
+			return &AgentError{Code: "service_start_failed", Message: "Cage could not start its controller.", NextAction: "doctor"}
+		}
+	} else if err != nil {
 		return &AgentError{Code: "service_unavailable", Message: "The controller cannot be authenticated. Preserve its data and inspect diagnostics.", NextAction: "doctor"}
 	}
-	if err := startController(configPath); err != nil {
-		return &AgentError{Code: "service_start_failed", Message: "Cage could not start its controller.", NextAction: "doctor"}
+	defer c.close()
+	return agentCheckController(c, configPath)
+}
+
+// A native launcher can spell the same profile directory through a system
+// alias (such as /tmp on macOS). Keep the configuration filename pinned.
+func sameControllerConfig(a, b string) bool {
+	if a == "" || b == "" {
+		return false
 	}
-	timer := time.NewTicker(100 * time.Millisecond)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return &AgentError{Code: "service_start_timeout", Message: "The controller has not become ready. It may still be starting.", NextAction: "doctor", Retryable: true}
-		case <-timer.C:
-			c, err := connectController(profile)
-			if err == nil {
-				defer c.close()
-				return agentCheckController(c, configPath)
-			}
-		}
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if a == b {
+		return true
 	}
+	if filepath.Base(a) != filepath.Base(b) {
+		return false
+	}
+	left, err := os.Stat(filepath.Dir(a))
+	if err != nil {
+		return false
+	}
+	right, err := os.Stat(filepath.Dir(b))
+	return err == nil && os.SameFile(left, right)
 }
 
 func agentCheckController(c *controllerClient, configPath string) error {
@@ -244,7 +261,7 @@ func agentCheckController(c *controllerClient, configPath string) error {
 	if err != nil || !want.matches(c.launch.Controller) || c.launch.DesktopGateway || c.launch.ClientOnly {
 		return &AgentError{Code: "controller_mismatch", Message: "Use the CLI shipped with the running workload. No controller was replaced.", NextAction: "open_desktop"}
 	}
-	if filepath.Clean(c.launch.ConfigPath) != filepath.Clean(configPath) {
+	if !sameControllerConfig(c.launch.ConfigPath, configPath) {
 		return &AgentError{Code: "config_path_mismatch", Message: "This directory's controller uses a different configuration filename. Use its original absolute config path.", NextAction: "doctor"}
 	}
 	return nil
@@ -253,7 +270,7 @@ func agentCheckController(c *controllerClient, configPath string) error {
 func agentConnect(ctx context.Context, configPath string) (*controllerClient, error) {
 	c, err := connectController(filepath.Dir(configPath))
 	if err != nil {
-		return nil, &AgentError{Code: "service_unavailable", Message: "The local Cage controller is unavailable. Run service.start or doctor.", NextAction: "service.start"}
+		return nil, &AgentError{Code: "service_unavailable", Message: "The local Cage controller is unavailable. Run the top-level command cage agent service.start (not call), open the Cage app, or run doctor.", NextAction: "service.start"}
 	}
 	fail := func(err error) (*controllerClient, error) { c.close(); return nil, err }
 	if err := agentCheckController(c, configPath); err != nil {

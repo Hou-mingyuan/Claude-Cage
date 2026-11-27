@@ -8,6 +8,7 @@ Cage 的核心路线是把 Claude 的运行外壳关在轻量化的本地隔离�
 | --- | --- | --- |
 | 给 Claude 的能力（MCP） | 提供工具，让环境里的 Claude 安全、受控地获得本机或环境内的能力 | `contributes.mcpServers` |
 | 定制 Cage（扩展） | 在 Cage 侧栏加一个自己的沙箱页面，扩展工作台界面与工作流 | `contributes.views` |
+| 运行桌面应用 | 在环境里安装并运行厂商的官方桌面应用，默认跟随最新版本 | `contributes.desktopApps` |
 
 工具由标准的 [MCP](https://modelcontextprotocol.io) 服务提供，通过标准输入输出通信，用任何语言都能写。页面是普通的 HTML，运行在沙箱里。所有社区插件通过开放的插件市场 [cage-plugins](https://github.com/Lee-xeo/cage-plugins) 与 Cage 主仓库解耦协作：社区在市场持续贡献 MCP 工具与页面扩展，Cage 维护团队专注于隔离环境、网络与工作台本身。日常安装、权限管理与使用说明也见[插件与插件市场指南](guide/plugins.md)。
 
@@ -182,6 +183,9 @@ my-plugin/
 | `icon` | 否 | 格式同顶层 `icon`。目前侧栏显示的是插件的顶层图标，这个字段为以后预留 |
 | `server` | 否 | 页面可以调用的 MCP 服务的 `id`。省略表示纯静态页面 |
 | `openUrls` | 否 | 页面可以请求打开的地址模式，见下 |
+| `presentation` | 否 | 展示方式：`page`（默认，作为独立工作区页面打开）或 `floating`（作为可拖动、可收起的半透明毛玻璃浮窗悬浮在工作台上）。需要 `engines.cage` 至少为 `0.2.1` |
+| `width` | 否 | 仅 `presentation: "floating"` 可用：浮窗初始宽度（CSS 像素，范围 `220`–`720`），需要 `engines.cage` 至少为 `0.2.1` |
+| `height` | 否 | 仅 `presentation: "floating"` 可用：浮窗内容区初始高度（CSS 像素，范围 `100`–`720`），需要 `engines.cage` 至少为 `0.2.1` |
 
 清单里的文件路径不超过 200 个字符。
 
@@ -191,6 +195,55 @@ my-plugin/
 - 必须写路径，至少是 `/`：`https://example.com` 不合法，要写 `https://example.com/*`。
 - 端口可以写数字或 `*`。不写端口只匹配默认端口，所以 `http://localhost/*` 只匹配 80 端口，本机服务通常要写 `http://localhost:*/*`。
 - 路径只能在结尾用 `*`。匹配时会连同查询串一起比较，所以要放行带查询串的地址，路径要以 `*` 结尾。
+
+`contributes.desktopApps[]`（只用于环境内插件，需要 `engines.cage` 至少为 `0.2.1`，最多 4 个）：
+
+插件可以让 Cage 在环境里安装并运行厂商的官方桌面应用，像 Claude Desktop 一样在侧栏打开、显示在自己的画面中。插件只描述**去哪里取最新版本、怎样启动**；下载、验签、安装、更新、卸载这些需要管理员权限的步骤都由 Cage 完成，插件自己的程序不会获得管理员权限。安装和“更新应用”会获取厂商当时发布的最新应用版本。
+
+| 字段 | 必需 | 说明 |
+| --- | --- | --- |
+| `id` | 是 | 小写字母、数字和连字符，插件内唯一 |
+| `title` | 是 | 侧栏和应用顶部显示的名称，不超过 80 个字符 |
+| `icon` | 否 | 插件内的 PNG 或 SVG |
+| `source` | 是 | 最新版本从哪里来，见下表 |
+| `command` | 是 | 启动应用的程序和参数。`apt`、`deb` 来源写软件包安装的绝对路径（位于 `/usr` 或 `/opt` 下）；`archive` 来源写压缩包内的相对路径 |
+| `schemes` | 否 | 厂商登录完成后返回应用使用的链接协议，最多 4 个。Cage 浏览器遇到这些链接时交给正在运行的应用。不能使用 `http`、`https`、`claude` 等保留协议，也不能与其他插件重复 |
+| `packages` | 否 | 应用另外需要的 Debian 软件包，最多 40 个 |
+
+`source` 的三种写法：
+
+| `type` | 字段 | 安装与更新 |
+| --- | --- | --- |
+| `apt` | `repository`、`suite`、`components`、`key`、`fingerprint`、`package` | 下载 `key` 并核对 40 位大写的完整指纹 `fingerprint`，不符即停止；再从签名软件源安装 `package`。厂商的软件包安装时自己登记了同一个软件源的，以厂商的登记为准，避免 apt 因重复登记拒绝更新 |
+| `deb` | `resolve`、`hosts` | 运行解析程序取得最新 `.deb` 的地址，下载后用 apt 安装 |
+| `archive` | `resolve`、`hosts` | 运行解析程序取得最新 `.tar.gz` / `.tar.xz` 的地址，解压到新的版本目录，确认启动程序存在后再切换；保留上一个版本。压缩包里只有一个顶层文件夹时，`command` 从该文件夹内算起 |
+
+解析程序 `resolve` 是插件内一个独立的 `.py` 或 `.sh` 文件（可带参数），以环境内的普通用户、干净的环境变量运行，第一个参数是处理器（`amd64` 或 `arm64`），须在 90 秒内向标准输出打印一个 JSON 对象：
+
+```json
+{ "version": "2.35.0", "url": "https://dl.example.com/2.35.0/linux-arm/App.tar.gz", "sha256": "可选，64 位十六进制" }
+```
+
+`url` 必须是 `https`，主机名必须是 `hosts` 中列出的官方下载站点之一；厂商发布了校验值时请一并给出 `sha256`。
+
+桌面应用安装和更新期间，维护代理会逐个检查请求的目标主机。默认仅放行 Debian 软件源、GitHub、`downloads.claude.ai` 等内置维护域名；设置 `source.hosts` 只约束解析程序返回的安装包地址，**不会**自动放行维护代理。如果插件访问额外的厂商站点（例如 Codex 和 Antigravity），只有与 Cage 已审核版本内容完全一致的插件，才能在本次安装或更新中通过 HTTPS 443 访问对应站点。
+
+#### 新增或更新桌面应用插件时的上架前检查
+
+新增 `contributes.desktopApps` 插件，或对已审核的桌面应用插件做**任何文件改动**（包括仅替换图标、修改翻译或升级版本号，都会改变 `hostbridge.PluginDigest`）时，必须逐项完成以下核对，避免插件上架后用户在“下载并安装”阶段触发维护代理 403 或破坏其他软件安装：
+
+1. **先同步主程序摘要与放行域名，再上架插件并对齐 `engines.cage`**：
+   - 先用市场索引的 SHA-256 核对归档，审阅 `plugin.json`、解析程序以及实际下载链路（含 HTTP 重定向）经过的全部精确 HTTPS 443 主机名。
+   - 用 `hostbridge.PluginDigest` 计算解压后插件目录的内容摘要，将摘要与精确主机名更新到 [桌面应用安装策略](../internal/workbench/desktop_app_sources.go)。Cage 在开始安装或更新时使用同一种算法核对本机文件。
+   - 对已对外分发且内容已审核的历史版本，在 `reviewedDesktopApps` 中保留其摘要，避免尚未更新插件的老用户点击安装/更新时触发 403。
+   - **禁止在包含对应摘要与域名放行的 Cage 版本发布之前，提前把依赖额外下载域名的插件合入插件市场**；插件清单中的 `engines.cage` 必须不低于实际包含该放行规则的 Cage 版本，避免旧版 Cage 安装插件后无法下载应用。
+2. **必须经由真实维护代理端到端实装验证（不能只单独测试 `curl` 或 `resolve.py`）**：
+   - 在隔离的 Debian 环境中，通过 Cage 真实的维护代理走通“首次下载并安装 → 更新应用 → 卸载后重装”，核对签名密钥指纹、实际下载包体（含大包断点续传）与可执行文件权限。
+   - **跨应用共存与失败回滚检查**：安装 `apt` 类桌面应用（如 Codex）后，再安装或更新其他桌面应用（如 Antigravity、Claude Desktop）或执行其他维护任务，确认第三方 `sources.list.d` 已被隔离、不会引发 `apt-get update` 403 警告或失败；并确认首次 `apt` 安装中途失败时不会残留损坏的 `.list` 文件。
+3. **核对桌面交互与数据保留**：
+   - 验证应用启动、窗口尺寸同步（`resize`）、剪贴板与文件选择、自定义 `schemes` 登录回调，以及更新/卸载后用户登录与配置目录完整保留。
+
+应用以环境用户本人的主目录运行，可以使用已共享的项目；它的登录凭据保存在单独的密钥环里。应用使用 Cage 的剪贴板、文件选择、上传与输入法，打开的网页进入 Cage 浏览器。卸载只删除应用文件以及安装时登记的软件源和密钥，登录、设置和项目保留在环境中。
 
 #### 旧格式
 
@@ -296,7 +349,7 @@ Cage 界面会按当前软件界面语言自动展示插件的名称与说明（
 
 | 方法 | 参数 | 结果 |
 | --- | --- | --- |
-| `ui/initialize` | `{"protocolVersion":1}` | `{"protocolVersion":1,"plugin","view","theme":{"scheme":"light"或"dark","tokens":{…}},"locale","state"}`。目前 `locale` 固定为 `zh-CN` |
+| `ui/initialize` | `{"protocolVersion":1}` | `{"protocolVersion":1,"plugin","view","presentation":"page"或"floating","theme":{"scheme":"light"或"dark","tokens":{…}},"locale","state"}`。`locale` 为当前工作台界面语言 |
 | `tools/list` | 无 | `{"tools":[{"name","description","inputSchema"}]}` |
 | `tools/call` | `{"name","arguments":{…}}` | MCP 的调用结果：`{"content":[…],"structuredContent"?,"isError"?}`。工具名不超过 200 个字符 |
 | `ui/openUrl` | `{"url"}` | `{}`。地址必须匹配清单的 `openUrls`，不超过 4096 个字符，在应用的内置浏览器里打开 |
@@ -304,6 +357,7 @@ Cage 界面会按当前软件界面语言自动展示插件的名称与说明（
 | `ui/copy` | `{"text"}` | `{}`。不超过 64 KiB |
 | `ui/notify` | `{"message","tone"?:"info"或"error"}` | `{}`。不超过 500 个字符 |
 | `ui/setState` | `{"state":<任意 JSON>}` | `{}`。序列化后不超过 64 KiB，超过时返回 -32002。下次 `ui/initialize` 时在 `state` 里取回。状态保存在当前窗口，不跨设备同步 |
+| `ui/resize` | `{"width"?,"height"?}` | 调整 `floating` 浮窗的宽高（宽度钳位到 `220`–`720`，高度钳位到 `80`–`720`，并返回生效的尺寸）；非浮窗视图仅校验并返回钳位值 |
 
 `theme.tokens` 是工作台当前主题的颜色，名称为 `paper`、`ink`、`strong`、`muted`、`line`、`chrome`、`hover`、`selected`、`accent`、`link`、`focus`、`input`、`button`、`button-ink`、`success`、`danger`。值是 CSS 颜色，主题未定义的名称不会出现。
 

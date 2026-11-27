@@ -413,6 +413,18 @@ func serveGuestService(ctx context.Context, client *ssh.Client, listener net.Lis
 	}
 }
 
+// prepareShareMountCommand clears any live or stale FUSE mount at quoted
+// before creating the mount directory. mountpoint -q calls stat(2) and fails
+// with ENOTCONN/EIO on a stale FUSE mount, so inspect /proc/self/mountinfo
+// first via findmnt --nocanonicalize and fall back to sudo umount -l when
+// fusermount3 cannot detach the stale entry.
+func prepareShareMountCommand(quoted string) string {
+	mounted := "findmnt -rn --nocanonicalize --mountpoint " + quoted + " >/dev/null 2>&1"
+	return "if " + mounted + " || mountpoint -q -- " + quoted + " 2>/dev/null; then " +
+		"fusermount3 -uz " + quoted + " 2>/dev/null || sudo -n umount -l -- " + quoted + " 2>/dev/null || ! " + mounted + "; " +
+		"fi && sudo mkdir -p -- " + quoted + " && sudo chown \"$(id -u):$(id -g)\" -- " + quoted
+}
+
 func (r *Runtime) shareEnvironment(ctx context.Context, client *ssh.Client, workspace string) (<-chan error, func(), error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -425,7 +437,7 @@ func (r *Runtime) shareEnvironment(ctx context.Context, client *ssh.Client, work
 		return nil, nil, err
 	}
 	interrupt := context.AfterFunc(ctx, func() { _ = prepare.Close() })
-	err = prepare.Run("if mountpoint -q " + quoted + "; then fusermount3 -uz " + quoted + "; fi; sudo mkdir -p " + quoted + " && sudo chown \"$(id -u):$(id -g)\" " + quoted)
+	err = prepare.Run(prepareShareMountCommand(quoted))
 	interrupt()
 	prepare.Close()
 	if err != nil {

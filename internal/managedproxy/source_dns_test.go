@@ -147,7 +147,7 @@ func TestSubscriptionNodeDNSRejectsCrossSourceConflicts(t *testing.T) {
 func TestSubscriptionNodeDNSValidatesUntrustedEndpoints(t *testing.T) {
 	// Real-world Clash/Mihomo resolvers that cannot be safely adopted as bare
 	// remote HTTPS DoH (non-HTTP, plain IP, local, credentialed, fragmented
-	// such as #skip-cert-verify=true / #DIRECT / #h3=true, malformed) are
+	// such as #skip-cert-verify=true / #h3=true, malformed) are
 	// ignored on import rather than blocking proxy import.
 	untrusted := []string{
 		"udp://127.0.0.1:7874",
@@ -212,7 +212,7 @@ func TestSubscriptionNodeDNSValidatesUntrustedEndpoints(t *testing.T) {
 		"https://127.0.0.1/dns-query",
 		"https://d1.example.test/dns-query",
 		"https://d1.example.test/dns-query",
-		"https://resolver.example.test/dns-query#DIRECT",
+		"https://resolver.example.test/dns-query#DIRECT&h3=true",
 		"https://d2.example.test/dns-query",
 		"https://d3.example.test/dns-query",
 		"https://d4.example.test/dns-query",
@@ -242,5 +242,50 @@ func TestSubscriptionNodeDNSValidatesUntrustedEndpoints(t *testing.T) {
 	s.Selected = s.Sources[0].Nodes[0].ID
 	if _, err := s.Runtime(t.TempDir()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSubscriptionNodeDNSAdoptsDirectSuffix(t *testing.T) {
+	for _, tc := range []struct {
+		server string
+		want   []string
+	}{
+		{"https://dns.example.test/dns-query#DIRECT", []string{"https://dns.example.test/dns-query"}},
+		{"https://dns.example.test/dns-query", []string{"https://dns.example.test/dns-query"}},
+		{"https://dns.example.test/dns-query#direct", nil},
+		{"https://dns.example.test/dns-query#DIRECT&h3=true", nil},
+		{"https://dns.example.test/dns-query#Proxy", nil},
+		{"https://dns.example.test/dns-query#skip-cert-verify=true#DIRECT", nil},
+		{"https://127.0.0.1/dns-query#DIRECT", nil},
+	} {
+		t.Run(tc.server, func(t *testing.T) {
+			s, _ := Load(t.TempDir())
+			input := "proxies:\n  - {name: demo, type: http, server: node.example.test, port: 8080}\ndns:\n  proxy-server-nameserver:\n    - " + fmt.Sprintf("%q", tc.server) + "\n"
+			if err := s.Import("source", "", []byte(input), "source", 0, ""); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(s.Sources[0].NodeDNS, tc.want) {
+				t.Fatalf("NodeDNS = %v, want %v", s.Sources[0].NodeDNS, tc.want)
+			}
+			s.Selected = s.Sources[0].Nodes[0].ID
+			wire, err := s.Runtime(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cfg struct {
+				DNS struct {
+					Policy map[string][]string `yaml:"proxy-server-nameserver-policy"`
+				}
+			}
+			if err := yaml.Unmarshal(wire, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(cfg.DNS.Policy["node.example.test"], tc.want) {
+				t.Fatalf("runtime policy = %v, want %v", cfg.DNS.Policy, tc.want)
+			}
+		})
+	}
+	if got := FilterNodeDNS([]string{"https://d1.example.test/dns-query#DIRECT", "https://d1.example.test/dns-query"}); !reflect.DeepEqual(got, []string{"https://d1.example.test/dns-query"}) {
+		t.Fatalf("stripped duplicate was kept twice: %v", got)
 	}
 }

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, Blocks, Check, ChevronDown, ChevronRight, CircleAlert, Clock, Copy, Download, FileCode2, Folder, FolderOpen, Globe2,
-  Keyboard, LoaderCircle, Monitor, PanelLeft, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, SquareTerminal, Store, Trash2, TriangleAlert, Wrench,
+  Keyboard, LoaderCircle, Monitor, PanelLeft, Power, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, SquareTerminal, Store, Trash2, TriangleAlert, Wrench,
 } from "lucide-react";
 import { api, writeClipboard } from "./api";
 import { getClientContext, isRemoteClient, runtimeURL } from "./client-context.mjs";
@@ -56,10 +56,25 @@ const urlHost = pattern => pattern.replace(/^[a-z]+:\/\//, "").replace(/\/.*$/, 
 function contributions(item) {
   const contributes = item?.contributes || {};
   const list = [];
+  for (const app of contributes.desktop_apps || []) {
+    list.push({ key: `app:${app.id}`, icon: Monitor, title: translate("应用「{0}」", app.title || app.id),
+      text: translate("在环境中安装并运行厂商的官方桌面应用，默认使用最新版本，可在侧栏打开、更新或卸载。应用的登录与数据保留在环境里。") });
+  }
   for (const view of contributes.views || []) {
     const hosts = [...new Set((view.open_urls || []).map(urlHost))];
-    list.push({ key: `view:${view.id}`, icon: PanelLeft, title: translate("页面「{0}」", view.title || view.id),
-      text: hosts.length ? translate("在侧栏添加一个页面。页面在隔离的框架中运行，只能使用这个插件自己的工具。它可以在内置浏览器中打开：{0}。", hosts.join(", ")) : translate("在侧栏添加一个页面。页面在隔离的框架中运行，只能使用这个插件自己的工具。它不能打开网页。") });
+    const floating = view.presentation === "floating";
+    list.push({
+      key: `view:${view.id}`,
+      icon: PanelLeft,
+      title: floating ? translate("浮窗「{0}」", view.title || view.id) : translate("页面「{0}」", view.title || view.id),
+      text: floating
+        ? (hosts.length
+          ? translate("在工作台上打开一个可拖动的半透明浮窗。浮窗在隔离的框架中运行，只能使用这个插件自己的工具。它可以在内置浏览器中打开：{0}。", hosts.join(", "))
+          : translate("在工作台上打开一个可拖动的半透明浮窗。浮窗在隔离的框架中运行，只能使用这个插件自己的工具。它不能打开网页。"))
+        : (hosts.length
+          ? translate("在侧栏添加一个页面。页面在隔离的框架中运行，只能使用这个插件自己的工具。它可以在内置浏览器中打开：{0}。", hosts.join(", "))
+          : translate("在侧栏添加一个页面。页面在隔离的框架中运行，只能使用这个插件自己的工具。它不能打开网页。")),
+    });
   }
   return list;
 }
@@ -74,6 +89,7 @@ export function purposes(item) {
   const list = [];
   if (contributes.mcp_servers?.length) list.push("Claude 工具");
   if (contributes.views?.length) list.push("界面扩展");
+  if (contributes.desktop_apps?.length) list.push("桌面应用");
   return list;
 }
 // categoryNames are the market's sections. The app lists only those it
@@ -94,12 +110,20 @@ const size = bytes => !bytes ? "" : bytes < 1024 * 1024 ? `${Math.max(1, Math.ro
 // and reads the plugin market once when first shown.
 export function useHostPlugins(active) {
   const windowVisible = useWindowVisibility();
-  const [view, setView] = useState(null), [error, setError] = useState(""), [busy, setBusy] = useState("");
+  const [view, setView] = useState(null), [loadError, setLoadError] = useState(""), [actionError, setActionError] = useState(""), [busy, setBusy] = useState("");
   const [market, setMarket] = useState({ loading: false, loaded: false });
   const [drafts, setDrafts] = useState({ loading: false, loaded: false, ready: false, items: [], error: "" });
   const [syncStatus, setSyncStatus] = useState(null);
   const [bridgeStatus, setBridgeStatus] = useState(null);
-  const mounted = useRef(true), revision = useRef(0), marketRevision = useRef(0), draftsRevision = useRef(0);
+  const mounted = useRef(true), revision = useRef(0), marketRevision = useRef(0), draftsRevision = useRef(0), busyRef = useRef("");
+  const beginBusy = useCallback((key) => {
+    busyRef.current = key;
+    setBusy(key);
+  }, []);
+  const endBusy = useCallback(() => {
+    busyRef.current = "";
+    if (mounted.current) setBusy("");
+  }, []);
   const refreshRemoteExtras = useCallback(async () => {
     if (!isRemoteClient()) {
       setSyncStatus(null);
@@ -122,9 +146,9 @@ export function useHostPlugins(active) {
       const value = await api("/host-tools");
       if (mounted.current && current === revision.current) {
         setView(previous => (sameState(previous, value) ? previous : value));
-        setError("");
+        setLoadError("");
       }
-    } catch (e) { if (mounted.current && current === revision.current) setError(e.message); }
+    } catch (e) { if (mounted.current && current === revision.current) setLoadError(e.message); }
     await refreshRemoteExtras();
   }, [refreshRemoteExtras]);
   const loadMarket = useCallback(async (fresh = false) => {
@@ -160,72 +184,82 @@ export function useHostPlugins(active) {
   // in the main sidebar; the market is read once the plugin views are shown.
   const browsing = active === true;
   useEffect(() => {
+    if (!browsing) setActionError("");
+  }, [browsing]);
+  useEffect(() => {
     if (!active || !windowVisible) return;
     void refresh();
     if (browsing) void loadDrafts();
     const timer = setInterval(() => {
-      if (!busy) {
+      if (!busyRef.current) {
         void refresh();
         if (browsing) void loadDrafts();
       }
     }, browsing ? 5000 : 30000);
     return () => { revision.current++; clearInterval(timer); };
-  }, [active, browsing, busy, refresh, loadDrafts, windowVisible]);
+  }, [active, browsing, refresh, loadDrafts, windowVisible]);
   useEffect(() => { if (browsing && !market.loaded && !market.loading) void loadMarket(); }, [browsing, market.loaded, market.loading, loadMarket]);
   // change sends one request; key names what is in progress, for the buttons.
   const change = useCallback(async (body, key = "change") => {
-    setBusy(key); setError(""); revision.current++;
+    beginBusy(key); setActionError(""); revision.current++;
     try {
       const value = await api("/host-tools", body);
-      if (mounted.current) setView(value);
+      if (mounted.current) {
+        setView(value);
+        setLoadError("");
+      }
       if (body.install || body.remove || body.restore_default) void loadMarket();
       return true;
-    } catch (e) { if (mounted.current) setError(e.message); return false; }
-    finally { if (mounted.current) setBusy(""); }
-  }, [loadMarket]);
+    } catch (e) { if (mounted.current) setActionError(e.message); return false; }
+    finally { endBusy(); }
+  }, [beginBusy, endBusy, loadMarket]);
   const readDraftFile = useCallback(async (id, relPath) => {
     return api(`/host-tools/drafts/file?id=${encodeURIComponent(id)}&path=${encodeURIComponent(relPath)}`);
   }, []);
   const installDraft = useCallback(async (body) => {
-    setBusy(`draft-install:${body.id}`); setError(""); revision.current++;
+    beginBusy(`draft-install:${body.id}`); setActionError(""); revision.current++;
     try {
       const value = await api("/host-tools/drafts/install", body);
-      if (mounted.current) setView(value);
+      if (mounted.current) {
+        setView(value);
+        setLoadError("");
+      }
       void loadDrafts();
       void loadMarket();
       return true;
-    } catch (e) { if (mounted.current) setError(e.message); return false; }
-    finally { if (mounted.current) setBusy(""); }
-  }, [loadDrafts, loadMarket]);
+    } catch (e) { if (mounted.current) setActionError(e.message); return false; }
+    finally { endBusy(); }
+  }, [beginBusy, endBusy, loadDrafts, loadMarket]);
   const discardDraft = useCallback(async (id) => {
-    setBusy(`draft-discard:${id}`); setError("");
+    beginBusy(`draft-discard:${id}`); setActionError("");
     try {
       await api("/host-tools/drafts/discard", { id });
       void loadDrafts();
       return true;
-    } catch (e) { if (mounted.current) setError(e.message); return false; }
-    finally { if (mounted.current) setBusy(""); }
-  }, [loadDrafts]);
+    } catch (e) { if (mounted.current) setActionError(e.message); return false; }
+    finally { endBusy(); }
+  }, [beginBusy, endBusy, loadDrafts]);
   const triggerSync = useCallback(async () => {
-    setBusy("sync"); setError("");
+    beginBusy("sync"); setActionError("");
     try {
       const value = await api("/client/plugins/sync", {});
       if (mounted.current) setSyncStatus(value);
       setTimeout(() => { if (mounted.current) void refresh(); }, 800);
       return true;
-    } catch (e) { if (mounted.current) setError(e.message); return false; }
-    finally { if (mounted.current) setBusy(""); }
-  }, [refresh]);
+    } catch (e) { if (mounted.current) setActionError(e.message); return false; }
+    finally { endBusy(); }
+  }, [beginBusy, endBusy, refresh]);
   const toggleBridge = useCallback(async (plugin, shared) => {
-    setBusy(`bridge:${plugin}`); setError("");
+    beginBusy(`bridge:${plugin}`); setActionError("");
     try {
       const value = await api("/client/plugins/bridge", { plugin, shared });
       if (mounted.current) setBridgeStatus(value);
       void refresh();
       return true;
-    } catch (e) { if (mounted.current) setError(e.message); return false; }
-    finally { if (mounted.current) setBusy(""); }
-  }, [refresh]);
+    } catch (e) { if (mounted.current) setActionError(e.message); return false; }
+    finally { endBusy(); }
+  }, [beginBusy, endBusy, refresh]);
+  const error = actionError || loadError;
   return { view, error, busy, change, market, loadMarket, drafts, loadDrafts, readDraftFile, installDraft, discardDraft, syncStatus, bridgeStatus, triggerSync, toggleBridge };
 }
 
@@ -335,7 +369,21 @@ export function pluginPages(model) {
     if (plugin.enabled === false || !plugin.supported || plugin.problem || plugin.needs_settings) continue;
     for (const view of plugin.contributes?.views || []) {
       if (!view.url) continue;
-      pages.push({ key: `${plugin.name}/${view.id}`, plugin: plugin.name, view, title: view.title || pluginTitle(plugin),
+      const title = !view.title || (plugin.display_name && view.title === plugin.display_name)
+        ? pluginTitle(plugin)
+        : view.title;
+      pages.push({
+        key: `${plugin.name}/${view.id}`,
+        plugin: plugin.name,
+        view,
+        title,
+        floating: view.presentation === "floating",
+        icon: plugin.icon ? runtimeURL(`/host-tools/icon?name=${encodeURIComponent(plugin.name)}`) : "",
+      });
+    }
+    // A desktop application opens in the workspace like a page, under its own key.
+    for (const app of plugin.contributes?.desktop_apps || []) {
+      pages.push({ key: `app:${plugin.name}/${app.id}`, kind: "desktop-app", plugin: plugin.name, app, title: app.title || pluginTitle(plugin),
         icon: plugin.icon ? runtimeURL(`/host-tools/icon?name=${encodeURIComponent(plugin.name)}`) : "" });
     }
   }
@@ -348,14 +396,53 @@ function PluginPageIcon({ src }) {
   return <img className="plugin-page-icon" src={src} alt="" draggable="false" onError={() => setFailed(true)} />;
 }
 
-export function PluginPagesNav({ pages, selected, onOpen }) {
+export function PluginPagesNav({ pages, selected, floatingOpen = [], desktopRunning = {}, disabled = false, onOpen, onDesktopStop }) {
   const tr = useTranslation();
-  return pages.map(page => (
-    <button key={page.key} className={`sidebar-link ${selected === page.key ? "selected" : ""}`}
-      aria-current={selected === page.key ? "page" : undefined} onClick={() => onOpen(page)} aria-label={tr("打开 {0}", (page.title))}>
-      <PluginPageIcon key={page.icon} src={page.icon} />{page.title}
-    </button>
-  ));
+  return pages.map(page => {
+    const isSelected = !page.floating && selected === page.key;
+    const isFloatingOpen = page.floating && floatingOpen.includes(page.key);
+    if (page.kind === "desktop-app") {
+      const isRunning = Boolean(desktopRunning[page.key]);
+      return (
+        <div key={page.key} className={`account-desktop-row ${isSelected ? "active" : ""}`}>
+          <button
+            className="sidebar-link"
+            aria-current={isSelected ? "page" : undefined}
+            onClick={() => onOpen(page)}
+            aria-label={tr("打开 {0}", (page.title))}
+          >
+            <PluginPageIcon key={page.icon} src={page.icon} />
+            {page.title}
+            {isRunning ? <span className="account-desktop-status" aria-hidden="true">●</span> : null}
+          </button>
+          {isRunning && onDesktopStop && (
+            <div className="terminal-row-actions" role="group" aria-label={tr("{0} 的操作", page.title)}>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={tr("关闭应用")}
+                title={tr("关闭应用")}
+                disabled={disabled}
+                onClick={(event) => onDesktopStop(page, event.currentTarget)}
+              >
+                <Power size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <button key={page.key} className={`sidebar-link ${isSelected ? "selected" : ""}`}
+        aria-current={isSelected ? "page" : undefined}
+        aria-pressed={page.floating ? isFloatingOpen : undefined}
+        onClick={() => onOpen(page)} aria-label={tr("打开 {0}", (page.title))}>
+        <PluginPageIcon key={page.icon} src={page.icon} />
+        {page.title}
+        {isFloatingOpen && <span className="plugin-floating-dot" aria-hidden="true" />}
+      </button>
+    );
+  });
 }
 
 export function HostPluginsNav({ open, onOpen }) {
@@ -385,7 +472,7 @@ function SidebarSection({ title, count, open, onToggle, action, children }) {
 function PluginRow({ entry, view, selected, busy, onSelect, onInstall }) {
   const tr = useTranslation();
   const info = entryInfo(entry, view);
-  const action = !entry.plugin ? info.item.supported && "安装" : entry.offer && "更新";
+  const action = !entry.plugin ? info.item.supported && "安装" : entry.offer?.supported && "更新";
   const installing = busy === `install:${entry.name}`;
   return (
     <div className={`plugin-row ${selected ? "selected" : ""} ${entry.plugin?.enabled === false ? "off" : ""}`}>
@@ -399,7 +486,7 @@ function PluginRow({ entry, view, selected, busy, onSelect, onInstall }) {
         </span>
       </button>
       {action && <button type="button" className="plugin-row-action" disabled={Boolean(busy)} onClick={onInstall}>
-        {installing ? <LoaderCircle size={12} className="spin" /> : null}{installing ? tr("正在安装") : action}
+        {installing ? <LoaderCircle size={12} className="spin" /> : null}{installing ? (entry.plugin ? tr("正在更新") : tr("正在安装")) : tr(action)}
       </button>}
     </div>
   );
@@ -433,7 +520,7 @@ export function HostPluginsSidebar({ visible, model, page, onPage, onBack, onCon
   const [open, setOpen] = useState(true);
   const { installed, available } = useMemo(() => pluginEntries(model), [model]);
   const shown = installed.filter(entry => matches(entry, query));
-  const updates = installed.filter(entry => entry.offer).length;
+  const updates = installed.filter(entry => entry.offer?.supported).length;
   const installable = available.filter(entry => entry.offer.supported).length;
   const draftCount = drafts?.items?.length || 0;
   const inMarket = page?.kind === "market" || page?.kind === "plugin" && !installed.some(entry => entry.name === page.name);
@@ -699,12 +786,30 @@ function Grants({ model, plugin, onConfirm }) {
 // PluginSettings is the form for the values a plugin asks the user for. The
 // app never sends a secret back: one that is set shows as such and can only
 // be replaced or cleared.
-function PluginSettings({ model, plugin, onConfirm }) {
+function PluginSettings({ model, plugin, onConfirm, hidden = false }) {
   const tr = useTranslation();
   const { busy, change } = model;
   const settings = plugin.settings || [];
   const [values, setValues] = useState(() => Object.fromEntries(settings.filter(item => item.type !== "secret").map(item => [item.id, item.value || ""])));
   const [secrets, setSecrets] = useState({}), [cleared, setCleared] = useState([]), [failed, setFailed] = useState(false);
+  const serverValuesRef = useRef(Object.fromEntries(settings.filter(item => item.type !== "secret").map(item => [item.id, item.value || ""])));
+  useEffect(() => {
+    const prevServer = serverValuesRef.current;
+    const nextServer = Object.fromEntries(settings.filter(item => item.type !== "secret").map(item => [item.id, item.value || ""]));
+    serverValuesRef.current = nextServer;
+    setValues(current => {
+      let changed = false;
+      const merged = { ...current };
+      for (const [id, nextVal] of Object.entries(nextServer)) {
+        // Only adopt refreshed server values for fields the user has not edited locally.
+        if ((current[id] || "") === (prevServer[id] || "") && (current[id] || "") !== nextVal) {
+          merged[id] = nextVal;
+          changed = true;
+        }
+      }
+      return changed ? merged : current;
+    });
+  }, [settings]);
   const key = `settings:${plugin.name}`, guest = plugin.kind === "guest";
   const dirty = settings.some(item => item.type !== "secret" && (values[item.id] || "") !== (item.value || ""))
     || Object.values(secrets).some(Boolean) || cleared.length > 0;
@@ -725,7 +830,7 @@ function PluginSettings({ model, plugin, onConfirm }) {
   };
   const set = (id, value) => setValues(previous => ({ ...previous, [id]: value }));
   return (
-    <form className="plugin-settings" onSubmit={save} aria-label={tr("设置")}>
+    <form className="plugin-config-form" hidden={hidden} onSubmit={save} aria-label={tr("设置")}>
       <p className="plugin-page-lead">{guest
         ? tr("这些值以环境变量交给插件在 Cage 环境中的程序，保存后插件会重新启动。密钥用你的 Cage 账户加密保存，之后不再显示；交给环境内的插件前需要你确认风险。")
         : tr("这些值以环境变量交给插件在这台电脑上的程序，保存后插件会重新启动。密钥用你的 Cage 账户加密保存，之后不再显示；Cage 锁定时，用到密钥的插件会停止，解锁后自动恢复。")}</p>
@@ -837,8 +942,8 @@ function Detail({ model, name, onConfirm, onPage }) {
             {!plugin && <button type="button" className="primary" disabled={Boolean(busy) || !offer.supported} onClick={() => installPlugin(model, entry, onConfirm)}>
               {installing ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}{!offer.supported ? unsupportedLabel(offer) : installing ? tr("正在安装…") : tr("安装")}
             </button>}
-            {plugin && offer && <button type="button" className="primary" disabled={Boolean(busy)} onClick={() => installPlugin(model, entry, onConfirm)}>
-              {installing ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}{installing ? tr("正在更新…") : tr("更新到 {0}", (offer.version))}
+            {plugin && offer && <button type="button" className="primary" disabled={Boolean(busy) || !offer.supported} onClick={() => installPlugin(model, entry, onConfirm)}>
+              {installing ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}{!offer.supported ? unsupportedLabel(offer) : installing ? tr("正在更新…") : tr("更新到 {0}", (offer.version))}
             </button>}
             {plugin && !offer && plugin.default_update && <button type="button" className="primary" disabled={Boolean(busy)} onClick={updateDefault}>
               {busy === `restore:${name}` ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}{busy === `restore:${name}` ? tr("正在更新…") : tr("更新到 {0}", plugin.default_update)}
@@ -862,7 +967,7 @@ function Detail({ model, name, onConfirm, onPage }) {
         <strong>{plugin.missing_program ? tr("需要本机安装 {0}", plugin.missing_program) : tr("插件无法加载")}</strong>
         <p>{plugin.missing_program ? missingProgramGuide(plugin.missing_program) : plugin.problem}</p>
       </div></div>}
-      {!plugin && offer?.problem && <div className="plugin-banner problem" role="status"><TriangleAlert size={17} /><div><strong>{tr("暂时无法安装")}</strong><p>{offer.problem}</p></div></div>}
+      {offer?.problem && <div className="plugin-banner problem" role="status"><TriangleAlert size={17} /><div><strong>{plugin ? tr("暂时无法更新") : tr("暂时无法安装")}</strong><p>{offer.problem}</p></div></div>}
       <nav className="plugin-tabs" role="tablist" aria-label={tr("{0} 的内容", (info.title))}>
         <button type="button" role="tab" aria-selected={tab === "tools"} onClick={() => setTab("tools")}>{tr("工具")}<em>{tools.length}</em></button>
         <button type="button" role="tab" aria-selected={tab === "permissions"} onClick={() => setTab("permissions")}>{plugin ? tr("授权与权限") : tr("权限")}<em>{declared.length}</em></button>
@@ -871,7 +976,10 @@ function Detail({ model, name, onConfirm, onPage }) {
       </nav>
       <div className="plugin-page-body">
         <div className="plugin-page-main" role="tabpanel">
-          {tab === "settings" && plugin?.settings?.length ? <PluginSettings key={JSON.stringify(plugin.settings)} model={model} plugin={plugin} onConfirm={onConfirm} />
+          {plugin?.settings?.length > 0 && (
+            <PluginSettings key={plugin.name} model={model} plugin={plugin} onConfirm={onConfirm} hidden={tab !== "settings"} />
+          )}
+          {tab === "settings" && plugin?.settings?.length ? null
           : tab === "contributions" && added.length ? <>
             <p className="plugin-page-lead">{tr("除了提供给 Claude 的工具，插件还会在应用中添加这些内容。")}</p>
             <ul className="plugin-permission-list">

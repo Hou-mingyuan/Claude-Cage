@@ -187,9 +187,36 @@ func TestMonitorTimingRecordsRenewalAndSkips(t *testing.T) {
 	s.monitorSafety()
 	s.networkPaused = true
 	s.monitorSafety()
+	s.monitorSafety()
 	records = monitorTimingRecords(t, s, "safety")
 	if len(records) != 2 || records[0]["result"] != "not_due" || records[1]["result"] != "network_paused" {
 		t.Fatalf("skip reasons were lost: %v", records)
+	}
+}
+
+func TestClosedGateLogsEachGenerationAndFault(t *testing.T) {
+	s, gate := grantedToolUpdateServer(t)
+	s.safety.VerifiedAt = time.Time{}
+	gate.Close("offline")
+	s.monitorSafety()
+	s.monitorSafety()
+	gate.Close("new offline decision")
+	s.monitorSafety()
+	records := monitorTimingRecords(t, s, "safety")
+	if len(records) != 2 || records[1]["result"] != "gate_closed" || records[1]["unrecorded_steady_rounds"] != "1" {
+		t.Fatalf("stable closed gate and a new generation: %v", records)
+	}
+	if err := gate.BeginCheck(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gate.SetFault(true); err != nil {
+		t.Fatal(err)
+	}
+	s.monitorSafety()
+	s.monitorSafety()
+	records = monitorTimingRecords(t, s, "safety")
+	if len(records) != 4 || records[2]["result"] != "gate_not_open" || records[3]["result"] != "gate_not_open" {
+		t.Fatalf("fault rounds must be recorded: %v", records)
 	}
 }
 

@@ -131,12 +131,12 @@ func TestMaintenanceClosesTLSConnectionsAndRefusesBusinessHosts(t *testing.T) {
 		t.Fatal("maintenance left a live tunnel")
 	}
 	for _, address := range []string{"claude.ai:443", "api.anthropic.com:443", "deb.debian.org:22", "127.0.0.1:443", "github.com.evil.test:443"} {
-		if maintenanceDestination(address, true) {
+		if proxy.allowsDestination(address, true) {
 			t.Fatal("business or non-HTTPS destination accepted", address)
 		}
 	}
 	for _, host := range []string{"mirrors.nju.edu.cn", "mirrors.ustc.edu.cn", "cdn.npmmirror.com", "api.snapcraft.io", "storage.snapcraftcontent.com", "canonical-lgw01.cdn.snapcraftcontent.com", "canonical-lcy01.cdn.snapcraftcontent.com", "canonical-lcy02.cdn.snapcraftcontent.com", "canonical-bos01.cdn.snapcraftcontent.com", "cloudfront.cdn.snapcraftcontent.com", "codeload.github.com"} {
-		if !maintenanceDestination(host+":443", true) || maintenanceDestination(host+":80", false) || maintenanceDestination(host+".evil.test:443", true) {
+		if !proxy.allowsDestination(host+":443", true) || proxy.allowsDestination(host+":80", false) || proxy.allowsDestination(host+".evil.test:443", true) {
 			t.Fatalf("unexpected mirror policy for %s", host)
 		}
 	}
@@ -185,5 +185,83 @@ func TestContainerMaintenanceKeepsAPTArchivesOutsideDefaultCleanup(t *testing.T)
 	}
 	if got := strings.TrimSpace(string(output)); got != `Dir::Cache::archives "/var/cache/apt/install-archives";` {
 		t.Fatalf("unexpected managed APT archive directory: %q", got)
+	}
+}
+
+func TestMaintenanceScriptScopesThirdPartyDesktopAppAPTSources(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the installer Bash script runs in the Linux guest, not the Windows host")
+	}
+	shell, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	sourcesDir := root + "/sources.list.d"
+	appsDir := root + "/desktop-apps"
+	codexID := desktopAppInstance("codex-app", "codex")
+	otherID := desktopAppInstance("other-app", "other")
+	if err := os.MkdirAll(sourcesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(appsDir+"/"+codexID, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"debian.sources":               "Types: deb\n",
+		"desktop-app-" + codexID + ".list": "deb https://persistent.oaistatic.com/codex-app-prod/linux/deb stable main\n",
+		"openai-vendor.list":           "deb https://persistent.oaistatic.com/codex-app-prod/linux/deb stable main\n",
+		"desktop-app-" + otherID + ".list": "deb https://other.example.test/deb stable main\n",
+	} {
+		if err := os.WriteFile(sourcesDir+"/"+name, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record := fmt.Sprintf(`{"vendor_files":[%q]}`, sourcesDir+"/openai-vendor.list")
+	if err := os.WriteFile(appsDir+"/"+codexID+"/app.json", []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Non-Codex maintenance excludes Codex's and other desktop apps' APT sources,
+	// and cage_refresh_apt_sources picks up newly created Claude Desktop sources.
+	script := fmt.Sprintf(`cage_apt_sources_dir=%q
+cage_desktop_apps_dir=%q
+cage_refresh_apt_sources
+dir=$(sed -n 's/^Dir::Etc::sourceparts "\(.*\)";$/\1/p' "$CAGE_APT_CONFIG")
+ls -1 "$dir" | sort | tr '\n' ','
+printf '\n'
+printf 'deb https://downloads.claude.ai/claude-desktop/apt/stable stable main\n' > "$cage_apt_sources_dir/claude-desktop.list"
+cage_refresh_apt_sources
+ls -1 "$dir" | sort | tr '\n' ','
+printf '\n'
+`, sourcesDir, appsDir)
+	cmd := exec.Command(shell, "-se")
+	cmd.Stdin = strings.NewReader(maintenanceScriptWithAPTScope(script, "fixture-token", false, ""))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("general maintenance failed: %v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 2 || lines[0] != "debian.sources," || lines[1] != "claude-desktop.list,debian.sources," {
+		t.Fatalf("unexpected filtered sources for general maintenance: %q", out)
+	}
+
+	// Codex's own maintenance keeps Codex's list and vendor source while still
+	// excluding other desktop applications' sources.
+	codexScript := fmt.Sprintf(`cage_apt_sources_dir=%q
+cage_desktop_apps_dir=%q
+cage_refresh_apt_sources
+dir=$(sed -n 's/^Dir::Etc::sourceparts "\(.*\)";$/\1/p' "$CAGE_APT_CONFIG")
+ls -1 "$dir" | sort | tr '\n' ','
+`, sourcesDir, appsDir)
+	cmd = exec.Command(shell, "-se")
+	cmd.Stdin = strings.NewReader(maintenanceScriptWithAPTScope(codexScript, "fixture-token", false, codexID))
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("codex maintenance failed: %v\n%s", err, out)
+	}
+	want := "claude-desktop.list,debian.sources,desktop-app-" + codexID + ".list,openai-vendor.list,"
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Fatalf("codex filtered sources = %q, want %q", got, want)
 	}
 }

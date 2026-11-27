@@ -35,6 +35,15 @@ function Resolve-WindowsBuildDirectory {
     return $resolved
 }
 
+# Returns the file system of a drive-letter path, or nothing for UNC paths and
+# drives that cannot be queried.
+function Get-WindowsBuildFileSystem {
+    param([string]$Directory)
+    $root = [IO.Path]::GetPathRoot($Directory)
+    if (-not $root -or $root.StartsWith('\\')) { return $null }
+    try { return [IO.DriveInfo]::new($root).DriveFormat } catch { return $null }
+}
+
 function Assert-WindowsWorkbenchTestBase {
     param([string]$Directory = (Get-WindowsWorkbenchTestBase -WorkbenchProfile))
     if (-not $IsWindows) { return }
@@ -47,6 +56,78 @@ function Assert-WindowsWorkbenchTestBase {
         if ($path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw 'The workbench smoke test directory resolves inside AppData or another private configuration directory. Set RUNNER_TEMP to a writable local directory outside it, such as D:\CageBuildTemp.'
         }
+    }
+    # Cage rejects private records that are not owned by the current user, and
+    # FAT-family volumes store no owner or ACL, so the workbench never starts
+    # and acceptance only ends at its timeout.
+    $fileSystem = Get-WindowsBuildFileSystem $path
+    if ($fileSystem -in @('exFAT', 'FAT', 'FAT32')) {
+        throw "The workbench smoke test directory is on a $fileSystem volume, which cannot keep the owner and permissions Cage requires for its private files. Set RUNNER_TEMP to a writable local directory on an NTFS volume outside AppData, such as C:\CageBuildTemp."
+    }
+}
+
+function Get-WindowsNonInteractiveSessionText {
+    param(
+        [int]$SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId,
+        [bool]$UserInteractive = [Environment]::UserInteractive
+    )
+    # WebView2 cannot create the smoke window without a visible window
+    # station; Win32-OpenSSH and services run in session 0 and fail late with
+    # 0x80070578 (invalid window handle).
+    if ($SessionId -eq 0) { return '当前在会话 0（SSH / 服务）中运行' }
+    if (-not $UserInteractive) { return "当前进程在会话 $SessionId 中没有可见的交互式桌面" }
+    return $null
+}
+
+function Assert-WindowsInteractiveDesktop {
+    param(
+        [int]$SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId,
+        [bool]$UserInteractive = [Environment]::UserInteractive,
+        [bool]$Windows = $IsWindows
+    )
+    if (-not $Windows) { return }
+    $session = Get-WindowsNonInteractiveSessionText -SessionId $SessionId -UserInteractive $UserInteractive
+    if ($session) {
+        throw "工作台自检需要已登录用户的交互式桌面；$session。请在桌面会话中运行，或用交互式登录的一次性计划任务运行构建与打包。参见 docs/windows.md#windows-源码构建。"
+    }
+}
+
+function Test-WindowsLowIntegrityText {
+    param([string[]]$Lines)
+    if (-not $Lines) { return $false }
+    foreach ($line in $Lines) {
+        if (-not $line) { continue }
+        if ($line -match '(?i)(?:Mandatory Label\\(?:Low Mandatory Level|低强制级别|低強制層級)|S-1-16-4096|\(ML;[^)]*;LW\))') {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Assert-WindowsBuildDirectoryIntegrity {
+    param([Parameter(Mandatory)][string]$Directory)
+    if (-not $IsWindows) { return }
+    $icacls = Get-BuildCommand @('icacls.exe', 'icacls') -Optional
+    if ($icacls -and (Test-Path -LiteralPath $Directory)) {
+        $savedNative = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+        try {
+            $lines = @(& $icacls $Directory 2>$null)
+            if ($LASTEXITCODE -eq 0 -and (Test-WindowsLowIntegrityText $lines)) {
+                throw "Build directory '$Directory' carries Windows Low Mandatory Level (Low IL). Executables built here inherit Low IL and cannot write to %TEMP% (causing 'cage.exe verify-vm-assets' to fail with Access is denied). Copy the repository to a normal local directory without a Low Mandatory Level label (for example C:\src\Claude-Cage) and rebuild. See docs/windows.md#windows-源码构建."
+            }
+        } finally { $PSNativeCommandUseErrorActionPreference = $savedNative }
+    }
+    $whoami = Get-BuildCommand @('whoami.exe', 'whoami') -Optional
+    if ($whoami) {
+        $savedNative = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+        try {
+            $groups = @(& $whoami '/groups' 2>$null)
+            if ($LASTEXITCODE -eq 0 -and (Test-WindowsLowIntegrityText $groups)) {
+                throw 'The current build shell runs at Windows Low Mandatory Level (Low IL), which prevents built executables from writing to %TEMP%. Run the build from a normal Medium-integrity shell in a standard local directory (for example C:\src\Claude-Cage). See docs/windows.md#windows-源码构建.'
+            }
+        } finally { $PSNativeCommandUseErrorActionPreference = $savedNative }
     }
 }
 
@@ -147,7 +228,11 @@ function Assert-WindowsWorkbenchReport {
     Write-Host ('Cage smoke diagnostic: ' + ($safe | ConvertTo-Json -Depth 6 -Compress))
     if ($failed) {
         $reason = $safe['controllerError'] ?? $safe.nativeStatus
-        throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $reason. Diagnostics: $Report"
+        $hint = ''
+        if ($safe.nativeStatus -match '(?i)0x80070578') {
+            $hint = ' 0x80070578 表示无法创建工作台窗口，常见于会话 0（SSH / 服务）等非交互会话；工作台自检需要已登录用户的交互式桌面。参见 docs/windows.md#windows-源码构建。'
+        }
+        throw "Cage workbench/bridge acceptance failed ($ExitCode), phase $($safe.phase): $reason. Diagnostics: $Report$hint"
     }
 }
 
@@ -370,6 +455,24 @@ function Get-VerifiedGitArchive {
     return $archive
 }
 
+function Get-WindowsCompilerPreflightError {
+    param([string]$LogPath, [int]$ExitCode, [string]$MsysDirectory, [string]$SystemDirectory, [bool]$SystemZlib)
+    $message = "The MSYS2 UCRT64 compiler preflight failed with exit code $ExitCode."
+    # The compiler may print local paths or flags. Only echo our own status line.
+    $last = Get-Content -LiteralPath $LogPath -Tail 1
+    if ($last -cmatch '^Preflight: (CC|CXX) (compile/link|run) (could not start|exited with -?\d+ \(0x[0-9A-F]{8}\))\.$') {
+        $message += " $last"
+    }
+    $loader = Select-String -Quiet -LiteralPath $LogPath -Pattern '\b(0xC000013[59]|322122578[15]|107374151[15])\b'
+    if ($SystemZlib -and ($loader -or (Select-String -Quiet -LiteralPath $LogPath -Pattern '\bas\.exe\b|\bassembler\b|\bzlib1\.dll\b'))) {
+        $bin = ($MsysDirectory -replace '\\', '/').TrimEnd('/') + '/ucrt64/bin/'
+        $message += "`nCheck whether the compiler tools load zlib1.dll from $SystemDirectory. Clear CC and CXX to use the default -B prefix, or set `$env:CC = 'gcc -B$bin' and `$env:CXX = 'g++ -B$bin'."
+    } elseif ($loader) {
+        $message += "`nCheck the UCRT64 tools and their DLLs. Windows reports a missing DLL as 0xC0000135 and a missing entry point as 0xC0000139."
+    }
+    return $message + "`nCompiler log: $LogPath`nSee docs/windows.md#windows-源码构建."
+}
+
 function Invoke-WindowsQemuProbe {
     param([string]$Executable, [string[]]$Arguments)
     $start = [Diagnostics.ProcessStartInfo]::new([IO.Path]::GetFullPath($Executable))
@@ -378,11 +481,8 @@ function Invoke-WindowsQemuProbe {
     $start.WorkingDirectory = Split-Path $start.FileName -Parent
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    # QEMU uses the Windows ANSI code page for redirected path output. Decode
-    # just this pipe instead of changing the calling shell's output encoding.
-    $codePage = Get-ItemPropertyValue -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage' -Name ACP
-    [Text.Encoding]::RegisterProvider([Text.CodePagesEncodingProvider]::Instance)
-    $start.StandardOutputEncoding = [Text.Encoding]::GetEncoding([int]$codePage)
+    # The bundled QEMU executables opt into UTF-8 even on legacy system code pages.
+    $start.StandardOutputEncoding = [Text.Encoding]::UTF8
     $start.StandardErrorEncoding = $start.StandardOutputEncoding
     # Catch missing DLLs even on a host with MSYS2 or another QEMU on PATH.
     $start.Environment['PATH'] = [Environment]::SystemDirectory

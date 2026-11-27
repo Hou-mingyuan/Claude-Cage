@@ -15,6 +15,19 @@ export class BootstrapError extends Error {
 }
 const fail = (code, message, next = 'plan') => { throw new BootstrapError(code, message, next); };
 
+// Global fetch ignores HTTP(S)_PROXY unless Node starts with --use-env-proxy or
+// NODE_USE_ENV_PROXY=1 (Node 22.21+/24.5+). Name the variables, never their values,
+// because proxy URLs can carry credentials.
+export function envProxyHint(env = process.env, runtime = { version: process.version, execArgv: process.execArgv, flagSupported: process.allowedNodeEnvironmentFlags.has('--use-env-proxy') }) {
+  if (!['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'].some(name => env[name])) return '';
+  const enabled = env.NODE_USE_ENV_PROXY === '1' || runtime.execArgv.includes('--use-env-proxy') || /(?:^|\s)--use-env-proxy(?:\s|$)/.test(env.NODE_OPTIONS ?? '');
+  if (enabled) return ' HTTPS_PROXY/HTTP_PROXY is set and Node uses it; check that this proxy is reachable and allows GitHub release downloads.';
+  if (runtime.flagSupported) return ' HTTPS_PROXY/HTTP_PROXY is set, but Node fetch ignores it unless enabled: rerun as node --use-env-proxy agent-bootstrap.mjs with the same arguments, or set NODE_USE_ENV_PROXY=1.';
+  return ` HTTPS_PROXY/HTTP_PROXY is set, but Node ${runtime.version} fetch cannot use environment proxies. Use Node 22.21+ or 24.5+ with node --use-env-proxy agent-bootstrap.mjs, or download the plan url with a proxy-aware tool such as curl and verify the plan sha256 before installing.`;
+}
+const networkFail = (code, message) => fail(code, `${message}${envProxyHint()}`, 'check_host_network');
+const waitTimeout = 120000;
+
 export function parseArgs(args) {
   const options = { action: 'plan', platform: `${process.platform}-${process.arch === 'x64' ? 'amd64' : process.arch}`, version: '', destination: '', allowUnsigned: false };
   if (args[0] && !args[0].startsWith('--')) options.action = args.shift();
@@ -33,15 +46,15 @@ export function parseArgs(args) {
 }
 
 // Validate HTTPS at every redirect; do not use browser credentials or tokens.
-export async function httpsResponse(url, fetchImpl = fetch, method = 'GET') {
+export async function httpsResponse(url, fetchImpl = fetch, method = 'GET', signal) {
   for (let redirects = 0; redirects <= 5; redirects++) {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password) fail('unsafe_download', 'Only public HTTPS downloads without embedded credentials are supported.');
     let response;
     try {
-      response = await fetchImpl(parsed, { method, redirect: 'manual', signal: AbortSignal.timeout(120000), headers: { 'User-Agent': 'Cage-Agent-Bootstrap/1', Accept: 'application/json, application/octet-stream' } });
+      response = await fetchImpl(parsed, { method, redirect: 'manual', signal: signal ?? AbortSignal.timeout(waitTimeout), headers: { 'User-Agent': 'Cage-Agent-Bootstrap/1', Accept: 'application/json, application/octet-stream' } });
     } catch {
-      fail('download_connection_failed', 'Could not connect to the public release service. Check host connectivity and user-configured proxy settings; Node 24 can use --use-env-proxy.', 'check_host_network');
+      networkFail('download_connection_failed', 'Could not connect to the public release service. Check host connectivity and user-configured proxy settings.');
     }
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get('location');
@@ -172,20 +185,34 @@ export async function makePlan(options, fetchImpl = fetch) {
   return { protocol, status: 'planned', release: selected.tag, release_url: `https://github.com/${repo}/releases/tag/${selected.tag}`, platform: options.platform, asset: selected.asset, url: selected.url, size: selected.size, sha256: selected.sha256, unsigned: selected.unsigned, cli, installation, data_policy: 'Preserve ~/.claude-cage, user projects and persistent VM disks. Downloads and application files are separate from profile data.' };
 }
 
-export async function downloadPlan(plan, destination, fetchImpl = fetch) {
+export async function downloadPlan(plan, destination, fetchImpl = fetch, idleTimeout = waitTimeout) {
   if (!isAbsolute(destination)) fail('invalid_input', 'Destination must be an absolute directory.');
   await mkdir(destination, { recursive: true });
   const stage = await mkdtemp(join(destination, '.cage-download-'));
+  // Bound each wait instead of the whole transfer: a large package on a slow link
+  // can take longer than one timeout while still making progress.
+  const controller = new AbortController(); let timer;
+  const touch = () => { clearTimeout(timer); timer = setTimeout(() => controller.abort(new DOMException('Download stalled.', 'TimeoutError')), idleTimeout); };
   try {
     const temp = join(stage, plan.asset);
-    const response = await httpsResponse(plan.url, fetchImpl);
+    touch();
+    const response = await httpsResponse(plan.url, fetchImpl, 'GET', controller.signal);
+    touch();
     const hash = createHash('sha256'); let size = 0;
     const verify = new Transform({ transform(chunk, encoding, callback) {
+      touch();
       size += chunk.length;
       if (size > plan.size) { callback(new BootstrapError('size_mismatch', 'Package exceeds the release size.', 'plan')); return; }
       hash.update(chunk); callback(null, chunk);
     } });
-    await pipeline(Readable.fromWeb(response.body), verify, createWriteStream(temp, { flags: 'wx', mode: 0o600 }));
+    try {
+      await pipeline(Readable.fromWeb(response.body), verify, createWriteStream(temp, { flags: 'wx', mode: 0o600 }));
+    } catch (error) {
+      // File system errors carry a syscall and keep their existing handling.
+      if (error instanceof BootstrapError || typeof error?.syscall === 'string') throw error;
+      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') networkFail('download_timeout', `The package download received no data for ${Math.round(idleTimeout / 1000)} seconds; the partial file was discarded. Check the host download network, then retry download.`);
+      networkFail('download_interrupted', 'The package download was interrupted; the partial file was discarded. Check the host download network, then retry download.');
+    }
     if (size !== plan.size || hash.digest('hex') !== plan.sha256) fail('checksum_mismatch', 'Package size or SHA-256 does not match the selected release. The staged download was discarded.');
     await chmod(temp, 0o600);
     const path = join(destination, plan.asset);
@@ -194,7 +221,7 @@ export async function downloadPlan(plan, destination, fetchImpl = fetch) {
     const installation = { ...plan.installation };
     if (installation.argv) installation.argv = installation.argv.map(arg => arg === '<downloaded_absolute_path>' ? path : arg);
     return { ...plan, status: 'downloaded', path, installation };
-  } finally { await rm(stage, { recursive: true, force: true }); }
+  } finally { clearTimeout(timer); await rm(stage, { recursive: true, force: true }); }
 }
 
 export async function main(args = process.argv.slice(2)) {

@@ -55,6 +55,7 @@ Claude Cage는 터미널, 브라우저, 편집기, 공식 Claude Desktop과 플�
 
 ## 케이지로 할 수 있는 일
 
+- **내 컴퓨터의 터미널에서 Claude Code를 사용합니다(v0.2.2).** `cage login`을 실행하면 Cage 브라우저에서 Claude 계정에 로그인할 수 있습니다. 프로젝트 폴더에서 `cage claude`를 실행하면 해당 폴더를 공유하고 기본 계정으로 세션을 시작합니다. 이름을 `sarah`로 지정한 계정은 `cage sarah`로 이번 실행에만 사용할 수 있습니다. `cage`만 입력하면 도움말이 표시됩니다. `cage start`는 Cage 서비스와 로컬 가상 머신을 백그라운드에서 시작하고 환경이 준비될 때까지 기다립니다. `cage up`은 데스크톱 앱을 열거나 이미 열린 창을 앞으로 가져옵니다. 터미널에서 Cage를 업데이트하려면 `cage update`를 실행하세요. v0.2.2 npm 패키지가 배포되면 `npm install -g claude-cage`로 설치할 수 있습니다. [명령어와 예시](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **단일 창에서 작업합니다.** 터미널에서 Claude Code를 실행하고, 편집기에서 변경 사항을 검토하고, Cage 브라우저를 사용하여 서비스를 미리 보고 로그인하세요.
 - **플러그인 마켓으로 모든 능력을 열어 보세요.** 개방형 [플러그인 마켓(cage-plugins)](https://github.com/Lee-xeo/cage-plugins)을 내장해 「플러그인 = MCP + 확장」을 지원합니다. 화면·키보드·마우스 제어, Office 문서, Blender, 호스트 명령 같은 MCP 도구를 안전하고 통제된 승인 아래 연결하고, 샌드박스 페이지로 Cage를 맞춤화할 수 있습니다. [플러그인 가이드](docs/guide/plugins.md) · [개발 명세](docs/plugins.md)
 - **모든 플랫폼에서 같은 경량 환경.** macOS, Windows, Linux의 Cage는 모두 동일한 경량 Debian 13 환경을 사용해 복잡한 다중 OS 게스트 없이 도구와 사용 방법이 같습니다. [Debian 환경](docs/guide/guest-systems.md)
@@ -71,8 +72,10 @@ Claude Cage는 터미널, 브라우저, 편집기, 공식 Claude Desktop과 플�
 이 요청을 AI 에이전트(codex, dsh, workbuddy — Claude Code는 아닐 수도 있음 😁) 에 보냅니다.
 
 ```markdown
-https://github.com/Lee-xeo/Claude-Cage의 최신 소스 코드를 받아 빌드하고 패키징해 설치해 줘. Cage 프록시가 내 로컬 Clash의 xx 노드를 통해 내 xx IP로 나가도록 설정해 줘. 전체 과정을 지켜보며 문제가 생기면 직접 수정하고, 필요하면 호환성 개선을 위해 프로젝트에 issue도 제출해 줘.
+https://github.com/Lee-xeo/Claude-Cage의 최신 소스 코드를 받아 빌드하고 패키징해 설치해 줘. 내가 내보낸 노드 설정 파일 [파일 경로]를 Cage로 가져와 줘. 프록시 체인을 쓰면 중계 노드와 출구 노드를 순서대로 설정하고, 외부에 표시되는 공인 IP가 [예상 IP]와 일치하는지 확인해 줘. 전체 과정을 지켜보며 문제가 생기면 직접 수정하고, 필요하면 호환성 개선을 위해 프로젝트에 issue도 제출해 줘.
 ```
+
+Clash/Mihomo 또는 sing-box가 로컬에서 연결을 받는 주소(예: `127.0.0.1:7890`)는 업스트림 노드로 사용할 수 없습니다. [기존 프록시 체인 이전하기](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 필요한 것은 안정적인 네트워크 프록시 엔드포인트뿐입니다. 이 프로젝트는 프록시 공급자를 홍보하지 않습니다. 예를 들어 Black Error 웹사이트를 검색하여 제공자를 직접 찾을 수 있습니다.
 
@@ -130,9 +133,9 @@ macOS와 서명된 Windows 버전은 선택한 프록시를 통해 업데이트�
 
 이 프로젝트는 빠르게 발전하고 있습니다. 피드백을 공유하려면 커뮤니티 그룹에 가입하세요. 커뮤니티 관리자를 환영합니다.
 
-| QQ group · 112745758 | WeChat |
+| QQ group · 782087179 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

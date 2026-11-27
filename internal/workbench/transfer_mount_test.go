@@ -46,7 +46,7 @@ func transferMountServer(t *testing.T, running bool, mounted string) *Server {
 }
 
 func TestTransferMountMigrationRequiresRestartAtEveryEntry(t *testing.T) {
-	for _, entry := range []string{"attach", "start", "up"} {
+	for _, entry := range []string{"attach", "start", "vm-start"} {
 		t.Run(entry, func(t *testing.T) {
 			s := transferMountServer(t, true, "old")
 			s.ready = true
@@ -57,8 +57,8 @@ func TestTransferMountMigrationRequiresRestartAtEveryEntry(t *testing.T) {
 				err = s.attach()
 			case "start":
 				err = s.startEnvironment(false)
-			case "up":
-				err = s.runCage("up")
+			case "vm-start":
+				err = s.runCage("vm-start")
 			}
 			var failure *projectShareError
 			if !errors.As(err, &failure) || failure.Recovery != "environment-restart" || s.ready {

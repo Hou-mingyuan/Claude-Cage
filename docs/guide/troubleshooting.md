@@ -20,6 +20,7 @@ keywords: 错误 失败 白屏 断网 137 OOM 代理 账号 配对 SSH 损坏 �
 | Windows 未知发布者 | 确认是否为明确标注的未签名预览，阅读对应发行说明；不能把它当作已签名发行。 |
 | Windows 启动虚拟机失败 | 检查 BIOS/UEFI 虚拟化和“Windows 虚拟机监控程序平台”，启用后重启。保留 WHPX 错误原文供定位。 |
 | 用户目录含空格，启动提示内部传输目录无法共享 | Lima 无法共享含空格的路径。把整个配置目录移到不含空格的路径并设置 `CLAUDE_CAGE_CONFIG`，步骤见[用户目录含空格时环境无法启动](https://github.com/Lee-xeo/Claude-Cage/blob/main/docs/troubleshooting.md#用户目录含空格时环境无法启动)。 |
+| 启停环境或应用内更新提示 `LIMA_HOME` 目录重合（旧版 `0.2.0-rc` 可能仅显示退出码 1） | 检查宿主机环境变量 `LIMA_HOME` 是否指向了 Cage 的 `state/lima` 目录，取消设置或改到其他目录后完全退出并重开 Cage。若在旧版应用内更新时被停止环境失败阻断，完全退出 Cage 后直接运行新版官方安装包原地升级，原有数据和虚拟机磁盘会保留。 |
 | Linux 无法启动 | 确认 x86_64、支持发行版与 KVM 权限，使用 APT 补齐安装依赖。 |
 | 首页提示 macOS / Windows / Ubuntu 客机已不再支持 | 当前版本只使用 Debian 13 环境。旧系统的磁盘和文件原样留在电脑上，Cage 不会删除。旧 Ubuntu 环境会挡住新环境的创建，需在首页点击“保留旧 Ubuntu 环境并新建 Debian”；处理方式见[早期版本创建的其他系统](guest-systems.md#早期版本创建的其他系统)。 |
 | 缺少代理核心 | 重装对应平台完整应用，不要只复制单个命令行文件。 |
@@ -55,12 +56,14 @@ keywords: 错误 失败 白屏 断网 137 OOM 代理 账号 配对 SSH 损坏 �
 | 命中大陆网段或定位为中国大陆 | 换用非大陆出口，静态 IP 和不限地区均不能豁免。怀疑归属错误时保留检查报告。 |
 | 旧配置显示“代理链需要迁移” | 导入原客户端里的具体节点，在 Cage 内按中转到最终出口的顺序应用并重新检测。见[把原客户端的代理链迁到 Cage](network.md#把原客户端的代理链迁到-cage)。 |
 | 代理核心未就绪 | 进入代理诊断检查状态，重新应用节点或重启 Cage 核心。 |
+| TLS / gRPC 节点持续握手超时（核心日志报 `connect error: context deadline exceeded`） | Go 1.26 构建的内置核心默认发送较大的后量子 TLS ClientHello。未设置 `client-fingerprint` 的 VMess/VLESS/Trojan 等节点可尝试在节点 YAML 中添加 `client-fingerprint: safari` 或 `firefox` 后重新导入并应用；详见[TLS 节点无 client-fingerprint 时握手超时](network.md#tls-节点无-client-fingerprint-时握手超时)。 |
 | 端口占用 | 选一个未占用的 Cage 独立端口，按提示重启，无需终止其他代理。 |
 | 位置查询失败 | 重试或换节点；所有模式均须确认非大陆出口，手动时区和语言不能跳过国家或地区检查。 |
 | 出口采样不完整 | 展开证据，查看缺失的是宿主、虚拟机终端还是浏览器，以及超时或 HTTP 状态；终端代理通过仍需其他路径成功。动态 IP 规则无法代替缺失的采样。 |
 | 手动暂停或报告过期 | 确认后主动重新检查，全部关键项通过才恢复。 |
 | “检查或监测授权已到期”反复出现 | 查看下文的续期排查，记录发生和恢复时间，导出诊断包。 |
 | 主机切网后离线 | 等待恢复和完整复检；原手动暂停不会自行解除。 |
+| Windows 主机开启 Clash / sing-box 等 TUN 模式后，TCP 类节点（VLESS / Trojan / SS）测速或出口超时，UDP/QUIC 类节点（Hysteria2 / TUIC）正常 | Cage 为避免主机 TUN 改写出口，会将内置代理核心绑定到物理网卡；部分 Windows TUN 客户端的路由或防火墙规则会丢弃绑定物理网卡的 TCP 出站连接。可暂时关闭主机代理软件的 TUN 模式（改为仅开启“系统代理”，不影响 Cage），或改用 Hysteria2 / TUIC 节点，或将 TCP 节点放在可连通节点之后的链式代理中使用。 |
 
 本机浏览器可联网不能证明 Cage 代理已经配置。订阅无节点时检查是不是含 `proxies` / `payload` 的 YAML；不要把私人订阅上传到在线转换网站或 Issue。
 
@@ -98,11 +101,21 @@ keywords: 错误 失败 白屏 断网 137 OOM 代理 账号 配对 SSH 损坏 �
 
 账号交接被阻止时，先处理未完成工具、审批、待发消息和后台任务，再核对接续分组、目标登录与额度。交接失败沿用原操作重试，准备阶段也可取消；不要重新发送旧消息来恢复历史。详细授权条件见[同一会话换账号](accounts.md#在同一会话中换账号)。
 
+### 网页登录停在哪一步
+
+| 页面上的现象 | 如何排查 |
+| --- | --- |
+| 人机验证框空白或加载报错 | 记下错误码。Cloudflare Turnstile 的 `200500` 表示验证组件未能加载，可检查浏览器或网络过滤日志中是否有对 `challenges.cloudflare.com` 的拦截记录。[Turnstile 错误码](https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/) |
+| 手动完成验证后又回到验证框 | 保持同一网络出口，在另一款受支持的最新版浏览器中打开站点登录首页作对照。若只有一个浏览器出现循环，检查它的 JavaScript 设置、扩展和缓存；若两边都循环，记录发生时间、浏览器版本和错误码，联系站点支持。[Cloudflare 验证排障](https://developers.cloudflare.com/cloudflare-challenges/troubleshooting/challenge-solve-issues/) |
+| 已返回 Claude 页面，随后出现地区或账号停用提示 | 保留 Claude 页面上的原始提示和出现时间，向 Claude 官方支持核实地区或账号状态。 |
+
+Cloudflare 验证页的 Ray ID 可帮助站点支持定位请求。公开 Issue 和截图中请遮盖完整 Ray ID，仅在联系站点官方支持时提供。
+
 ## 浏览器、Desktop 或文件上传异常
 
 浏览器白屏或待恢复时点“恢复浏览器”。整个界面中断时重开 App；异常页可“重新加载界面”或导出诊断。`localhost` 应在 Cage 内启动服务。
 
-Desktop 画面比例异常时先设“显示大小”为 100%，点“重试调整”。更新组件后保存工作、关闭再打开 Desktop。上传仍显示内部目录或出现 “The file picker didn’t open” 时，同样先同步组件再重开应用。
+Desktop 画面比例异常时可在应用内按 `Ctrl`/`Cmd` + `0` 重置缩放，或点“重试调整”。更新组件后保存工作、关闭再打开 Desktop。上传仍显示内部目录或出现 “The file picker didn’t open” 时，同样先同步组件再重开应用。
 
 Desktop 文件服务退出或连接中断时，Cage 会提示原因并降低重试频率；恢复后自动继续读取文件请求。反复提示服务退出时，重新打开 Desktop，并在资源设置与诊断日志中检查应用退出原因。
 
@@ -134,7 +147,7 @@ Desktop 文件服务退出或连接中断时，Cage 会提示原因并降低重�
 
 ## SSH 或云端部署失败
 
-先确认 SSH 地址、端口、用户、认证方式和服务器网络。主机指纹变化时独立核对，避免直接接受未知身份。首次部署失败需检查 Linux x86_64、cgroup v2、systemd 用户服务、UID/GID 映射及 FUSE/TUN 前提。
+先确认 SSH 地址、端口、用户、认证方式和服务器网络。主机指纹变化时独立核对，避免直接接受未知身份。首次部署失败需检查 Linux x86_64、cgroup v2、systemd 用户服务的 cgroup 委派（`cpu`、`memory`、`pids`）、UID/GID 映射及 FUSE/TUN 前提。
 
 服务退出时重连可尝试启动；持续失败查看用户服务日志。关闭本机 App 不停止远端，若希望停止任务，须在对应服务器工作台停止环境。无人登录后服务停止时由管理员检查 linger；服务器重启恢复需单独配置和验证。
 
@@ -154,5 +167,7 @@ cage diagnostics --json /absolute/path/cage-diagnostics.zip
 ```
 
 macOS 命令在 `Cage.app/Contents/Resources/cage`，Windows 在安装目录 `resources\cage.exe`，Linux 位于应用目录。使用本机绝对输出路径；控制服务不可用时仍可导出本机日志。
+
+排查某次断网时，先记下故障的本地时间和时区，再按 UTC 在 `logs/events.jsonl` 的 `time` 字段中定位前后事件；较早的事件也可能在 `logs/events-*.jsonl` 中。若包内有 `safety/latest-report.json`，用其 `created_at` 核对最近一次已保存检查的时间。故障之后生成的报告只能说明后来检查时的状态。`manifest.json` 的 `created_at` 记录诊断包的导出时间。
 
 向 [GitHub Issues](https://github.com/Lee-xeo/Claude-Cage/issues)提供应用版本、操作系统、处理器架构、当前模式、复现步骤、期望结果与错误原文。分享前检查诊断和截图，遮盖账号、IP、路径、代理凭据和授权链接。不要上传整个配置目录、完整订阅或项目内容。

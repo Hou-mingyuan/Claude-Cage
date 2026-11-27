@@ -16,6 +16,8 @@
     <Compile Include="../windows/UpdatePolicy.cs" Link="UpdatePolicy.cs" />
     <Compile Include="../windows/Backend.cs" Link="Backend.cs" />
     <Compile Include="../windows/UpdateRecovery.cs" Link="UpdateRecovery.cs" />
+    <Compile Include="../windows/CliUpdatePipe.cs" Link="CliUpdatePipe.cs" />
+    <Compile Include="../windows/CliUpdate.cs" Link="CliUpdate.cs" />
     <Compile Include="../windows/AppUpdater.cs" Link="AppUpdater.cs" />
     <Compile Include="../windows/UpdateInstaller.cs" Link="UpdateInstaller.cs" />
     <Compile Include="../windows/Authenticode.cs" Link="Authenticode.cs" />
@@ -23,6 +25,7 @@
   </ItemGroup>
   <ItemGroup Condition="'$(WindowsNativeInputTests)' == 'true'">
     <Compile Include="../windows/NativeInput.cs" Link="NativeInput.cs" />
+    <Compile Include="../windows/SharedClipboard.cs" Link="SharedClipboard.cs" />
     <Compile Include="../windows/TrayMenu.cs" Link="TrayMenu.cs" />
     <Compile Include="../windows/WindowChrome.cs" Link="WindowChrome.cs" />
   </ItemGroup>

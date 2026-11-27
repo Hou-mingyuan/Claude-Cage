@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lima-vm/sshocker/pkg/ssh"
@@ -64,6 +65,8 @@ type HostAgent struct {
 	sshConfig         *ssh.SSHConfig
 	portForwarder     *portForwarder // legacy SSH port forwarder
 	grpcPortForwarder *portfwd.Forwarder
+	// grpcTunnelDialer dials through the current guest agent client.
+	grpcTunnelDialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 	onClose   []func() error // LIFO
 	onCloseMu sync.Mutex
@@ -272,6 +275,7 @@ func New(ctx context.Context, instName string, stdout io.Writer, signalCh chan o
 		guestAgentAliveCh: make(chan struct{}),
 		showProgress:      o.showProgress,
 	}
+	a.grpcTunnelDialer = portfwd.DialContextToCurrentGRPCTunnel(a.getClient)
 	a.grpcPortForwarder = portfwd.NewPortForwarder(rules, ignoreTCP, ignoreUDP, func(ev *events.PortForwardEvent) {
 		a.emitPortForwardEvent(context.Background(), ev)
 	})
@@ -356,6 +360,28 @@ func (a *HostAgent) emitEvent(_ context.Context, ev events.Event) {
 	}
 }
 
+// emitStatusUpdate atomically updates currentStatus and encodes the resulting
+// event under eventEncMu so concurrent updates (such as CloudInitProgress and
+// Running) cannot overwrite each other.
+func (a *HostAgent) emitStatusUpdate(_ context.Context, update func(*events.Status)) {
+	a.eventEncMu.Lock()
+	defer a.eventEncMu.Unlock()
+
+	a.statusMu.Lock()
+	status := a.currentStatus
+	update(&status)
+	a.currentStatus = status
+	a.statusMu.Unlock()
+
+	ev := events.Event{
+		Time:   time.Now(),
+		Status: status,
+	}
+	if err := a.eventEnc.Encode(ev); err != nil {
+		logrus.WithField("event", ev).WithError(err).Error("failed to emit an event")
+	}
+}
+
 func (a *HostAgent) emitCloudInitProgressEvent(ctx context.Context, progress *events.CloudInitProgress) {
 	// LogLine is read verbatim from the guest's cloud-init output over SSH, so an
 	// untrusted guest controls its bytes. limactl start/watch print it to the
@@ -363,36 +389,21 @@ func (a *HostAgent) emitCloudInitProgressEvent(ctx context.Context, progress *ev
 	// from injecting ANSI/OSC escape sequences.
 	progress.LogLine = strutil.RemoveControlChars(progress.LogLine)
 
-	a.statusMu.RLock()
-	currentStatus := a.currentStatus
-	a.statusMu.RUnlock()
-
-	currentStatus.CloudInitProgress = progress
-
-	ev := events.Event{Status: currentStatus}
-	a.emitEvent(ctx, ev)
+	a.emitStatusUpdate(ctx, func(status *events.Status) {
+		status.CloudInitProgress = progress
+	})
 }
 
 func (a *HostAgent) emitPortForwardEvent(ctx context.Context, pfEvent *events.PortForwardEvent) {
-	a.statusMu.RLock()
-	currentStatus := a.currentStatus
-	a.statusMu.RUnlock()
-
-	currentStatus.PortForward = pfEvent
-
-	ev := events.Event{Status: currentStatus}
-	a.emitEvent(ctx, ev)
+	a.emitStatusUpdate(ctx, func(status *events.Status) {
+		status.PortForward = pfEvent
+	})
 }
 
 func (a *HostAgent) emitVsockEvent(ctx context.Context, vsockEvent *events.VsockEvent) {
-	a.statusMu.RLock()
-	currentStatus := a.currentStatus
-	a.statusMu.RUnlock()
-
-	currentStatus.Vsock = vsockEvent
-
-	ev := events.Event{Status: currentStatus}
-	a.emitEvent(ctx, ev)
+	a.emitStatusUpdate(ctx, func(status *events.Status) {
+		status.Vsock = vsockEvent
+	})
 }
 
 func generatePassword(length int) (string, error) {
@@ -524,13 +535,17 @@ func (a *HostAgent) startRoutinesAndWait(ctx context.Context, errCh <-chan error
 	a.emitEvent(ctx, events.Event{Status: stBooting})
 	ctxHA, cancelHA := context.WithCancel(ctx)
 	go func() {
-		stRunning := stBase
-		if haErr := a.startHostAgentRoutines(ctxHA); haErr != nil {
-			stRunning.Degraded = true
-			stRunning.Errors = append(stRunning.Errors, haErr.Error())
-		}
-		stRunning.Running = true
-		a.emitEvent(ctx, events.Event{Status: stRunning})
+		haErr := a.startHostAgentRoutines(ctxHA)
+		a.emitStatusUpdate(ctx, func(st *events.Status) {
+			st.SSHLocalPort = a.sshLocalPort
+			st.PortForward = nil
+			st.Vsock = nil
+			if haErr != nil {
+				st.Degraded = true
+				st.Errors = append(st.Errors, haErr.Error())
+			}
+			st.Running = true
+		})
 	}()
 	// wait for either the driver to stop or a signal to shut down
 	select {
@@ -672,18 +687,22 @@ ln -sf "${SSH_AUTH_SOCK}" /run/host-services/ssh-auth.sock`
 	a.addStaticPortForwardsFromList(ctx, staticPortForwards)
 
 	hasGuestAgentDaemon := !*a.instConfig.Plain && *a.instConfig.OS == limatype.LINUX
+	var bootDone chan struct{}
+	var bootDeadline time.Time
 	if hasGuestAgentDaemon {
 		go a.watchGuestAgentEvents(ctx)
 		go a.startTimeSync(ctx)
 		if a.showProgress {
+			bootDone = make(chan struct{})
+			bootDeadline = time.Now().Add(cloudInitMonitorTimeout)
 			cloudInitDone := make(chan struct{})
 			go func() {
 				// Progress mode follows a first boot that may download packages
 				// for a long time; the caller's idle timeout detects a stall.
-				timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+				timeoutCtx, cancel := context.WithDeadline(ctx, bootDeadline)
 				defer cancel()
 
-				a.watchCloudInitProgress(timeoutCtx)
+				a.watchCloudInitProgress(timeoutCtx, bootDone)
 				close(cloudInitDone)
 			}()
 
@@ -712,13 +731,10 @@ ln -sf "${SSH_AUTH_SOCK}" /run/host-services/ssh-auth.sock`
 		}
 	}
 
-	finalRequirements := a.finalRequirements()
-	if *a.instConfig.OS == limatype.WINDOWS {
-		finalRequirements = a.finalWinRequirements()
-	}
-
-	if err := a.waitForRequirements("final", finalRequirements); err != nil {
+	if err := a.waitForFinalRequirements(ctx, bootDeadline); err != nil {
 		errs = append(errs, err)
+	} else if bootDone != nil {
+		close(bootDone)
 	}
 	// Copy all config files _after_ the requirements are done
 	for _, rule := range a.instConfig.CopyToHost {
@@ -920,10 +936,13 @@ func isGuestAgentSocketAccessible(ctx context.Context, client *guestagentclient.
 }
 
 // getClient returns the current guest agent client under the clientMu lock,
-// so callers observe a consistent (non-mid-transition) snapshot.
+// so callers observe a consistent (non-mid-transition) snapshot. It only
+// reads, so port forwarding dials (one per accepted connection) do not
+// serialize on each other; they still wait while getOrCreateClient probes or
+// replaces the client, which the probe timeout bounds.
 func (a *HostAgent) getClient() *guestagentclient.GuestAgentClient {
-	a.clientMu.Lock()
-	defer a.clientMu.Unlock()
+	a.clientMu.RLock()
+	defer a.clientMu.RUnlock()
 	return a.client
 }
 
@@ -999,8 +1018,9 @@ func (a *HostAgent) processGuestAgentEvents(ctx context.Context, client *guestag
 		if useSSHFwd {
 			a.portForwarder.OnEvent(ctx, ev)
 		} else {
-			dialContext := portfwd.DialContextToGRPCTunnel(client)
-			a.grpcPortForwarder.OnEvent(ctx, dialContext, ev)
+			// Dial through whichever client is current, not the one that
+			// reported the port: the listener stays open across reconnects.
+			a.grpcPortForwarder.OnEvent(ctx, a.grpcTunnelDialer, ev)
 		}
 		return nil
 	}
@@ -1157,17 +1177,49 @@ var forwardSSH = func(ctx context.Context, sshConfig *ssh.SSHConfig, sshAddress 
 	return nil
 }
 
-func (a *HostAgent) watchCloudInitProgress(ctx context.Context) {
-	exitReason := "Cloud-init monitoring completed successfully"
-	var cmd *exec.Cmd
+// cloudInitMonitorTimeout bounds how long watchCloudInitProgress follows a
+// first boot; the caller's idle timeout detects a stall long before that.
+const (
+	cloudInitMonitorTimeout   = 2 * time.Hour
+	cloudInitPostBootGrace    = 3 * time.Second
+	cloudInitPostBootInterval = 3 * time.Second
+)
 
+// cloudInitProbe checks the guest's authoritative cloud-init state once
+// finalRequirements has confirmed /run/lima-boot-done matches this boot.
+type cloudInitProbe func(ctx context.Context) bool
+
+// watchCloudInitProgress follows the guest's cloud-init output and reports it
+// as CloudInitProgress events. It reports Completed only after it has seen
+// cloud-init finish (either in the log stream or via guest status once
+// bootDone confirms /run/lima-boot-done for this boot): a log stream that ends
+// early (sshd restarting during provisioning, a dropped connection) is reopened
+// until cloud-init finishes or ctx ends.
+func (a *HostAgent) watchCloudInitProgress(ctx context.Context, bootDone <-chan struct{}) {
+	a.watchCloudInitWithProbe(ctx, a.streamCloudInitLog, bootDone, a.probeCloudInitCompleted, cloudInitPostBootGrace, cloudInitPostBootInterval)
+}
+
+func (a *HostAgent) watchCloudInit(ctx context.Context, stream cloudInitStream) {
+	a.watchCloudInitWithProbe(ctx, stream, nil, nil, 0, 0)
+}
+
+func (a *HostAgent) watchCloudInitWithProbe(ctx context.Context, stream cloudInitStream, bootDone <-chan struct{}, probe cloudInitProbe, probeDelay, probeInterval time.Duration) {
+	completed := false
 	defer func() {
-		a.emitCloudInitProgressEvent(context.Background(), &events.CloudInitProgress{
-			Active:    false,
-			Completed: true,
-			LogLine:   exitReason,
-		})
-		logrus.Debug("Cloud-init progress monitoring completed")
+		progress := &events.CloudInitProgress{Completed: true, LogLine: "Cloud-init monitoring completed successfully"}
+		if !completed {
+			// Not Completed: the caller must not take the VM as provisioned.
+			reason := "Cloud-init monitoring stopped before cloud-init reported completion"
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				reason = fmt.Sprintf("Cloud-init monitoring timed out after %v before cloud-init reported completion", cloudInitMonitorTimeout)
+				logrus.Warn(reason)
+			} else {
+				logrus.Info(reason)
+			}
+			progress = &events.CloudInitProgress{LogLine: reason}
+		}
+		a.emitCloudInitProgressEvent(context.Background(), progress)
+		logrus.Debug("Cloud-init progress monitoring ended")
 	}()
 
 	logrus.Debug("Starting cloud-init progress monitoring")
@@ -1176,117 +1228,268 @@ func (a *HostAgent) watchCloudInitProgress(ctx context.Context) {
 		Active: true,
 	})
 
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+
+	var verifiedComplete atomic.Bool
+	probeDone := make(chan struct{})
+	if bootDone != nil && probe != nil {
+		go func() {
+			defer close(probeDone)
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-bootDone:
+			}
+			if probeDelay > 0 {
+				timer := time.NewTimer(probeDelay)
+				select {
+				case <-streamCtx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+			for {
+				if streamCtx.Err() != nil {
+					return
+				}
+				if probe(streamCtx) {
+					verifiedComplete.Store(true)
+					cancelStream()
+					return
+				}
+				wait := probeInterval
+				if wait <= 0 {
+					wait = time.Second
+				}
+				timer := time.NewTimer(wait)
+				select {
+				case <-streamCtx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+		}()
+	} else {
+		close(probeDone)
+	}
+
+	completed = followCloudInit(streamCtx, stream, func(line string, finished bool) {
+		a.emitCloudInitProgressEvent(ctx, &events.CloudInitProgress{
+			Active:    !finished,
+			LogLine:   line,
+			Completed: finished,
+		})
+	}, cloudInitRetryDelay)
+	cancelStream()
+	<-probeDone
+	if !completed && verifiedComplete.Load() {
+		completed = true
+		a.emitCloudInitProgressEvent(ctx, &events.CloudInitProgress{
+			Active:    false,
+			LogLine:   "Cloud-init completed (verified via guest status)",
+			Completed: true,
+		})
+	}
+}
+
+// cloudInitLogStreamScript follows cloud-init logs for the current boot.
+// When falling back to /var/log/cloud-init-output.log, it advances past a
+// previous boot only when a new "Cloud-init ... running" line starts after an
+// earlier "Cloud-init ... finished" line, so trailing lines after the current
+// boot's completion never cause tail to skip the completion marker (#782).
+const cloudInitLogStreamScript = `if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled -q cloud-init-main.service; then
+	exec sudo journalctl -u cloud-init-main.service -b -S @0 -o cat -f
+else
+	start_line=$(sudo awk '
+		BEGIN{b=1; e=0}
+		/^Cloud-init.* running/{if(e>0 && b<=e){b=NR}}
+		/^Cloud-init.* finished/{e=NR}
+		END{print b}
+	' /var/log/cloud-init-output.log 2>/dev/null || echo 1)
+	exec sudo tail -n +"${start_line:-1}" -f /var/log/cloud-init-output.log
+fi
+`
+
+func cloudInitCompletedProbeScript(iid string) string {
+	return fmt.Sprintf(`BOOT_DONE=/run/lima-boot-done
+[ "$(cat "$BOOT_DONE" 2>/dev/null)" = "%s" ] || exit 1
+if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled -q cloud-init-main.service 2>/dev/null; then
+	state=$(systemctl show -p ActiveState --value cloud-init-main.service 2>/dev/null)
+	sub=$(systemctl show -p SubState --value cloud-init-main.service 2>/dev/null)
+	result=$(systemctl show -p Result --value cloud-init-main.service 2>/dev/null)
+	case "$state:$sub:$result" in
+		inactive:*:success|active:exited:success) exit 0 ;;
+	esac
+fi
+if command -v cloud-init >/dev/null 2>&1; then
+	status=$(cloud-init status 2>/dev/null || true)
+	if [ -z "$status" ]; then
+		status=$(sudo -n cloud-init status 2>/dev/null || true)
+	fi
+	case "$status" in
+		*"status: done"*|*"status: degraded done"*|*"status: disabled"*) exit 0 ;;
+	esac
+fi
+exit 1
+`, iid)
+}
+
+func (a *HostAgent) probeCloudInitCompleted(ctx context.Context) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return a.cloudInitCommand(probeCtx, cloudInitCompletedProbeScript(a.iid)).Run() == nil
+}
+
+func (a *HostAgent) cloudInitCommand(ctx context.Context, script string) *exec.Cmd {
 	sshAddress, sshPort := a.sshAddressPort()
 	args := a.sshConfig.Args()
-	args = append(args,
-		"-p", strconv.Itoa(sshPort),
-		sshAddress,
-		"sh", "-c",
-		`"if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled -q cloud-init-main.service; then
-			sudo journalctl -u cloud-init-main.service -b -S @0 -o cat -f
-		else
-			sudo tail -n +$(sudo awk '
-				BEGIN{b=1; e=1}
-				/^Cloud-init.* finished/{e=NR}
-				/.*/{if(NR>e){b=e+1}}
-				END{print b}
-			' /var/log/cloud-init-output.log) -f /var/log/cloud-init-output.log
-		fi"`,
-	)
+	if runtime.GOOS == "windows" {
+		// Windows SSH clients need a separate session for piped guest commands.
+		args = sshutil.DisableControlMasterOptsFromSSHArgs(args)
+	}
+	args = append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
+	cmd := exec.CommandContext(ctx, a.sshConfig.Binary(), args...)
+	cmd.Stdin = strings.NewReader(script)
+	return cmd
+}
 
-	cmd = exec.CommandContext(ctx, a.sshConfig.Binary(), args...)
+// cloudInitStream runs one command that follows the guest's cloud-init log
+// from the start of the current boot, and passes its output to read. The
+// command is ended once read returns.
+type cloudInitStream func(ctx context.Context, read func(io.Reader)) error
+
+func (a *HostAgent) streamCloudInitLog(ctx context.Context, read func(io.Reader)) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := a.cloudInitCommand(ctx, cloudInitLogStreamScript)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		logrus.WithError(err).Warn("Failed to create stdout pipe for cloud-init monitoring")
-		exitReason = "Failed to create stdout pipe for cloud-init monitoring"
-		return
+		return fmt.Errorf("failed to create stdout pipe for cloud-init monitoring: %w", err)
 	}
-
 	if err := cmd.Start(); err != nil {
-		logrus.WithError(err).Warn("Failed to start cloud-init monitoring command")
-		exitReason = "Failed to start cloud-init monitoring command"
-		return
+		return fmt.Errorf("failed to start cloud-init monitoring command: %w", err)
 	}
+	read(stdout)
+	// Ends `-f` once cloud-init has finished; a no-op if ssh already exited.
+	cancel()
+	return cmd.Wait()
+}
 
-	scanner := bufio.NewScanner(stdout)
-	cloudInitMainServiceStarted := false
-	cloudInitFinished := false
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		if !cloudInitMainServiceStarted {
-			if isStartedCloudInitMainService(line) {
-				logrus.Debug("cloud-init-main.service started detected via log pattern")
-				cloudInitMainServiceStarted = true
-			} else if !cloudInitFinished {
-				if isCloudInitFinished(line) {
-					logrus.Debug("Cloud-init completion detected via log pattern")
-					cloudInitFinished = true
-				}
-			}
-		} else if !cloudInitFinished && isDeactivatedCloudInitMainService(line) {
-			logrus.Debug("cloud-init-main.service deactivated detected via log pattern")
-			cloudInitFinished = true
-		}
-
-		a.emitCloudInitProgressEvent(ctx, &events.CloudInitProgress{
-			Active:    !cloudInitFinished,
-			LogLine:   line,
-			Completed: cloudInitFinished,
+// followCloudInit reads cloud-init log streams until one shows that cloud-init
+// finished, and reports whether it did before ctx ended. Each stream replays
+// the log from the start of the boot, so lines already reported by an earlier
+// stream are parsed again but not reported again. retryDelay gives the wait
+// before reopening a stream after attempt consecutive streams without new
+// lines.
+func followCloudInit(ctx context.Context, stream cloudInitStream, emit func(line string, finished bool), retryDelay func(attempt int) time.Duration) bool {
+	reported := 0
+	attempt := 0
+	for {
+		var lines int
+		var finished bool
+		err := stream(ctx, func(r io.Reader) {
+			lines, finished = followCloudInitLog(r, reported, emit)
 		})
+		if finished {
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		if lines > reported {
+			reported = lines
+			attempt = 0
+		}
+		delay := retryDelay(attempt)
+		attempt++
+		logrus.WithError(err).Debugf("cloud-init log stream ended before cloud-init finished; reopening in %v", delay)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(delay):
+		}
+	}
+}
 
-		if cloudInitFinished {
-			logrus.Debug("Breaking from cloud-init monitoring loop - completion detected")
-			if cmd.Process != nil {
-				logrus.Debug("Killing cloud-init monitoring process after completion")
-				if err := cmd.Process.Kill(); err != nil {
-					logrus.WithError(err).Debug("Failed to kill cloud-init monitoring process")
-				}
+func cloudInitRetryDelay(attempt int) time.Duration {
+	const maxDelay = 30 * time.Second
+	if attempt >= 5 {
+		return maxDelay
+	}
+	return min(time.Second<<attempt, maxDelay)
+}
+
+// cloudInitMaxLine bounds one reported log line; the rest of a longer line
+// (such as a progress bar without newlines) is dropped.
+const cloudInitMaxLine = 64 * 1024
+
+// followCloudInitLog reads one cloud-init log stream until it ends or shows
+// that cloud-init finished. It reports every non-blank line after the first
+// skip ones, and the line that shows cloud-init finished in any case. It
+// returns the number of non-blank lines read and whether cloud-init finished.
+func followCloudInitLog(r io.Reader, skip int, emit func(line string, finished bool)) (lines int, finished bool) {
+	var p cloudInitLogParser
+	br := bufio.NewReaderSize(r, cloudInitMaxLine)
+	for {
+		line, err := readCloudInitLine(br)
+		if strings.TrimSpace(line) != "" {
+			lines++
+			finished = p.feed(line)
+			if lines > skip || finished {
+				emit(line, finished)
 			}
-			break
-		}
-	}
-
-	if err := cmd.Wait(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			logrus.Warn("Cloud-init monitoring timed out after 10 minutes")
-			exitReason = "Cloud-init monitoring timed out after 10 minutes"
-			return
-		}
-		logrus.WithError(err).Debug("SSH command finished (expected when cloud-init completes)")
-	}
-
-	if !cloudInitFinished {
-		logrus.Debug("Connection dropped, checking for any remaining cloud-init logs")
-
-		finalArgs := a.sshConfig.Args()
-		finalArgs = append(finalArgs,
-			"-p", strconv.Itoa(sshPort),
-			sshAddress,
-			"sudo", "tail", "-n", "20", "/var/log/cloud-init-output.log",
-		)
-
-		finalCmd := exec.CommandContext(ctx, a.sshConfig.Binary(), finalArgs...)
-		if finalOutput, err := finalCmd.Output(); err == nil {
-			for line := range strings.SplitSeq(string(finalOutput), "\n") {
-				if strings.TrimSpace(line) != "" {
-					if !cloudInitFinished {
-						cloudInitFinished = isCloudInitFinished(line)
-					}
-
-					a.emitCloudInitProgressEvent(ctx, &events.CloudInitProgress{
-						Active:    !cloudInitFinished,
-						LogLine:   line,
-						Completed: cloudInitFinished,
-					})
-				}
+			if finished {
+				logrus.Debug("Cloud-init completion detected via log pattern")
+				return lines, true
 			}
 		}
+		if err != nil {
+			return lines, false
+		}
 	}
+}
+
+// readCloudInitLine returns the next line without its line ending, cut to
+// cloudInitMaxLine. err is set once the stream has ended.
+func readCloudInitLine(br *bufio.Reader) (string, error) {
+	var line []byte
+	for {
+		frag, isPrefix, err := br.ReadLine()
+		if len(line) < cloudInitMaxLine {
+			line = append(line, frag[:min(len(frag), cloudInitMaxLine-len(line))]...)
+		}
+		if err != nil || !isPrefix {
+			return string(line), err
+		}
+	}
+}
+
+// cloudInitLogParser recognizes the end of cloud-init in its log output.
+type cloudInitLogParser struct {
+	mainServiceStarted bool
+	finished           bool
+}
+
+// feed parses the next log line and reports whether cloud-init has finished.
+func (p *cloudInitLogParser) feed(line string) bool {
+	if p.finished {
+		return true
+	}
+	if !p.mainServiceStarted {
+		if isStartedCloudInitMainService(line) {
+			logrus.Debug("cloud-init-main.service started detected via log pattern")
+			p.mainServiceStarted = true
+		} else if isCloudInitFinished(line) {
+			p.finished = true
+		}
+	} else if isDeactivatedCloudInitMainService(line) {
+		logrus.Debug("cloud-init-main.service deactivated detected via log pattern")
+		p.finished = true
+	}
+	return p.finished
 }
 
 func isCloudInitFinished(line string) bool {
@@ -1301,8 +1504,11 @@ func isStartedCloudInitMainService(line string) bool {
 
 func isDeactivatedCloudInitMainService(line string) bool {
 	line = strings.ToLower(strings.TrimSpace(line))
-	// Deactivated event lines end with a line reporting consumed CPU time, etc.
-	return strings.HasPrefix(line, "cloud-init-main.service: consumed")
+	// Deactivated event lines normally end with a line reporting consumed CPU
+	// time, while Type=oneshot + RemainAfterExit=yes units finish without
+	// deactivating or emitting a Consumed line (#782).
+	return strings.HasPrefix(line, "cloud-init-main.service: consumed") ||
+		strings.HasPrefix(line, "finished cloud-init-main.service")
 }
 
 func copyToHost(ctx context.Context, sshConfig *ssh.SSHConfig, sshAddress string, sshPort int, local, remote string, skipIfMissing bool) error {

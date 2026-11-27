@@ -48,6 +48,9 @@ const (
 	controllerReleaseRequestTimeout = 2*vmProbeTimeout + 5*time.Second
 	// Connecting may start a controller and then wait for its first status.
 	localBootstrapTimeout = controllerVMRequestTimeout + 12*time.Second
+	// Lima can wait 190 seconds for its host agent and another 180 seconds
+	// for the instance. Leave room for stop-job bookkeeping and polling.
+	controllerUpdateStopTimeout = 7 * time.Minute
 )
 
 // controllerRequestBudget extends the client timeout only for the requests
@@ -232,7 +235,15 @@ func pendingUpdate(c *controllerClient) DesktopResult {
 // Desktop never silently loads a different build's UI. Completing an update is
 // an explicit user action because it stops the existing environment's work.
 func Desktop(configPath string, options DesktopOptions) (DesktopResult, error) {
-	return desktopLaunch(filepath.Dir(configPath), false, options, func() error { return startController(configPath) })
+	return desktopLaunch(filepath.Dir(configPath), false, options, func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), localBootstrapTimeout)
+		defer cancel()
+		c, err := startController(ctx, configPath)
+		if c != nil {
+			c.close()
+		}
+		return err
+	})
 }
 
 func desktopLaunch(profile string, gateway bool, options DesktopOptions, start func() error) (DesktopResult, error) {
@@ -256,6 +267,15 @@ func desktopLaunch(profile string, gateway bool, options DesktopOptions, start f
 			}
 			if err != nil {
 				return DesktopResult{}, err
+			}
+		} else if want.matches(current.launch.Controller) && !options.UseExisting && sessionChanged(current.launch.SessionID) && current.launch.Controller.Protocol == controlProtocol {
+			status, handoffErr := current.call("POST", "/api/handoff", map[string]string{"token": current.record.Token}, nil)
+			if handoffErr == nil && status == http.StatusOK {
+				if err = current.waitForExit(); err != nil {
+					return DesktopResult{}, err
+				}
+			} else {
+				return DesktopResult{Status: "ready", URL: current.launch.URL, Controller: current.launch.Controller}, nil
 			}
 		} else if want.matches(current.launch.Controller) || options.UseExisting {
 			status := "ready"
@@ -423,7 +443,7 @@ func (c *controllerClient) stopAndHandoff() error {
 	if status != http.StatusOK || requested.ID == "" {
 		return errors.New("后台未接受停止请求，已取消本次更新。")
 	}
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(controllerUpdateStopTimeout)
 	for {
 		var state struct {
 			VMRunning *bool `json:"vm_running"`
@@ -521,39 +541,72 @@ func (c *controllerClient) exitTimeout() error {
 	}
 	return fmt.Errorf("%s（进程 %d）尚未退出，未强制结束进程。请稍后重试更新。", service, c.record.PID)
 }
-func startController(configPath string) error {
+func startController(ctx context.Context, configPath string) (*controllerClient, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return startControllerExecutable(configPath, exe)
+	c, _, err := startControllerExecutable(ctx, configPath, exe)
+	return c, err
 }
 
-func startControllerExecutable(configPath, exe string, extraEnv ...string) error {
+// started identifies the caller that actually spawned the controller. A
+// desktop may release its own idle launch if connecting the window fails.
+func startControllerExecutable(ctx context.Context, configPath, exe string, extraEnv ...string) (client *controllerClient, started bool, err error) {
 	profile := filepath.Dir(configPath)
-	if err := host.EnsurePrivateDir(profile); err != nil {
-		return err
+	lock, err := acquireControllerLaunch(ctx, profile)
+	if err != nil {
+		return nil, false, err
 	}
-	return startDetached(func() *exec.Cmd {
+	defer lock.Close()
+	defer unlockController(lock)
+	if c, err := waitControllerReady(ctx, profile); !errors.Is(err, errControllerUnavailable) {
+		return c, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	if err := startDetached(windowHidden, func() *exec.Cmd {
 		cmd := exec.Command(exe, "log-relay", "controller")
 		cmd.Dir = profile
 		cmd.Env = append(vm.ChildEnv(), cage.ConfigEnv+"="+configPath)
 		cmd.Env = append(cmd.Env, extraEnv...)
 		return cmd
-	})
+	}); err != nil {
+		return nil, false, err
+	}
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if c, err := connectController(profile); !errors.Is(err, errControllerUnavailable) {
+			return c, true, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, true, ctx.Err()
+		case <-tick.C:
+		}
+	}
 }
 
-// startDetached starts a background service that must outlive its caller.
+type windowVisibility bool
+
+const (
+	windowHidden  windowVisibility = false
+	windowVisible windowVisibility = true
+)
+
+// startDetached starts a process that must outlive its caller.
 // Windows first asks to leave the caller's job, which automation shells may
 // close with kill-on-close; a job that forbids leaving refuses the start, so
 // it is retried inside the job with the previous behaviour.
-func startDetached(newCommand func() *exec.Cmd) error {
+func startDetached(visibility windowVisibility, newCommand func() *exec.Cmd) error {
 	cmd := newCommand()
-	cmd.SysProcAttr = detachedProcessAttributes(true)
+	cmd.SysProcAttr = detachedProcessAttributes(true, visibility)
 	err := cmd.Start()
 	if err != nil && breakawayRefused(err) {
 		cmd = newCommand()
-		cmd.SysProcAttr = detachedProcessAttributes(false)
+		cmd.SysProcAttr = detachedProcessAttributes(false, visibility)
 		err = cmd.Start()
 	}
 	if err != nil {

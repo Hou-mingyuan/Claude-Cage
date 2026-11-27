@@ -14,7 +14,7 @@ import {
 export function installRemoteInput(
   transport,
   container,
-  { mode, systemClipboard = () => true, clipboardActive = () => window.cageSharedClipboardActive,
+  { mode, claudeDesktop = false, systemClipboard = () => true, clipboardActive = () => window.cageSharedClipboardActive,
     syncClipboard = () => window.cageSyncClipboard(), onStatus, onFallback, isActive,
     insertText, insertComposition, caretRect, surface, inputLabel = "Cage 网页输入", tabId: getTargetId = () => "", pasteContent, preparePaste, setCopyContext, copyText },
 ) {
@@ -46,6 +46,9 @@ export function installRemoteInput(
     nativeFailed = false,
     focusHandoff = null,
     lateSymbolComposition = false,
+    pendingText = "",
+    pendingTimer,
+    clickedField = false,
     disposed = false;
   const target = document.createElement("textarea");
   target.setAttribute("aria-label", translate(inputLabel));
@@ -119,7 +122,11 @@ export function installRemoteInput(
       if (handoff && focusHandoff === handoff) focusHandoff = null;
     });
   };
+  const webviewComposition = () => claudeDesktop && Boolean(window.chrome?.webview);
   const updateNative = (rect) => {
+    // Moving focus from WebView2 to the Win32 edit control can drop the
+    // initial Pinyin keystroke in Claude Desktop. Keep composing in the textarea.
+    if (webviewComposition()) return;
     if (nativeFailed || !window.cageNativeIMEAvailable || !nativeAvailable() || !focused()) return;
     if (!nativeOwned && composing) return;
     const operation = nativeOwned ? "caret" : "activate";
@@ -207,6 +214,8 @@ export function installRemoteInput(
     "pointerdown",
     (event) => {
       acted();
+      flushText();
+      if (webviewComposition()) clickedField = true;
       // Cancel before noVNC queues a click into another remote field.
       if (composing) {
         if (compositionSession) queueComposition({ mode: "cancel" });
@@ -220,13 +229,37 @@ export function installRemoteInput(
     },
     true,
   );
+  // Each Windows IME batch belongs to the desktop that accepted the input.
+  // A pane can lose focus between the last input event and this queue write.
+  const sendConfirmedText = (text) => {
+    insertText(text, { committed: true }).catch(() => {
+      onFallback(text, "文字输入未完成，请重新连接画面后重试");
+    });
+  };
+  const flushText = () => {
+    if (!pendingText) return;
+    clearTimeout(pendingTimer);
+    const text = pendingText;
+    pendingText = "";
+    sendConfirmedText(text);
+  };
   const commit = (text) => {
     if (disposed || !isActive() || !text) return;
-    // X0tigervnc cannot map arbitrary Unicode to its finite X11 keycode pool.
-    // The browser inserts committed text directly, without clipboard mutation.
-    insertText(text).catch(() => {
-      if (!disposed) onStatus("文字输入未完成，请重新连接画面后重试");
-    });
+    if (!webviewComposition()) {
+      insertText(text).catch(() => {
+        if (!disposed) onStatus("文字输入未完成，请重新连接画面后重试");
+      });
+      return;
+    }
+    // A single input event can contain an entire phrase or dictation. Keep it
+    // intact and send it directly when it does not fit in the burst buffer.
+    if (pendingText.length + text.length > 1024) flushText();
+    if (text.length >= 1024) {
+      sendConfirmedText(text);
+      return;
+    }
+    if (!pendingText) pendingTimer = setTimeout(flushText, 8);
+    pendingText += text;
   };
   // ASCII punctuation is left to the host input method so it can choose e.g.
   // fullwidth "？". Some methods (Sogou) never answer with an input event, so
@@ -295,13 +328,19 @@ export function installRemoteInput(
   };
   const startComposition = () => {
     acted();
+    flushText();
+    // A click can move guest focus to a field whose input context replaces
+    // the one just read, and the session begun with it then expires. Keep the
+    // first composition after a click local; insertText re-reads the field.
+    const afterClick = clickedField;
+    clickedField = false;
     // A late answer may also arrive as a composition. Its key already sent
     // the literal character, so the composition must not send it again.
     lateSymbolComposition = symbols.some(entry => entry.state === "committed");
     cancelSymbols();
     composing = true;
     compositionTarget = getTargetId();
-    if (insertComposition && caretState?.context && caretState.target === compositionTarget &&
+    if (insertComposition && !afterClick && caretState?.context && caretState.target === compositionTarget &&
         Date.now() - caretState.time < caretFreshFor) {
       compositionSession = crypto.randomUUID().replaceAll("-", "");
       compositionSequence = 0;
@@ -356,6 +395,7 @@ export function installRemoteInput(
     target.value = "";
   });
   on(target, "blur", () => {
+    flushText();
     cancelSymbols();
     if (nativeOwned) return;
     if (composing && compositionSession) queueComposition({ mode: "cancel", text: "", selectionStart: 0, selectionEnd: 0 });
@@ -418,7 +458,10 @@ export function installRemoteInput(
     if (!physical.has(modifier[1])) keys.push([...modifier, false]);
     return keys;
   };
-  const chord = (key, shift = false) => shortcutKeys(key, shift).forEach(value => transport.sendKey(...value));
+  const chord = (key, shift = false) => {
+    flushText();
+    shortcutKeys(key, shift).forEach(value => transport.sendKey(...value));
+  };
   const receiveCopy = async ({ id, text, clipboard, context, document: sourceDocument, error }) => {
     if (sharedClipboard()) return;
     const valid = () => !disposed && Boolean(copyContext) && context === copyContext && id === getTargetId() && focused() &&
@@ -470,6 +513,7 @@ export function installRemoteInput(
   };
   const copy = (key = "c") => {
     if (disposed || !isActive()) return;
+    flushText();
     copyRequested = true;
     say("正在复制所选文本…");
     clearTimeout(copyTimer);
@@ -497,6 +541,7 @@ export function installRemoteInput(
   };
   const paste = (text) => {
     if (disposed) return;
+    flushText();
     pending++;
     say("正在粘贴…");
     transport.focus();
@@ -513,6 +558,7 @@ export function installRemoteInput(
   };
   const receive = (content, preparation = preparePaste?.()) => {
     if (disposed || !isActive()) { preparation?.dispose(); return; }
+    flushText();
     pending++;
     say("正在传递剪贴板内容…");
     transport.focus();
@@ -536,6 +582,7 @@ export function installRemoteInput(
   };
   const readAndPaste = () => {
     if (disposed || !isActive()) return;
+    flushText();
     if (sharedClipboard()) {
       const id = getTargetId();
       say("正在粘贴…");
@@ -564,6 +611,7 @@ export function installRemoteInput(
     if (copyRequested) await receiveCopy({ id: getTargetId(), text: lastText, context: copyContext });
   });
   const release = () => {
+    flushText();
     cancelCopy();
     cancelSymbols();
     for (const [code, keysym] of remote) transport.sendKey(keysym, code, false);
@@ -583,6 +631,8 @@ export function installRemoteInput(
     "keydown",
     (event) => {
       focusHandoff = null;
+      if (pendingText && (composing || event.isComposing || event.metaKey || event.ctrlKey ||
+          [...(event.key || "")].length !== 1 || event.key.codePointAt(0) <= 127)) flushText();
       if (!focused()) return;
       acted();
       if ((event.isTrusted || event.cageNativeInput) && (!copyContext || ["Enter", " ", "Tab"].includes(event.key) ||
@@ -813,6 +863,7 @@ export function installRemoteInput(
     },
     focused,
     dispose() {
+      flushText();
       if (composing && compositionSession)
         queueComposition({ mode: "cancel", text: "", selectionStart: 0, selectionEnd: 0 });
       disposed = true;

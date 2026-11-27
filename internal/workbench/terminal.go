@@ -1,10 +1,12 @@
 package workbench
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -57,13 +59,36 @@ func (s *Server) terminalStream(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	query := r.URL.Query()
+	modern := query.Get("replay") == "1"
+	var cursor *terminalViewCursor
+	if modern && query.Has("after") {
+		position, err := strconv.ParseUint(query.Get("after"), 10, 64)
+		if err != nil {
+			http.Error(w, "无效的终端回放位置", http.StatusBadRequest)
+			return
+		}
+		cursor = &terminalViewCursor{position, query.Get("generation"), query.Get("lease")}
+	}
 	ws, err := s.upgrade(w, r)
 	if err != nil {
 		return
 	}
 	defer ws.Close()
 	ws.SetReadLimit(1 << 20)
-	subscription := session.subscribe()
+	epoch, _ := r.Context().Value(accountEpochKey{}).(context.Context)
+	var subscription *terminalSubscription
+	var replay terminalViewReplay
+	if modern {
+		subscription, replay = session.subscribeView(epoch, cursor)
+		// A window may be hidden again while a large history response is
+		// still in flight. Keep its cursor valid until xterm acknowledges it.
+		if replay.End > replay.Start {
+			session.parkView(epoch, replay, replay.Start)
+		}
+	} else {
+		subscription = session.subscribe()
+	}
 	defer subscription.Close()
 	if subscription.CLIStartup != nil {
 		_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -71,16 +96,29 @@ func (s *Server) terminalStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if modern {
+		_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if ws.WriteJSON(replay) != nil {
+			return
+		}
+		if err := replay.writePrefix(func(data []byte) error {
+			_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			return ws.WriteMessage(websocket.BinaryMessage, data)
+		}); err != nil {
+			return
+		}
+	}
 	if len(subscription.History) > 0 {
 		_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		// Replayed output must render without repeating clipboard side effects.
-		if err := ws.WriteJSON(map[string]string{"type": "history"}); err != nil {
+		if !modern && ws.WriteJSON(map[string]string{"type": "history"}) != nil {
 			return
 		}
 		if err := ws.WriteMessage(websocket.BinaryMessage, subscription.History); err != nil {
 			return
 		}
 	}
+	replay.blocks, replay.pending, subscription.History = nil, nil, nil
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -99,6 +137,15 @@ func (s *Server) terminalStream(w http.ResponseWriter, r *http.Request) {
 				}
 			case chunk, ok := <-subscription.Output:
 				if !ok {
+					if modern {
+						session.mu.Lock()
+						ended := session.closed
+						session.mu.Unlock()
+						if ended {
+							_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+							_ = ws.WriteJSON(map[string]string{"type": "terminal-end"})
+						}
+					}
 					return
 				}
 				_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -119,12 +166,29 @@ func (s *Server) terminalStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var input struct {
-			Type string `json:"type"`
-			Data string `json:"data"`
-			Cols uint16 `json:"cols"`
-			Rows uint16 `json:"rows"`
+			Type     string `json:"type"`
+			Data     string `json:"data"`
+			Cols     uint16 `json:"cols"`
+			Rows     uint16 `json:"rows"`
+			Position uint64 `json:"position"`
 		}
 		if json.Unmarshal(data, &input) != nil {
+			continue
+		}
+		if modern {
+			switch input.Type {
+			case "pause":
+				session.parkView(epoch, replay, input.Position)
+				return
+			case "caught-up":
+				session.releaseView(epoch, replay)
+				continue
+			}
+		}
+		session.mu.Lock()
+		hostInput := session.hostInput
+		session.mu.Unlock()
+		if hostInput {
 			continue
 		}
 		switch input.Type {

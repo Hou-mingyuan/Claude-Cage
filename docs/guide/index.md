@@ -37,6 +37,7 @@ macOS、Windows 和 Linux 上统一运行同一个轻量化 Debian 13 环境，�
 | 了解环境的要求、内容、空间占用和旧环境的处理 | [Debian 环境](guest-systems.md) |
 | 导入订阅、连接住宅代理、设置出口规则 | [网络与代理](network.md) |
 | 打开项目、启动 Claude 终端、传文件与截图 | [项目、终端与文件](workbench.md) |
+| 在本机项目目录使用 `cage claude` 或按名称选择账号，传入 Claude Code 参数、管道或恢复会话 | [本机终端命令与示例](workbench.md#在本机终端使用-claude-code) |
 | 添加多个订阅、查看额度、分配或接续会话 | [多账号与额度](accounts.md) |
 | 收藏网页、无痕浏览、清理 Cookie、安装扩展 | [浏览器与网站数据](browser.md) |
 | 在 Cage 内使用 Claude Desktop | [Claude Desktop](desktop.md) |

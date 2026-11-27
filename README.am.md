@@ -55,6 +55,7 @@ Claude Cage ተርሚናልን፣ አሳሽን፣ አርታዒን፣ ኦፊሴ�
 
 ## በ Cage ምን ማድረግ ይችላሉ
 
+- **Claude Codeን ከኮምፒውተርዎ ተርሚናል ይጠቀሙ (v0.2.2)።** `cage login` ወደ Claude መለያዎ ለመግባት የCage አሳሹን ይከፍታል። በፕሮጀክቱ አቃፊ ውስጥ `cage claude` ሲያስኬዱ አቃፊው ይጋራል፣ የClaude Code ክፍለ ጊዜም በነባሪው መለያ ይጀምራል። አንድን መለያ `sarah` ብለው ከሰየሙ፣ ለዚህ ጊዜ ብቻ ያንን መለያ ለመጠቀም `cage sarah` ያስኪዱ። `cage` ብቻውን የእገዛ መረጃውን ያሳያል። `cage start` የCage አገልግሎትንና በኮምፒውተርዎ ያለውን ምናባዊ ማሽን ከጀርባ ያስነሳል፣ አካባቢው ዝግጁ እስኪሆንም ይጠብቃል። `cage up` የCage ዴስክቶፕ መተግበሪያውን ይከፍታል ወይም ክፍት መስኮቱን ወደ ፊት ያመጣል። Cageን ከተርሚናሉ ለማዘመን `cage update` ያስኪዱ። የv0.2.2 npm ጥቅል ከታተመ በኋላ በ`npm install -g claude-cage` መጫን ይችላሉ። [ትዕዛዞችና ምሳሌዎች](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **በአንድ መስኮት ውስጥ ይስሩ.** በተርሚናል ውስጥ የClaude ኮድን ያሂዱ፣ በአርታዒው ላይ የተደረጉ ለውጦችን ይገምግሙ እና አገልግሎቶችን አስቀድመው ለማየት እና ለመግባት የCage አሳሹን ይጠቀሙ።
 - **በፕለጊን ገበያ ሙሉ ችሎታዎችን ይክፈቱ።** ክፍቱ [የፕለጊን ገበያ (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) በ«ፕለጊን = MCP + ቅጥያ» መሠረት Claude የኮምፒውተርዎን መሣሪያዎች (ስክሪንና ኪቦርድ/ማውስ፣ Office ሰነዶች፣ Blender፣ ትዕዛዞች) በግልጽ ፈቃድና ማረጋገጫ እንዲጠቀም እና ለCage ብጁ ገጾችን እንዲያክሉ ያስችላል። [የፕለጊን መመሪያ](docs/guide/plugins.md) · [የልማት መግለጫ](docs/plugins.md)
 - **በሁሉም መድረኮች አንድ ቀላል አካባቢ።** Cage በmacOS፣ Windows እና Linux ላይ ውስብስብ ብዙ እንግዳ ሥርዓቶችን ሳያስተዳድር ያንኑ ቀላል Debian 13 አካባቢ ከተመሳሳይ መሣሪያዎች እና አሠራር ጋር ይጠቀማል። [Debian አካባቢ](docs/guide/guest-systems.md)
@@ -71,8 +72,10 @@ Claude Cage ተርሚናልን፣ አሳሽን፣ አርታዒን፣ ኦፊሴ�
 ይህንን ጥያቄ ወደ AI ወኪልዎ ይላኩ (ኮዴክስ ፣ ዲኤስኤስ ፣ የስራ ጓደኛ - ምናልባት Claude ኮድ 😁 ላይሆን ይችላል)
 
 ```markdown
-የ https://github.com/Lee-xeo/Claude-Cage የቅርብ ጊዜ ምንጭ ኮድ አውርድ፣ ገንባ፣ ጥቅል አድርግና ጫን። የCage ፕሮክሲ በአካባቢዬ ያለውን የClash xx ኖድ ተጠቅሞ በእኔ xx IP እንዲወጣ አዋቅር። ሂደቱን በሙሉ ተከታተል፣ ችግሮችን በቀጥታ አስተካክል፣ አስፈላጊ ከሆነም ተስማሚነትን ለማሻሻል በፕሮጀክቱ issue አስገባ።
+የ https://github.com/Lee-xeo/Claude-Cage የቅርብ ጊዜ ምንጭ ኮድ አውርድ፣ ገንባ፣ ጥቅል አድርግና ጫን። ወደ [የፋይል ዱካ] የላክሁትን የኖድ ውቅር ወደ Cage አስገባ። የፕሮክሲ ሰንሰለት ከተጠቀምኩ መጀመሪያ አስተላላፊውን ኖድ፣ ቀጥሎም የመውጫውን ኖድ አዋቅር። ለሕዝብ የሚታየው የመውጫ IP ከ[የሚጠበቀው IP] ጋር መዛመዱን አረጋግጥ። ሂደቱን በሙሉ ተከታተል፣ ችግሮችን በቀጥታ አስተካክል፣ አስፈላጊ ከሆነም ተስማሚነትን ለማሻሻል በፕሮጀክቱ issue አስገባ።
 ```
+
+Clash/Mihomo ወይም sing-box በአካባቢው ግንኙነቶችን የሚቀበልበትን አድራሻ (ለምሳሌ `127.0.0.1:7890`) ለላይኛው ኖድ መጠቀም አይቻልም። [የፕሮክሲ ሰንሰለትን ወደ Cage ማዛወር](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 የሚያስፈልግህ አስተማማኝ የአውታረ መረብ ተኪ የመጨረሻ ነጥብ ነው። ይህ ፕሮጀክት ማንኛውንም ተኪ አቅራቢን አያስተዋውቅም። አቅራቢን እራስዎ ማግኘት ይችላሉ፣ ለምሳሌ የጥቁር ስህተት ድህረ ገጽን በመፈለግ።
 
@@ -130,9 +133,9 @@ macOS እና የተፈረሙ Windows ስሪቶች በተመረጠው ፕሮክ�
 
 ፕሮጀክቱ በፍጥነት እያደገ ነው. ግብረመልስ ለማጋራት የማህበረሰብ ቡድኑን ይቀላቀሉ; የማህበረሰብ ጠባቂዎች እንኳን ደህና መጡ።
 
-| QQ group · 112745758 | WeChat |
+| QQ group · 782087179 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

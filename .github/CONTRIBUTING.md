@@ -67,6 +67,8 @@ bash scripts/build-app.sh
 
 使用 `GOTOOLCHAIN=local` 时，先让 `PATH` 中的 Go 本身满足两个模块的要求，例如 Go 1.27.3 或更新版本；仅准备 Go 1.26.10 会在构建 `tools/tailnet` 时失败。离线构建还需预先准备 Go 模块、前端依赖和构建脚本所需的下载材料。Windows 与 Linux 构建也会使用该子模块，须核对同一版本要求。
 
+前端由 `make` 通过 `npm --prefix ui ci` 和 `npm run --prefix ui build` 构建。macOS CI 使用 Node.js 24；`ui` 依赖的 Vite 8 及其 Rolldown 打包器要求 Node.js 20.19+ 或 22.12+。建议与 CI 一致，使用 Node 24 的最新补丁版，构建前用 `node -v` 确认。
+
 `build-app.sh` 会先获取随附的代理核心 Mihomo。单独运行 `make cage` 只生成 `_output/bin/cage`，不含代理核心，此时代理导入会直接报“随附代理核心缺失”；在 macOS 或 Linux x86_64 上运行 `make cage-core`，它会校验并放到 `_output/proxy-core/mihomo`，`cage` 运行时从这里或同目录加载。
 
 ### macOS 构建排查
@@ -75,12 +77,16 @@ bash scripts/build-app.sh
 
 | 现象 | 处理 |
 | --- | --- |
-| cgo 链接报 `unknown architecture`（例如 `arm64e.x1`） | 默认 SDK 比 clang 新。未设置 `SDKROOT` 时，脚本会改用本机已安装、能成功链接的最新 SDK 并提示所用路径；都不能链接时请更新 Xcode 或 Command Line Tools，或手动设置 `SDKROOT`。 |
+| cgo 链接报 `unknown architecture`（例如 `arm64e.x1`）或 Swift 报 `this SDK is not supported by the compiler` | 默认 SDK 比本机 clang 或 swiftc 新。未设置 `SDKROOT` 时，脚本会改用本机已安装、同时通过 C 链接与 Swift 导入 Cocoa 探测的最新 SDK 并提示所用路径；都不可用时请更新 Xcode 或 Command Line Tools，或手动设置 `SDKROOT`。 |
 | Swift 报 `redefinition of module 'SwiftBridging'` | Command Line Tools 升级后残留了旧的模块映射文件，`usr/include/swift/module.modulemap` 与 `bridging.modulemap` 重复定义。重新安装 Command Line Tools，或用 `xcode-select` 选择完整 Xcode。脚本不修改系统工具链。 |
 | 图标生成阶段出现与 Swift 无关的报错 | `PATH` 上可能有同名的非 Apple `swift`。构建脚本通过 `xcrun` 调用 Swift，若仍失败，检查 `xcode-select -p`。 |
-| 签名报 `resource fork, Finder information, or similar detritus not allowed` | 仓库位于 iCloud Drive 等文件同步目录时，文件会带上扩展属性。脚本在签名前清除应用包内的扩展属性；无法清除时，把仓库移到不受同步管理的目录再构建。 |
+| 签名报 `resource fork, Finder information, or similar detritus not allowed` | 文件同步软件可能在签名期间写入 Finder 属性。脚本在本机临时目录签名，使用 `--install` 可直接安装到 `~/Applications`。若只需构建且同步目录中的成品无法通过校验，可将 `CAGE_BUILD_OUTPUT` 设为同步目录外的绝对 `.app` 路径。 |
+| `npm ci` 报 `EBADENGINE`，随后 Rolldown 可能报 `Cannot find native binding` | 用 `node -v` 与警告中的版本要求对照。若当前 Node 版本不符合要求，切换到 Node 24 后重新构建。 |
+| Rolldown 报 `Cannot find native binding`，内层 `dlopen` 错误含 `different Team IDs` | 用 `node -p 'process.execPath'` 查看实际运行的 Node。如果路径指向其他桌面应用内置的 Node，将 Node.js 官方 macOS 发行包的 `bin` 目录放到当前终端的 `PATH` 首位，再运行构建。 |
 | 只允许写入工作区的沙箱中 npm、uv 或 Swift 模块缓存报 `Operation not permitted` | 脚本发现默认缓存目录不可写时，改用 `_output/cache` 下的 npm、uv 和 Swift 模块缓存。`iconutil` 在部分沙箱中仍会报 `Failed to generate ICNS`，这一步需要在沙箱外运行构建。 |
 | 检出路径经过 `/tmp` 等符号链接 | 构建脚本按真实路径判断入口，可以在符号链接目录中构建。 |
+| 获取代理核心时报 `The Mihomo license could not be obtained` | `raw.githubusercontent.com` 不可达时，脚本会改从 GitHub 源码归档提取 Mihomo 的 LICENSE，许可证正文和源码归档均按固定 SHA-256 校验；两者都失败时停止构建，避免应用包缺少许可证。按报错把对应版本的 LICENSE 纯文本或源码归档放到提示的 `_output/proxy-core/` 路径，或把 `CAGE_GITHUB_MIRROR` 设为可访问的 HTTPS GitHub 下载镜像前缀，再重新运行。 |
+| `make cage` 下载 Go 工具链或模块失败，例如访问 `sum.golang.org` 超时 | 设置可访问的模块代理和校验数据库后重试，例如 `GOPROXY=https://goproxy.cn,direct GOSUMDB=sum.golang.google.cn bash scripts/build-app.sh`。`tools/tailnet` 需要的 Go 1.27.3 工具链也经由 `GOPROXY` 下载；也可以先安装满足要求的 Go 并使用 `GOTOOLCHAIN=local`。 |
 
 ## 维护者：配置自动邀请
 

@@ -667,6 +667,8 @@ export function AppearanceSettings() {
         await update((previous) => ({
           ...value,
           customThemes: previous.customThemes,
+          syncGuestTheme: previous.syncGuestTheme,
+          blurStatusNetwork: previous.blurStatusNetwork,
         }))
       )
         setSynced(true);
@@ -720,6 +722,20 @@ export function AppearanceSettings() {
                 </button>
               ))}
             </div>
+          </SettingRow>
+          <SettingRow
+            label={tr("同步环境内部主题")}
+            description={tr("将环境内的浏览器、编辑器、桌面应用与 Claude Code 同步为相同的浅色或深色主题。")}
+          >
+            <label className="appearance-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={tr("同步环境内部主题")}
+                checked={appearance.syncGuestTheme}
+                onChange={(e) => patch({ syncGuestTheme: e.target.checked })}
+              />
+            </label>
           </SettingRow>
         </div>
         <div className="theme-card-grid">
@@ -800,6 +816,20 @@ export function AppearanceSettings() {
                 aria-label={tr("字体平滑")}
                 checked={appearance.fontSmoothing}
                 onChange={(e) => patch({ fontSmoothing: e.target.checked })}
+              />
+            </label>
+          </SettingRow>
+          <SettingRow
+            label={tr("模糊状态栏中的 IP 与位置")}
+            description={tr("截图或共享屏幕时模糊底部状态栏中的出口 IP 和位置，鼠标悬停或键盘聚焦时显示。")}
+          >
+            <label className="appearance-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={tr("模糊状态栏中的 IP 与位置")}
+                checked={appearance.blurStatusNetwork}
+                onChange={(e) => patch({ blurStatusNetwork: e.target.checked })}
               />
             </label>
           </SettingRow>

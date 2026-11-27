@@ -6,7 +6,7 @@ if ! locale -a | tr '[:upper:]' '[:lower:]' | grep -qx "${CAGE_LOCALE,,}" && ! l
   printf '%s UTF-8\n' "$CAGE_LOCALE" | sudo tee -a /etc/locale.gen >/dev/null
   sudo locale-gen >/dev/null
 fi
-printf 'TZ=%s\nLANG=%s\nLC_ALL=%s\nCAGE_LANGUAGE=%s\nBROWSER=/usr/local/bin/cage-open\nPULSE_SERVER=unix:/run/cage-audio/native\n' "$CAGE_TZ" "$CAGE_LOCALE" "$CAGE_LOCALE" "$CAGE_LANGUAGE" | sudo tee /etc/claude-cage/environment >/dev/null
+printf 'TZ=%s\nLANG=%s\nLC_ALL=%s\nCAGE_LANGUAGE=%s\nBROWSER=/usr/local/bin/xdg-open\nPULSE_SERVER=unix:/run/cage-audio/native\n' "$CAGE_TZ" "$CAGE_LOCALE" "$CAGE_LOCALE" "$CAGE_LANGUAGE" | sudo tee /etc/claude-cage/environment >/dev/null
 sudo update-locale "LANG=$CAGE_LOCALE" "LC_ALL=$CAGE_LOCALE"
 set -a
 . /etc/claude-cage/environment
@@ -28,4 +28,10 @@ CAGE_SHELL_PROMPT
 # Only the scoped installer receives this variable; services load their fixed environment.
 if [ -n "${CAGE_INSTALL_PROXY:-}" ]; then
   export http_proxy="$CAGE_INSTALL_PROXY" https_proxy="$CAGE_INSTALL_PROXY" HTTP_PROXY="$CAGE_INSTALL_PROXY" HTTPS_PROXY="$CAGE_INSTALL_PROXY"
+fi
+
+if command -v git >/dev/null 2>&1; then
+  git config --system --get core.checkStat >/dev/null 2>&1 || sudo git config --system core.checkStat minimal
+  git config --system --get core.trustctime >/dev/null 2>&1 || sudo git config --system core.trustctime false
+  git config --system --get core.preloadIndex >/dev/null 2>&1 || sudo git config --system core.preloadIndex true
 fi

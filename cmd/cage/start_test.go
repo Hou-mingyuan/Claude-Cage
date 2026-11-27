@@ -13,54 +13,47 @@ import (
 	"github.com/sylvinus/agent-vm/internal/cli"
 )
 
-func TestStartEnvironmentDispatch(t *testing.T) {
-	for _, command := range []string{"up", "login"} {
-		for _, reset := range []bool{false, true} {
-			t.Run(command+"/reset="+strconv.FormatBool(reset), func(t *testing.T) {
-				args := []string{"run", "true"}
-				if reset {
-					args = append([]string{"--reset"}, args...)
+func TestVMStartDispatch(t *testing.T) {
+	for _, reset := range []bool{false, true} {
+		t.Run("reset="+strconv.FormatBool(reset), func(t *testing.T) {
+			args := []string{"run", "true"}
+			if reset {
+				args = append([]string{"--reset"}, args...)
+			}
+			var output bytes.Buffer
+			stdio := cli.IO{Stdin: strings.NewReader(""), Stdout: &output, Stderr: &output}
+			var events []string
+			code := startEnvironment(args, stdio, func(got []string, streams cli.IO) int {
+				if streams != stdio || !slices.Equal(got, args) {
+					t.Fatalf("unexpected VM boot invocation: %q", got)
 				}
-				input := strings.NewReader("login input")
-				var stdout, stderr bytes.Buffer
-				stdio := cli.IO{Stdin: input, Stdout: &stdout, Stderr: &stderr}
-				var events []string
-				invoke := func(got []string, streams cli.IO) int {
-					if streams != stdio {
-						t.Fatal("start or login replaced interactive IO")
-					}
-					if len(events) == 0 {
-						if !slices.Equal(got, args) {
-							t.Errorf("start got %q, want %q", got, args)
-						}
-						events = append(events, "start")
-					} else {
-						want := []string{"run", "--tty", "bash", "-lc", "source /etc/profile.d/claude-cage.sh; exec claude auth login"}
-						if !slices.Equal(got, want) {
-							t.Errorf("login got %q, want %q", got, want)
-						}
-						events = append(events, "login")
-					}
-					return 0
-				}
-				code := startEnvironment(command, args, stdio, invoke, func() error {
-					events = append(events, "services")
-					return nil
-				})
-				want := []string{"start", "services"}
-				if command == "login" {
-					want = append(want, "login")
-				}
-				if code != 0 || !slices.Equal(events, want) || !strings.Contains(stdout.String(), "services are ready") {
-					t.Fatalf("exit=%d events=%q stdout=%q stderr=%q", code, events, stdout.String(), stderr.String())
-				}
-			})
-		}
+				events = append(events, "boot")
+				return 0
+			}, func() error { events = append(events, "services"); return nil })
+			if code != 0 || !slices.Equal(events, []string{"boot", "services"}) || !strings.Contains(output.String(), "services are ready") {
+				t.Fatalf("exit=%d events=%v output=%q", code, events, output.String())
+			}
+		})
+	}
+}
+
+func TestUpRejectsLegacyResetBeforeOpeningProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profile", "config.json")
+	t.Setenv("CLAUDE_CAGE_CONFIG", path)
+	old := os.Args
+	t.Cleanup(func() { os.Args = old })
+	os.Args = []string{"cage", "up", "--reset"}
+	code, _, message := captureRun(t, run)
+	if code != 2 || !strings.Contains(message, "cage start --reset") || !strings.Contains(message, "lost") {
+		t.Fatalf("code=%d message=%q", code, message)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("opened profile: %v", err)
 	}
 }
 
 func TestStartUsageBeforeOpeningProfile(t *testing.T) {
-	for _, command := range []string{"up", "login"} {
+	for _, command := range []string{"start", "up", "login"} {
 		for _, args := range [][]string{
 			{"--unknown"}, {"unexpected"}, {"--reset", "--unknown"},
 			{"--help", "--unknown"}, {"-h", "unexpected"},
@@ -86,42 +79,28 @@ func TestStartUsageBeforeOpeningProfile(t *testing.T) {
 	}
 }
 
-func TestStartEnvironmentStopsOnFailure(t *testing.T) {
-	for _, phase := range []string{"start", "services", "login"} {
+func TestVMStartFailureStopsBeforeNextStage(t *testing.T) {
+	for _, phase := range []string{"boot", "services"} {
 		t.Run(phase, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
 			var events []string
-			invoke := func(args []string, stdio cli.IO) int {
-				event := "start"
-				if slices.Contains(args, "--tty") {
-					event = "login"
-				}
-				events = append(events, event)
-				if event == phase {
-					return 7
-				}
-				return 0
-			}
+			var output bytes.Buffer
 			code, _, _ := captureRun(t, func() int {
-				return startEnvironment("login", []string{"--reset", "run", "true"}, cli.IO{Stdout: &stdout, Stderr: &stderr}, invoke, func() error {
-					events = append(events, "services")
-					if phase == "services" {
-						return errors.New("service startup failed")
+				return startEnvironment([]string{"--reset", "run", "true"}, cli.IO{Stdout: &output, Stderr: &output}, func([]string, cli.IO) int {
+					events = append(events, "boot")
+					if phase == "boot" {
+						return 7
 					}
-					return nil
-				})
+					return 0
+				}, func() error { events = append(events, "services"); return errors.New("service startup failed") })
 			})
-			want, wantCode := []string{"start"}, 7
-			if phase != "start" {
-				want = append(want, "services")
-			}
+			want := []string{"boot"}
+			wantCode := 7
 			if phase == "services" {
+				want = append(want, "services")
 				wantCode = 1
-			} else if phase == "login" {
-				want = append(want, "login")
 			}
 			if code != wantCode || !slices.Equal(events, want) {
-				t.Fatalf("exit=%d events=%q, want exit=%d events=%q", code, events, wantCode, want)
+				t.Fatalf("exit=%d events=%v", code, events)
 			}
 		})
 	}

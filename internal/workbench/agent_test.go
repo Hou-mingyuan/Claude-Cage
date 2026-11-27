@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/guestprofile"
 )
 
 func agentTestController(t *testing.T) *Server {
@@ -114,6 +115,32 @@ func TestAgentSettingsPatchPreservesOmittedFields(t *testing.T) {
 		if _, err := AgentCall(context.Background(), s.configPath, "settings.patch", json.RawMessage(input)); err == nil {
 			t.Fatal("accepted invalid patch", input)
 		}
+	}
+}
+
+func TestInstallPreferenceWithProvisionedGuestDoesNotRevalidateEgress(t *testing.T) {
+	s := agentTestController(t)
+	if _, err := guestprofile.Create(s.profile, guestprofile.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	setupUnreachableManagedProxy(t, s)
+	patch := func(input string) Job {
+		t.Helper()
+		if _, err := AgentCall(t.Context(), s.configPath, "settings.patch", json.RawMessage(input)); err != nil {
+			t.Fatal(err)
+		}
+		return awaitJobIdle(t, &s.jobs)
+	}
+	result := patch(`{"patch":{"install_tls12_compat":true}}`)
+	if result.Error != "" || !s.preferences.InstallTLS12Compat {
+		t.Fatalf("install preference was not saved with the egress offline: %s", result.Error)
+	}
+	if _, err := os.Stat(filepath.Join(s.profile, "previous-profile.json")); !os.IsNotExist(err) {
+		t.Fatalf("preference-only change entered the environment replacement path: %v", err)
+	}
+	result = patch(`{"patch":{"exit_policy":{"mode":"static","scope":"country","ip":"8.8.8.8"}}}`)
+	if result.Error == "" || result.SettingsSaved {
+		t.Fatal("a real egress policy change was saved without validating the offline route")
 	}
 }
 
@@ -422,5 +449,11 @@ func TestAgentReleasesDesktopOnboardingWithoutQuittingWindow(t *testing.T) {
 	}
 	if _, err := AgentCall(context.Background(), s.configPath, "environment.start", json.RawMessage(`{}`)); !errors.As(err, &ae) || ae.Code != "state_conflict" {
 		t.Fatalf("agent start during reclaimed onboarding: %v", err)
+	}
+}
+
+func TestAgentAuthenticationFailureOpensDesktop(t *testing.T) {
+	if e := agentHTTPError(401); e.Code != "authentication_failed" || e.NextAction != "open_desktop" {
+		t.Fatalf("rejected session points at a controller restart: %+v", e)
 	}
 }

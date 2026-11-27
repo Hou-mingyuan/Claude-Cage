@@ -63,6 +63,10 @@ class SubscriptionStatusTimeout(SubscriptionStatusError):
     pass
 
 
+class ClaudeCLINotInstalled(ValueError):
+    pass
+
+
 def profile(account_id):
     if account_id != DEFAULT and not re.fullmatch("[0-9a-f]{24}", account_id):
         raise ValueError("invalid account ID")
@@ -2601,7 +2605,7 @@ def main(args, *, mobile_settings_fd=None, verify_mobile=None):
             raise ValueError("not the default subscription configuration")
     binary = os.environ.get("CAGE_CLI_BINARY") if os.name == "nt" else shutil.which("claude", path=env["PATH"])
     if not binary:
-        raise ValueError("Claude is not installed")
+        raise ClaudeCLINotInstalled("Claude is not installed")
     if mode == "archive-login":
         # Only authentication follows a user who signs into a different account.
         if len(rest) != 2 or base.name == DEFAULT or base.name == rest[0]:
@@ -2680,22 +2684,29 @@ def main(args, *, mobile_settings_fd=None, verify_mobile=None):
                 finish = [scoped or OPEN, *owner_args, "--login-id", account_id, "--finish-login"]
                 subprocess.run(finish, env=os.environ, timeout=8, check=False,
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if mode == "run":
+    if mode in ("run", "native"):
         if os.name != "nt" and (owner_args or scoped or sys.platform == "darwin"):
             env["BROWSER"] = _runtime["launcher"](scoped or OPEN, executable=True, arguments=owner_args, login_config=config_directory(base))
-        shared_profile_resources(base)
-        if not settings_flags(rest) and not has_status_line(base):
-            rest = ["--settings", json.dumps({"statusLine": status_line(_runtime["command_text"](__file__, ["statusline", account_id]))}), *rest]
-        rest = shared_launch_arguments(base, rest, mobile_settings_fd)
-        rest = shared_mcp_arguments(base, rest)
+        # Like Desktop, the native CLI must see the account's shared defaults
+        # through its profile even for subcommands that accept no extra flags.
+        shared_profile_resources(base, desktop=(mode == "native"))
+        if mode == "run":
+            if not settings_flags(rest) and not has_status_line(base):
+                rest = ["--settings", json.dumps({"statusLine": status_line(_runtime["command_text"](__file__, ["statusline", account_id]))}), *rest]
+            rest = shared_launch_arguments(base, rest, mobile_settings_fd)
+            rest = shared_mcp_arguments(base, rest)
         # Profile/project settings can override inherited authentication. Check
         # the actual CLI method in the project before launching the conversation.
         options = settings_flags(rest)
         # A mobile turn verifies and executes with the same anonymous settings
         # snapshot. Keep its descriptor open across the auth-status child.
         pass_fds = () if mobile_settings_fd is None else (mobile_settings_fd,)
-        reading = identity(binary, env, Path.cwd(), options, pass_fds=pass_fds) if expected else None
-        if not expected or subject(reading) != expected:
+        # Native auth subcommands report and repair the profile's actual state.
+        # They must remain usable after OAuth expires; the workbench prevents
+        # changing an identity being used by another live session.
+        auth_action = mode == "native" and rest[:1] == ["auth"]
+        reading = identity(binary, env, Path.cwd(), options, pass_fds=pass_fds) if expected and not auth_action else None
+        if not auth_action and (not expected or subject(reading) != expected):
             print("此项目未使用所选 Claude 订阅。请检查项目配置和账号登录状态。", file=sys.stderr)
             return 1
         if mobile_settings_fd is not None:
@@ -2766,6 +2777,8 @@ def entrypoint(args):
         print("读取 Claude 订阅状态超时，请稍后重试；现有登录信息已保留。", file=sys.stderr)
     except SubscriptionStatusError:
         print("无法读取 Claude 订阅状态，请确认官方 CLI 可正常运行后重试；现有登录信息已保留。", file=sys.stderr)
+    except ClaudeCLINotInstalled:
+        print("未找到官方 Claude Code CLI，请先在环境中安装后重试。", file=sys.stderr)
     except _runtime["RuntimePathConflict"]:
         print("终端运行路径发生冲突，原数据已保留，请同步环境组件后重试。", file=sys.stderr)
     except (OSError, ValueError, subprocess.SubprocessError, TypeError):

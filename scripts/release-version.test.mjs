@@ -11,6 +11,7 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'cage-release-version-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'VERSION'), '1.2.3-alpha.9\r\n');
+  writeFileSync(join(root, 'package.json'), '{"name":"claude-cage", "version": "1.2.3-alpha.9"}\n');
   for (const directory of ['ui', 'www']) {
     mkdirSync(join(root, directory));
     writeFileSync(join(root, directory, 'package.json'), '{\r\n\t"name" : "fixture",\r\n\t"version": "1.2.3-alpha.9",\r\n\t"dependencies": {"same-version": "1.2.3-alpha.9"},\r\n\t"number": 900719925474099312345\r\n}\r\n');
@@ -77,12 +78,12 @@ test('reserves existing tags including future draft tags and ignores noncanonica
   assert.equal(nextVersion('0.1.0', 'major', ['v2.4.9-rc.3']), '3.0.0');
 });
 
-test('returns five edits without writing files or changing dependency data and formatting', t => {
+test('returns six edits without writing files or changing dependency data and formatting', t => {
   const root = fixture(t);
-  const paths = ['VERSION', 'ui/package.json', 'ui/package-lock.json', 'www/package.json', 'www/package-lock.json'];
+  const paths = ['VERSION', 'package.json', 'ui/package.json', 'ui/package-lock.json', 'www/package.json', 'www/package-lock.json'];
   const before = new Map(paths.map(path => [join(root, path), readFileSync(join(root, path), 'utf8')]));
   const edits = versionFiles(root, '1.2.3');
-  assert.equal(edits.size, 5);
+  assert.equal(edits.size, 6);
   assert.deepEqual([...edits.keys()], [...before.keys()]);
   assert.equal(edits.get(join(root, 'VERSION')), '1.2.3\r\n');
   for (const [path, original] of before) {
@@ -100,7 +101,7 @@ test('returns five edits without writing files or changing dependency data and f
 });
 
 test('rejects inconsistent versions in any package or lockfile root without writing', t => {
-  for (const path of ['ui/package.json', 'ui/package-lock.json', 'www/package.json', 'www/package-lock.json']) {
+  for (const path of ['package.json', 'ui/package.json', 'ui/package-lock.json', 'www/package.json', 'www/package-lock.json']) {
     const root = fixture(t);
     const file = join(root, path);
     const original = readFileSync(file, 'utf8');

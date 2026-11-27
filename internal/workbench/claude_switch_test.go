@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -16,31 +17,6 @@ import (
 	"al.essio.dev/pkg/shellescape"
 	"github.com/google/uuid"
 )
-
-// settledTempDir is t.TempDir for directories that fixture processes or server
-// goroutines may still write into when the test returns (macOS runners saw
-// "directory not empty" from the plain cleanup). Removal retries briefly.
-func settledTempDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "cage-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			err := os.RemoveAll(dir)
-			if err == nil || time.Now().After(deadline) {
-				if err != nil {
-					t.Errorf("remove %s: %v", dir, err)
-				}
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	})
-	return dir
-}
 
 func TestClaudeSwitchUnopenedSessionWhenSourceLoggedOut(t *testing.T) {
 	s, _, project := metadataFixture(t)
@@ -69,9 +45,29 @@ func TestClaudeSwitchUnopenedSessionWhenSourceLoggedOut(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".bash_profile"), []byte("export PATH="+shellescape.Quote(bin)+":/usr/bin:/bin\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	mobileTestSSHRewrite(t, s, home, []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin"}, func(cmd string) string {
+	guestEnv := []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin"}
+	mobileTestSSHRewrite(t, s, home, guestEnv, func(cmd string) string {
 		return strings.ReplaceAll(cmd, "/usr/local/bin/cage-claude-account", stubPath)
 	})
+	// The fake guest is this host: the helper runs on its python3 through a
+	// login shell. A real guest answers in a second or two, but a loaded CI
+	// host can take longer than the product's per-attempt deadline, so the
+	// test gives each attempt more time. The interpreter is started once
+	// first, outside any deadline; each step is logged for failure diagnosis.
+	previousTimeout := cliChannelTimeout
+	cliChannelTimeout = 2 * time.Minute
+	t.Cleanup(func() { cliChannelTimeout = previousTimeout })
+	for _, step := range [][]string{
+		{"/usr/bin/python3", "-I", "-c", ""},
+		{"/usr/bin/python3", "-I", "-c", ""},
+		{"/bin/bash", "-lc", "exec python3 -I -c ''"},
+	} {
+		started := time.Now()
+		cmd := exec.Command(step[0], step[1:]...)
+		cmd.Dir, cmd.Env = home, guestEnv
+		output, err := cmd.CombinedOutput()
+		t.Logf("guest interpreter %q: %v err=%v output=%q", step, time.Since(started).Round(time.Millisecond), err, output)
+	}
 
 	a, b := strings.Repeat("a", 24), strings.Repeat("b", 24)
 	list := claudeAccountList{Accounts: []claudeAccount{
@@ -117,7 +113,14 @@ func TestClaudeSwitchUnopenedSessionWhenSourceLoggedOut(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	listStarted := time.Now()
 	listResp := request(s, "GET", "/api/cli/sessions", s.origin, "", true)
+	t.Logf("first session list (helper install and retry): %v", time.Since(listStarted).Round(time.Millisecond))
+	t.Cleanup(func() {
+		if t.Failed() {
+			logCLIChannelDiagnostics(t, s.profile)
+		}
+	})
 	if listResp.Code != 200 {
 		t.Fatalf("list sessions failed: %d %s", listResp.Code, listResp.Body.String())
 	}
@@ -132,7 +135,7 @@ func TestClaudeSwitchUnopenedSessionWhenSourceLoggedOut(t *testing.T) {
 		}
 	}
 	if discoveredID == "" {
-		t.Fatal("did not discover unopened session from Account A")
+		t.Fatalf("did not discover unopened session from Account A (response: %s)", listResp.Body.String())
 	}
 
 	// Inspect must report supported=true, unopened=true, and candidate B even though A is signed_out.
@@ -210,6 +213,24 @@ func TestClaudeSwitchUnopenedSessionWhenSourceLoggedOut(t *testing.T) {
 	}
 	if updated.Account.ID != b || updated.Launcher != "claude" || len(updated.Executions) != 1 || updated.Executions[0].CLIID != sourceCLIID {
 		t.Fatalf("unexpected updated record: %+v", updated)
+	}
+}
+
+// logCLIChannelDiagnostics reports the channel's own records (operation,
+// failure, elapsed_ms, shared) for a failed run.
+func logCLIChannelDiagnostics(t *testing.T, profile string) {
+	t.Helper()
+	files, _ := filepath.Glob(filepath.Join(profile, "logs", "*"))
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, "cli-channel") {
+				t.Logf("diagnostics: %s", line)
+			}
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ package hostbridge
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,13 +22,44 @@ func userShell() string {
 	return "/bin/sh"
 }
 
-// shellCommand runs the command in the user's own shell, so it sees the same
-// PATH and tools as their terminal.
-func shellCommand(command string) *exec.Cmd {
-	cmd := exec.Command(userShell(), "-c", command)
-	cmd.Env = userEnv()
+func normalizeShell(raw string) (string, error) {
+	switch name := strings.ToLower(strings.TrimSpace(raw)); name {
+	case "", "default":
+		return "", nil
+	case "bash", "sh", "zsh":
+		return name, nil
+	default:
+		return "", fmt.Errorf("unsupported shell %q; use default, bash, sh, or zsh", raw)
+	}
+}
+
+// shellCommand runs the command in the requested shell (or the user's own
+// shell when shell is empty), so it sees the same PATH and tools as their
+// terminal.
+func shellCommand(command, shell string) (*exec.Cmd, error) {
+	env := userEnv()
+	var program string
+	switch shell {
+	case "":
+		program = userShell()
+	case "sh":
+		program = "/bin/sh"
+	case "bash", "zsh":
+		program = lookProgram(shell, env)
+		if !filepath.IsAbs(program) {
+			if found, err := exec.LookPath(shell); err == nil {
+				program = found
+			} else {
+				return nil, fmt.Errorf("shell %q is not installed on this computer", shell)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported shell %q; use default, bash, sh, or zsh", shell)
+	}
+	cmd := exec.Command(program, "-c", command)
+	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	return cmd
+	return cmd, nil
 }
 
 // hideWindow does nothing here: programs open no window of their own.

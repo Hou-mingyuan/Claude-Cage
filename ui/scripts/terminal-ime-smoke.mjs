@@ -12,7 +12,7 @@ const { browser, page, errors } = await createWorkbench({
         const { type, data } = JSON.parse(message);
         if (type === "input") {
           inputs.push(data);
-          if (data === "\r") socket.send(Buffer.from("INPUT_DONE"));
+          if (data.includes("\r")) socket.send(Buffer.from("INPUT_DONE"));
         }
       });
       socket.send(Buffer.from("$ "));
@@ -55,7 +55,7 @@ try {
   await page.keyboard.press("a");
   await page.keyboard.press("Enter");
   await page.locator(".xterm-rows").getByText(/INPUT_DONE/).waitFor();
-  assert.deepEqual(inputs, ["（", "）", "？", "a", "\r"]);
+  assert.equal(inputs.join(""), "（）？a\r");
   assert.deepEqual(errors, []);
   console.log("IME direct commits and ordinary input reached the shell once per key.");
 } finally { await browser.close(); }

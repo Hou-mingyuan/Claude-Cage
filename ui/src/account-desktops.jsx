@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Monitor,
   Columns2,
+  PanelLeftOpen,
   Pencil,
   Power,
   Plus,
@@ -17,17 +18,24 @@ import { BrowserUploads } from "./browser-uploads";
 import { ProjectDialog } from "./project-dialog";
 import { sendFiles } from "./file-transfer";
 import { shareClipboard } from "./shared-clipboard.mjs";
+import { commitDesktopText } from "./desktop-text-input.mjs";
 import { desktopInputChannel } from "./desktop-input-channel.mjs";
 import { installRemoteInput } from "./remote-input";
 import { guestKeys } from "./guest-keys.mjs";
+import { followDisplaySize } from "./remote-display.mjs";
 import { runtimeSocketURL } from "./client-context.mjs";
 import { translate, useTranslation } from "./interface-language.mjs";
 import { localizeBackendMessage } from "./backend-message.mjs";
 import {
+  canDeleteDesktop,
   desktopClipboardState,
   desktopMergeNoticeTarget,
   desktopTitle as title,
+  flatDesktopTooltip,
+  hasDefaultDesktop,
+  isMultiDesktopMode,
   reconcileAccountDesktopPanes,
+  soleDesktopInstance,
 } from "./account-desktop-state.mjs";
 
 const entry = (id) => "/desktop-instances/" + id;
@@ -41,21 +49,58 @@ function DesktopAccountLabel({ account }) {
   </>;
 }
 
-function DesktopRowAction({ label, icon: Icon, disabled, className = "", onClick }) {
+function DesktopRowAction({ label, icon: Icon, disabled, className = "", onClick, ...props }) {
   return (
     <button
       type="button"
       className={`icon-button ${className}`.trim()}
       aria-label={label}
+      title={label}
       disabled={disabled}
       onClick={onClick}
+      {...props}
     >
       <Icon size={14} />
     </button>
   );
 }
 
-export function useAccountDesktops(onShow, onHide, notify, confirm, visible, revision) {
+function DesktopCreateForm({ catalog, accountID, onAccountChange, disabled, pending, onSubmit, onCancel, flat = false }) {
+  const tr = useTranslation();
+  return (
+    <div
+      className={`desktop-create-fields ${flat ? "desktop-create-flat" : ""}`.trim()}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <label>
+        {tr("所属账号")}
+        <InlineSelect inline aria-label={tr("Desktop 所属账号")} value={accountID} onValueChange={onAccountChange}>
+          <option value="">{tr("在此实例中登录")}</option>
+          {(catalog?.accounts || []).map((a) => (
+            <option key={a.id} value={a.id}>{title(a)}</option>
+          ))}
+        </InlineSelect>
+      </label>
+      <div className="desktop-create-actions">
+        <button type="button" className="primary" disabled={disabled || Boolean(pending)} onClick={onSubmit}>
+          {tr("打开 Desktop")}
+        </button>
+        {flat && (
+          <button type="button" className="quiet-button" disabled={Boolean(pending)} onClick={onCancel}>
+            {tr("取消")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function useAccountDesktops(onShow, onHide, notify, confirm, visible, revision, onDefaultRemoved, preload = false) {
   const [expanded, setExpanded] = useState(false);
   const [catalog, setCatalog] = useState(null);
   const [panes, setPanes] = useState([]);
@@ -69,7 +114,11 @@ export function useAccountDesktops(onShow, onHide, notify, confirm, visible, rev
   const previousDefaultRedirect = useRef(null);
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
-  const refresh = useCallback(async (background = false) => {
+  const onHideRef = useRef(onHide);
+  onHideRef.current = onHide;
+  const onDefaultRemovedRef = useRef(onDefaultRemoved);
+  onDefaultRemovedRef.current = onDefaultRemoved;
+  const refresh = useCallback(async (background = false, silent = false) => {
     const g = ++generation.current;
     try {
       const next = await api("/desktop-instances");
@@ -83,17 +132,22 @@ export function useAccountDesktops(onShow, onHide, notify, confirm, visible, rev
       }
       previousDefaultRedirect.current = nextDefaultRedirect;
       setCatalog(next);
+      if (Boolean(visibleRef.current) && panesRef.current.length === 0 && next?.default_removed) {
+        onDefaultRemovedRef.current?.();
+        onHideRef.current?.();
+      }
       setPanes((old) => reconcileAccountDesktopPanes(old, next, Boolean(visibleRef.current)));
       return next;
     } catch (e) {
-      if (g === generation.current && !(background && e.status === 409)) notifyRef.current(e.message);
+      if (g === generation.current && !silent && !(background && e.status === 409)) notifyRef.current(e.message);
     }
   }, []);
   // Guest login and window lifecycle events advance the revision in the
   // normal workbench status response. Idle panes need no extra SSH polling.
   useEffect(() => {
     if (expanded || visible) void refresh(true);
-  }, [expanded, visible, revision, refresh]);
+    else if (preload) void refresh(true, true);
+  }, [expanded, visible, preload, revision, refresh]);
   const focus = id => requestAnimationFrame(() =>
     document.getElementById("desktop-pane-" + id)?.querySelector("canvas")?.focus());
   async function act(account, action, beside = false, create = false, anchor = null) {
@@ -172,9 +226,15 @@ export function useAccountDesktops(onShow, onHide, notify, confirm, visible, rev
         setPending(account.id);
         try {
           await api(entry(account.id), undefined, "DELETE");
-          const closingOnly = panesRef.current.length === 1 && panesRef.current[0].id === account.id;
-          setPanes((old) => old.filter((a) => a.id !== account.id));
-          if (closingOnly) onHide();
+          if (account.id === "default") {
+            const viewingDefault = Boolean(visibleRef.current) && panesRef.current.length === 0;
+            onDefaultRemovedRef.current?.();
+            if (viewingDefault) onHideRef.current?.();
+          } else {
+            const closingOnly = panesRef.current.length === 1 && panesRef.current[0].id === account.id;
+            setPanes((old) => old.filter((a) => a.id !== account.id));
+            if (closingOnly) onHideRef.current?.();
+          }
           await refresh();
         } finally {
           lock.current = false;
@@ -194,33 +254,143 @@ export function useAccountDesktops(onShow, onHide, notify, confirm, visible, rev
     remove,
     refresh,
     clear: () => setPanes([]),
+    expand: () => setExpanded(true),
     toggle: () => {
       setExpanded(!expanded);
     },
   };
 }
 
-export function DesktopList({ model, disabled, selected, onDefault, onRename }) {
+export function DesktopList({ model, disabled, selected, defaultRunning = false, onDefault, onDefaultStop, onRename }) {
   const tr = useTranslation();
   const { catalog, expanded, panes, pending } = model;
   const [creating, setCreating] = useState(false);
   const [accountID, setAccountID] = useState("");
   const instances = catalog?.instances ?? catalog?.accounts ?? [];
-  const original = instances.find(a => a.id === "default");
+  const multiMode = isMultiDesktopMode(catalog);
+  const showDefault = hasDefaultDesktop(catalog);
+  const showDelete = canDeleteDesktop(catalog);
+  const canCreate = catalog ? Boolean(catalog.supported && Array.isArray(catalog.instances)) : true;
+  const original = instances.find((a) => a.id === "default");
   const defaultEntry = original || { id: "default", label: tr("默认 Desktop") };
+  const isDefaultRunning = Boolean(defaultEntry.running || defaultRunning);
   const defaultSelected = selected && panes.length === 0;
+  const otherInstances = catalog?.supported ? instances.filter((a) => a.id !== "default") : [];
+  useEffect(() => {
+    setCreating(false);
+    setAccountID("");
+  }, [multiMode]);
   const focusRowActions = (event) => {
     event.preventDefault();
     event.currentTarget.focus();
     event.currentTarget.parentElement?.querySelector(".terminal-row-actions button:not(:disabled)")?.focus();
   };
-  const choose = async () => {
-    if (await model.act({id:accountID}, "start", false, true)) setCreating(false);
+  const toggleCreate = () => {
+    const next = !creating;
+    setCreating(next);
+    if (next) void model.refresh(true);
   };
+  const cancelCreate = () => {
+    setCreating(false);
+    setAccountID("");
+  };
+  const choose = async () => {
+    if (await model.act({ id: accountID }, "start", false, true)) {
+      setCreating(false);
+      setAccountID("");
+      model.expand();
+    }
+  };
+  if (!multiMode) {
+    const sole = soleDesktopInstance(catalog);
+    const isDefaultSole = !sole || sole.id === "default";
+    const isSoleRunning = isDefaultSole ? isDefaultRunning : Boolean(sole.running);
+    const isSolePending = Boolean(pending && (pending === (sole?.id || "default") || pending === "create"));
+    const flatSelected = Boolean(selected);
+    const hasCustomDefault = Boolean(
+      isDefaultSole &&
+        sole &&
+        (sole.number > 0 || (sole.label && sole.label !== tr("默认 Desktop") && sole.label !== "默认 Desktop")),
+    );
+    const showStop = isSoleRunning && (isDefaultSole ? Boolean(onDefaultStop) : true);
+    const openSole = () => {
+      setCreating(false);
+      if (isDefaultSole) onDefault();
+      else void model.act(sole, "start");
+    };
+    const stopSole = (event) => {
+      if (isDefaultSole) onDefaultStop(hasCustomDefault ? sole : null, event.currentTarget);
+      else void model.act(sole, "stop", false, false, event.currentTarget);
+    };
+    return (
+      <div className="account-desktop-nav">
+        <div className={`account-desktop-row ${flatSelected ? "active" : ""}`}>
+          <button
+            type="button"
+            className="sidebar-link"
+            title={flatDesktopTooltip(sole, tr("默认 Desktop"))}
+            aria-current={flatSelected ? "page" : undefined}
+            disabled={Boolean(pending) || disabled}
+            onClick={openSole}
+            onContextMenu={focusRowActions}
+            onKeyDown={(event) => {
+              if (event.key === "F10" && event.shiftKey) focusRowActions(event);
+            }}
+          >
+            <Monitor size={17} />
+            Claude Desktop
+            {isSolePending || isSoleRunning ? (
+              <span className="account-desktop-status" aria-hidden="true">
+                {isSolePending ? "…" : "●"}
+              </span>
+            ) : null}
+          </button>
+          {(showStop || canCreate) && (
+            <div className="terminal-row-actions" role="group" aria-label={tr("{0} 的操作", "Claude Desktop")}>
+              {showStop && (
+                <DesktopRowAction
+                  label={tr("关闭应用")}
+                  icon={Power}
+                  disabled={Boolean(pending) || disabled}
+                  onClick={stopSole}
+                />
+              )}
+              {canCreate && (
+                <DesktopRowAction
+                  label={tr("新建 Desktop")}
+                  icon={Plus}
+                  aria-expanded={creating}
+                  disabled={Boolean(pending) || disabled}
+                  onClick={toggleCreate}
+                />
+              )}
+            </div>
+          )}
+        </div>
+        {creating && canCreate && (
+          <DesktopCreateForm
+            catalog={catalog}
+            accountID={accountID}
+            onAccountChange={setAccountID}
+            disabled={disabled}
+            pending={pending}
+            onSubmit={choose}
+            onCancel={cancelCreate}
+            flat
+          />
+        )}
+      </div>
+    );
+  }
+  const anyChildActive =
+    (showDefault && defaultSelected) ||
+    otherInstances.some((a) => selected && panes.some((p) => p.id === a.id));
+  const headerSelected = selected && (!expanded || !anyChildActive);
   return (
     <div className="account-desktop-nav">
       <button
-        className={"sidebar-link " + (selected ? "selected" : "")}
+        type="button"
+        className={`sidebar-link ${headerSelected ? "selected" : ""}`.trim()}
         aria-expanded={expanded}
         onClick={model.toggle}
       >
@@ -230,13 +400,14 @@ export function DesktopList({ model, disabled, selected, onDefault, onRename }) 
       </button>
       {expanded && (
         <div className="account-desktop-list">
-          {!catalog?.redirects?.default && (
+          {showDefault && (
             <div className={`account-desktop-row ${defaultSelected ? "active" : ""}`}>
               <button
+                type="button"
                 className="sidebar-link"
                 title={title(defaultEntry)}
                 aria-pressed={defaultSelected}
-                disabled={disabled}
+                disabled={Boolean(pending) || disabled}
                 onClick={onDefault}
                 onContextMenu={focusRowActions}
                 onKeyDown={(event) => {
@@ -244,26 +415,47 @@ export function DesktopList({ model, disabled, selected, onDefault, onRename }) 
                 }}
               >
                 <DesktopAccountLabel account={defaultEntry} />
-                {defaultEntry.running ? <span className="account-desktop-status" aria-hidden="true">●</span> : null}
+                {pending === "default" || isDefaultRunning ? <span className="account-desktop-status" aria-hidden="true">{pending === "default" ? "…" : "●"}</span> : null}
               </button>
-              {catalog?.supported && onRename && (
+              {((isDefaultRunning && onDefaultStop) || (catalog?.supported && (onRename || showDelete))) && (
                 <div className="terminal-row-actions" role="group" aria-label={tr("{0} 的操作", title(defaultEntry))}>
-                  <DesktopRowAction
-                    label={tr("重命名")}
-                    icon={Pencil}
-                    disabled={Boolean(pending) || disabled}
-                    onClick={() => onRename(defaultEntry)}
-                  />
+                  {isDefaultRunning && onDefaultStop && (
+                    <DesktopRowAction
+                      label={tr("关闭")}
+                      icon={Power}
+                      disabled={Boolean(pending) || disabled}
+                      onClick={(event) => onDefaultStop(defaultEntry, event.currentTarget)}
+                    />
+                  )}
+                  {catalog?.supported && onRename && (
+                    <DesktopRowAction
+                      label={tr("重命名")}
+                      icon={Pencil}
+                      disabled={Boolean(pending) || disabled}
+                      onClick={() => onRename(defaultEntry)}
+                    />
+                  )}
+                  {showDelete && (
+                    <DesktopRowAction
+                      label={tr("删除")}
+                      icon={Trash2}
+                      className="desktop-delete-action"
+                      disabled={Boolean(pending) || disabled}
+                      onClick={(event) => model.remove({ ...defaultEntry, running: isDefaultRunning }, event.currentTarget)}
+                    />
+                  )}
                 </div>
               )}
             </div>
           )}
-          {catalog?.supported &&
-            instances.filter(a => a.id !== "default").map((a) => {
+          {otherInstances.map((a) => {
               const active = selected && panes.some((p) => p.id === a.id);
+              const showBeside = panes.length > 0 && !panes.some((p) => p.id === a.id);
+              const hasRowActions = showBeside || a.running || Boolean(onRename) || showDelete;
               return (
                 <div className={`account-desktop-row ${active ? "active" : ""}`} key={a.id}>
                   <button
+                    type="button"
                     title={title(a) + (a.running ? " " + tr("· 运行中") : " " + tr("· 未启动"))}
                     aria-label={title(a) + (pending === a.id ? " " + tr("· 处理中") : a.running ? " " + tr("· 运行中") : " " + tr("· 未启动"))}
                     aria-pressed={active}
@@ -278,61 +470,87 @@ export function DesktopList({ model, disabled, selected, onDefault, onRename }) 
                     <DesktopAccountLabel account={a} />
                     {pending === a.id || a.running ? <span className="account-desktop-status" aria-hidden="true">{pending === a.id ? "…" : "●"}</span> : null}
                   </button>
-                  <div className="terminal-row-actions" role="group" aria-label={tr("{0} 的操作", title(a))}>
-                    {panes.length > 0 && !panes.some((p) => p.id === a.id) && (
-                      <DesktopRowAction
-                        label={tr("并排打开")}
-                        icon={Columns2}
-                        disabled={Boolean(pending) || disabled}
-                        onClick={() => model.act(a, "start", true)}
-                      />
-                    )}
-                    {a.running && (
-                      <DesktopRowAction
-                        label={tr("关闭")}
-                        icon={Power}
-                        disabled={Boolean(pending) || disabled}
-                        onClick={(event) => model.act(a, "stop", false, false, event.currentTarget)}
-                      />
-                    )}
-                    {onRename && (
-                      <DesktopRowAction
-                        label={tr("重命名")}
-                        icon={Pencil}
-                        disabled={Boolean(pending) || disabled}
-                        onClick={() => onRename(a)}
-                      />
-                    )}
-                    <DesktopRowAction
-                      label={tr("删除")}
-                      icon={Trash2}
-                      className="desktop-delete-action"
-                      disabled={Boolean(pending) || disabled}
-                      onClick={(event) => model.remove(a, event.currentTarget)}
-                    />
-                  </div>
+                  {hasRowActions && (
+                    <div className="terminal-row-actions" role="group" aria-label={tr("{0} 的操作", title(a))}>
+                      {showBeside && (
+                        <DesktopRowAction
+                          label={tr("并排打开")}
+                          icon={Columns2}
+                          disabled={Boolean(pending) || disabled}
+                          onClick={() => model.act(a, "start", true)}
+                        />
+                      )}
+                      {a.running && (
+                        <DesktopRowAction
+                          label={tr("关闭")}
+                          icon={Power}
+                          disabled={Boolean(pending) || disabled}
+                          onClick={(event) => model.act(a, "stop", false, false, event.currentTarget)}
+                        />
+                      )}
+                      {onRename && (
+                        <DesktopRowAction
+                          label={tr("重命名")}
+                          icon={Pencil}
+                          disabled={Boolean(pending) || disabled}
+                          onClick={() => onRename(a)}
+                        />
+                      )}
+                      {showDelete && (
+                        <DesktopRowAction
+                          label={tr("删除")}
+                          icon={Trash2}
+                          className="desktop-delete-action"
+                          disabled={Boolean(pending) || disabled}
+                          onClick={(event) => model.remove(a, event.currentTarget)}
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
-          {catalog?.supported && Array.isArray(catalog.instances) && <div className="desktop-create">
-            <button type="button" className="sidebar-link" disabled={disabled || Boolean(pending)}
-              aria-expanded={creating} onClick={() => setCreating(!creating)}><Plus size={16}/>{tr("新建 Desktop")}</button>
-            {creating && <div className="desktop-create-fields">
-              <label>{tr("所属账号")}<InlineSelect inline aria-label={tr("Desktop 所属账号")} value={accountID} onValueChange={setAccountID}>
-                <option value="">{tr("在此实例中登录")}</option>
-                {catalog.accounts.map(a => <option key={a.id} value={a.id}>{title(a)}</option>)}
-              </InlineSelect></label>
-              <button className="primary" disabled={disabled || Boolean(pending)} onClick={choose}>{tr("打开 Desktop")}</button>
-            </div>}
-          </div>}
+          {canCreate && (
+            <div className="desktop-create">
+              <button
+                type="button"
+                className="sidebar-link"
+                disabled={disabled || Boolean(pending)}
+                aria-expanded={creating}
+                onClick={toggleCreate}
+              >
+                <Plus size={16} />
+                {tr("新建 Desktop")}
+              </button>
+              {creating && (
+                <DesktopCreateForm
+                  catalog={catalog}
+                  accountID={accountID}
+                  onAccountChange={setAccountID}
+                  disabled={disabled}
+                  pending={pending}
+                  onSubmit={choose}
+                  onCancel={cancelCreate}
+                />
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function DesktopPane({
+// DesktopPane shows one Desktop instance's display. A plugin's desktop
+// application uses it too, with its own address and labels.
+export function DesktopPane({
   account,
+  claudeDesktop = false,
+  path: instancePath = entry(account.id),
+  heading,
+  showHeader = true,
+  inputLabel = "Claude Desktop 输入",
+  closeLabel = "关闭实例",
   ready = true,
   visible,
   windowVisible = true,
@@ -365,7 +583,9 @@ function DesktopPane({
   const current = useRef({ visible: screenVisible && focused, keyboard, systemClipboard, onStatus, onFallback });
   current.current = { visible: screenVisible && focused, keyboard, systemClipboard, onStatus, onFallback };
   const [message, setMessage] = useState("");
+  const [sizeError, setSizeError] = useState(false);
   const [attempt, retry] = useState(0);
+  const sizingRef = useRef(null);
   useEffect(() => {
     if (!focused) input.current?.deactivate();
   }, [focused]);
@@ -373,7 +593,7 @@ function DesktopPane({
     if (!clipboardState.connected) return;
     clipboardReady.current = false;
     const clipboard = shareClipboard({
-      connect: () => new WebSocket(runtimeSocketURL(entry(account.id) + "/clipboard")),
+      connect: () => new WebSocket(runtimeSocketURL(instancePath + "/clipboard")),
       native,
       onStatus: (text) => current.current.onStatus?.(text),
       setActive: (active) => { clipboardReady.current = Boolean(active); },
@@ -385,7 +605,7 @@ function DesktopPane({
       clipboardRef.current = null;
       clipboard.dispose();
     };
-  }, [account.id, account.generation, clipboardState.connected]);
+  }, [account.id, account.generation, clipboardState.connected, instancePath]);
   useEffect(() => {
     clipboardRef.current?.setVisible(clipboardState.pollingVisible);
   }, [clipboardState.pollingVisible]);
@@ -404,12 +624,19 @@ function DesktopPane({
     let live = true,
       client,
       keys,
-      channel;
+      channel,
+      sizing;
     const valid = () => live && current.current.visible;
     setMessage("正在连接…");
-    const path = entry(account.id);
+    setSizeError(false);
+    const path = instancePath;
+    const stopSizing = () => {
+      sizing?.dispose();
+      sizing = undefined;
+      sizingRef.current = null;
+    };
     api(path + "/vnc-credentials")
-      .then(({ password, native_input }) => {
+      .then(({ password, native_input, display_scale, dynamic_scale }) => {
         if (!live) return;
         client = new RFB(container, runtimeSocketURL(path + "/vnc"), {
           credentials: { password },
@@ -418,17 +645,30 @@ function DesktopPane({
         keys = guestKeys(client.sendKey.bind(client));
         client.sendKey = keys.sendKey;
         client.scaleViewport = true;
-        client.resizeSession = true;
+        // The workbench sizes the display in screen pixels and sets its density;
+        // noVNC's own request would use CSS pixels at 96 DPI.
+        client.resizeSession = false;
         client.focusOnClick = true;
         client.addEventListener("connect", () => {
           if (!live) return;
           setMessage("");
+          stopSizing();
+          // A session started by an earlier version keeps 96 DPI and reports
+          // display_scale 1: its pane is sized in CSS pixels as before.
+          sizing = followDisplaySize({
+            client, container, desktop: true, density: display_scale ?? 1, follow: dynamic_scale === true,
+            resize: (size) => api(path + "/resize", size),
+            onError: () => { if (live) setSizeError(true); },
+            onSuccess: () => { if (live) setSizeError(false); },
+          });
+          sizingRef.current = sizing;
           input.current?.dispose();
           channel?.dispose();
-          channel = desktopInputChannel(() => new WebSocket(runtimeSocketURL(path + "/input")));
+          const connection = desktopInputChannel(() => new WebSocket(runtimeSocketURL(path + "/input")));
+          channel = connection;
           const request = async (value) => {
             if (value.mode !== "cancel" && !valid()) throw new Error("输入实例已切换，请重新点击输入框");
-            const result = await channel.request(value);
+            const result = await connection.request(value);
             if (value.mode !== "cancel" && !valid()) throw new Error("输入实例已切换，请重新点击输入框");
             return result;
           };
@@ -443,6 +683,7 @@ function DesktopPane({
             },
             container,
             {
+              claudeDesktop,
               systemClipboard: () => current.current.systemClipboard,
               clipboardActive: () => clipboardReady.current,
               syncClipboard: async () => {
@@ -461,17 +702,17 @@ function DesktopPane({
                     return result;
                   })
                 : undefined,
-              insertText: (text) => !native_input
-                ? client.cagePasteContent(Promise.resolve({ text }), undefined, valid)
-                : client.cageRunInput(async () => {
-                    const state = await request({ mode: "status" });
-                    if (!state.available) throw new Error("输入位置已失去焦点，请重新点击输入框");
-                    const session = crypto.randomUUID().replaceAll("-", "");
-                    const begun = await request({ mode: "begin", context: state.context, session, sequence: 0 });
-                    if (!begun.available) throw new Error("输入位置已失去焦点，请重新点击输入框");
-                    const result = await request({ mode: "commit", session, sequence: 1, text });
-                    if (!result.available) throw new Error("文字输入未完成，请重新点击输入框");
-                  }),
+              insertText: (text, { committed = false } = {}) => {
+                // A confirmed batch may finish after another pane gains focus.
+                // Both transports here belong to this account and connection.
+                const targetValid = committed ? () => live : valid;
+                if (!native_input) return client.cagePasteContent(Promise.resolve({ text }), undefined, targetValid);
+                return client.cageRunInput(async () => {
+                  if (!targetValid()) throw new Error("输入实例已切换，请重新点击输入框");
+                  const state = await connection.request({ mode: "status" });
+                  return commitDesktopText(connection.request, state, text, targetValid);
+                });
+              },
               pasteContent: (content) => client.cagePasteContent(
                 content,
                 (payload) => {
@@ -486,7 +727,7 @@ function DesktopPane({
                 },
                 valid,
               ),
-              inputLabel: "Claude Desktop 输入",
+              inputLabel,
               tabId: () => `desktop:${account.id}`,
               mode: () => current.current.keyboard,
               isActive: valid,
@@ -500,6 +741,7 @@ function DesktopPane({
         });
         client.addEventListener("disconnect", () => {
           keys?.stop();
+          stopSizing();
           input.current?.dispose();
           input.current = null;
           channel?.dispose();
@@ -512,6 +754,7 @@ function DesktopPane({
       });
     return () => {
       live = false;
+      stopSizing();
       input.current?.dispose();
       input.current = null;
       channel?.dispose();
@@ -519,7 +762,7 @@ function DesktopPane({
       rfb.current = null;
       client?.disconnect();
     };
-  }, [account.id, account.generation, screenVisible, attempt]);
+  }, [account.id, account.generation, screenVisible, attempt, instancePath, claudeDesktop]);
   return (
     <section
       className="account-desktop-pane"
@@ -529,15 +772,23 @@ function DesktopPane({
       onPointerDownCapture={onFocus}
       onFocusCapture={onFocus}
     >
-      <header>
-        <strong className="account-desktop-title" title={title(account)}>
-          <DesktopAccountLabel account={account} />
-        </strong>
-        <button disabled={busy} onClick={close}>
-          {tr("关闭实例")}
-        </button>
-      </header>
+      {showHeader && (
+        <header>
+          <strong className="account-desktop-title" title={title(account)}>
+            {heading ?? <DesktopAccountLabel account={account} />}
+          </strong>
+          <button disabled={busy} onClick={close}>
+            {tr(closeLabel)}
+          </button>
+        </header>
+      )}
       <div className="account-desktop-screen" ref={box} />
+      {sizeError && !message && (
+        <div className="account-desktop-message" role="alert">
+          {tr("画面尺寸未能同步，显示比例可能不准确。")}{" "}
+          <button onClick={() => sizingRef.current?.retry()}>{tr("重试调整")}</button>
+        </div>
+      )}
       {message && (
         <div className="account-desktop-message" role="status">
           {localizeBackendMessage(message, tr)}{" "}
@@ -563,9 +814,12 @@ export const DesktopPanes = forwardRef(function DesktopPanes(
     onProjectOpened,
     onStatus,
     onFallback,
+    sidebarCollapsed,
+    onExpand,
   },
   ref,
 ) {
+  const tr = useTranslation();
   const [focusedID, setFocusedID] = useState("");
   const [closedChooser, setClosedChooser] = useState("");
   const controls = useRef(new Map());
@@ -599,6 +853,18 @@ export const DesktopPanes = forwardRef(function DesktopPanes(
   const directoryRequest = paneUploads.find((item) => item.directory && item.id !== closedChooser);
   return (
     <div className="account-desktop-panes">
+      {sidebarCollapsed && (
+        <div className="desktop-sidebar-reveal">
+          <button
+            className="icon-button"
+            aria-label={tr("展开侧栏")}
+            title={tr("展开侧栏")}
+            onClick={onExpand}
+          >
+            <PanelLeftOpen size={15} />
+          </button>
+        </div>
+      )}
       {!nativeAvailable() && <BrowserUploads requests={paneUploads} onStatus={onStatus} />}
       {directoryRequest && status && (
         <ProjectDialog
@@ -629,6 +895,7 @@ export const DesktopPanes = forwardRef(function DesktopPanes(
         <DesktopPane
           key={a.id}
           account={a}
+          claudeDesktop
           ready={ready}
           visible={visible}
           windowVisible={windowVisible}

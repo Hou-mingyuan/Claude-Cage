@@ -34,6 +34,7 @@ try {
       "sendKey",
       "_cageSendKey",
       "_cageQueueInput",
+      "_cagePasteKeys",
       "_handleKeyEvent",
       "_handleServerFenceMsg",
       "cageSetKeyboardTarget",

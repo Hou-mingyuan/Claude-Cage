@@ -11,11 +11,14 @@ import (
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/guestos"
 	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/hostimage"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
+	"github.com/sylvinus/agent-vm/internal/usererror"
+	"github.com/sylvinus/agent-vm/internal/vmname"
 	"io"
 	"io/fs"
 	"log"
@@ -84,6 +87,7 @@ type Server struct {
 	diagnosticRateMu                                 sync.Mutex
 	diagnosticWindow                                 time.Time
 	diagnosticCount                                  int
+	guestThemeMu                                     sync.Mutex
 	tickets                                          map[string]time.Time
 	remoteDesktopTickets                             map[string]bool
 	browserControl                                   *browserClient
@@ -93,6 +97,8 @@ type Server struct {
 	mu                                               sync.Mutex
 	preferences                                      Preferences
 	jobs                                             jobManager
+	desktopAppOps                                    desktopAppOpManager
+	desktopAppOpRunner                               func(context.Context, desktopAppTarget, string) error
 	desktopOnboardingUntil                           time.Time
 	desktopOnboardingReleased                        bool
 	ready                                            bool
@@ -116,6 +122,8 @@ type Server struct {
 	audioClients                                     int
 	audioInputClients                                int
 	projectShares                                    map[string]*projectShare
+	hostCLIUses                                      map[*hostCLIUse]bool
+	hostCLIBrowser                                   hostCLIFocus
 	hostTools                                        *hostTools
 	hostToolsRemoved                                 bool
 	hostMarket                                       hostMarketCache
@@ -147,6 +155,9 @@ type Server struct {
 	networkPaused           bool
 	proxyNetworkLost        bool
 	proxyNetworkRetry       time.Time
+	proxyInterfaceLost      bool
+	proxyInterfaceError     string
+	proxyBindingCheck       proxyBindingCheck
 	checkCancel             context.CancelFunc
 	lifeContext             context.Context
 	lifeCancel              context.CancelFunc
@@ -287,6 +298,11 @@ func serve(configPath string, clientOnly bool, fullConfigPath string) (returned 
 			s.safety.monitorError = "旧代理核心尚未停止，请迁移到远程节点后重新应用；外网保持关闭"
 			diagnostics.Log("error", "proxy", "停止旧代理核心失败："+e.Error())
 		}
+		go func() {
+			if e := managedproxy.SweepPreflight(profile); e != nil {
+				diagnostics.Log("warn", "proxy", "清理遗留候选代理失败："+e.Error())
+			}
+		}()
 		// A previously running VM cannot keep an unmanaged endpoint online.
 		if cfg, e := loadConfig(configPath); e != nil || cfg.RequireManagedProxy(profile) != nil {
 			_ = s.closeProxyGate("尚未配置有效节点，外网保持关闭")
@@ -375,7 +391,7 @@ func (s *Server) handler() http.Handler {
 			return
 		}
 		ticket := s.issueTicketWithScope(input.RemoteDesktop)
-		jsonReply(w, launchResponse{ConfigPath: s.configPath, ClientOnly: s.clientOnly, DesktopGateway: s.desktopEntry, URL: s.origin + "/?launch=" + randomToken()[:8] + "#" + ticket, Controller: s.identity})
+		jsonReply(w, launchResponse{ConfigPath: s.configPath, ClientOnly: s.clientOnly, DesktopGateway: s.desktopEntry, SessionID: desktopSessionID(), URL: s.origin + "/?launch=" + randomToken()[:8] + "#" + ticket, Controller: s.identity})
 	})
 	if s.desktopEntry || s.clientOnly {
 		mux.HandleFunc("POST /api/handoff", s.handoffEntry)
@@ -406,6 +422,7 @@ func (s *Server) handler() http.Handler {
 		jsonReply(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("GET /api/status", s.status)
+	mux.HandleFunc("GET /api/host-cli", s.hostCLI)
 	mux.HandleFunc("GET /api/environment/initialization", s.initialization)
 	mux.HandleFunc("POST /api/environment/initialization", s.initialization)
 	mux.HandleFunc("GET /api/remote/manifest", s.remoteManifest)
@@ -472,7 +489,9 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /api/favorites", s.serveFavorites)
 	mux.HandleFunc("POST /api/appearance", s.saveAppearance)
 	mux.HandleFunc("GET /api/appearance/codex", s.codexAppearance)
+	mux.HandleFunc("POST /api/appearance/guest-theme", s.syncGuestAppearance)
 	mux.HandleFunc("POST /api/settings/probe", s.probe)
+	mux.HandleFunc("POST /api/settings/dns-check", s.checkDNS)
 	mux.HandleFunc("GET /api/proxy", s.proxyStatus)
 	mux.HandleFunc("GET /api/proxy/local-configs", s.proxyLocalConfigs)
 	mux.HandleFunc("POST /api/proxy/delay", s.proxyDelay)
@@ -527,6 +546,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /api/desktop-instances/{id}/metadata", s.updateAccountDesktopMetadata)
 	mux.HandleFunc("GET /api/desktop-instances/{id}/{action}", s.accountDesktop)
 	mux.HandleFunc("POST /api/desktop-instances/{id}/{action}", s.accountDesktop)
+	mux.HandleFunc("GET /api/desktop-apps/{plugin}/{app}/{action}", s.desktopApp)
+	mux.HandleFunc("POST /api/desktop-apps/{plugin}/{app}/{action}", s.desktopApp)
 	mux.HandleFunc("GET /api/claude-desktop", s.claudeDesktopStatus)
 	mux.HandleFunc("GET /api/claude-desktop/vnc-credentials", s.claudeDesktopCredentials)
 	mux.HandleFunc("GET /api/claude-desktop/vnc", s.claudeDesktopVNC)
@@ -609,7 +630,12 @@ func (s *Server) handler() http.Handler {
 			mux.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/mobile/") {
+		if r.URL.Path == "/api/host-cli" {
+			if s.desktopEntry || s.clientOnly || !equalSecret(r.Header.Get(hostCLIHeader), hostCLIProof(s.token)) {
+				http.Error(w, "Local CLI authentication required", http.StatusForbidden)
+				return
+			}
+		} else if strings.HasPrefix(r.URL.Path, "/api/mobile/") {
 			// Device trust is scoped to this host. Never forward a paired phone
 			// into a different host selected by the desktop SSH client.
 			if s.desktopEntry && !s.clientOnly && s.remote != nil && s.remote.desktop != nil && r.Header.Get(connectionHeader) != "" {
@@ -777,6 +803,16 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	if requestInitiator(r) == jobInitiatorSetup {
 		s.touchDesktopOnboarding()
 	}
+	if r.URL.Query().Get("view") == "runtime" {
+		running := s.vmRunning()
+		s.mu.Lock()
+		open := s.networkOpenLocked(time.Now())
+		state := hostCLIStatus{Ready: s.ready, Running: running, NetworkOpen: &open, NetworkPaused: s.networkPaused, Job: s.jobs.snapshot()}
+		s.mu.Unlock()
+		state.Job.Log = ""
+		jsonReply(w, state)
+		return
+	}
 	projects, err := s.projectPaths()
 	if err != nil {
 		requestError(w, errors.New("无法读取项目列表，请检查项目配置"))
@@ -811,6 +847,9 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		"network_paused": s.networkPaused, "network_open": s.networkOpenLocked(time.Now()),
 		"safety": s.safety, "environment_update_required": s.guestUpdateRequired, "environment_update_error": s.guestUpdateError,
 		"abandoned_guests": s.abandonedGuestList(), "abandoned_environment": s.abandonedEnvironmentSystem(),
+	}
+	if time.Now().Before(s.hostCLIBrowser.until) {
+		view["host_cli_browser"] = s.hostCLIBrowser
 	}
 	if system, err := s.installedLinuxSystem(); err != nil {
 		view["guest_system_error"] = err.Error()
@@ -878,7 +917,10 @@ func (s *Server) proposedWithOptions(w http.ResponseWriter, r *http.Request) (sa
 	}
 	return savedProfile{c, p}, input.SaveStaticDraft, true
 }
-func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
+
+var checkDNSFunc = cage.CheckDNS
+
+func (s *Server) checkDNS(w http.ResponseWriter, r *http.Request) {
 	v, ok := s.proposed(w, r)
 	if !ok {
 		return
@@ -887,10 +929,50 @@ func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 		requestError(w, err)
 		return
 	}
-	loc, err := probeLocation(r.Context(), v.Config, v.Preferences.locationOptions())
-	if finishErr := s.finishLocationProbe(v.Config, loc, err); finishErr != nil {
-		requestError(w, finishErr)
+	result, err := checkDNSFunc(r.Context(), v.Config)
+	if err != nil {
+		requestError(w, err)
 		return
+	}
+	jsonReply(w, result)
+}
+
+func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
+	v, ok := s.proposed(w, r)
+	if !ok {
+		return
+	}
+	p, err := managedproxy.Applied(s.profile, v.Config.ProxyURL, v.Config.ProxyRevision)
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	old, err := loadConfig(s.configPath)
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	if !needsBootstrapPreflight(old, v.Config, p) {
+		if !s.vmRunning() {
+			checkCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			ready := proxyInterfaceCoreRunning(checkCtx, s.profile, p)
+			cancel()
+			if !ready {
+				requestError(w, usererror.New("验证代理出口", proxyNotReadyReason, "请先启动环境", nil))
+				return
+			}
+		}
+		if err := s.ensureProxyInterfaceBeforeUse(r.Context()); err != nil {
+			requestError(w, err)
+			return
+		}
+	}
+	loc, usedPreflight, err := s.probeCandidateLocation(r.Context(), old, v.Config, v.Preferences)
+	if !usedPreflight {
+		if finishErr := s.finishLocationProbe(v.Config, loc, err); finishErr != nil {
+			requestError(w, finishErr)
+			return
+		}
 	}
 	if err != nil {
 		requestError(w, err)
@@ -949,12 +1031,24 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		guestInstallRequest
 		// SetAsideAbandoned moves an environment of a no longer supported
 		// system aside, unchanged, before a Debian environment is created.
-		SetAsideAbandoned bool `json:"set_aside_abandoned"`
+		SetAsideAbandoned bool   `json:"set_aside_abandoned"`
+		ResetDiskToken    string `json:"reset_disk_token"`
 	}
 	if r.ContentLength != 0 && !readJSON(w, r, &request) {
 		return
 	}
 	input := request.guestInstallRequest
+	rebuild := request.ResetDiskToken != ""
+	if rebuild {
+		if !s.hasTrustedView(r) || requestConnection(r) != "local" || !equalSecret(request.ResetDiskToken, hostCLIProof(s.token)) {
+			http.Error(w, "请从本机 Cage 终端命令确认重建虚拟磁盘", http.StatusForbidden)
+			return
+		}
+		if containerenv.Configured(s.profile) || request.SetAsideAbandoned || input.System != "" || input.GuestProfile != nil {
+			http.Error(w, "只支持重建现有本机虚拟机", http.StatusConflict)
+			return
+		}
+	}
 	if input.GuestProfile != nil {
 		if err := input.GuestProfile.Validate(); err != nil {
 			requestError(w, err)
@@ -983,6 +1077,10 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if pending != nil {
+		if rebuild {
+			http.Error(w, "请先完成现有安装，再重建本机虚拟机", http.StatusConflict)
+			return
+		}
 		input.System = pending.System
 		s.beginGuestInstall(w, r, input)
 		return
@@ -1000,14 +1098,29 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "当前环境无法启动所选客户机系统，请保留原环境并重新检查安装选择", http.StatusConflict)
 		return
 	}
-	s.launchRequest(w, r, "start", func() error {
+	kind := "start"
+	if rebuild {
+		kind = "rebuild"
+	}
+	s.launchRequest(w, r, kind, func() error {
 		if err := s.prepareGuestProfile(input.GuestProfile); err != nil {
 			return err
 		}
 		if err := s.prepareEnvironment(); err != nil {
 			return err
 		}
-		return s.startEnvironment(true)
+		if rebuild {
+			stateDir := filepath.Join(s.profile, "state")
+			marker, err := os.Stat(filepath.Join(stateDir, ".agent-vm-base-version"))
+			if err != nil || !marker.Mode().IsRegular() || !limaInstanceReady(filepath.Join(stateDir, "lima", vmname.Template)) {
+				return errors.New("基础虚拟机尚未准备好，请先运行 cage setup")
+			}
+			if err := s.stopEnvironment(); err != nil {
+				return err
+			}
+			return s.startEnvironmentDisk(true, true)
+		}
+		return s.hookStartEnv(true)
 	})
 }
 

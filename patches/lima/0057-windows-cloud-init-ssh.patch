@@ -1,0 +1,77 @@
+Use a separate SSH session to monitor Debian first boot on Windows.
+
+diff --git a/pkg/hostagent/cloudinit_test.go b/pkg/hostagent/cloudinit_test.go
+index 5341c100..51417b18 100644
+--- a/pkg/hostagent/cloudinit_test.go
++++ b/pkg/hostagent/cloudinit_test.go
+@@ -19,11 +19,26 @@ import (
+ 	"time"
+ 	"unicode"
+ 
++	"github.com/lima-vm/sshocker/pkg/ssh"
+ 	"gotest.tools/v3/assert"
+ 
+ 	"github.com/lima-vm/lima/v2/pkg/hostagent/events"
+ )
+ 
++func TestCloudInitSSHSession(t *testing.T) {
++	control := []string{"-o", "ControlMaster=auto", "-o", "ControlPath=boot.sock", "-o", "ControlPersist=yes"}
++	a := &HostAgent{
++		instSSHAddress: "127.0.0.1",
++		sshLocalPort:   6001,
++		sshConfig:      &ssh.SSHConfig{AdditionalArgs: append(control, "-o", "BatchMode=yes")},
++	}
++	if runtime.GOOS == "windows" {
++		control = []string{"-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ControlPersist=no"}
++	}
++	cmd := a.cloudInitCommand(t.Context(), cloudInitLogStreamScript)
++	assert.DeepEqual(t, cmd.Args[1:], append(control, "-o", "BatchMode=yes", "-T", "-p", "6001", "127.0.0.1", "sh", "-s"))
++}
++
+ func TestEmitCloudInitProgressEventStripsControlChars(t *testing.T) {
+ 	var buf bytes.Buffer
+ 	a := &HostAgent{eventEnc: json.NewEncoder(&buf)}
+diff --git a/pkg/hostagent/hostagent.go b/pkg/hostagent/hostagent.go
+index b3b72bfe..4e6a5794 100644
+--- a/pkg/hostagent/hostagent.go
++++ b/pkg/hostagent/hostagent.go
+@@ -1343,12 +1343,20 @@ exit 1
+ func (a *HostAgent) probeCloudInitCompleted(ctx context.Context) bool {
+ 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+ 	defer cancel()
++	return a.cloudInitCommand(probeCtx, cloudInitCompletedProbeScript(a.iid)).Run() == nil
++}
++
++func (a *HostAgent) cloudInitCommand(ctx context.Context, script string) *exec.Cmd {
+ 	sshAddress, sshPort := a.sshAddressPort()
+ 	args := a.sshConfig.Args()
++	if runtime.GOOS == "windows" {
++		// Windows SSH clients need a separate session for piped guest commands.
++		args = sshutil.DisableControlMasterOptsFromSSHArgs(args)
++	}
+ 	args = append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
+-	cmd := exec.CommandContext(probeCtx, a.sshConfig.Binary(), args...)
+-	cmd.Stdin = strings.NewReader(cloudInitCompletedProbeScript(a.iid))
+-	return cmd.Run() == nil
++	cmd := exec.CommandContext(ctx, a.sshConfig.Binary(), args...)
++	cmd.Stdin = strings.NewReader(script)
++	return cmd
+ }
+ 
+ // cloudInitStream runs one command that follows the guest's cloud-init log
+@@ -1357,14 +1365,9 @@ func (a *HostAgent) probeCloudInitCompleted(ctx context.Context) bool {
+ type cloudInitStream func(ctx context.Context, read func(io.Reader)) error
+ 
+ func (a *HostAgent) streamCloudInitLog(ctx context.Context, read func(io.Reader)) error {
+-	sshAddress, sshPort := a.sshAddressPort()
+-	args := a.sshConfig.Args()
+-	args = append(args, "-T", "-p", strconv.Itoa(sshPort), sshAddress, "sh", "-s")
+-
+ 	ctx, cancel := context.WithCancel(ctx)
+ 	defer cancel()
+-	cmd := exec.CommandContext(ctx, a.sshConfig.Binary(), args...)
+-	cmd.Stdin = strings.NewReader(cloudInitLogStreamScript)
++	cmd := a.cloudInitCommand(ctx, cloudInitLogStreamScript)
+ 	stdout, err := cmd.StdoutPipe()
+ 	if err != nil {
+ 		return fmt.Errorf("failed to create stdout pipe for cloud-init monitoring: %w", err)

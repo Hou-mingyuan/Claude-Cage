@@ -243,8 +243,9 @@ type External struct {
 	Manifest Manifest
 	Dir      string
 	// ProjectDir is substituted for ${PROJECT_DIR} in host plugin arguments.
-	ProjectDir string
-	Approve    func(context.Context, ToolRequest) error
+	ProjectDir   string
+	CheckProject func(string) error
+	Approve      func(context.Context, ToolRequest) error
 	// Env, if set, gives the variables added for the plugin's program on
 	// this computer, read again each time it starts.
 	Env func(context.Context) ([]string, error)
@@ -639,26 +640,29 @@ func (e *External) callWithin(ctx context.Context, name string, arguments json.R
 		limited, cancel := context.WithTimeout(ctx, wait)
 		defer cancel()
 		ctx = limited
-		result, err := e.run(ctx, name, arguments)
+		result, err := e.run(ctx, name, arguments, fromView)
 		if err != nil && limited.Err() != nil && outer.Err() == nil {
 			return nil, ErrCallTimedOut
 		}
 		return result, err
 	}
-	return e.run(ctx, name, arguments)
+	return e.run(ctx, name, arguments, fromView)
 }
 
 // run calls the tool, starting the plugin's program again once if it is gone.
-func (e *External) run(ctx context.Context, name string, arguments json.RawMessage) (*mcp.CallToolResult, error) {
+func (e *External) run(ctx context.Context, name string, arguments json.RawMessage, fromView bool) (*mcp.CallToolResult, error) {
 	params := &mcp.CallToolParams{Name: name}
 	if len(arguments) > 0 {
 		params.Arguments = arguments
 	}
 	e.mu.Lock()
-	session := e.session
+	session, project := e.session, e.ProjectDir
 	e.mu.Unlock()
 	if session == nil {
 		return nil, errors.New("the extension is not running")
+	}
+	if err := e.checkModelProject(project, fromView); err != nil {
+		return nil, err
 	}
 	result, err := session.CallTool(ctx, params)
 	if err == nil || ctx.Err() != nil {
@@ -682,9 +686,12 @@ func (e *External) run(ctx context.Context, name string, arguments json.RawMessa
 			return nil, errors.New("the extension changed its tools while running")
 		}
 	}
-	session = e.session
+	session, project = e.session, e.ProjectDir
 	e.mu.Unlock()
 	if session == nil {
+		return nil, err
+	}
+	if err := e.checkModelProject(project, fromView); err != nil {
 		return nil, err
 	}
 	return session.CallTool(ctx, params)
@@ -695,10 +702,13 @@ func (e *External) run(ctx context.Context, name string, arguments json.RawMessa
 func (e *External) getPrompt(ctx context.Context, name string, arguments map[string]string) (*mcp.GetPromptResult, error) {
 	params := &mcp.GetPromptParams{Name: name, Arguments: arguments}
 	e.mu.Lock()
-	session := e.session
+	session, project := e.session, e.ProjectDir
 	e.mu.Unlock()
 	if session == nil {
 		return nil, errors.New("the extension is not running")
+	}
+	if err := e.checkModelProject(project, false); err != nil {
+		return nil, err
 	}
 	result, err := session.GetPrompt(ctx, params)
 	if err != nil && ctx.Err() == nil {
@@ -718,9 +728,12 @@ func (e *External) getPrompt(ctx context.Context, name string, arguments map[str
 				return nil, errors.New("the extension changed its tools while running")
 			}
 		}
-		session = e.session
+		session, project = e.session, e.ProjectDir
 		e.mu.Unlock()
 		if session == nil {
+			return nil, err
+		}
+		if err := e.checkModelProject(project, false); err != nil {
 			return nil, err
 		}
 		result, err = session.GetPrompt(ctx, params)
@@ -732,6 +745,21 @@ func (e *External) getPrompt(ctx context.Context, name string, arguments map[str
 		return nil, fmt.Errorf("prompt %s returned wording that cannot be shown", name)
 	}
 	return result, nil
+}
+
+// A program with a project argument is bound to the directory it started in.
+// The check uses the same snapshot as the session being called, even on retry.
+func (e *External) checkModelProject(dir string, fromView bool) error {
+	if fromView || e.CheckProject == nil || !e.UsesProjectDir() {
+		return nil
+	}
+	if e.Spawn != nil {
+		dir = ""
+	} // The guest spawner owns its actual working directory.
+	if err := e.CheckProject(dir); err != nil {
+		return &RefusedError{err}
+	}
+	return nil
 }
 
 // Withdraw stops the program and offers none of its tools or prompts until it
@@ -781,8 +809,9 @@ type LoadOptions struct {
 	Version string
 	// ProjectDir is the active project folder on this computer, substituted for
 	// ${PROJECT_DIR} in host plugin arguments.
-	ProjectDir string
-	Approve    func(context.Context, ToolRequest) error
+	ProjectDir   string
+	CheckProject func(string) error
+	Approve      func(context.Context, ToolRequest) error
 	// Env gives the variables from the user's settings for a plugin that
 	// runs on this computer; see External.Env.
 	Env func(ctx context.Context, manifest Manifest) ([]string, error)
@@ -839,7 +868,7 @@ func LoadPlugins(ctx context.Context, dir string, options LoadOptions) ([]*Exter
 		if options.GuestOnly && manifest.Kind != KindGuest {
 			continue
 		}
-		plugin := &External{Manifest: manifest, Dir: path, ProjectDir: options.ProjectDir, Approve: approve}
+		plugin := &External{Manifest: manifest, Dir: path, ProjectDir: options.ProjectDir, CheckProject: options.CheckProject, Approve: approve}
 		if manifest.Kind == KindGuest {
 			plugin.Spawn = func(ctx context.Context) (*exec.Cmd, error) { return options.Guest(ctx, manifest, path) }
 		} else if options.Env != nil {

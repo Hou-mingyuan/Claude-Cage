@@ -14,7 +14,7 @@ func TestSubcommandHelpDoesNotRunTheCommand(t *testing.T) {
 	previous := os.Args
 	t.Cleanup(func() { os.Args = previous })
 	for _, flag := range []string{"--help", "-h"} {
-		for _, command := range []string{"init", "setup", "up", "login", "serve", "prepare-update", "version"} {
+		for _, command := range []string{"init", "setup", "start", "up", "login", "serve", "prepare-update", "version"} {
 			os.Args = []string{"cage", command, flag}
 			if code := run(); code != 0 {
 				t.Fatalf("%s %s returned %d", command, flag, code)
@@ -27,7 +27,7 @@ func TestSubcommandHelpDoesNotRunTheCommand(t *testing.T) {
 }
 
 func TestStartHelpDocumentsReset(t *testing.T) {
-	for _, command := range []string{"up", "login"} {
+	for _, command := range []string{"start", "login"} {
 		text, ok := subcommandHelp([]string{command, "--help"})
 		if !ok {
 			t.Fatalf("no help for %s", command)
@@ -47,8 +47,11 @@ func TestStartHelpDocumentsReset(t *testing.T) {
 
 func TestSubcommandHelpText(t *testing.T) {
 	text, ok := subcommandHelp([]string{"stop", "--help"})
-	if !ok || !strings.HasPrefix(text, "cage stop ") || !strings.Contains(text, "--keep-proxy") || strings.Contains(text, "cage list") {
+	if !ok || !strings.HasPrefix(text, "cage stop ") || !strings.Contains(text, "background service") || strings.Contains(text, "cage list") {
 		t.Fatalf("stop help: %q", text)
+	}
+	if up, ok := subcommandHelp([]string{"up", "--help"}); !ok || !strings.Contains(up, "desktop window") || strings.Contains(up, "--reset") {
+		t.Fatalf("up help: %q", up)
 	}
 	if text, ok = subcommandHelp([]string{"prepare-update", "-h"}); !ok || text != help {
 		t.Fatalf("an undocumented command falls back to the overview: %q", text)

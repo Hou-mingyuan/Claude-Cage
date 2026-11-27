@@ -305,8 +305,12 @@ class DeviceResetter:
             "cage-window-manager",
             "cage-display",
             "cage-display-governor",
+            "cage-webvnc.socket",
             "cage-webvnc",
+            "cage-editor.socket",
+            "cage-editor-forward",
             "cage-editor",
+            "cage-audio.socket",
             "cage-audio",
         ]
         subprocess.run(["systemctl", "stop", *services], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -1,7 +1,10 @@
 package host
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"os"
 	"strings"
 )
 
@@ -26,16 +29,16 @@ func windowsSocketDirProblem(dir string, room int, excluded []string) error {
 	if len(dir)+room > windowsSocketPathLimit {
 		return errors.New("too long")
 	}
-	if windowsPathWithin(dir, excluded) {
+	if WindowsPathWithin(dir, excluded) {
 		return errors.New("inside AppData or Temp")
 	}
 	return nil
 }
 
-// windowsPathWithin reports whether dir is one of roots or below one,
+// WindowsPathWithin reports whether dir is one of roots or below one,
 // comparing as Windows does: case-insensitively, ignoring trailing dots and
 // spaces of each component.
-func windowsPathWithin(dir string, roots []string) bool {
+func WindowsPathWithin(dir string, roots []string) bool {
 	normalize := func(p string) string {
 		parts := strings.Split(strings.ReplaceAll(p, "/", `\`), `\`)
 		for i, part := range parts {
@@ -46,11 +49,17 @@ func windowsPathWithin(dir string, roots []string) bool {
 		return strings.ToLower(strings.TrimRight(strings.Join(parts, `\`), `\`))
 	}
 	d := normalize(dir)
+	if d == "" {
+		return false
+	}
 	for _, root := range roots {
 		if root == "" {
 			continue
 		}
 		r := normalize(root)
+		if r == "" {
+			continue
+		}
 		if d == r || strings.HasPrefix(d, r+`\`) {
 			return true
 		}
@@ -72,6 +81,11 @@ type windowsSocketFS struct {
 	exists         func(string) bool
 	mkdir          func(string) error
 	shortName      func(string) (string, error)
+	// mkdirPrivate creates a directory that is private to the current user
+	// from the moment it exists, and ownedPrivate reports why an existing
+	// one is not a real directory owned by and private to the current user.
+	mkdirPrivate func(string) error
+	ownedPrivate func(string) error
 }
 
 // chooseWindowsSocketDir picks the directory for a profile's sockets: the
@@ -89,7 +103,7 @@ func chooseWindowsSocketDir(candidates []string, room int, excluded []string, fs
 	var reasons []string
 	for _, dir := range candidates {
 		problem := windowsSocketDirProblem(dir, room, excluded)
-		if strings.HasPrefix(dir, `\\`) || windowsPathWithin(dir, excluded) {
+		if strings.HasPrefix(dir, `\\`) || WindowsPathWithin(dir, excluded) {
 			reasons = append(reasons, problem.Error())
 			continue
 		}
@@ -133,4 +147,32 @@ func WindowsSocketDirCandidates(profile, home, id string) []string {
 		candidates = append(candidates, join(home, ".cage-run", id))
 	}
 	return candidates
+}
+
+// WindowsSystemSocketDir is the last candidate, for a user directory with no
+// ASCII spelling, not even through 8.3 aliases (#1037): a directory directly
+// in the root of the system drive, one per user and profile.
+func WindowsSystemSocketDir(systemDrive, user, profile string) string {
+	sum := sha256.Sum256([]byte(user + "\x00" + profile))
+	return systemDrive + `\CageRun-` + hex.EncodeToString(sum[:8])
+}
+
+// openSharedSocketDir makes dir, the WindowsSystemSocketDir chosen by
+// chooseWindowsSocketDir, ready for use. Other users can predict its name and
+// create it first, so it is created private from the start, and an existing
+// one is used only when it is a real directory owned by the current user and
+// closed to others. A directory someone else made is refused, never adopted:
+// its creator could still reach or replace the sockets in it.
+func openSharedSocketDir(dir string, fs windowsSocketFS, create bool) error {
+	if !fs.exists(dir) {
+		if !create {
+			return errSocketDirNotCreated
+		}
+		// A name taken by something that is not a real directory, such as
+		// a junction, is refused by the ownership check below.
+		if err := fs.mkdirPrivate(dir); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+	}
+	return fs.ownedPrivate(dir)
 }

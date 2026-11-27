@@ -14,6 +14,7 @@ type desktopLocalRequest struct {
 	Token        string `json:"token"`
 	ControllerID string `json:"controller_id,omitempty"`
 	Stop         bool   `json:"stop,omitempty"`
+	PreserveVM   bool   `json:"preserve_vm,omitempty"`
 	Running      bool   `json:"running,omitempty"`
 	Terminals    int    `json:"terminals,omitempty"`
 	JobID        string `json:"job_id,omitempty"`
@@ -25,6 +26,7 @@ type desktopLocalReply struct {
 	OwnerID    string             `json:"owner_id"`
 	InstanceID string             `json:"instance_id"`
 	LaunchID   string             `json:"launch_id,omitempty"`
+	SessionID  string             `json:"session_id,omitempty"`
 	JobID      string             `json:"job_id,omitempty"`
 	JobRunning bool               `json:"job_running,omitempty"`
 	JobFailed  bool               `json:"job_failed,omitempty"`
@@ -39,7 +41,7 @@ func (s *Server) desktopLocalSnapshot() desktopLocalReply {
 	reply := desktopLocalReply{
 		DesktopLocalStatus: DesktopLocalStatus{Available: true, ServiceRunning: true},
 		Identity:           s.identity, OwnerID: localControllerID(s.token), InstanceID: s.instanceID,
-		LaunchID: os.Getenv("CAGE_DESKTOP_START_ID"), JobID: job.ID, JobRunning: job.Running, JobFailed: job.Error != "",
+		LaunchID: os.Getenv("CAGE_DESKTOP_START_ID"), SessionID: desktopSessionID(), JobID: job.ID, JobRunning: job.Running, JobFailed: job.Error != "",
 	}
 	owners, err := controllerVMOwners(s.profile)
 	reply.Running = len(owners) != 0
@@ -86,7 +88,7 @@ func (s *Server) desktopLocalControl(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, s.desktopLocalSnapshot())
 	case "release":
 		if !s.op.TryLock() {
-			http.Error(w, "本机正在执行操作，请稍后重试", http.StatusConflict)
+			http.Error(w, desktopLocalOperationBusy, http.StatusConflict)
 			return
 		}
 		view := s.desktopLocalSnapshot()
@@ -95,8 +97,17 @@ func (s *Server) desktopLocalControl(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "本机任务或控制服务已变化，请重新确认", http.StatusConflict)
 			return
 		}
+		if request.Stop && request.PreserveVM {
+			s.op.Unlock()
+			http.Error(w, "本机控制请求冲突", http.StatusConflict)
+			return
+		}
 		if !view.Running && view.LiveTerminals == 0 {
 			s.handoffLocked(w)
+			return
+		}
+		if request.PreserveVM && view.LiveTerminals == 0 {
+			s.handoffPreservingVMLocked(w)
 			return
 		}
 		defer s.op.Unlock()

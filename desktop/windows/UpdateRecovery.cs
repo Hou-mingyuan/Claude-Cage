@@ -35,7 +35,7 @@ internal static class UpdateRecovery
     // verified controller to check the shared profile and stop any new process.
     public static async Task PrepareRollback(string backup, CancellationToken cancellation = default)
     {
-        var (exit, result) = await Backend.JsonAt(BackendPath(backup), ["prepare-update", "--json", "--stop"], cancellation);
+        var (exit, result) = await Backend.JsonAt(BackendPath(backup), ["prepare-update", "--json", "--stop"], cancellation, Backend.UpdateStopDeadline);
         if (exit != 0 || result.Text("status") != "prepared")
             throw new IOException("旧版后台无法确认环境已停止，原应用备份已保留");
     }
@@ -76,6 +76,30 @@ internal static class UpdateRecovery
                 throw new IOException("新版 Cage 的 " + running + " 仍在运行，安装目录尚未改动。请退出 Cage 后重试恢复");
             await Task.Delay(250);
         }
+    }
+
+    // Detach moves program folders even while a process runs an image inside
+    // them, so a candidate started after the installation check runs from the
+    // failed folder, where cleanup can neither delete nor move its files. Stop
+    // it as before detach. One that keeps running leaves its unchanged program
+    // files to the cleanup retention path rather than failing the rollback.
+    public static async Task StopDetachedCandidate(string backup, string failed, TimeSpan timeout)
+    {
+        var prefix = Path.GetFullPath(failed).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!await StopInstalledApps(failed) && RunningFrom(prefix) == null) return;
+        try { await PrepareRollback(backup); }
+        catch (Exception error) when (error is IOException or OperationCanceledException or Win32Exception or UnauthorizedAccessException) { }
+        try { await WaitForInstalledProcesses(failed, timeout); }
+        catch (IOException) { }
+    }
+
+    // NSIS refuses to start while an earlier transaction awaits recovery and
+    // only reports exit code 2, which hides why the update cannot proceed.
+    public static void EnsureNoPendingTransaction(string target)
+    {
+        var receipt = target + ".cage-installation.json";
+        if (File.Exists(receipt))
+            throw new IOException("上一次安装或更新尚未完成恢复，本次更新未开始，原应用未改动。请先处理 " + receipt + " 中记录的目录");
     }
 
     private static string? RunningFrom(string prefix)

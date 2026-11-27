@@ -18,6 +18,21 @@ while [ "$#" -ge 3 ]; do
   shift 2
 done
 if [ "${1:-}" = --stdin ]; then set -- "$(cat)"; fi
+# Absolute opener paths skip the independent Desktop's PATH. Use the same
+# per-instance MIME handlers as its xdg-open, including for browser callbacks.
+if [ -z "$route$account$login" ]; then
+  case "${HOME:-}" in
+    */.local/share/desktop-profiles/*/home)
+      case "${1:-}" in
+        http://*|https://*|claude://*)
+          profile=${HOME%/home}
+          [ "${XDG_RUNTIME_DIR:-}" -ef "/run/desktop-${profile##*/}" ] || exit 1
+          exec /usr/bin/gio open "$1"
+          ;;
+      esac
+      ;;
+  esac
+fi
 case "${1:-}" in
   --finish-login)
     [ -n "$login" ] || exit 2
@@ -49,6 +64,25 @@ case "${1:-}" in
     else
       set -- /new "$1"
     fi
+    ;;
+  [a-z]*:*)
+    # A plugin's desktop application takes the sign-in links of its schemes.
+    # The link goes on stdin: sudo records its arguments in the journal.
+    scheme=${1%%:*}
+    case "$scheme" in
+      *[!a-z0-9+.-]*) ;;
+      *)
+        if [ -r /usr/local/lib/desktop-apps/schemes ] && awk -v s="$scheme" '$1 == s {found = 1} END {exit !found}' /usr/local/lib/desktop-apps/schemes; then
+          if [ "$(id -un)" = cage ]; then
+            printf '%s' "$1" | /usr/local/bin/desktop-app-open --stdin
+          else
+            printf '%s' "$1" | sudo -n -H -u cage /usr/local/bin/desktop-app-open --stdin
+          fi
+          exit $?
+        fi
+        ;;
+    esac
+    exec /usr/local/bin/cage-desktop-files --open "$1"
     ;;
   *)
     # File operations belong to the desktop session, never the browser control

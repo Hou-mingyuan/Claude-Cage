@@ -16,6 +16,7 @@ import {
   FolderOpen,
   Check,
   LoaderCircle,
+  RefreshCw,
   RotateCcw,
   ArrowLeft,
   Settings,
@@ -312,22 +313,61 @@ export function SettingsPanel({
                 <div className="settings-card settings-exit-card">
                   <div className="settings-row">
                     <div className="settings-row-copy">
-                      <strong>{currentLoc ? `${currentLoc.country} · ${currentLoc.city}` : tr("验证出口")}</strong>
+                      <strong>
+                        {currentLoc
+                          ? [currentLoc.country, currentLoc.region, currentLoc.city].filter(Boolean).join(" · ")
+                          : tr("验证出口")}
+                      </strong>
                       <small className="settings-exit-meta">
                         {currentLoc ? (
                           <>
                             <code>{currentLoc.ip}</code>
-                            <span>{currentLoc.timezone}</span>
-                            <span>{new Date(currentLoc.checked_at).toLocaleTimeString(document.documentElement.lang, { hour: "2-digit", minute: "2-digit" })}</span>
-                            {probe && <span className="settings-ok-pill"><Check size={12} />{tr("验证通过")}</span>}
+                            {currentLoc.timezone && <span>{currentLoc.timezone}</span>}
+                            {currentLoc.checked_at && (
+                              <span>
+                                {new Date(currentLoc.checked_at).toLocaleTimeString(document.documentElement.lang, {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            )}
                           </>
                         ) : tr("通过当前节点查询 IP 和位置")}
                       </small>
                     </div>
                     <div className="settings-row-control">
-                      <button disabled={busy} onClick={check}>
-                        {probing ? <LoaderCircle size={15} className="spin" /> : <Globe2 size={15} />}
-                        {tr("验证出口")}
+                      <button
+                        type="button"
+                        className={`settings-exit-probe${currentLoc && !probing ? " has-result" : ""}`}
+                        aria-label={tr("检测当前出口")}
+                        title={tr("检测当前出口")}
+                        disabled={busy || probing}
+                        onClick={check}
+                      >
+                        {probing ? (
+                          <span className="settings-exit-probe-busy">
+                            <LoaderCircle size={14} className="spin" />
+                            <span>{tr("正在检测…")}</span>
+                          </span>
+                        ) : currentLoc ? (
+                          <>
+                            <span className="settings-exit-probe-idle">
+                              <span className="settings-ok-pill">
+                                <Check size={12} />
+                                {probe ? tr("验证通过") : tr("已验证")}
+                              </span>
+                            </span>
+                            <span className="settings-exit-probe-hover" aria-hidden="true">
+                              <RefreshCw size={13} />
+                              <span>{tr("重新检测")}</span>
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Globe2 size={14} />
+                            <span>{tr("验证出口")}</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -336,10 +376,11 @@ export function SettingsPanel({
                   <ExitPolicyFields
                     value={draft.exit_policy}
                     onChange={(value) => update("exit_policy", value)}
-                    observation={probe}
+                    observation={probe || currentLoc}
                     onProbe={check}
                     busy={busy}
                     probing={probing}
+                    showProbe={false}
                   />
                 </section>
                 <details className="settings-disclosure-card">
@@ -435,15 +476,29 @@ export function SettingsPanel({
                   <p>{tr("这些设置作用于 Cage 内的系统、CLI 和浏览器。")}</p>
                 </div>
                 <div className="settings-card">
-                  <label className="settings-row settings-switch-row">
+                  <label
+                    className="settings-row settings-switch-row"
+                    title={tr("在启动或应用设置时重新查询，不会静默重启正在运行的任务。")}
+                  >
                     <span className="settings-row-copy">
                       <strong>{tr("跟随出口 IP 的时区")}</strong>
-                      <small>{probe && draft.auto_timezone ? probe.timezone : tr("在启动或应用设置时重新查询，不会静默重启正在运行的任务。")}</small>
+                      {draft.auto_timezone && (
+                        <small className="settings-inline-value">
+                          {probe?.timezone || currentLoc?.timezone || draft.timezone}
+                        </small>
+                      )}
                     </span>
                     <span className="settings-row-inline">
                       {draft.auto_timezone && (
-                        <button type="button" className="quiet-button" onClick={check} disabled={busy}>
-                          {probing ? <LoaderCircle size={13} className="spin" /> : <Clock3 size={13} />}
+                        <button
+                          type="button"
+                          className="quiet-button"
+                          aria-label={tr("现在检测")}
+                          title={tr("现在检测")}
+                          onClick={check}
+                          disabled={busy}
+                        >
+                          {probing ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}
                           {tr("现在检测")}
                         </button>
                       )}
@@ -455,36 +510,49 @@ export function SettingsPanel({
                       />
                     </span>
                   </label>
-                  <div className="settings-row">
-                    <div className="settings-row-copy">
-                      <strong>{draft.auto_timezone ? tr("将应用的时区") : tr("系统时区")}</strong>
+                  {!draft.auto_timezone && (
+                    <div className="settings-row">
+                      <div className="settings-row-copy">
+                        <strong>{tr("系统时区")}</strong>
+                      </div>
+                      <div className="settings-row-control settings-row-control--wide">
+                        <InlineSelect
+                          editable
+                          aria-label={tr("系统时区")}
+                          value={draft.timezone}
+                          onValueChange={(next) => update("timezone", next)}
+                        >
+                          {zones.map((zone) => (
+                            <option key={zone} value={zone} />
+                          ))}
+                        </InlineSelect>
+                      </div>
                     </div>
-                    <div className="settings-row-control settings-row-control--wide">
-                      <InlineSelect editable
-                        aria-label={draft.auto_timezone ? tr("将应用的时区") : tr("系统时区")}
-                        value={draft.timezone}
-                        disabled={draft.auto_timezone}
-                        onValueChange={(next) => update("timezone", next)}
-                      >
-                        {zones.map((zone) => (
-                          <option key={zone} value={zone} />
-                        ))}
-                      </InlineSelect>
-                    </div>
-                  </div>
+                  )}
                 </div>
                 <div className="settings-card">
                   <label className="settings-row settings-switch-row">
                     <span className="settings-row-copy">
                       <strong>{tr("跟随出口地区的语言建议")}</strong>
-                      {draft.auto_language && currentLoc?.suggested_locale && (
-                        <small>{`${currentLoc.suggested_locale} / ${currentLoc.suggested_browser_language}`}</small>
+                      {draft.auto_language && (
+                        <small className="settings-inline-value">
+                          {currentLoc?.suggested_locale
+                            ? `${currentLoc.suggested_locale} / ${currentLoc.suggested_browser_language}`
+                            : `${draft.locale} / ${draft.browser_language}`}
+                        </small>
                       )}
                     </span>
                     <span className="settings-row-inline">
                       {draft.auto_language && (
-                        <button type="button" className="quiet-button" onClick={check} disabled={busy}>
-                          {probing ? <LoaderCircle size={13} className="spin" /> : <Globe2 size={13} />}
+                        <button
+                          type="button"
+                          className="quiet-button"
+                          aria-label={tr("现在检测")}
+                          title={tr("现在检测")}
+                          onClick={check}
+                          disabled={busy}
+                        >
+                          {probing ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}
                           {tr("现在检测")}
                         </button>
                       )}
@@ -496,80 +564,82 @@ export function SettingsPanel({
                       />
                     </span>
                   </label>
-                  <div className="settings-row">
-                    <div className="settings-row-copy">
-                      <strong>{tr("系统语言")}</strong>
-                    </div>
-                    <div className="settings-row-control">
-                      <InlineSelect
-                        aria-label={tr("系统语言")}
-                        value={draft.locale}
-                        disabled={draft.auto_language}
-                        onValueChange={(next) => update("locale", next)}
-                      >
-                        {[
-                          ["en_US.UTF-8", "English (United States)"],
-                          ["zh_CN.UTF-8", "简体中文"],
-                          ["zh_TW.UTF-8", "繁體中文"],
-                          ["ja_JP.UTF-8", "日本語"],
-                          ["de_DE.UTF-8", "Deutsch"],
-                          ["fr_FR.UTF-8", "Français"],
-                        ].map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {tr(label)}
-                          </option>
-                        ))}
-                        {![
-                          "en_US.UTF-8",
-                          "zh_CN.UTF-8",
-                          "zh_TW.UTF-8",
-                          "ja_JP.UTF-8",
-                          "de_DE.UTF-8",
-                          "fr_FR.UTF-8",
-                        ].includes(draft.locale) && (
-                          <option value={draft.locale}>{draft.locale}</option>
-                        )}
-                      </InlineSelect>
-                    </div>
-                  </div>
-                  <div className="settings-row">
-                    <div className="settings-row-copy">
-                      <strong>{tr("网页首选语言")}</strong>
-                    </div>
-                    <div className="settings-row-control">
-                      <InlineSelect
-                        aria-label={tr("网页首选语言")}
-                        value={draft.browser_language}
-                        disabled={draft.auto_language}
-                        onValueChange={(next) => update("browser_language", next)}
-                      >
-                        {[
-                          ["en-US", "English (United States)"],
-                          ["zh-CN", "简体中文"],
-                          ["zh-TW", "繁體中文"],
-                          ["ja-JP", "日本語"],
-                          ["de-DE", "Deutsch"],
-                          ["fr-FR", "Français"],
-                        ].map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {tr(label)}
-                          </option>
-                        ))}
-                        {![
-                          "en-US",
-                          "zh-CN",
-                          "zh-TW",
-                          "ja-JP",
-                          "de-DE",
-                          "fr-FR",
-                        ].includes(draft.browser_language) && (
-                          <option value={draft.browser_language}>
-                            {draft.browser_language}
-                          </option>
-                        )}
-                      </InlineSelect>
-                    </div>
-                  </div>
+                  {!draft.auto_language && (
+                    <>
+                      <div className="settings-row">
+                        <div className="settings-row-copy">
+                          <strong>{tr("系统语言")}</strong>
+                        </div>
+                        <div className="settings-row-control">
+                          <InlineSelect
+                            aria-label={tr("系统语言")}
+                            value={draft.locale}
+                            onValueChange={(next) => update("locale", next)}
+                          >
+                            {[
+                              ["en_US.UTF-8", "English (United States)"],
+                              ["zh_CN.UTF-8", "简体中文"],
+                              ["zh_TW.UTF-8", "繁體中文"],
+                              ["ja_JP.UTF-8", "日本語"],
+                              ["de_DE.UTF-8", "Deutsch"],
+                              ["fr_FR.UTF-8", "Français"],
+                            ].map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {tr(label)}
+                              </option>
+                            ))}
+                            {![
+                              "en_US.UTF-8",
+                              "zh_CN.UTF-8",
+                              "zh_TW.UTF-8",
+                              "ja_JP.UTF-8",
+                              "de_DE.UTF-8",
+                              "fr_FR.UTF-8",
+                            ].includes(draft.locale) && (
+                              <option value={draft.locale}>{draft.locale}</option>
+                            )}
+                          </InlineSelect>
+                        </div>
+                      </div>
+                      <div className="settings-row">
+                        <div className="settings-row-copy">
+                          <strong>{tr("网页首选语言")}</strong>
+                        </div>
+                        <div className="settings-row-control">
+                          <InlineSelect
+                            aria-label={tr("网页首选语言")}
+                            value={draft.browser_language}
+                            onValueChange={(next) => update("browser_language", next)}
+                          >
+                            {[
+                              ["en-US", "English (United States)"],
+                              ["zh-CN", "简体中文"],
+                              ["zh-TW", "繁體中文"],
+                              ["ja-JP", "日本語"],
+                              ["de-DE", "Deutsch"],
+                              ["fr-FR", "Français"],
+                            ].map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {tr(label)}
+                              </option>
+                            ))}
+                            {![
+                              "en-US",
+                              "zh-CN",
+                              "zh-TW",
+                              "ja-JP",
+                              "de-DE",
+                              "fr-FR",
+                            ].includes(draft.browser_language) && (
+                              <option value={draft.browser_language}>
+                                {draft.browser_language}
+                              </option>
+                            )}
+                          </InlineSelect>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -728,7 +798,7 @@ export function SettingsPanel({
                 {status.local_vm_storage && !isRemoteClient() && <EnvironmentStorage status={status} onConfirm={onConfirm} />}
                 {!status.storage_recovery?.required && <EnvironmentVersions status={status} onConfirm={onConfirm} />}
                 {!status.storage_recovery?.required && <EnvironmentCache status={status} onConfirm={onConfirm} />}
-                {!status.storage_recovery?.required && (
+                {(!status.storage_recovery?.required || (status.local_vm_storage && !isRemoteClient())) && (
                   <EnvironmentDeviceReset
                     status={status}
                     onConfirm={onConfirm}
@@ -800,25 +870,33 @@ export function SettingsPanel({
             </div>
           )}
         </div>
-        {(!["appearance", "notifications", "browser", "account", "vault", "mobile", "archived-sessions", "project", "about"].includes(section) || changed) && (
+        {(changed || proxyDirty || Boolean(status.job?.running)) && (
           <footer className="settings-footer">
-            {" "}
-            <>
-              <span className="save-note">
-                {status.job?.running
-                  ? status.job.message
-                  : proxyDirty
-                    ? tr("代理修改待应用，请点击「应用代理」")
-                    : changed
-                    ? environmentChanged && status.vm_running
-                      ? tr("网络和系统设置需要重启")
-                      : tr("有尚未保存的修改")
-                    : tr("没有未保存的修改")}
-              </span>
-              <button onClick={close}>{tr("返回工作台")}</button>
+            <span className="save-note">
+              {status.job?.running
+                ? status.job.message
+                : proxyDirty
+                  ? tr("代理修改待应用，请点击「应用代理」")
+                  : environmentChanged && status.vm_running
+                    ? tr("网络和系统设置需要重启")
+                    : tr("有尚未保存的修改")}
+            </span>
+            {changed && !busy && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft({ ...current });
+                  setError("");
+                  setProbeFailed(false);
+                }}
+              >
+                {tr("放弃修改")}
+              </button>
+            )}
+            {changed && (
               <button
                 className="primary"
-                disabled={!changed || busy}
+                disabled={busy}
                 onClick={() => save()}
               >
                 {busy ? (
@@ -830,7 +908,7 @@ export function SettingsPanel({
                   ? tr("保存并重启")
                   : tr("保存设置")}
               </button>
-            </>
+            )}
           </footer>
         )}
       </div>

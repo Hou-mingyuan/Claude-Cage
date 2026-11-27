@@ -92,6 +92,7 @@ export function AppearanceProvider({ children }) {
     root.dataset.preset = theme.preset || "custom";
     root.dataset.translucent = String(!theme.opaqueWindows);
     root.dataset.fontSmoothing = String(appearance.fontSmoothing);
+    root.dataset.blurStatusNetwork = String(appearance.blurStatusNetwork);
     root.dataset.reducedMotion = String(
       appearance.reducedMotion === "on" ||
         (appearance.reducedMotion === "system" && systemReduced),
@@ -115,6 +116,17 @@ export function AppearanceProvider({ children }) {
         setError("外观已应用到工作台，原生窗口未能同步，请重新打开 Cage。"),
       );
   }, [appearance, variant, systemReduced]);
+  useEffect(() => {
+    if (loading || !appearance.syncGuestTheme) return;
+    let cancelled = false;
+    queue.current.catch(() => {}).then(() => {
+      if (!cancelled && current.current.syncGuestTheme)
+        api("/appearance/guest-theme", { variant }).catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, appearance.syncGuestTheme, variant]);
   const update = (next) => {
     next = normalizeAppearance(
       typeof next === "function" ? next(current.current) : next,

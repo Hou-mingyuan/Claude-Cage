@@ -39,15 +39,16 @@ for variable, suffix in (("CC", "c"), ("CXX", "cpp")):
     executable = directory / f"cage-compiler-check-{suffix}.exe"
     source.write_text("int main(void) { return 0; }\n", encoding="ascii")
     command = os.environ[variable]
-    try:
-        arguments = subprocess.list2cmdline([str(source), "-o", str(executable)])
-        subprocess.run(f"{command} {arguments}", check=True)
-        subprocess.run([str(executable)], check=True)
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
-        sys.exit(
-            f"MSYS2 UCRT64 compile/link/run check failed for {variable}={command}: {error}\n"
-            "Check the selected assembler and linker, including the System32 zlib1.dll conflict in docs/windows.md."
-        )
+    arguments = subprocess.list2cmdline([str(source), "-o", str(executable)])
+    for phase, step in (("compile/link", f"{command} {arguments}"), ("run", [str(executable)])):
+        try:
+            result = subprocess.run(step)
+        except (ValueError, OSError) as error:
+            print(error, file=sys.stderr)
+            sys.exit(f"Preflight: {variable} {phase} could not start.")
+        if result.returncode:
+            status = result.returncode & 0xFFFFFFFF
+            sys.exit(f"Preflight: {variable} {phase} exited with {result.returncode} (0x{status:08X}).")
 CAGE_COMPILER_CHECK
     exit
 fi

@@ -192,25 +192,20 @@ export default class Display {
         this._fbWidth = width;
         this._fbHeight = height;
 
-        const canvas = this._backbuffer;
-        if (canvas.width !== width || canvas.height !== height) {
-
-            // We have to save the canvas data since changing the size will clear it
-            let saveImg = null;
-            if (canvas.width > 0 && canvas.height > 0) {
-                saveImg = this._drawCtx.getImageData(0, 0, canvas.width, canvas.height);
+        const previous = this._backbuffer;
+        if (previous.width !== width || previous.height !== height) {
+            // Keep the unscaled overlap for incremental updates and CopyRect.
+            // Copy between canvases to avoid a synchronous pixel readback.
+            const next = document.createElement('canvas');
+            next.width = width;
+            next.height = height;
+            const ctx = next.getContext('2d');
+            if (previous.width > 0 && previous.height > 0 && width > 0 && height > 0) {
+                ctx.drawImage(previous, 0, 0);
             }
-
-            if (canvas.width !== width) {
-                canvas.width = width;
-            }
-            if (canvas.height !== height) {
-                canvas.height = height;
-            }
-
-            if (saveImg) {
-                this._drawCtx.putImageData(saveImg, 0, 0);
-            }
+            previous.width = 0;
+            this._backbuffer = next;
+            this._drawCtx = ctx;
         }
 
         // Readjust the viewport as it may be incorrectly sized

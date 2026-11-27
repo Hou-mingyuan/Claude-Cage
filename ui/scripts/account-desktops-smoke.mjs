@@ -13,10 +13,12 @@ const accounts = [
   { id: accountA, account_id: accountA, number: 1, label: "工作账号", running: false, dedicated: false },
 ];
 let instances = [
-  { id: "default", number: 0, label: "默认 Desktop", running: false, dedicated: false },
+  { id: "default", number: 0, label: "默认 Desktop", running: true, dedicated: false },
   { id: instanceA, account_id: accountA, number: 1, label: "工作账号", running: false, dedicated: false },
   { id: pendingB, number: 0, label: "待登录 Desktop", running: false, dedicated: false },
 ];
+let defaultStopped = 0;
+let defaultRemoved = false;
 let failDelete = false;
 const deletedIDs = [];
 
@@ -25,11 +27,27 @@ try {
   state.status.account_desktops_supported = true;
   state.status.desktop_catalog_revision = 1;
 
+  await page.route("**/api/claude-desktop/stop", async (route) => {
+    defaultStopped++;
+    const def = instances.find((item) => item.id === "default");
+    if (def) def.running = false;
+    return route.fulfill({ json: { id: "job-default-stop", running: false } });
+  });
+
   await page.route("**/api/desktop-instances**", async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname.replace("/api", "");
     if (path === "/desktop-instances" && req.method() === "GET") {
-      return route.fulfill({ json: { supported: true, accounts, instances, redirects: {} } });
+      return route.fulfill({ json: { supported: true, accounts, instances, redirects: {}, default_removed: defaultRemoved } });
+    }
+    if (path === "/desktop-instances" && req.method() === "POST") {
+      const { account_id } = req.postDataJSON() || {};
+      const acct = accounts.find((item) => item.id === account_id);
+      const created = acct
+        ? { id: "d".repeat(24), account_id: acct.id, number: acct.number, label: acct.label, running: false, dedicated: false }
+        : { id: "e".repeat(24), number: 0, label: "待登录 Desktop", running: false, dedicated: false };
+      instances = [...instances, created];
+      return route.fulfill({ json: created });
     }
     const metaMatch = path.match(/^\/desktop-instances\/([^/]+)\/metadata$/);
     if (metaMatch && req.method() === "POST") {
@@ -52,10 +70,14 @@ try {
     const deleteMatch = path.match(/^\/desktop-instances\/([^/]+)$/);
     if (deleteMatch && req.method() === "DELETE") {
       const id = deleteMatch[1];
+      if (instances.length <= 1) {
+        return route.fulfill({ status: 400, contentType: "text/plain", body: "至少保留一个 Desktop 实例，不能删除最后一个" });
+      }
       if (failDelete) {
         return route.fulfill({ status: 502, contentType: "text/plain", body: "无法清理客机内的 Desktop 实例数据，暂未删除记录，请重试" });
       }
       deletedIDs.push(id);
+      if (id === "default") defaultRemoved = true;
       instances = instances.filter((item) => item.id !== id);
       return route.fulfill({ json: { ok: true } });
     }
@@ -63,15 +85,25 @@ try {
   });
 
   await page.reload();
-  await page.getByRole("button", { name: "Claude Desktop", exact: true }).click();
+  const desktopToggle = page.getByRole("button", { name: "Claude Desktop", exact: true });
+  await desktopToggle.waitFor();
+  await page.locator('.account-desktop-nav > button.sidebar-link[aria-expanded="false"]').waitFor();
+  await desktopToggle.click();
 
-  // Default desktop supports rename and never shows delete.
+  // Default desktop supports rename and delete when multiple instances exist.
   const defaultButton = page.getByRole("button", { name: "默认 Desktop", exact: true });
   await defaultButton.waitFor();
   await defaultButton.hover();
   const defaultActions = page.getByRole("group", { name: "默认 Desktop 的操作" });
   await defaultActions.getByRole("button", { name: "重命名", exact: true }).waitFor();
-  assert.equal(await defaultActions.getByRole("button", { name: "删除", exact: true }).count(), 0);
+  await defaultActions.getByRole("button", { name: "删除", exact: true }).waitFor();
+  await defaultActions.getByRole("button", { name: "关闭", exact: true }).click();
+  const stopDefaultDialog = page.getByRole("dialog", { name: "关闭 默认 Desktop？" });
+  await stopDefaultDialog.getByRole("button", { name: "关闭应用", exact: true }).click();
+  await stopDefaultDialog.waitFor({ state: "hidden" });
+  assert.equal(defaultStopped, 1);
+  await defaultButton.hover();
+  assert.equal(await defaultActions.getByRole("button", { name: "关闭", exact: true }).count(), 0);
   await defaultActions.getByRole("button", { name: "重命名", exact: true }).click();
   const renameDialog = page.getByRole("dialog", { name: "重命名 Desktop" });
   await renameDialog.getByRole("textbox", { name: "Desktop 名称" }).fill("主力桌面");
@@ -79,10 +111,12 @@ try {
   await renameDialog.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "主力桌面", exact: true }).waitFor();
 
-  // Start the bound instance so its pane is open, then rename it and verify both sidebar and pane header update.
+  // Start the bound instance so its pane is open, then verify sidebar collapse/expand and rename.
   await page.getByRole("button", { name: "#01 工作账号 · 未启动", exact: true }).click();
   const pane = page.locator(`#desktop-pane-${instanceA}`);
   await pane.waitFor();
+  await page.getByRole("button", { name: "收起侧栏", exact: true }).click();
+  await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
   const runningRowButton = page.getByRole("button", { name: "#01 工作账号 · 运行中", exact: true });
   await runningRowButton.focus();
   await page.keyboard.press("Shift+F10");
@@ -94,48 +128,75 @@ try {
   await page.getByRole("button", { name: "#01 研发专用 · 运行中", exact: true }).waitFor();
   assert.match(await pane.locator("header").innerText(), /研发专用/);
 
-  // Delete flow: cancel keeps instance, error shows inside anchored dialog and keeps instance, retry deletes and closes pane.
+  // Delete flow on the first (default) desktop: cancel keeps it, error shows inside anchored dialog, retry deletes it while keeping the open pane.
+  const renamedDefaultButton = page.getByRole("button", { name: "主力桌面", exact: true });
+  await renamedDefaultButton.hover();
+  const renamedDefaultActions = page.getByRole("group", { name: "主力桌面 的操作" });
+  await renamedDefaultActions.getByRole("button", { name: "删除", exact: true }).click();
+  const defaultDeleteDialog = page.getByRole("dialog", { name: "删除 主力桌面？" });
+  await defaultDeleteDialog.waitFor();
+  await defaultDeleteDialog.getByRole("button", { name: "取消", exact: true }).click();
+  await defaultDeleteDialog.waitFor({ state: "hidden" });
+  assert.equal(deletedIDs.length, 0);
+
+  await renamedDefaultButton.hover();
+  await renamedDefaultActions.getByRole("button", { name: "删除", exact: true }).click();
+  failDelete = true;
+  await defaultDeleteDialog.getByRole("button", { name: "删除实例", exact: true }).click();
+  await defaultDeleteDialog.getByRole("alert").filter({ hasText: "无法清理客机内的 Desktop 实例数据" }).waitFor();
+  assert.equal(deletedIDs.length, 0);
+
+  failDelete = false;
+  await defaultDeleteDialog.getByRole("button", { name: "删除实例", exact: true }).click();
+  await defaultDeleteDialog.waitFor({ state: "hidden" });
+  assert.deepEqual(deletedIDs, ["default"]);
+  assert.equal(await page.getByRole("button", { name: "主力桌面", exact: true }).count(), 0);
+  // Active isolated pane stays open after deleting default.
+  assert.equal(await pane.isVisible(), true);
+
+  // Two instances remain (instanceA + pendingB): deleting instanceA closes its pane and leaves pendingB as sole remaining.
   const renamedRowButton = page.getByRole("button", { name: "#01 研发专用 · 运行中", exact: true });
   await renamedRowButton.hover();
   const renamedActions = page.getByRole("group", { name: "#01 研发专用 的操作" });
   await renamedActions.getByRole("button", { name: "删除", exact: true }).click();
   const deleteDialog = page.getByRole("dialog", { name: "删除 #01 研发专用？" });
-  await deleteDialog.waitFor();
-  await deleteDialog.getByRole("button", { name: "取消", exact: true }).click();
-  await deleteDialog.waitFor({ state: "hidden" });
-  assert.equal(deletedIDs.length, 0);
-
-  await renamedRowButton.hover();
-  await renamedActions.getByRole("button", { name: "删除", exact: true }).click();
-  failDelete = true;
-  await deleteDialog.getByRole("button", { name: "删除实例", exact: true }).click();
-  await deleteDialog.getByRole("alert").filter({ hasText: "无法清理客机内的 Desktop 实例数据" }).waitFor();
-  assert.equal(deletedIDs.length, 0);
-
-  failDelete = false;
   await deleteDialog.getByRole("button", { name: "删除实例", exact: true }).click();
   await deleteDialog.waitFor({ state: "hidden" });
   await pane.waitFor({ state: "hidden" });
-  assert.deepEqual(deletedIDs, [instanceA]);
+  assert.deepEqual(deletedIDs, ["default", instanceA]);
   assert.equal(await page.getByRole("button", { name: /研发专用/ }).count(), 0);
 
-  // Pending desktop can also be deleted directly.
-  const pendingButton = page.getByRole("button", { name: "待登录 Desktop · 未启动", exact: true });
-  await pendingButton.hover();
-  await page.getByRole("group", { name: "待登录 Desktop 的操作" }).getByRole("button", { name: "删除", exact: true }).click();
-  const pendingDelete = page.getByRole("dialog", { name: "删除 待登录 Desktop？" });
-  await pendingDelete.getByRole("button", { name: "删除实例", exact: true }).click();
-  await pendingDelete.waitFor({ state: "hidden" });
-  assert.deepEqual(deletedIDs, [instanceA, pendingB]);
-  assert.equal(await page.getByRole("button", { name: /待登录 Desktop/ }).count(), 0);
+  // Pending desktop is now the sole remaining instance: sidebar collapses to a single flat Claude Desktop row.
+  assert.equal(await page.locator(".account-desktop-list").count(), 0);
+  const flatDesktopButton = page.getByRole("button", { name: "Claude Desktop", exact: true });
+  await flatDesktopButton.waitFor();
+  assert.equal(await flatDesktopButton.getAttribute("aria-expanded"), null);
+  assert.equal(await flatDesktopButton.getAttribute("title"), "Claude Desktop · 待登录 Desktop");
 
-  // Account remains available when creating a new Desktop.
-  await page.getByRole("button", { name: "新建 Desktop", exact: true }).click();
+  // Clicking the flat row opens the sole remaining instance directly.
+  await flatDesktopButton.click();
+  const pendingPane = page.locator(`#desktop-pane-${pendingB}`);
+  await pendingPane.waitFor();
+
+  // Hovering the flat row shows stop + create actions (no delete/rename).
+  await flatDesktopButton.hover();
+  const flatActions = page.getByRole("group", { name: "Claude Desktop 的操作" });
+  await flatActions.getByRole("button", { name: "关闭应用", exact: true }).waitFor();
+  await flatActions.getByRole("button", { name: "新建 Desktop", exact: true }).waitFor();
+  assert.equal(await flatActions.getByRole("button", { name: "删除", exact: true }).count(), 0);
+  assert.equal(await flatActions.getByRole("button", { name: "重命名", exact: true }).count(), 0);
+
+  // Account remains available when creating a second Desktop from flat mode, and creating transitions back to expanded tree mode.
+  await flatActions.getByRole("button", { name: "新建 Desktop", exact: true }).click();
   await page.getByRole("combobox", { name: "Desktop 所属账号" }).click();
-  await page.getByRole("option", { name: "#01 工作账号" }).waitFor();
+  await page.getByRole("option", { name: "#01 工作账号" }).click();
+  await page.getByRole("button", { name: "打开 Desktop", exact: true }).click();
+  await page.locator(".account-desktop-list").waitFor();
+  await page.getByRole("button", { name: "#01 工作账号 · 运行中", exact: true }).waitFor();
+  await page.getByRole("button", { name: "待登录 Desktop · 运行中", exact: true }).waitFor();
 
   assert.deepEqual(errors, []);
-  console.log("PASS: desktop instance rename, Shift+F10 actions, anchored delete with cancel/retry, pane close, and account preservation");
+  console.log("PASS: desktop instance rename, default delete, flat single-instance mode, create-to-tree transition, and account preservation");
 } finally {
   await browser.close();
 }

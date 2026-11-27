@@ -19,6 +19,17 @@ Windows ARM64 和 Linux ARM64 暂不支持。平台依赖详情见 [Windows 指�
 
 这里选择的是运行 Cage 的电脑平台。三个平台上的环境都是 Debian 13，无需另外选择系统，见[Debian 环境](guest-systems.md)。
 
+### 从 npm 安装
+
+从官方 v0.2.2 npm 包发布起，装有 Node.js 20 或更高版本的电脑也可从终端安装完整版。
+
+```sh
+npm install -g claude-cage
+cage --version
+```
+
+npm 安装终端入口。单独输入 `cage` 可查看帮助。运行 `cage version` 时，入口会查找本机已安装的 Cage。已有兼容版本便直接使用原来的安装和账号；新电脑会下载同版本的官方安装包并校验，Linux 按系统提示授权 APT 安装。macOS 上已有的旧版若提示先在工作台升级，请完成升级后重试。首次下载需要联网。`cage update --check` 只检查版本，尚未安装原生程序时也不会触发安装。之后可用 `cage update` 升级本机应用。进入项目文件夹后运行 `cage claude` 使用默认账号，或用 `cage sarah` 只为这次调用选择名为 `sarah` 的账号。若旧预览版不支持按名选择，请按终端提示升级工作台。Linux 上若需保留系统已有的同名 `cage` 命令，可把 npm 包安装到独立前缀，运行该前缀下的 `bin/claude-cage`。[终端使用示例](workbench.md#在本机终端使用-claude-code)
+
 <figure class="guide-shot">
   <a href="../../www/public/docs/screenshots/account-setup.jpg" target="_blank" rel="noopener" aria-label="查看原图：首次创建 Cage 账户"><img src="../../www/public/docs/screenshots/account-setup.jpg" alt="首次创建 Cage 账户" width="2560" height="1764" loading="lazy" decoding="async" /></a>
   <figcaption>首次创建 Cage 账户。截图版本：0.1.6-alpha-preview（开发构建） · macOS 原生应用 · 2026-11-07。<a href="../../www/public/docs/screenshots/account-setup.jpg" target="_blank" rel="noopener">查看原图（2560 × 1764） ↗</a></figcaption>
@@ -28,7 +39,7 @@ Windows ARM64 和 Linux ARM64 暂不支持。平台依赖详情见 [Windows 指�
 
 首次使用需要先创建用户名和密码，密码至少 8 个字符。这个账户用于解锁当前 Cage，Claude 订阅需要另外在环境里登录。注册后请保存恢复密钥，忘记密码时可在登录页使用它重置；保存与补设步骤见[账户恢复](settings.md#保存恢复密钥)。
 
-完整桌面版在创建账户时默认勾选“记住我”，可以取消；勾选后同一系统用户以后打开 Cage 可自动进入。新安装没有跳过注册的入口；以前创建的免账号工作区仍可继续使用，适用范围见[受信任的本机登录](https://github.com/Lee-xeo/Claude-Cage/blob/main/docs/getting-started.md#受信任的本机登录)。已有账户可在登录页或“设置 → 账户”调整“记住我”。macOS 另可开启 Touch ID。手动锁定后仍需验证，退出账户会撤销快捷登录授权。账户密码不会加密整个项目目录或虚拟磁盘。
+完整桌面版在创建账户时默认勾选“记住我”，可以取消；勾选后同一系统用户以后打开 Cage 可自动进入。新安装没有跳过注册的入口；以前创建的免账号工作区仍可继续使用，适用范围见[受信任的本机登录](https://github.com/Lee-xeo/Claude-Cage/blob/main/docs/getting-started.md#受信任的本机登录)。已有账户可在登录页或“设置 → 账户”调整“记住我”。在支持 Touch ID 的 macOS 安装包中，还可以开启指纹解锁。手动锁定后仍需验证，退出账户会撤销快捷登录授权。账户密码不会加密整个项目目录或虚拟磁盘。
 
 若以前已有账户，现在再次出现创建页面，先停止操作并查[数据目录问题](troubleshooting.md#原账户与数据看不见了)。
 
@@ -38,7 +49,7 @@ Windows ARM64 和 Linux ARM64 暂不支持。平台依赖详情见 [Windows 指�
 
 “存储目录”已填入默认位置。需要更换时直接编辑，或点击“选择文件夹”选定本地磁盘上的专用空文件夹；点击“下一步：配置代理”时保存，目录无效时留在当前页提示修改。Windows 安装器里的程序目录与环境数据目录分开；例如应用装在 C 盘，环境可放在 `D:\CageData`。
 
-Mac、Linux 使用默认配置时，环境数据放在用户主目录的 `.claude-cage/state`。Windows 正式安装版在首次初始化时，默认填入安装目录下的 `CageData`，例如应用装在 `D:\Cage`，环境数据就放在 `D:\Cage\CageData`；没有写入权限时，在当前字段选择其他有权限的本地文件夹。已有环境继续使用原存储位置，不会自动迁移。更新或覆盖安装时，安装目录下的 `CageData` 保持原位，不随程序文件移动，虚拟磁盘路径不变。账户与配置仍保存在用户目录的 `.claude-cage`。
+Mac、Linux 使用默认配置时，环境数据放在用户主目录的 `.claude-cage/state`。Windows 正式安装版在首次初始化时，若应用安装在 `AppData` 和临时目录之外（例如 `D:\Cage`），默认填入安装目录下的 `CageData`（如 `D:\Cage\CageData`）；若应用安装在 `%LOCALAPPDATA%\Programs\Cage` 等 `AppData` 或临时目录中，则默认沿用用户主目录下的 `.claude-cage\state`，避免虚拟机本机套接字在 `AppData` 下受限。没有写入权限或需换盘时，在当前字段选择 `AppData` 之外的其他有权限本地文件夹。已有环境继续使用原存储位置，不会自动迁移，也可随时从设置迁移到其他本地目录。更新或覆盖安装时，安装目录下的 `CageData` 保持原位，不随程序文件移动，虚拟磁盘路径不变。账户与配置仍保存在用户目录的 `.claude-cage`。
 
 初始化页显示本机完整路径。系统镜像、后续镜像下载缓存与持久虚拟磁盘使用同一存储位置；旧版本已留在系统缓存目录的文件不自动移动或删除。更新、重装与卸载应用保留环境数据目录，重新安装后可以继续使用已有数据。不要手动删除这个目录。
 

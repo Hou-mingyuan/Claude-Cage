@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 type DesktopLocalController interface {
 	Status(context.Context) (DesktopLocalStatus, error)
 	Connect(context.Context) (*remotehost.Session, error)
+	Attach(context.Context, string) (*remotehost.Session, error)
 	Release(context.Context, DesktopLocalStatus, bool) error
 	ReleaseOwnedIdle(context.Context, DesktopLocalStatus) (bool, error)
 }
@@ -125,14 +127,17 @@ type desktopGateway struct {
 	store           *remotehost.Store
 	local           DesktopLocalController
 	generation      string
+	windowOnly      bool
 	active, pending *desktopTarget
 	closed          bool
 	departing       bool
 }
 
+const desktopWindowOnlyEnv = "CAGE_DESKTOP_WINDOW_ONLY"
+
 func newDesktopGateway(profile string, local DesktopLocalController) *remoteGateway {
 	g := newRemoteGateway(profile)
-	g.desktop = &desktopGateway{local: local, store: g.store, generation: randomToken()}
+	g.desktop = &desktopGateway{local: local, store: g.store, generation: randomToken(), windowOnly: os.Getenv(desktopWindowOnlyEnv) == "1"}
 	return g
 }
 
@@ -140,7 +145,7 @@ func (d *desktopGateway) context() ClientContext {
 	d.mu.RLock()
 	generation, active, pending := d.generation, d.active, d.pending
 	d.mu.RUnlock()
-	c := ClientContext{DesktopGateway: true, Mode: "none", ConnectionID: generation, ClientPlatform: runtime.GOOS, State: remotehost.ConnectionState{State: "disconnected"}, Candidate: pending.candidate()}
+	c := ClientContext{DesktopGateway: true, WindowOnly: d.windowOnly, Mode: "none", ConnectionID: generation, ClientPlatform: runtime.GOOS, State: remotehost.ConnectionState{State: "disconnected"}, Candidate: pending.candidate()}
 	if active == nil {
 		return c
 	}
@@ -220,7 +225,13 @@ func (d *desktopGateway) prepare(in switchRequest) (*desktopCandidate, error) {
 		t.localDone = make(chan struct{})
 		go func() {
 			defer close(t.localDone)
-			session, err := d.local.Connect(ctx)
+			var session *remotehost.Session
+			var err error
+			if in.LocalControllerID != "" {
+				session, err = d.local.Attach(ctx, in.LocalControllerID)
+			} else {
+				session, err = d.local.Connect(ctx)
+			}
 			t.mu.Lock()
 			t.session, t.localErr = session, err
 			t.mu.Unlock()

@@ -20,18 +20,20 @@ const (
 )
 
 type Job struct {
-	Canceled      bool           `json:"canceled,omitempty"`
-	SettingsSaved bool           `json:"settings_saved,omitempty"`
-	SetupProgress *SetupProgress `json:"setup_progress,omitempty"`
-	ID            string         `json:"id"`
-	Kind          string         `json:"kind"`
-	Initiator     string         `json:"initiator,omitempty"`
-	Running       bool           `json:"running"`
-	Message       string         `json:"message"`
-	Error         string         `json:"error,omitempty"`
-	Recovery      string         `json:"recovery,omitempty"`
-	Workspace     string         `json:"workspace,omitempty"`
-	Log           string         `json:"log,omitempty"`
+	Canceled           bool           `json:"canceled,omitempty"`
+	NetworkCheckFailed bool           `json:"network_check_failed,omitempty"`
+	SettingsSaved      bool           `json:"settings_saved,omitempty"`
+	SetupProgress      *SetupProgress `json:"setup_progress,omitempty"`
+	ID                 string         `json:"id"`
+	Kind               string         `json:"kind"`
+	Target             string         `json:"target,omitempty"`
+	Initiator          string         `json:"initiator,omitempty"`
+	Running            bool           `json:"running"`
+	Message            string         `json:"message"`
+	Error              string         `json:"error,omitempty"`
+	Recovery           string         `json:"recovery,omitempty"`
+	Workspace          string         `json:"workspace,omitempty"`
+	Log                string         `json:"log,omitempty"`
 	// SupersededBy names the job that replaced this one; a running job
 	// replaced by a stop is recorded as canceled.
 	SupersededBy string `json:"superseded_by,omitempty"`
@@ -67,6 +69,10 @@ func (m *jobManager) submit(operation sync.Locker, kind string, pauseVersion uin
 }
 
 func (m *jobManager) submitWithInitiator(operation sync.Locker, kind, initiator string, pauseVersion uint64, prepare func() error, afterSuccess func() error, run func() error) (Job, error) {
+	return m.submitWithInitiatorTarget(operation, kind, "", initiator, pauseVersion, prepare, afterSuccess, run)
+}
+
+func (m *jobManager) submitWithInitiatorTarget(operation sync.Locker, kind, target, initiator string, pauseVersion uint64, prepare func() error, afterSuccess func() error, run func() error) (Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -104,7 +110,7 @@ func (m *jobManager) submitWithInitiator(operation sync.Locker, kind, initiator 
 		previous.CanceledBy = m.cancelBy
 	}
 	m.cancelBy = ""
-	m.state = Job{ID: randomToken()[:12], Kind: kind, Initiator: initiator, Running: true, Message: "正在准备…"}
+	m.state = Job{ID: randomToken()[:12], Kind: kind, Target: target, Initiator: initiator, Running: true, Message: "正在准备…"}
 	m.previous = supersededJob(previous, m.state)
 	execution := &jobExecution{owner: m, id: m.state.ID, ctx: ctx, pauseVersion: pauseVersion}
 	execution.log = diagnostics.NewStreamWithConsumer(diagnostics.Default(), "task/"+kind, "info", func(line string) {
@@ -224,7 +230,8 @@ func (m *jobManager) finishLocked(execution *jobExecution, err error) {
 		m.state.Message = jobName(m.state.Kind) + "失败"
 		var networkFailure networkCheckError
 		var draftPending staticDraftPendingError
-		if m.state.Kind == "start" && errors.As(err, &networkFailure) {
+		if (m.state.Kind == "start" || m.state.Kind == "rebuild") && errors.As(err, &networkFailure) {
+			m.state.NetworkCheckFailed = true
 			m.state.Message = "环境已启动，联网检查未通过"
 		} else if m.state.SettingsSaved {
 			m.state.Message = "设置已保存，等待环境恢复"
@@ -243,7 +250,8 @@ func (m *jobManager) finishLocked(execution *jobExecution, err error) {
 
 func jobName(kind string) string {
 	names := map[string]string{
-		"start": "启动环境", "stop": "停止环境", "setup": "准备环境", "settings": "应用设置", "project": "连接项目目录", "storage": "迁移环境目录", "restore": "恢复配置", "resources": "应用资源配置", "safety": "检查联网条件", "network-recovery": "恢复联网", "proxy": "应用代理节点", "proxy-network": "恢复代理连接", "environment-update": "更新环境组件", "environment-tools": "更新环境工具", "claude-desktop-install": "安装 Claude Desktop", "claude-desktop-start": "打开 Claude Desktop", "claude-desktop-stop": "关闭 Claude Desktop", "device-reset": "重置环境与换机", "device-reset-restore": "恢复旧环境",
+		"rebuild": "重建本机虚拟机",
+		"start":   "启动环境", "stop": "停止环境", "setup": "准备环境", "settings": "应用设置", "project": "连接项目目录", "storage": "迁移环境目录", "restore": "恢复配置", "resources": "应用资源配置", "safety": "检查联网条件", "network-recovery": "恢复联网", "proxy": "应用代理节点", "proxy-network": "恢复代理连接", "environment-update": "更新环境组件", "environment-tools": "更新环境工具", "claude-desktop-install": "安装 Claude Desktop", "claude-desktop-update": "更新 Claude Desktop", "claude-desktop-start": "打开 Claude Desktop", "claude-desktop-stop": "关闭 Claude Desktop", "desktop-app-install": "安装应用", "desktop-app-update": "更新应用", "desktop-app-remove": "卸载应用", "desktop-app-start": "打开应用", "desktop-app-stop": "关闭应用", "device-reset": "重置环境与换机", "device-reset-restore": "恢复旧环境",
 	}
 	if name := names[kind]; name != "" {
 		return name

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -100,6 +101,36 @@ func TestDesktopCallbackFocusAfterHandoff(t *testing.T) {
 					t.Fatal("handoff notification missing")
 				}
 			})
+		}
+	}
+}
+
+func TestAbsoluteDesktopOpenerUsesInstanceHandlers(t *testing.T) {
+	dir := t.TempDir()
+	id := strings.Repeat("a", 24)
+	home := "/home/test/.local/share/desktop-profiles/" + id + "/home"
+	runtime := "desktop-" + id
+	if err := os.Mkdir(filepath.Join(dir, runtime), 0700); err != nil {
+		t.Fatal(err)
+	}
+	gio := filepath.Join(dir, "gio")
+	if err := os.WriteFile(gio, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := strings.NewReplacer("/run/desktop-", "./desktop-", "/usr/bin/gio", "./gio").Replace(guestOpen)
+	for _, url := range []string{"https://example.com/login", "claude://callback?state=a&code=b"} {
+		for _, source := range []string{runtime, "."} {
+			cmd := exec.Command("sh", "-c", script, "open", url)
+			cmd.Dir = dir
+			cmd.Env = []string{"HOME=" + home, "XDG_RUNTIME_DIR=" + source, "PATH=."}
+			out, err := cmd.CombinedOutput()
+			if source == runtime {
+				if err != nil || string(out) != "open\n"+url+"\n" {
+					t.Fatalf("instance handoff: %q %v", out, err)
+				}
+			} else if err == nil || len(out) != 0 {
+				t.Fatalf("mismatched instance dispatched: %q %v", out, err)
+			}
 		}
 	}
 }
@@ -288,5 +319,67 @@ func TestDesktopAuthBrowserHardeningAndNoIncognito(t *testing.T) {
 	}
 	if len(regCageKeys) != 0 {
 		t.Fatalf("CAGE_* env leaked into regular chromium: %v", regCageKeys)
+	}
+}
+
+func TestClaudeDesktopInstallerReportsKeptPartialDownload(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the installer Bash script runs in the Linux guest, not the Windows host")
+	}
+	dir := t.TempDir()
+	archives := filepath.Join(dir, "archives")
+	if err := os.MkdirAll(filepath.Join(archives, "partial"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, size := range map[string]int{"claude-desktop_1.0_arm64.deb": 3000, "libfoo_1_arm64.deb": 234, "lock": 99} {
+		if err := os.WriteFile(filepath.Join(archives, "partial", name), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commands := map[string]string{
+		"sudo": "#!/bin/sh\ncase \"$1\" in env|find) exec \"$@\";; esac\necho blocked-privileged-operation >&2; exit 97\n",
+		"apt-get": `#!/bin/sh
+printf '%s\n' "$*" >> "$HOME/apt-requests"
+case " $* " in
+  *" $FAIL_ACTION "*) echo 'E: Connection timed out' >&2; exit 100 ;;
+esac
+`,
+		"apt-config": "#!/bin/sh\nprintf \"archives='%s/'\\n\" \"$CAGE_TEST_ARCHIVES\"\n",
+		"systemctl":  "#!/bin/sh\nexit 3\n",
+		"flock":      "#!/bin/sh\nexit 0\n",
+		"dpkg":       "#!/bin/sh\necho arm64\n",
+	}
+	for name, body := range commands {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, action := range []string{"update", "install"} {
+		t.Run(action, func(t *testing.T) {
+			cmd := exec.Command("bash", "-s")
+			cmd.Stdin = strings.NewReader(ClaudeDesktopInstallScript())
+			cmd.Env = append(os.Environ(), "HOME="+dir, "PATH="+dir+":"+os.Getenv("PATH"), "CAGE_TEST_ARCHIVES="+archives, "FAIL_ACTION="+action)
+			out, err := cmd.CombinedOutput()
+			marker := "APT_FAILED exit=100 command=apt-get " + action
+			if err == nil || !strings.Contains(string(out), marker) {
+				t.Fatalf("failure marker missing: %v\n%s", err, out)
+			}
+			if action == "install" && !strings.Contains(string(out), "APT_PARTIAL bytes=3234\n"+marker) ||
+				action == "update" && strings.Contains(string(out), "APT_PARTIAL") {
+				t.Fatalf("unexpected partial package evidence for %s:\n%s", action, out)
+			}
+		})
+	}
+	requests, err := os.ReadFile(filepath.Join(dir, "apt-requests"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(requests)), "\n") {
+		install := strings.Contains(line, " install ")
+		for _, option := range []string{"Acquire::Retries=3", "Acquire::http::Timeout=30", "Acquire::https::Timeout=30"} {
+			if strings.Contains(line, option) != install {
+				t.Fatalf("wrong retry policy: %s", line)
+			}
+		}
 	}
 }

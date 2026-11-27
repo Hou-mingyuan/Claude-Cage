@@ -10,9 +10,8 @@ if [[ "${1:-}" == --intel-macos-test ]]; then
   bundle_id+=.intel-macos-test
   app_name='Cage Intel'
 fi
-installed_app="$HOME/Applications/$app_name.app"
-app_destination="${CAGE_BUILD_OUTPUT:-$PWD/_output/$app_name.app}"
-if [[ "$app_destination" != /*.app ]]; then echo 'CAGE_BUILD_OUTPUT must be an absolute .app path.' >&2; exit 2; fi
+build_output="${CAGE_BUILD_OUTPUT:-$PWD/_output/$app_name.app}"
+if [[ "$build_output" != /*.app ]]; then echo 'CAGE_BUILD_OUTPUT must be an absolute .app path.' >&2; exit 2; fi
 check_destination() {
   local target="$1"
   [[ ! -e "$target" ]] && return 0
@@ -29,7 +28,7 @@ check_destination() {
     echo 'Cage is running from this destination. Quit it before replacing the App.' >&2; exit 1
   fi
 }
-check_destination "$app_destination"
+app_destination="$build_output"
 if [[ "${1:-}" == --install ]]; then
   # The App declares LSMinimumSystemVersion 14.0; stop before downloading
   # dependencies when it could not open on this Mac.
@@ -38,8 +37,9 @@ if [[ "${1:-}" == --install ]]; then
     printf 'Cage requires macOS 14.0 or later; this Mac runs %s. Run scripts/build-app.sh without --install to only build the App.\n' "${host_version:-an unknown version}" >&2
     exit 1
   fi
-  check_destination "$installed_app"
+  app_destination="$HOME/Applications/$app_name.app"
 fi
+check_destination "$app_destination"
 version="$(tr -d '\n\r' < VERSION)"
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then echo 'Invalid VERSION.' >&2; exit 1; fi
 short_version="${version%%-*}"
@@ -58,11 +58,30 @@ source scripts/macos-build-env.sh
 macos_prepare_caches
 macos_check_toolchain
 bash scripts/fetch-proxy-core.sh
-make cage VERSION="$version"
+if ! make cage VERSION="$version"; then
+  cat >&2 <<'EOF'
+make cage failed. If the error is a Go toolchain or module download (proxy.golang.org, sum.golang.org,
+or the Go 1.27.3 toolchain for tools/tailnet), point Go at reachable mirrors and rerun, for example:
+  GOPROXY=https://goproxy.cn,direct GOSUMDB=sum.golang.google.cn bash scripts/build-app.sh
+EOF
+  exit 1
+fi
 _output/bin/cage verify-web-assets
-build_stage="$(mktemp -d "$PWD/_output/app-build.XXXXXX")"
-install_stage=''
-trap 'rm -rf "$build_stage"; if [[ -n "$install_stage" ]]; then rm -rf "$install_stage"; fi' EXIT
+# A File Provider can restore FinderInfo between signing individual binaries
+# and signing the outer bundle. Assemble and sign outside the checkout.
+build_stage="$(mktemp -d "${TMPDIR:-/tmp}/cage-app-build.XXXXXX")"
+publish_stage=''
+cleanup_stages() {
+  rm -rf "$build_stage"
+  if [[ -n "$publish_stage" ]]; then
+    if [[ -e "$publish_stage/previous.app" ]]; then
+      printf 'Previous application retained at %s/previous.app\n' "$publish_stage" >&2
+    else
+      rm -rf "$publish_stage"
+    fi
+  fi
+}
+trap cleanup_stages EXIT
 bundle="$build_stage/Cage.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 xcrun swiftc ${swift_flags[@]+"${swift_flags[@]}"} -O -target "$(uname -m)-apple-macosx14.0" -parse-as-library -framework Cocoa -framework WebKit -framework Security -framework LocalAuthentication -framework UserNotifications desktop/Cage.swift desktop/InterfaceLanguage.swift desktop/MacKeyboard.swift desktop/NativeInput.swift desktop/Updates.swift desktop/AccountDevice.swift -o "$bundle/Contents/MacOS/Cage"
@@ -125,36 +144,38 @@ fi
 "${account_signing[@]}" "$bundle/Contents/MacOS/Cage"
 "${account_signing[@]}" "$bundle"
 codesign --verify --deep --strict --verbose=2 "$bundle"
-# Keep the working App until the replacement has passed signature verification.
-check_destination "$app_destination"
+# Verify a candidate on the destination volume before moving the current App.
 mkdir -p "$(dirname "$app_destination")"
-if [[ -e "$app_destination" ]]; then mv "$app_destination" "$build_stage/previous.app"; fi
-if ! mv "$bundle" "$app_destination"; then
-  if [[ -d "$build_stage/previous.app" ]]; then mv "$build_stage/previous.app" "$app_destination"; fi
+publish_stage="$(mktemp -d "$(dirname "$app_destination")/.Cage-publish.XXXXXX")"
+ditto "$bundle" "$publish_stage/Cage.app"
+if ! codesign --verify --deep --strict --verbose=2 "$publish_stage/Cage.app"; then
+  echo 'Could not verify the copied application. If the output is in a synced folder, set CAGE_BUILD_OUTPUT to a local .app path or use --install.' >&2
   exit 1
 fi
-bundle="$app_destination"
-printf 'Built: %s\n' "$bundle"
-if [[ "${1:-}" == --install ]]; then
-  mkdir -p "$HOME/Applications"
-  install_stage="$(mktemp -d "$HOME/Applications/.Cage-install.XXXXXX")"
-  ditto "$bundle" "$install_stage/Cage.app"
-  codesign --verify --deep --strict --verbose=2 "$install_stage/Cage.app"
-  check_destination "$installed_app"
-  if [[ -e "$installed_app" ]]; then mv "$installed_app" "$install_stage/previous.app"; fi
-  if ! mv "$install_stage/Cage.app" "$installed_app"; then
-    if [[ -d "$install_stage/previous.app" ]]; then mv "$install_stage/previous.app" "$installed_app"; fi
+check_destination "$app_destination"
+# Rename to the exact path; mv would nest an app inside an existing directory
+# if another build published to the same destination in the meantime.
+rename_app() { node -e 'require("node:fs").renameSync(process.argv[1], process.argv[2])' "$1" "$2"; }
+if [[ -e "$app_destination" ]]; then rename_app "$app_destination" "$publish_stage/previous.app"; fi
+if rename_app "$publish_stage/Cage.app" "$app_destination"; then
+  if ! codesign --verify --deep --strict --verbose=2 "$app_destination"; then
+    rename_app "$app_destination" "$publish_stage/Cage.app"
+    if [[ -d "$publish_stage/previous.app" ]]; then rename_app "$publish_stage/previous.app" "$app_destination"; fi
     exit 1
   fi
-  printf 'Installed: %s\n' "$installed_app"
-  # An installed build has one launchable copy. Remove the staging build too,
-  # along with historical validation copies, after the installed App verifies.
-  codesign --verify --deep --strict --verbose=2 "$installed_app"
-  node scripts/cleanup-apps.mjs --keep "$installed_app" \
-    --root "$bundle" --root "$PWD/_output" --root "$HOME/Applications" \
+else
+  if [[ -d "$publish_stage/previous.app" ]]; then rename_app "$publish_stage/previous.app" "$app_destination"; fi
+  exit 1
+fi
+if [[ -d "$publish_stage/previous.app" ]]; then rm -rf "$publish_stage/previous.app"; fi
+if [[ "${1:-}" == --install ]]; then
+  printf 'Installed: %s\n' "$app_destination"
+  node scripts/cleanup-apps.mjs --keep "$app_destination" \
+    --root "$build_output" --root "$PWD/_output" --root "$HOME/Applications" \
     --root /Applications --root "$HOME/.claude-cage-validation"
 else
+  printf 'Built: %s\n' "$app_destination"
   if [[ -z "${CAGE_BUILD_OUTPUT:-}" && "${1:-}" != --intel-macos-test ]]; then
-    node scripts/cleanup-apps.mjs --keep "$bundle" --root "$PWD/_output"
+    node scripts/cleanup-apps.mjs --keep "$app_destination" --root "$PWD/_output"
   fi
 fi

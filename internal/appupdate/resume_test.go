@@ -97,6 +97,29 @@ func TestDroppedDownloadContinuesFromStoredBytes(t *testing.T) {
 	}
 }
 
+func TestRetryReusesOnlyVerifiedCompleteArchive(t *testing.T) {
+	a, content, digest, path := resumeFixture(t)
+	source := &rangeSource{content: content}
+	fetch := func() {
+		t.Helper()
+		if err := download(context.Background(), &http.Client{Transport: source}, a, digest, path, func(int64) {}, func() {}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fetch()
+	fetch()
+	if len(source.requests) != 1 {
+		t.Fatal("downloaded the same verified archive twice")
+	}
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", len(content))), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fetch()
+	if data, err := os.ReadFile(path); err != nil || string(data) != content || len(source.requests) != 2 {
+		t.Fatal("reused a modified archive")
+	}
+}
+
 func TestInterruptedDownloadResumesInALaterRun(t *testing.T) {
 	a, content, digest, path := resumeFixture(t)
 	source := &rangeSource{content: content, limit: func(int) int { return 50 }}

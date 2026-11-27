@@ -172,7 +172,7 @@
 }
 
 /* ── Form fields ─────────────────────────────────────────── */
-.settings-page .settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip) {
+:where(.settings-page .settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label)) {
   gap: 8px;
   margin-bottom: 20px;
   font-size: var(--s-sm);
@@ -387,6 +387,54 @@
   color: var(--success);
   background: color-mix(in srgb, var(--success) 12%, transparent);
 }
+.settings-page .settings-content .settings-exit-probe {
+  display: inline-grid;
+  place-items: center;
+  min-width: 96px;
+  min-height: 32px;
+  padding: 4px 10px;
+  gap: 6px;
+}
+.settings-page .settings-content .settings-exit-probe.has-result {
+  border-color: transparent;
+  background: transparent;
+}
+.settings-page .settings-content .settings-exit-probe.has-result:is(:hover, :focus-visible):not(:disabled) {
+  border-color: var(--line);
+  background: var(--hover);
+  color: var(--strong);
+}
+.settings-page .settings-content .settings-exit-probe-idle,
+.settings-page .settings-content .settings-exit-probe-hover {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.settings-page .settings-content .settings-exit-probe-hover {
+  opacity: 0;
+  visibility: hidden;
+}
+.settings-page .settings-content .settings-exit-probe.has-result:is(:hover, :focus-visible):not(:disabled) .settings-exit-probe-idle {
+  opacity: 0;
+  visibility: hidden;
+}
+.settings-page .settings-content .settings-exit-probe.has-result:is(:hover, :focus-visible):not(:disabled) .settings-exit-probe-hover {
+  opacity: 1;
+  visibility: visible;
+}
+.settings-page .settings-content .settings-exit-probe-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.settings-page .settings-inline-value {
+  font-family: var(--code-font-family);
+  color: var(--muted);
+}
 /* Collapsible advanced disclosure card */
 .settings-page .settings-disclosure-card {
   margin-top: 24px;
@@ -454,8 +502,8 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
-.settings-page .settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.theme-swatch-hex):not(.archive-search-input):not(.proxy-search-input),
-.settings-page .settings-content .inline-select-trigger {
+:where(.settings-page .settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.theme-swatch-hex):not(.archive-search-input):not(.proxy-search-input)),
+:where(.settings-page .settings-content .inline-select-trigger) {
   height: var(--s-control);
   padding: 0 12px;
   border-radius: 8px;
@@ -464,7 +512,7 @@
   color: var(--strong);
   transition: border-color 0.12s, box-shadow 0.12s;
 }
-.settings-page .settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.archive-search-input):not(.proxy-search-input):focus-visible {
+:where(.settings-page .settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.archive-search-input):not(.proxy-search-input)):focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
@@ -495,7 +543,7 @@
 }
 
 /* ── Buttons ─────────────────────────────────────────────── */
-.settings-page .settings-content button:not(.text-button):not(.icon-button) {
+:where(.settings-page .settings-content button:not(.text-button):not(.icon-button)) {
   min-height: 36px;
   padding: 6px 14px;
   border-radius: 8px;

@@ -8,6 +8,7 @@ const profiles = [];
 const starts = [];
 let assignedProfile = 0;
 let failRefresh = false;
+let revokeAtAutoLaunch = false;
 let accountRequests = 0;
 const usageRequests = [];
 let heldRefresh = null;
@@ -23,6 +24,8 @@ const profileCard = (label) => {
   return page.getByRole("article", { name: profile?.number ? `#${String(profile.number).padStart(2, "0")} ${label}` : label, exact: true });
 };
 const now = Math.floor(Date.now() / 1000);
+const usageStamp = row => row.locator(".claude-quota-age time");
+const usageStatus = (row, text) => row.getByTitle(new RegExp("^" + text));
 const openAccounts = async () => {
   await page.getByRole("button", { name: "Claude 账号管理", exact: true }).click();
   await page.getByRole("main", { name: "Claude 账号管理", exact: true }).waitFor();
@@ -105,13 +108,13 @@ async function checkLocalCountdown() {
     seven_day: { used_percentage: 64, observed_at: seconds, resets_at: seconds + 7200 } };
   await openAccounts();
   const row = profileCard("工作");
-  await row.getByText("5秒后", { exact: true }).waitFor();
-  await row.getByText("最近更新 刚刚", { exact: true }).waitFor();
-  await page.getByText("正在请求账号用量…").waitFor({ state: "hidden" });
+  await row.getByText("5 秒后", { exact: true }).waitFor();
+  await row.getByText("刚刚", { exact: true }).waitFor();
+  await page.getByText("正在查询账号用量…").waitFor({ state: "hidden" });
   const requestsBefore = accountRequests;
   const wavesBefore = usageRequests.filter((r) => r.action === "usage_panel").length;
   await page.clock.runFor(2000);
-  await row.getByText("3秒后", { exact: true }).waitFor();
+  await row.getByText("3 秒后", { exact: true }).waitFor();
   await page.clock.runFor(3000);
   await row.getByText("等待更新", { exact: true }).waitFor();
   assert.equal(await row.getByText("28%", { exact: true }).count(), 0, "expired quota cannot remain current");
@@ -129,9 +132,9 @@ async function checkLocalCountdown() {
   assert.equal(usageRequests.filter((r) => r.action === "usage_panel").length, wavesBefore, "12-second panel polling cannot start another usage query");
   assert.ok(usageRequests.some((r) => !r.action && r.visible), "a visible panel keeps the existing queue alive via GET");
   await page.clock.runFor(47_000);
-  await row.getByText("最近更新 1分钟前", { exact: true }).waitFor();
+  await row.getByText("1 分钟前", { exact: true }).waitFor();
   await page.clock.runFor(240_000);
-  await row.getByText("最近更新 5分钟前", { exact: true }).waitFor();
+  await row.getByText("5 分钟前", { exact: true }).waitFor();
 }
 
 async function checkUsagePanel() {
@@ -143,12 +146,12 @@ async function checkUsagePanel() {
   const row = profileCard(profile.label);
   await page.getByText("正在查询账号用量…", { exact: true }).waitFor();
   profile.usage_checking = true;
-  await row.getByText("正在查询额度…").waitFor();
+  await usageStatus(row, "正在查询额度…").waitFor();
   assert.equal(waves(), before + 1, "opening the panel initiates one real usage request");
   assert.equal(await row.getByRole("button", { name: "检查状态" }).isEnabled(), false);
   panelWorker = false;
   Object.assign(profile, { usage_checking: false, usage_status: "cached", usage_checked_at: now });
-  await row.getByText("本次只有缓存读数").waitFor();
+  await usageStatus(row, "本次只有缓存读数").waitFor();
   await row.getByText("23%", { exact: true }).waitFor();
   await row.getByText("历史读数", { exact: true }).waitFor();
   await page.setViewportSize({ width: 375, height: 700 });
@@ -160,7 +163,7 @@ async function checkUsagePanel() {
   await back.click();
   offlineUsage = true;
   await openAccounts();
-  await row.getByText("环境离线，无法查询").waitFor();
+  await usageStatus(row, "环境离线，无法查询").waitFor();
   await row.getByText("23%", { exact: true }).waitFor();
   assert.equal(await row.getByRole("button", { name: "检查状态" }).isEnabled(), false);
   await back.click();
@@ -174,14 +177,14 @@ async function checkUsagePanel() {
   usageUnavailable = "";
   profile.usage_status = "not_applicable";
   await openAccounts();
-  await row.getByText("当前登录不提供订阅额度").waitFor();
+  await usageStatus(row, "当前登录不提供订阅额度").waitFor();
   await row.getByText("历史读数", { exact: true }).waitFor();
   await back.click();
   // An upstream probe failure is also a normal panel response, distinct from an HTTP transport error.
   profile.usage_status = "error";
   profile.usage_checked_at = now;
   await openAccounts();
-  await row.getByText("额度查询失败").waitFor();
+  await usageStatus(row, "额度查询失败").waitFor();
   const failedFive = row.getByRole("group", { name: "5h 额度" });
   assert.equal(await failedFive.locator("time").getAttribute("datetime"), new Date((now - 3600) * 1000).toISOString());
   const failedWeek = row.getByRole("group", { name: "7d 额度" });
@@ -221,6 +224,8 @@ try {
     starts.push(body);
     const automatic = body.claude_account_id === "auto";
     const selected = automatic ? profiles[assignedProfile] : profiles.find(a => a.id === body.claude_account_id);
+    // A concurrent change can revoke an otherwise eligible account after the picker opens.
+    if (automatic && revokeAtAutoLaunch) { selected.enabled = false; revokeAtAutoLaunch = false; }
     if (body.kind === "claude" && automatic && profiles.length && !selected?.enabled)
       return route.fulfill({ status: 409, contentType: "text/plain; charset=utf-8", body: "没有可用 Claude 账号" });
     const terminal = { id: String(starts.length), title: "终端 " + starts.length, kind: body.kind,
@@ -234,10 +239,17 @@ try {
   await page.getByRole("button", { name: /^在 .* 新建终端$/ }).waitFor();
   assert.equal(usageRequests.filter((r) => r.action === "usage_panel").length, 0, "launching the workbench must not query subscription usage");
   const plus = page.getByRole("button", { name: /^在 .* 新建终端$/ });
-  const launchClaude = async (account = "auto", handoff = false) => {
+  const launchClaude = async (account, handoff = false, expectedDefault) => {
     await plus.click();
     await page.getByRole("menuitem", { name: /Claude 终端$/ }).press("Enter");
-    await chooseInline(page.getByRole("combobox", {name:"启动账号"}), account);
+    const picker = page.getByRole("combobox", {name:"启动账号"});
+    if (expectedDefault) {
+      await picker.click();
+      await page.getByRole("option", { selected: true }).and(page.locator(`[data-value="${expectedDefault}"]`)).waitFor();
+      assert.equal(await page.getByRole("option", { name: "自动选择账号" }).getAttribute("aria-disabled"), String(expectedDefault !== "auto"));
+      await picker.press("Escape");
+    }
+    if (account) await chooseInline(picker, account);
     const checkbox = page.getByRole("checkbox", {name:"额度用尽后自动接续"});
     assert.equal(await checkbox.isChecked(), false);
     if (handoff) {
@@ -254,6 +266,17 @@ try {
     await row.getByRole("button", { name: "保存备注" }).click();
   };
 
+  profiles.push({ id: "desktop-only", source: "managed", email: "desktop@example.test",
+    label: "Desktop 账号", status: "signed_out", code_unlinked: true, desktop_status: "ready" });
+  await openAccounts();
+  const desktopOnly = profileCard("Desktop 账号");
+  await desktopOnly.getByText("Code 待授权", { exact: true }).waitFor();
+  assert.ok(await desktopOnly.getByRole("button", { name: "检查状态" }).isDisabled());
+  assert.ok(await desktopOnly.getByRole("button", { name: "授权 Code", exact: true }).isEnabled());
+  assert.equal(await desktopOnly.getByText("请用原账号重新登录。").count(), 0);
+  await back();
+  profiles.pop();
+
   // Records created by the previous version keep their recovery actions.
   profiles.push({ id: "legacy", label: "草稿", status: "pending", enabled: true });
   await openAccounts();
@@ -268,9 +291,9 @@ try {
   await page.getByText("尚未添加账号").waitFor();
   await page.getByText(/普通终端尚未登录 Claude 订阅/).waitFor();
   await back();
-  await launchClaude();
+  await launchClaude(undefined, false, "login");
   await page.getByRole("tab", { name: "终端 1", exact: true }).waitFor();
-  assert.deepEqual(starts[0], { workspace: state.settings.workspace, kind: "claude", claude_account_id: "auto", auto_handoff: false });
+  assert.deepEqual(starts[0], { workspace: state.settings.workspace, kind: "claude", claude_account_id: "login", auto_handoff: false });
 
   await openAccounts();
   assert.equal(await page.getByRole("textbox", { name: "账号名称" }).count(), 0);
@@ -298,14 +321,14 @@ try {
   failRefresh = true;
   await card.getByRole("button", { name: "检查状态" }).click();
   await page.getByRole("alert").filter({ hasText: "暂时无法检查登录" }).waitFor();
-  await card.getByText("额度查询失败").waitFor();
+  await usageStatus(card, "额度查询失败").waitFor();
   await card.getByText("0%", { exact: true }).waitFor();
   assert.equal(await card.getByRole("group", { name: "5h 额度" }).locator("time").getAttribute("datetime"), new Date((now - 3600) * 1000).toISOString());
   assert.equal(await card.getByRole("group", { name: "7d 额度" }).getByText(/^上次 100% ·/).locator("time").getAttribute("datetime"), new Date((now - 7200) * 1000).toISOString());
   failRefresh = false;
   heldRefresh = Promise.withResolvers();
   await card.getByRole("button", { name: "检查状态" }).click();
-  await card.getByText("正在查询额度…").waitFor();
+  await usageStatus(card, "正在查询额度…").waitFor();
   assert.equal(await card.getByRole("button", { name: "检查状态" }).isEnabled(), false);
   assert.deepEqual(usageRequests.filter((r) => r.action === "refresh").at(-1), { action: "refresh", id: "one", visible: false });
   // A partial result with an unknown reset is usable without inventing a countdown.
@@ -313,23 +336,26 @@ try {
     quota: { five_hour: { used_percentage: 23, observed_at: now - 3600, resets_at: 0 },
       seven_day: { used_percentage: 100, observed_at: now - 7200, resets_at: now - 80 }, observed_at: now - 3600 } });
   heldRefresh.resolve();
-  await card.getByText("本次只返回了部分额度").waitFor();
+  await usageStatus(card, "本次只返回了部分额度").waitFor();
   await card.getByText("23%", { exact: true }).waitFor();
   await card.getByText(/^读取于 /).waitFor();
   await card.getByText("重置时间未知", { exact: true }).waitFor();
   const oldWeek = card.getByRole("group", { name: "7d 额度" }).getByText(/^上次 100% ·/);
   assert.equal(await oldWeek.locator("time").getAttribute("datetime"), new Date((now - 7200) * 1000).toISOString());
-  const updated = card.getByText(/^最近更新 /);
+  const updated = usageStamp(card);
   assert.equal(await updated.count(), 1);
-  assert.equal(await updated.locator("time").getAttribute("datetime"), new Date((now - 3600) * 1000).toISOString(),
+  assert.equal(await updated.getAttribute("datetime"), new Date((now - 3600) * 1000).toISOString(),
     "a newer query must not make retained quota readings appear fresh");
   assert.equal(await card.getByText(/^(上次查询|最近读数) /).count(), 0);
   heldRefresh = null;
+  await card.getByRole("checkbox", { name: "参与自动分配" }).click();
+  await card.getByRole("checkbox", { name: "参与自动分配", checked: true }).waitFor();
   await back();
-  await launchClaude();
+  revokeAtAutoLaunch = true;
+  await launchClaude(undefined, false, "auto");
   await page.getByText("没有可用 Claude 账号", { exact: true }).waitFor();
   assert.equal(await page.getByRole("tab", { name: /^终端 / }).count(), 1);
-  await launchClaude("one", true);
+  await launchClaude("one", true, "one");
   await page.getByRole("tab", { name: "终端 4 · 工作", exact: true }).waitFor();
   await page.getByText("Claude · 工作", { exact: true }).waitFor();
   assert.deepEqual(starts.at(-1), { workspace: state.settings.workspace, kind: "claude", claude_account_id:"one", auto_handoff:true });
@@ -339,7 +365,7 @@ try {
   await openAccounts();
   assert.equal(await card.getByRole("button", { name: "重新授权 Code" }).isEnabled(), false);
   const detectedA = profileCard(identityA.email);
-  await detectedA.getByText("仅手动选择").waitFor();
+  await detectedA.getByTitle("仅手动选择", { exact: true }).waitFor();
   const clawd = await readFile(new URL("../src/claude-account-crab.svg", import.meta.url), "utf8");
   assert.ok(await detectedA.locator("img").evaluate(async (img, source) => {
     await img.decode();
@@ -358,8 +384,9 @@ try {
   await page.setViewportSize({ width: 1280, height: 850 });
   assert.equal(profiles.length, 2, "the verified identity is archived once");
   await detectedA.getByRole("button", { name: "检查状态" }).click();
-  await detectedA.getByText("本次未返回额度").waitFor();
-  assert.equal(await detectedA.getByText(/^最近更新 /).locator("time").getAttribute("datetime"), new Date(now * 1000).toISOString(),
+  await detectedA.locator("img").hover();
+  await usageStatus(detectedA, "本次未返回额度").waitFor();
+  assert.equal(await usageStamp(detectedA).getAttribute("datetime"), new Date(now * 1000).toISOString(),
     "accounts without readings fall back to the latest query time");
   assert.equal(await detectedA.getByText("暂无读数", { exact: true }).count(), 2);
   assert.deepEqual(usageRequests.filter((r) => r.action === "refresh").at(-1), { action: "refresh", id: "default-" + identityA.identity, visible: false });
@@ -376,14 +403,15 @@ try {
   await rename(identityA.email, "个人");
   await back();
   assignedProfile = 1;
-  await launchClaude();
+  await launchClaude(undefined, false, "auto");
+  assert.equal(starts.at(-1).claude_account_id, "auto");
   await page.getByRole("tab", { name: "终端 5 · 个人", exact: true }).waitFor();
   defaultLogin = { identity: "b-in-org", email: "b@example.test", plan: "Pro" };
   profiles[1].status = "changed";
   profiles[1].quota = null;
   await openAccounts();
   const nextIdentity = profileCard(defaultLogin.email);
-  await nextIdentity.getByText("仅手动选择").waitFor();
+  await nextIdentity.getByTitle("仅手动选择", { exact: true }).waitFor();
   await profileCard("个人").getByText(/请重新打开工作会话确认身份/).waitFor();
   await nextIdentity.getByRole("checkbox", {checked:false}).waitFor();
   assert.equal(profiles[1].email, identityA.email);

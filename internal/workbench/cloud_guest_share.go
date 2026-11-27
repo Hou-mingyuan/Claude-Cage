@@ -192,7 +192,10 @@ func (s *Server) guestClientShare(w http.ResponseWriter, r *http.Request) {
 	// Keep normal mmap/read-ahead support for compilers and search tools.
 	// Present files as the guest user so ownership checks (e.g. Git) work
 	// when the workstation uses a different UID or Windows ACLs.
-	script := "exec sudo -n sshfs -f :/ " + target + ` -o "slave,allow_other,cache=no,nodev,nosuid,uid=$(id -u),gid=$(id -g)"`
+	s.mu.Lock()
+	cache := s.preferences.ProjectFileCache
+	s.mu.Unlock()
+	script := "exec sudo -n sshfs -f :/ " + target + ` -o "` + projectShareOptions(nil, cache) + `"`
 	cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", script)
 	cmd.Stdout = conn
 	input, err := cmd.StdinPipe()

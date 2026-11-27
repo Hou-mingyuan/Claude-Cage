@@ -30,12 +30,16 @@ export const defaultAppearance = {
   pointerCursors: false,
   fontSmoothing: true,
   reducedMotion: "system",
+  syncGuestTheme: true,
+  blurStatusNetwork: false,
 };
 export function normalizeAppearance(value = {}) {
   value = value && typeof value === "object" ? value : {};
   return {
     ...defaultAppearance,
     ...value,
+    syncGuestTheme: value.syncGuestTheme !== false,
+    blurStatusNetwork: value.blurStatusNetwork === true,
     customThemes: Array.isArray(value.customThemes) ? value.customThemes : [],
     lightTheme: {
       ...defaultAppearance.lightTheme,

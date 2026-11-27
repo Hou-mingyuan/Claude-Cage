@@ -3,8 +3,9 @@ package managedproxy
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"net"
-	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -12,6 +13,22 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+)
+
+var (
+	runDarwinNetworksetup = func(ctx context.Context) ([]byte, error) {
+		return exec.CommandContext(ctx, "/usr/sbin/networksetup", "-listallhardwareports").Output()
+	}
+	runDarwinRoute = func(ctx context.Context) ([]byte, error) {
+		return exec.CommandContext(ctx, "/sbin/route", "-n", "get", "default").Output()
+	}
+	runDarwinScutilNWI = func(ctx context.Context) ([]byte, error) {
+		return exec.CommandContext(ctx, "/usr/sbin/scutil", "--nwi").Output()
+	}
+	listNetInterfaces = net.Interfaces
+	netInterfaceAddrs = func(iface net.Interface) ([]net.Addr, error) {
+		return iface.Addrs()
+	}
 )
 
 // PhysicalInterface uses the system's preferred reachable IPv4 hardware port.
@@ -26,16 +43,23 @@ func PhysicalInterface(ctx context.Context) (string, error) {
 	if runtime.GOOS != "darwin" {
 		return "", errors.New("物理网卡识别当前支持 macOS")
 	}
+	return darwinPhysicalInterface(ctx)
+}
+
+func darwinPhysicalInterface(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	hardware, err := exec.CommandContext(ctx, "/usr/sbin/networksetup", "-listallhardwareports").Output()
+	hardware, err := runDarwinNetworksetup(ctx)
 	if err != nil {
 		return "", errors.New("无法读取物理网卡，请检查主机网络后重试")
 	}
-	route, _ := exec.CommandContext(ctx, "/sbin/route", "-n", "get", "default").Output()
-	nwi, _ := exec.CommandContext(ctx, "/usr/sbin/scutil", "--nwi").Output()
+	route, _ := runDarwinRoute(ctx)
+	nwi, err := runDarwinScutilNWI(ctx)
+	if err != nil {
+		return "", errors.New("无法读取系统网络状态，请检查主机网络或重启 Cage 后重试")
+	}
 	usable := map[string]bool{}
-	interfaces, err := net.Interfaces()
+	interfaces, err := listNetInterfaces()
 	if err != nil {
 		return "", err
 	}
@@ -64,6 +88,9 @@ func isVirtualMACInterface(name string) bool {
 }
 
 func selectPhysicalInterface(route, hardware, nwi string, usable map[string]bool) (string, error) {
+	if strings.TrimSpace(nwi) == "" {
+		return "", errors.New("无法读取系统网络状态，请检查主机网络或重启 Cage 后重试")
+	}
 	physical := map[string]bool{}
 	for _, line := range strings.Split(hardware, "\n") {
 		fields := strings.Fields(line)
@@ -145,18 +172,42 @@ func BindInterface(data []byte, name string) ([]byte, error) {
 	return yaml.Marshal(config)
 }
 
+// Address checks also protect old runtime files. A malformed per-node route
+// makes BindingMatches fail, but must not hide a retired local server.
+type routeField struct {
+	value   string
+	invalid bool
+}
+
+func (f *routeField) UnmarshalYAML(node *yaml.Node) error {
+	f.invalid = node.Decode(&f.value) != nil
+	return nil
+}
+
+type runtimeBindings struct {
+	Interface string `yaml:"interface-name"`
+	Proxies   []struct {
+		Server      string     `yaml:"server"`
+		DialerProxy routeField `yaml:"dialer-proxy"`
+		Interface   routeField `yaml:"interface-name"`
+	} `yaml:"proxies"`
+}
+
+// A service monitors one active runtime. Keep only the routing fields of
+// the most recently decoded file; every reader still checks the file bytes.
+var lastBindings parsedConfig[*runtimeBindings]
+
+func readRuntimeBindings(path string) (*runtimeBindings, error) {
+	return lastBindings.read(path, math.MaxInt64, func(data []byte) (*runtimeBindings, error) {
+		var config runtimeBindings
+		err := yaml.Unmarshal(data, &config)
+		return &config, err
+	})
+}
+
 func BoundInterface(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	config, err := readRuntimeBindings(path)
 	if err != nil {
-		return "", err
-	}
-	var config struct {
-		Interface string `yaml:"interface-name"`
-		Proxies   []struct {
-			Server string `yaml:"server"`
-		} `yaml:"proxies"`
-	}
-	if err := yaml.Unmarshal(data, &config); err != nil {
 		return "", err
 	}
 	local := newLocalServers()
@@ -175,29 +226,18 @@ func BindingMatches(path, physical string) bool {
 	if physical == "" {
 		return false
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var config struct {
-		Interface string `yaml:"interface-name"`
-		Proxies   []struct {
-			Server      string `yaml:"server"`
-			DialerProxy string `yaml:"dialer-proxy"`
-			Interface   string `yaml:"interface-name"`
-		} `yaml:"proxies"`
-	}
-	if err := yaml.Unmarshal(data, &config); err != nil || config.Interface != physical {
+	config, err := readRuntimeBindings(path)
+	if err != nil || config.Interface != physical {
 		return false
 	}
 	local := newLocalServers()
 	var resolver *nodeInterfaceResolver
 	for _, proxy := range config.Proxies {
-		if local.contains(proxy.Server) {
+		if proxy.DialerProxy.invalid || proxy.Interface.invalid || local.contains(proxy.Server) {
 			return false
 		}
-		want := resolveNodeInterface(proxy.Server, proxy.DialerProxy, physical, &resolver)
-		have := proxy.Interface
+		want := resolveNodeInterface(proxy.Server, proxy.DialerProxy.value, physical, &resolver)
+		have := proxy.Interface.value
 		if have == physical {
 			have = ""
 		}
@@ -206,4 +246,75 @@ func BindingMatches(path, physical string) bool {
 		}
 	}
 	return true
+}
+
+// InterfaceAvailable reports whether the named host interface currently exists,
+// is up and running (carrier active), is not loopback, and holds at least one
+// routable IPv4 address. It uses in-process OS calls only (no subprocesses).
+func InterfaceAvailable(name string) bool {
+	if name == "" {
+		return false
+	}
+	interfaces, err := listNetInterfaces()
+	if err != nil {
+		return false
+	}
+	for _, iface := range interfaces {
+		if iface.Name != name || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagRunning == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := netInterfaceAddrs(iface)
+		if err != nil {
+			return false
+		}
+		for _, address := range addresses {
+			ip, _, err := net.ParseCIDR(address.String())
+			if err == nil && ip.To4() != nil && !ip.IsLinkLocalUnicast() && !ip.IsLoopback() && !ip.IsUnspecified() {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// StaleInterfaceError reports that the proxy core's runtime config is bound to
+// an interface or per-node host route that no longer matches the host's current
+// network uplink.
+type StaleInterfaceError struct {
+	Bound   string
+	Current string
+}
+
+func (e *StaleInterfaceError) Error() string {
+	if e.Bound != "" && e.Current != "" && e.Bound != e.Current {
+		return fmt.Sprintf("代理核心当前绑定的出口网卡（%s）已失效或不再是默认物理网卡（当前为 %s）；请重启代理核心以重新绑定", e.Bound, e.Current)
+	}
+	return "代理核心当前绑定的出口网卡或节点路由接口已变化；请重启代理核心以重新绑定"
+}
+
+// CheckInterfaceBinding verifies that the runtime config at configPath still
+// matches the host's current physical uplink and per-node host routes.
+func CheckInterfaceBinding(ctx context.Context, configPath string) error {
+	return checkInterfaceBindingWith(ctx, configPath, PhysicalInterface, BindingMatches)
+}
+
+func checkInterfaceBindingWith(
+	ctx context.Context,
+	configPath string,
+	physical func(context.Context) (string, error),
+	matches func(string, string) bool,
+) error {
+	bound, err := BoundInterface(configPath)
+	if err != nil {
+		return err
+	}
+	current, err := physical(ctx)
+	if err != nil {
+		return err
+	}
+	if !matches(configPath, current) {
+		return &StaleInterfaceError{Bound: bound, Current: current}
+	}
+	return nil
 }

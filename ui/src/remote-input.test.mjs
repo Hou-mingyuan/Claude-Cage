@@ -122,18 +122,19 @@ function fixture(native = false, browserComposition = false, options = {}) {
     container,
     {
       mode: () => mode,
+      claudeDesktop: options.claudeDesktop,
       systemClipboard: () => systemClipboard,
       clipboardActive: options.clipboardActive,
       syncClipboard: options.syncClipboard,
       preparePaste: options.preparePaste,
       copyText: options.copyText,
       onStatus: (t) => statuses.push(t),
-      onFallback() {},
-      isActive: () => true,
+      onFallback: options.onFallback || (() => {}),
+      isActive: options.isActive || (() => true),
       setCopyContext: async (context, valid) => { if (valid()) copyContexts.push(context); },
-      insertText: async (text) => {
+      insertText: options.insertText || (async (text) => {
         texts.push(text);
-      },
+      }),
       insertComposition: browserComposition ? async (id, value) => {
         if (id !== currentTabId) throw new Error("Input target changed");
         compositions.push({ id, ...value });
@@ -457,6 +458,192 @@ function fakeClock() {
   };
 }
 
+test("Windows Claude Desktop keeps WebView focus across successive Pinyin compositions", async () => {
+  const clock = fakeClock();
+  const calls = [];
+  const f = fixture(true, true, {
+    ...clock,
+    claudeDesktop: true,
+    surface: {
+      width: 800, height: 600,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    },
+    native: async (name, value) => { calls.push({ name, value }); return true; },
+  });
+  try {
+    f.win.chrome = { webview: {} };
+    f.win.cageNativeIMEAvailable = true;
+    f.rfb.focus();
+    await clock.advance(0);
+    for (const [pinyin, word] of [["wo", "我"], ["jintian", "今天"]]) {
+      inputEvent(f, "compositionstart");
+      f.target.value = pinyin;
+      inputEvent(f, "input", { data: pinyin, inputType: "insertCompositionText", isComposing: true });
+      inputEvent(f, "compositionend", { data: word });
+      await new Promise(resolve => setImmediate(resolve));
+      await clock.advance(caretPollFast);
+    }
+    assert.equal(calls.some(({ name }) => name === "remoteInput"), false);
+    assert.deepEqual(f.compositions.filter(e => e.mode === "commit").map(e => e.text), ["我", "今天"]);
+  } finally { f.controller.dispose(); }
+});
+
+test("Windows Claude Desktop sends a phrase delivered per ideograph as one insertion", async () => {
+  const clock = fakeClock();
+  const f = fixture(false, false, { ...clock, claudeDesktop: true });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    for (const character of "今天天") assert.equal(f.key("keydown", character, "").defaultPrevented, true);
+    for (const character of "气很好") {
+      f.target.value = character;
+      inputEvent(f, "input", { data: character, inputType: "insertText" });
+    }
+    assert.deepEqual(f.texts, []);
+    await clock.advance(8);
+    assert.deepEqual(f.texts, ["今天天气很好"]);
+    await clock.advance(100);
+    assert.deepEqual(f.texts, ["今天天气很好"]);
+  } finally { f.controller.dispose(); }
+});
+
+test("a stream of ideographs flushes eight milliseconds after the first character", async () => {
+  const clock = fakeClock();
+  const f = fixture(false, false, { ...clock, claudeDesktop: true });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    f.key("keydown", "中", "");
+    await clock.advance(7);
+    f.key("keydown", "国", "");
+    await clock.advance(1);
+    assert.deepEqual(f.texts, ["中国"]);
+  } finally { f.controller.dispose(); }
+});
+
+test("a single oversized dictation bypasses the buffer intact after earlier text", async () => {
+  const clock = fakeClock();
+  const f = fixture(false, false, { ...clock, claudeDesktop: true });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    const dictated = "中".repeat(1023) + "🙂";
+    f.key("keydown", "前", "");
+    f.target.value = dictated;
+    inputEvent(f, "input", { data: dictated, inputType: "insertText" });
+    assert.deepEqual(f.texts, ["前", dictated]);
+    await clock.advance(8);
+    assert.deepEqual(f.texts, ["前", dictated]);
+  } finally { f.controller.dispose(); }
+});
+
+test("switching panes drains text accepted by the old pane and ignores subsequent input", async () => {
+  const clock = fakeClock();
+  let active = true;
+  const delivered = [];
+  const f = fixture(false, false, {
+    ...clock, claudeDesktop: true, isActive: () => active,
+    insertText: async (text, { committed }) => {
+      if (active || committed) delivered.push(text);
+    },
+  });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    f.key("keydown", "中", "");
+    active = false;
+    f.controller.deactivate();
+    f.key("keydown", "文", "");
+    await clock.advance(8);
+    assert.deepEqual(delivered, ["中"]);
+  } finally { f.controller.dispose(); }
+});
+
+test("closing the original connection keeps undelivered text available for manual recovery", async () => {
+  const clock = fakeClock(), recovered = [];
+  let active = true;
+  const f = fixture(false, false, {
+    ...clock, claudeDesktop: true, isActive: () => active,
+    insertText: async () => { throw new Error("Input disconnected"); },
+    onFallback: text => recovered.push(text),
+  });
+  f.win.chrome = { webview: {} };
+  f.rfb.focus();
+  f.key("keydown", "字", "");
+  active = false;
+  f.controller.dispose();
+  await clock.advance(8);
+  assert.deepEqual(recovered, ["字"]);
+});
+
+test("a pending phrase is sent before the next key, click, composition or blur", async () => {
+  const clock = fakeClock();
+  const f = fixture(false, false, { ...clock, claudeDesktop: true });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    const steps = [
+      () => f.key("keydown", "Enter", "Enter"),
+      () => f.armCopy(),
+      () => inputEvent(f, "compositionstart"),
+      () => inputEvent(f, "blur"),
+    ];
+    for (const [index, step] of steps.entries()) {
+      f.key("keydown", "中", "");
+      f.key("keydown", "国", "");
+      step();
+      assert.equal(f.texts.length, index + 1);
+      assert.equal(f.texts.at(-1), "中国");
+      inputEvent(f, "compositionend", { data: "" });
+      f.rfb.focus();
+    }
+    await clock.advance(100);
+    assert.deepEqual(f.texts, ["中国", "中国", "中国", "中国"]);
+  } finally { f.controller.dispose(); }
+});
+
+test("a pending phrase is sent when the input is disposed", async () => {
+  const clock = fakeClock();
+  const f = fixture(false, false, { ...clock, claudeDesktop: true });
+  f.win.chrome = { webview: {} };
+  f.rfb.focus();
+  f.key("keydown", "中", "");
+  f.controller.dispose();
+  assert.deepEqual(f.texts, ["中"]);
+  await clock.advance(100);
+  assert.deepEqual(f.texts, ["中"]);
+});
+
+test("the first composition after a click is committed through the validated insertion", async () => {
+  const clock = fakeClock();
+  const f = fixture(false, true, { ...clock, claudeDesktop: true });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    await clock.advance(0);
+    f.armCopy();
+    inputEvent(f, "compositionstart");
+    f.target.value = "zhongguo";
+    inputEvent(f, "input", { data: "zhongguo", inputType: "insertCompositionText", isComposing: true });
+    inputEvent(f, "compositionend", { data: "中国" });
+    await clock.advance(8);
+    assert.deepEqual(f.compositions, []);
+    assert.deepEqual(f.texts, ["中国"]);
+
+    await clock.advance(caretPollFast);
+    inputEvent(f, "compositionstart");
+    inputEvent(f, "compositionend", { data: "今天" });
+    await clock.advance(8);
+    assert.deepEqual(f.compositions.filter(e => e.mode === "commit").map(e => e.text), ["今天"]);
+    assert.deepEqual(f.texts, ["中国"]);
+
+    f.armCopy();
+    inputEvent(f, "compositionstart");
+    inputEvent(f, "compositionend", { data: "" });
+    await clock.advance(8);
+    assert.deepEqual(f.texts, ["中国"]);
+  } finally { f.controller.dispose(); }
+});
 test("releasing native input cancels the active composition before its late end event", async () => {
   const clock = fakeClock();
   const calls = [];

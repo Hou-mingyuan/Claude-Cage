@@ -22,8 +22,28 @@ import (
 	"github.com/lima-vm/lima/v2/pkg/sshutil"
 )
 
+func (a *HostAgent) waitForFinalRequirements(ctx context.Context, bootDeadline time.Time) error {
+	if *a.instConfig.OS == limatype.WINDOWS {
+		return a.waitForRequirements("final", a.finalWinRequirements())
+	}
+	final := a.finalRequirements()
+	if bootDeadline.IsZero() {
+		return a.waitForRequirements("final", final)
+	}
+	// The first-boot progress watcher owns the idle limit. Retry the real
+	// marker check through transient SSH failures until its overall deadline.
+	ctx, cancel := context.WithDeadline(ctx, bootDeadline)
+	defer cancel()
+	return checkRequirements(ctx, "final", final, 0, func(req requirement) error {
+		out, err := a.cloudInitCommand(ctx, req.script).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("boot marker probe: %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		return nil
+	})
+}
+
 func (a *HostAgent) waitForRequirements(label string, requirements []requirement) error {
-	const sleepDuration = 3 * time.Second
 	retries := 200
 	if *a.instConfig.OS == limatype.DARWIN && *a.instConfig.VMType == limatype.QEMU {
 		var opts limatype.QEMUOpts
@@ -33,17 +53,24 @@ func (a *HostAgent) waitForRequirements(label string, requirements []requirement
 			retries = 1200
 		}
 	}
-	var errs []error
-
 	fn := a.waitForRequirement
 	if *a.instConfig.OS == limatype.WINDOWS {
 		fn = a.waitForWinRequirement
 	}
 
+	return checkRequirements(context.Background(), label, requirements, retries, fn)
+}
+
+// A zero attempt limit retries until the supplied context expires.
+func checkRequirements(ctx context.Context, label string, requirements []requirement, retries int, fn func(requirement) error) error {
+	var errs []error
 	for i, req := range requirements {
 		logrus.Infof("Waiting for the %s requirement %d of %d: %#q", label, i+1, len(requirements), req.description)
 	retryLoop:
-		for j := range retries {
+		for j := 1; ; j++ {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("waiting for the %s requirement %#q: %w", label, req.description, err)
+			}
 			err := fn(req)
 			if err == nil {
 				logrus.Infof("The %s requirement %d of %d is satisfied", label, i+1, len(requirements))
@@ -54,11 +81,15 @@ func (a *HostAgent) waitForRequirements(label string, requirements []requirement
 				errs = append(errs, fmt.Errorf("failed to satisfy the %s requirement %d of %d %#q: %s; skipping further checks: %w", label, i+1, len(requirements), req.description, req.debugHint, err))
 				return errors.Join(errs...)
 			}
-			if j == retries-1 {
+			if j == retries {
 				errs = append(errs, fmt.Errorf("failed to satisfy the %s requirement %d of %d %#q: %s: %w", label, i+1, len(requirements), req.description, req.debugHint, err))
 				break retryLoop
 			}
-			time.Sleep(sleepDuration)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("waiting for the %s requirement %#q: %w: %w", label, req.description, ctx.Err(), err)
+			case <-time.After(3 * time.Second):
+			}
 		}
 	}
 	return errors.Join(errs...)

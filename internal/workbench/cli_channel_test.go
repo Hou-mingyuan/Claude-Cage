@@ -4,7 +4,6 @@ package workbench
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,6 +38,17 @@ func TestCLIChannelProtocol(t *testing.T) {
 	}
 }
 
+func TestTerminalJobControl(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	cmd := exec.Command(python, "-I", "terminal_job_test.py")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("terminal job control: %v\n%s", err, output)
+	}
+}
+
 func TestCLIChannelCommandFitsWindows(t *testing.T) {
 	// Leave room in CreateProcessW's 32767 UTF-16 limit for SSH paths and the
 	// login-shell quoting around this command.
@@ -70,7 +80,7 @@ func TestSharedSendReceiptSurvivesReadFailure(t *testing.T) {
 	}
 	// Keep the real host SSH/bootstrap/RPC path; replace only the guest
 	// operation boundary to lose the read immediately after an admitted send.
-	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
 	if err = os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +227,7 @@ func TestDiscoveryRunningStateUpdatesCatalogAndClearsMissingHistory(t *testing.T
 	}
 	// Keep the host bootstrap and SSH path; substitute the guest's observation.
 	observation := filepath.Join(home, "observation.json")
-	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
 	if err := os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +268,7 @@ func TestCachedDiscoveryReuseIsBoundedAndInvalidatedByWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	observation := filepath.Join(home, "observation.json")
-	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
 	if err := os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -268,9 +278,11 @@ func TestCachedDiscoveryReuseIsBoundedAndInvalidatedByWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.ready = true
+	title := "first title"
+	paused := false
 	observe := func(running bool) {
 		t.Helper()
-		found := []terminalConversation{{CLIID: record.CLIID, Workspace: guestPath(project), Config: filepath.Join(home, ".claude"), Running: running}}
+		found := []terminalConversation{{CLIID: record.CLIID, Title: title, Workspace: guestPath(project), Config: filepath.Join(home, ".claude"), Running: running, Paused: paused}}
 		if err := writePrivate(observation, found); err != nil {
 			t.Fatal(err)
 		}
@@ -295,6 +307,11 @@ func TestCachedDiscoveryReuseIsBoundedAndInvalidatedByWrites(t *testing.T) {
 	if !list(true) || guestCalls() != 1 {
 		t.Fatal("first list did not observe the guest")
 	}
+	recordPath := mobileRecordPath(s.profile, id)
+	stamp := time.Unix(1000000000, 0)
+	if err := os.Chtimes(recordPath, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
 	observe(false)
 	if !list(true) || guestCalls() != 1 {
 		t.Fatal("a list within the reuse window ran discovery again")
@@ -302,10 +319,17 @@ func TestCachedDiscoveryReuseIsBoundedAndInvalidatedByWrites(t *testing.T) {
 	if list(false) || guestCalls() != 2 {
 		t.Fatal("an uncached discovery reused an earlier result")
 	}
+	if info, err := os.Stat(recordPath); err != nil || !info.ModTime().Equal(stamp) {
+		t.Fatalf("a live running-state change rewrote unchanged durable metadata: %v, %v", info, err)
+	}
+	title = "renamed in Claude"
 	observe(true)
 	s.invalidateConversationDiscovery() // as any POST, PUT or DELETE request does
 	if !list(true) || guestCalls() != 3 {
 		t.Fatal("a write request did not invalidate the reused discovery")
+	}
+	if saved, err := s.mobileCLI.record(s.profile, id); err != nil || saved.Title != title {
+		t.Fatalf("updated title was not persisted: %v, %v", saved, err)
 	}
 	observe(false)
 	s.terminals.exits.Add(1)
@@ -318,6 +342,24 @@ func TestCachedDiscoveryReuseIsBoundedAndInvalidatedByWrites(t *testing.T) {
 	s.conversationMu.Unlock()
 	if !list(true) || guestCalls() != 5 {
 		t.Fatal("a discovery was reused past its limit")
+	}
+	beforePause, err := s.mobileCLI.record(s.profile, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paused = true
+	observe(true)
+	list(false)
+	saved, err := s.mobileCLI.record(s.profile, id)
+	if err != nil || !saved.Paused || saved.Revision != beforePause.Revision+1 {
+		t.Fatalf("the pause transition was not persisted once: %+v, %v", saved, err)
+	}
+	if err := os.Chtimes(recordPath, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	list(false)
+	if info, err := os.Stat(recordPath); err != nil || !info.ModTime().Equal(stamp) {
+		t.Fatalf("rediscovering the same paused session rewrote its record: %v, %v", info, err)
 	}
 	// Writes through the HTTP handler invalidate as well.
 	before := s.conversationGeneration.Load()
@@ -333,7 +375,7 @@ func TestTerminalViewReusesUnchangedGuestView(t *testing.T) {
 	s, id, project := metadataFixture(t)
 	home, _ := filepath.EvalSymlinks(t.TempDir())
 	mobileTestSSH(t, s, home, []string{"HOME=" + home, "PATH=/usr/bin:/bin:/usr/local/bin"})
-	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", fmt.Sprintf("%x.py", sha256.Sum256([]byte(cliChannelHelper+cliResumePrompt+claudeAccountResumePrompt))))
+	helper := filepath.Join(home, ".local/share/cage/cli-channel-code", cliChannelDigest()+".py")
 	if err := os.MkdirAll(filepath.Dir(helper), 0700); err != nil {
 		t.Fatal(err)
 	}

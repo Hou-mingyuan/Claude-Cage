@@ -95,7 +95,17 @@ func (s *Server) inspectClaudeDefault(parent context.Context, force bool) (claud
 	defer m.mu.Unlock()
 	if ctx.Err() != nil || epoch.Err() != nil || err != nil {
 		reading = empty
-		err = errors.New("暂时无法读取环境的默认登录，请确认 Claude Code 和环境组件可用后重试")
+		var classified *accountProbeError
+		switch {
+		case epoch.Err() != nil:
+			err = errors.New("暂时无法读取环境的默认登录，请确认 Claude Code 和环境组件可用后重试")
+		case errors.Is(err, errAccountRouteFailed) || errors.Is(err, errUnsupportedAccountNetwork):
+			// Preserve route / capability error details.
+		case errors.As(err, &classified) && classified.message != "":
+			err = classified
+		default:
+			err = errors.New("暂时无法读取环境的默认登录，请确认 Claude Code 和环境组件可用后重试")
+		}
 	} else {
 		list, loadErr := s.loadClaudeAccounts()
 		if loadErr != nil {
@@ -196,7 +206,7 @@ func (s *Server) claudePanelView(ctx context.Context) (claudePanel, claudeAccoun
 	for i := range view.Accounts {
 		view.Accounts[i].claudeAccount = list.Accounts[i]
 		a := &view.Accounts[i]
-		a.UsageChecking = m.usageActive[claudeIdentityHash(a.Email, a.Organization)] != nil
+		a.UsageChecking = !a.CodeUnlinked && m.usageActive[claudeIdentityHash(a.Email, a.Organization)] != nil
 		a.Notices = notices[a.guestID()]
 	}
 	return view, list, nil

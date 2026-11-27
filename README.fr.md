@@ -55,6 +55,7 @@ Claude Cage réunit terminal, navigateur, éditeur, Claude Desktop officiel et m
 
 ## Ce que vous pouvez faire avec Cage
 
+- **Utilisez Claude Code depuis le terminal de votre ordinateur (v0.2.2).** `cage login` ouvre le navigateur de Cage pour vous connecter à votre compte Claude. Lancez `cage claude` dans le dossier du projet pour le partager et ouvrir une session avec le compte par défaut. Si vous avez nommé un compte `sarah`, lancez `cage sarah` pour l’utiliser uniquement cette fois. La commande `cage` sans argument affiche l’aide. `cage start` démarre le service Cage et la machine virtuelle locale en arrière-plan, puis attend que l’environnement soit prêt. `cage up` ouvre l’application de bureau ou ramène sa fenêtre au premier plan. Pour mettre à jour Cage depuis le terminal, lancez `cage update`. Dès la publication du paquet npm v0.2.2, vous pourrez l’installer avec `npm install -g claude-cage`. [Commandes et exemples](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **Travaillez dans une seule fenêtre.** Exécutez Claude Code dans le terminal, examinez les modifications dans l'éditeur et utilisez le navigateur Cage pour prévisualiser les services et vous connecter.
 - **Débloquez toutes les capacités avec le marché de plugins.** Le [marché de plugins ouvert (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) suit la formule « plugin = MCP + extension » : Claude peut utiliser en toute sécurité et sous contrôle les outils de votre ordinateur (écran et clavier/souris, documents Office, Blender, commandes) et ajouter des vues isolées à Cage avec permissions déclarées et confirmation système. [Guide des plugins](docs/guide/plugins.md) · [Spécification](docs/plugins.md)
 - **Un même environnement léger sur toutes les plateformes.** Cage utilise le même environnement Debian 13 léger sous macOS, Windows et Linux, sans maintenir plusieurs systèmes invités complexes, avec les mêmes outils et le même fonctionnement. [Environnement Debian](docs/guide/guest-systems.md)
@@ -71,8 +72,10 @@ Claude Cage réunit terminal, navigateur, éditeur, Claude Desktop officiel et m
 Envoyez cette demande à votre agent IA (codex, dsh, workbuddy — probablement pas Claude Code 😁) :
 
 ```markdown
-Récupère le code source le plus récent de https://github.com/Lee-xeo/Claude-Cage, compile-le, crée le paquet et installe-le. Configure le proxy de Cage pour utiliser le nœud xx de mon Clash local et sortir par mon IP xx. Surveille toute l’opération, corrige directement les problèmes et, si nécessaire, ouvre une issue sur le projet pour améliorer la compatibilité.
+Récupère le code source le plus récent de https://github.com/Lee-xeo/Claude-Cage, compile-le, crée le paquet et installe-le. Importe dans Cage le nœud exporté dans [chemin du fichier]. Pour une chaîne de proxys, configure le relais puis le nœud de sortie. Vérifie que l’adresse IP publique de sortie correspond à [IP attendue]. Surveille toute l’opération, corrige directement les problèmes et, si nécessaire, ouvre une issue sur le projet pour améliorer la compatibilité.
 ```
+
+L’adresse d’écoute locale de Clash/Mihomo ou de sing-box, par exemple `127.0.0.1:7890`, ne peut pas servir de proxy en amont. [Migrer une chaîne de proxys](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 Tout ce dont vous avez besoin est un point de terminaison proxy réseau fiable. Ce projet ne fait la promotion d'aucun fournisseur de proxy ; vous pouvez trouver un fournisseur vous-même, par exemple en recherchant le site Web Black Error.
 
@@ -130,9 +133,9 @@ Pour l'index complet, voir [Index des documents](docs/README.md).
 
 Le projet évolue rapidement. Rejoignez le groupe communautaire pour partager vos commentaires ; les responsables de la communauté sont les bienvenus.
 
-| QQ group · 112745758 | WeChat |
+| QQ group · 782087179 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

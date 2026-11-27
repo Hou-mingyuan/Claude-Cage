@@ -33,6 +33,7 @@ type rootedHandlers struct {
 	readonlyNames []string
 	foldedNames   []string // readonlyNames as FoldName gives them
 	guardRoot     string   // the served directory as Guard is told
+	owner         *Owner   // 客端看到的文件属主；nil 表示未呈现为其他身份
 	rootedSys
 
 	mu    sync.Mutex // protects relay
@@ -71,14 +72,30 @@ func newRootedServerAt(rwc io.ReadWriteCloser, localPath, exportedPath string, r
 		h.foldedNames = append(h.foldedNames, FoldName(n))
 	}
 	handlers := sftp.Handlers{FileGet: h, FilePut: h, FileCmd: h, FileList: h}
-	// Sequential, as OpenSSH's sftp-server: otherwise two writes to the same range, or a write
-	// and the FSTAT or FSETSTAT sent after it, can run in either order.
-	srv := sftp.NewRequestServer(rwc, handlers, sftp.WithStartDirectory(startDirectory(h.rootPath)), sftp.WithRSSequential(),
+	// Serialize writes and handle lifecycle behind a full barrier while allowing
+	// read-only metadata queries and reads to run concurrently across workers.
+	srv := sftp.NewRequestServer(rwc, handlers, sftp.WithStartDirectory(startDirectory(h.rootPath)), sftp.WithRSSequentialWrites(),
 		// Each handle holds a file descriptor of this process, which may be the one running the VM.
 		sftp.WithRSMaxHandles(maxHandles),
 		// sshfs reads up to 64 KiB (max_read), and takes a shorter answer for the end of the file.
 		sftp.WithRSMaxTxPacket(64*1024))
 	return srv, h, nil
+}
+
+// presentAs 记录客端挂载时把文件呈现成的属主（sshfs -o uid=,gid=）。
+func (h *rootedHandlers) presentAs(o Owner) { h.owner = &o }
+
+// unchangedID 是 SFTP 中 UID 或 GID 的 -1：保持不变。
+const unchangedID = ^uint32(0)
+
+// keepsOwner 报告 chown 请求的 UID 与 GID 是否各自等于呈现属主或为 -1。客端只是把文件
+// 交给它本来看到的属主，宿主上的属主无需改变，chown 可以跳过。其他 ID 不在此列，照旧处理。
+func (h *rootedHandlers) keepsOwner(attrs *sftp.FileStat) bool {
+	if h.owner == nil || attrs == nil {
+		return false
+	}
+	return (attrs.UID == h.owner.UID || attrs.UID == unchangedID) &&
+		(attrs.GID == h.owner.GID || attrs.GID == unchangedID)
 }
 
 func (h *rootedHandlers) Close() error {

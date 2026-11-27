@@ -55,6 +55,7 @@ Claude Cage သည် terminal၊ browser၊ editor၊ တရားဝင် Cla
 
 ## Cage နဲ့ သင်ဘာလုပ်နိုင်လဲ။
 
+- **ကွန်ပျူတာ၏ terminal မှ Claude Code ကို သုံးပါ (v0.2.2)။** `cage login` သည် Claude အကောင့်သို့ ဝင်ရောက်ရန် Cage ဘရောက်ဇာကို ဖွင့်ပေးသည်။ ပရောဂျက်ဖိုင်တွဲထဲတွင် `cage claude` ကို အသုံးပြုလျှင် ထိုဖိုင်တွဲကို မျှဝေပြီး ပုံသေအကောင့်ဖြင့် Claude Code စက်ရှင် စတင်မည်။ အကောင့်တစ်ခုကို `sarah` ဟု အမည်ပေးထားပါက ယခုတစ်ကြိမ်အတွက် ထိုအကောင့်ကို `cage sarah` ဖြင့် ရွေးနိုင်သည်။ `cage` တစ်ခုတည်းကို ရိုက်လျှင် အကူအညီကို ပြသမည်။ `cage start` သည် Cage ဝန်ဆောင်မှုနှင့် စက်တွင်းရှိ virtual machine ကို နောက်ခံတွင် စတင်ပြီး လုပ်ငန်းပတ်ဝန်းကျင် အဆင်သင့်ဖြစ်သည်အထိ စောင့်ပေးသည်။ `cage up` သည် Cage ဒက်စ်တော့အက်ပ်ကို ဖွင့်ပေးသည် သို့မဟုတ် ဖွင့်ထားပြီးသား ဝင်းဒိုးကို ရှေ့သို့ ယူလာပေးသည်။ တာမီနယ်မှ Cage ကို အပ်ဒိတ်လုပ်ရန် `cage update` ကို အသုံးပြုပါ။ v0.2.2 အတွက် npm ပက်ကေ့ချ် ထွက်ရှိလာသည့်အခါ `npm install -g claude-cage` ဖြင့် ထည့်သွင်းနိုင်ပါသည်။ [အမိန့်များနှင့် ဥပမာများ](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **ပြတင်းပေါက်တစ်ခုတည်းတွင် အလုပ်လုပ်ပါ။** Terminal တွင် Claude ကုဒ်ကိုဖွင့်ပါ၊ တည်းဖြတ်သူရှိပြောင်းလဲမှုများကိုစစ်ဆေးပါ၊ ဝန်ဆောင်မှုများကိုအစမ်းကြည့်ရှုရန်နှင့် လက်မှတ်ထိုးဝင်ရန်အတွက် Cage ဘရောက်ဆာကိုအသုံးပြုပါ။
 - **Plugin စျေးကွက်ဖြင့် စွမ်းရည်အားလုံးကို ဖွင့်လှစ်ပါ။** ပွင့်လင်းသော [Plugin စျေးကွက် (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) သည် «Plugin = MCP + တိုးချဲ့မှု» ဖြင့် Claude အား မိမိစက်ကိရိယာများ (မျက်နှာပြင်နှင့် ကီးဘုတ်/မောက်စ်၊ Office ဖိုင်များ၊ Blender၊ command များ) ကို ခွင့်ပြုချက်အတည်ပြုမှုဖြင့် ဘေးကင်းစွာသုံးစေပြီး Cage တွင် စိတ်ကြိုက်စာမျက်နှာများ ထည့်သွင်းနိုင်သည်။ [Plugin လမ်းညွှန်](docs/guide/plugins.md) · [ဖွံ့ဖြိုးရေးစံ](docs/plugins.md)
 - **ပလက်ဖောင်းအားလုံးတွင် ပေါ့ပါးသော ပတ်ဝန်းကျင်တစ်ခုတည်း။** Cage သည် macOS၊ Windows နှင့် Linux တွင် ရှုပ်ထွေးသော guest စနစ်မျိုးစုံမလိုဘဲ တူညီသော ပေါ့ပါးသည့် Debian 13 ပတ်ဝန်းကျင်ကို အသုံးပြုသည်။ [Debian ပတ်ဝန်းကျင်](docs/guide/guest-systems.md)
@@ -71,8 +72,10 @@ Claude Cage သည် terminal၊ browser၊ editor၊ တရားဝင် Cla
 ဤတောင်းဆိုချက်ကို သင်၏ AI အေးဂျင့် (codex၊ dsh၊ workbuddy — Claude Code ဖြစ်နိုင်သည် 😁) ။
 
 ```markdown
-https://github.com/Lee-xeo/Claude-Cage ၏ နောက်ဆုံး source code ကို ရယူပြီး build လုပ်၊ package ပြုလုပ်ကာ install လုပ်ပေးပါ။ Cage proxy ကို ကျွန်ုပ်၏ local Clash ရှိ xx node မှတစ်ဆင့် ကျွန်ုပ်၏ xx IP ဖြင့် ထွက်နိုင်အောင် သတ်မှတ်ပေးပါ။ လုပ်ငန်းစဉ်တစ်လျှောက် စောင့်ကြည့်ပြီး ပြဿနာများကို တိုက်ရိုက်ပြင်ဆင်ပါ။ လိုအပ်ပါက compatibility ပိုကောင်းစေရန် project တွင် issue တင်ပေးပါ။
+https://github.com/Lee-xeo/Claude-Cage ၏ နောက်ဆုံး source code ကို ရယူပြီး build လုပ်၊ package ပြုလုပ်ကာ install လုပ်ပေးပါ။ ကျွန်ုပ် export လုပ်ထားသော node configuration ကို [ဖိုင်လမ်းကြောင်း] မှ Cage သို့ import လုပ်ပေးပါ။ Proxy chain သုံးပါက relay node နှင့် exit node ကို အစဉ်လိုက် သတ်မှတ်ပေးပါ။ အပြင်သို့ထွက်သည့် public IP သည် [မျှော်မှန်းထားသော IP] နှင့် ကိုက်ညီကြောင်း စစ်ဆေးပေးပါ။ လုပ်ငန်းစဉ်တစ်လျှောက် စောင့်ကြည့်ပြီး ပြဿနာများကို တိုက်ရိုက်ပြင်ဆင်ပါ။ လိုအပ်ပါက compatibility ပိုကောင်းစေရန် project တွင် issue တင်ပေးပါ။
 ```
+
+Clash/Mihomo သို့မဟုတ် sing-box ၏ local listener လိပ်စာ (ဥပမာ `127.0.0.1:7890`) ကို upstream node အဖြစ် အသုံးမပြုနိုင်ပါ။ [Proxy chain ကို Cage သို့ ပြောင်းရွှေ့နည်း](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 သင်လိုအပ်သည်မှာ ယုံကြည်စိတ်ချရသော ကွန်ရက် proxy အဆုံးမှတ်တစ်ခုဖြစ်သည်။ ဤပရောဂျက်သည် မည်သည့်ပရောက်စီဝန်ဆောင်မှုပေးသူကိုမျှ မြှင့်တင်မည်မဟုတ်ပါ။ ဥပမာအားဖြင့် Black Error ဝဘ်ဆိုက်ကို ရှာဖွေခြင်းဖြင့် ပံ့ပိုးပေးသူကို သင်ကိုယ်တိုင် ရှာဖွေနိုင်သည်။
 
@@ -130,9 +133,9 @@ macOS နှင့် လက်မှတ်ထိုးထားသော Window
 
 ပရောဂျက်က အရှိန်အဟုန်နဲ့ တိုးတက်နေတယ်။ တုံ့ပြန်ချက်မျှဝေရန် ကွန်မြူနတီအဖွဲ့သို့ ဝင်ရောက်ပါ။ ရပ်ရွာထိန်းသိမ်းသူ များကို ကြိုဆိုပါတယ်။
 
-| QQ group · 112745758 | WeChat |
+| QQ group · 782087179 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

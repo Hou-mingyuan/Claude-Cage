@@ -628,6 +628,14 @@ button.primary:hover:not(:disabled) {
 .appearance-sample {
   background: var(--chrome-dark);
 }
+:root[data-blur-status-network="true"] .status-network-value {
+  filter: blur(5px);
+  transition: filter 0.15s ease;
+}
+:root[data-blur-status-network="true"] .status-bar button:hover .status-network-value,
+:root[data-blur-status-network="true"] .status-bar button:focus-visible .status-network-value {
+  filter: none;
+}
 .appearance-switch input:checked:after {
   background: var(--accent-ink);
 }

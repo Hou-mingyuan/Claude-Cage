@@ -41,7 +41,7 @@ func agentConnectTarget(ctx context.Context, configPath string, target AgentTarg
 		return nil, &AgentError{Code: "service_unavailable", Message: "Open the Cage desktop before managing client configuration.", NextAction: "open_desktop"}
 	}
 	want, err := currentController()
-	if err != nil || !want.matches(c.launch.Controller) || (target.Scope != "client" && !c.launch.DesktopGateway) || (target.Scope == "client" && !c.launch.ClientOnly) || filepath.Clean(c.launch.ConfigPath) != filepath.Clean(path) {
+	if err != nil || !want.matches(c.launch.Controller) || (target.Scope != "client" && !c.launch.DesktopGateway) || (target.Scope == "client" && !c.launch.ClientOnly) || !sameControllerConfig(c.launch.ConfigPath, path) {
 		c.close()
 		return nil, &AgentError{Code: "controller_mismatch", Message: "The desktop controller does not match this CLI and configuration.", NextAction: "open_desktop"}
 	}

@@ -57,6 +57,8 @@ export async function cleanupApps({ keep, roots, onInUse = () => {}, onModified 
   const removed = [];
   const visited = new Set();
   async function visit(directory) {
+    // This directory can hold another build's candidate or a recoverable backup.
+    if (path.basename(directory).startsWith(".Cage-publish.")) return;
     let stat;
     try {
       stat = await lstat(directory);

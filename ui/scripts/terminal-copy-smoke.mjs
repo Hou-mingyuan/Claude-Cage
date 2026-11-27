@@ -18,12 +18,18 @@ for (const platform of ["MacIntel", "Win32", "Linux x86_64"]) {
     await page.routeWebSocket("**/api/**", (socket) => {
       if (!socket.url().includes("/terminals/")) return socket.close();
       terminalSocket = socket;
+      const copyKey = "\x1b[99;6u";
+      let previous = "";
       socket.onMessage((message) => {
         const { type, data } = JSON.parse(message);
         if (type === "input") {
           inputs.push(data);
-          if (data === "\x03") interrupted.resolve();
-          if (data === "\x1b[99;6u") socket.send(Buffer.from(`\x1b]52;c;${Buffer.from("Claude 选中文本 🖼️").toString("base64")}\x07`));
+          if (data.includes("\x03")) interrupted.resolve();
+          // The PTY receives a byte stream. A mouse release and the copy key
+          // can legitimately arrive together in one input message.
+          const stream = previous + data;
+          if (stream.includes(copyKey)) socket.send(Buffer.from(`\x1b]52;c;${Buffer.from("Claude 选中文本 🖼️").toString("base64")}\x07`));
+          previous = stream.slice(1 - copyKey.length);
         }
       });
       socket.send(JSON.stringify({ type: "history" }));
@@ -51,7 +57,8 @@ for (const platform of ["MacIntel", "Win32", "Linux x86_64"]) {
     // Replay while the terminal already owns focus, as on a reconnect. The
     // next live OSC 52 must still work after the replay has finished parsing.
     terminalSocket.send(JSON.stringify({ type: "history" }));
-    terminalSocket.send(Buffer.from("\x1b]52;c;c3RhbGU=\x07REPLAY_DONE\r\n"));
+    terminalSocket.send(Buffer.from("\x1b]52;c;c3RhbGU="));
+    terminalSocket.send(Buffer.from("\x07REPLAY_DONE\r\n"));
     await page.locator(".xterm-rows").getByText(/REPLAY_DONE/).waitFor();
     assert.deepEqual(writes, ["CopyMe"]);
 

@@ -39,12 +39,16 @@ func (s *Server) submitJob(kind string, run func() error) (Job, error) {
 }
 
 func (s *Server) submitJobWithInitiator(initiator, kind string, run func() error) (Job, error) {
+	return s.submitJobWithInitiatorTarget(initiator, kind, "", run)
+}
+
+func (s *Server) submitJobWithInitiatorTarget(initiator, kind, target string, run func() error) (Job, error) {
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
 		return Job{}, errJobsClosed
 	}
-	if s.storageRecoveryError != "" && kind != "storage-recovery" {
+	if s.storageRecoveryError != "" && kind != "storage-recovery" && kind != "device-reset" {
 		err := fmt.Errorf("环境存储待恢复，请在设置中恢复后继续。%s", s.storageRecoveryError)
 		s.mu.Unlock()
 		return Job{}, err
@@ -55,7 +59,7 @@ func (s *Server) submitJobWithInitiator(initiator, kind string, run func() error
 		afterSuccess = func() error { return s.account.lockAccess(true) }
 	}
 	intentFailed := false
-	job, err := s.jobs.submitWithInitiator(&s.op, kind, initiator, s.safety.pauseVersion, func() error {
+	job, err := s.jobs.submitWithInitiatorTarget(&s.op, kind, target, initiator, s.safety.pauseVersion, func() error {
 		if kind == "safety" || (kind == "start" || kind == "restore") {
 			if err := s.saveNetworkIntentLocked(false); err != nil {
 				intentFailed = true

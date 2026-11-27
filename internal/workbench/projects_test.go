@@ -11,7 +11,9 @@ import (
 
 	"al.essio.dev/pkg/shellescape"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/lima-vm/sshocker/pkg/reversesshfs"
@@ -366,4 +368,92 @@ func TestRestoreProjectSharesPopulatesEmptyCurrentWorkspace(t *testing.T) {
 	if err != nil || json.Unmarshal(data, &saved) != nil || saved.Workspace != project {
 		t.Fatalf("restored workspace was not persisted: err=%v saved=%q", err, saved.Workspace)
 	}
+}
+
+func TestPrepareProjectMountCommandUnmountsStaleFuse(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("guest mount commands execute in Linux guests")
+	}
+	target := filepath.Join(t.TempDir(), "Vibe coding", "项目 dir")
+	script := prepareProjectMountCommand(shellescape.Quote(target))
+
+	runCase := func(t *testing.T, findmntScript, fusermountScript, sudoScript string) (string, error) {
+		t.Helper()
+		bin := t.TempDir()
+		logFile := filepath.Join(t.TempDir(), "calls.log")
+		writeTool := func(name, body string) {
+			if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeTool("findmnt", findmntScript)
+		// Simulate stale FUSE: mountpoint -q calls stat(2) and fails with ENOTCONN/EIO.
+		writeTool("mountpoint", "echo 'mountpoint' >> \"$LOG_FILE\"; exit 1")
+		writeTool("fusermount3", fusermountScript)
+		writeTool("sudo", sudoScript)
+		cmd := exec.Command("/bin/sh", "-c", script)
+		cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "LOG_FILE=" + logFile, "STATE_DIR=" + t.TempDir()}
+		out, err := cmd.CombinedOutput()
+		calls, _ := os.ReadFile(logFile)
+		if err != nil {
+			return string(calls), &exec.ExitError{Stderr: out}
+		}
+		return string(calls), nil
+	}
+
+	t.Run("stale fuse detached via fusermount3 when mountpoint fails", func(t *testing.T) {
+		calls, err := runCase(t,
+			"echo 'findmnt' >> \"$LOG_FILE\"; exit 0",
+			"echo 'fusermount3' >> \"$LOG_FILE\"; exit 0",
+			"echo \"sudo $*\" >> \"$LOG_FILE\"; exit 0",
+		)
+		if err != nil {
+			t.Fatalf("expected success, got %v (calls=%q)", err, calls)
+		}
+		if !strings.Contains(calls, "fusermount3\n") || !strings.Contains(calls, "sudo mkdir -p") || !strings.Contains(calls, "sudo chown") {
+			t.Fatalf("unexpected calls:\n%s", calls)
+		}
+	})
+
+	t.Run("falls back to sudo umount -l when fusermount3 fails", func(t *testing.T) {
+		calls, err := runCase(t,
+			"echo 'findmnt' >> \"$LOG_FILE\"; exit 0",
+			"echo 'fusermount3-fail' >> \"$LOG_FILE\"; exit 1",
+			"echo \"sudo $*\" >> \"$LOG_FILE\"; exit 0",
+		)
+		if err != nil {
+			t.Fatalf("expected fallback success, got %v (calls=%q)", err, calls)
+		}
+		if !strings.Contains(calls, "fusermount3-fail\n") || !strings.Contains(calls, "sudo -n umount -l --") || !strings.Contains(calls, "sudo mkdir -p") {
+			t.Fatalf("unexpected calls:\n%s", calls)
+		}
+	})
+
+	t.Run("tolerates mount disappearing before unmount", func(t *testing.T) {
+		calls, err := runCase(t,
+			"if [ ! -f \"$STATE_DIR/seen\" ]; then touch \"$STATE_DIR/seen\"; echo 'findmnt-yes' >> \"$LOG_FILE\"; exit 0; fi; echo 'findmnt-gone' >> \"$LOG_FILE\"; exit 1",
+			"echo 'fusermount3-gone' >> \"$LOG_FILE\"; exit 1",
+			"echo \"sudo $*\" >> \"$LOG_FILE\"; if [ \"$1\" = \"-n\" ]; then exit 32; fi; exit 0",
+		)
+		if err != nil {
+			t.Fatalf("expected race tolerance, got %v (calls=%q)", err, calls)
+		}
+		if !strings.Contains(calls, "findmnt-gone\n") || !strings.Contains(calls, "sudo mkdir -p") {
+			t.Fatalf("unexpected calls:\n%s", calls)
+		}
+	})
+
+	t.Run("aborts without mkdir when stuck mount cannot be unmounted", func(t *testing.T) {
+		calls, err := runCase(t,
+			"echo 'findmnt' >> \"$LOG_FILE\"; exit 0",
+			"echo 'fusermount3-fail' >> \"$LOG_FILE\"; exit 1",
+			"echo \"sudo $*\" >> \"$LOG_FILE\"; if [ \"$1\" = \"-n\" ]; then exit 1; fi; exit 0",
+		)
+		if err == nil {
+			t.Fatalf("expected failure when mount remains stuck, calls=\n%s", calls)
+		}
+		if strings.Contains(calls, "sudo mkdir -p") {
+			t.Fatalf("ran mkdir on stuck mount:\n%s", calls)
+		}
+	})
 }

@@ -25,6 +25,7 @@ type Contributes struct {
 	Views       []View       `json:"views,omitempty"`
 	URIHandlers []URIHandler `json:"uriHandlers,omitempty"`
 	Settings    []Setting    `json:"settings,omitempty"`
+	DesktopApps []DesktopApp `json:"desktopApps,omitempty"`
 }
 
 // Setting is a value the user enters for the plugin, such as an address or
@@ -63,9 +64,13 @@ func ValidSettingValue(value string) bool {
 	return len(value) <= SettingValueLimit && !strings.ContainsAny(value, "\x00\r\n")
 }
 
-// settingsSince is the first application version that reads settings; older
-// ones reject a manifest that has them.
-var settingsSince = [3]int{0, 2, 0}
+// settingsSince and floatingViewsSince are the first application version that
+// reads settings and view presentation fields; older ones reject manifests that
+// have them. 0.2.0 shipped before view presentation existed.
+var (
+	settingsSince      = [3]int{0, 2, 0}
+	floatingViewsSince = [3]int{0, 2, 1}
+)
 
 var settingEnv = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
@@ -113,7 +118,20 @@ type MCPServer struct {
 	Command []string `json:"command"`
 }
 
-// View is a page of the plugin's own.
+// Presentation modes for a plugin view.
+const (
+	ViewPresentationPage     = "page"
+	ViewPresentationFloating = "floating"
+)
+
+const (
+	floatingViewMinWidth  = 220
+	floatingViewMaxWidth  = 720
+	floatingViewMinHeight = 100
+	floatingViewMaxHeight = 720
+)
+
+// View is a page or floating panel of the plugin's own.
 type View struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -124,6 +142,11 @@ type View struct {
 	Server string `json:"server,omitempty"`
 	// OpenURLs are the address patterns the page may ask to have opened.
 	OpenURLs []string `json:"openUrls,omitempty"`
+	// Presentation is "page" (default) or "floating" for a draggable overlay.
+	Presentation string `json:"presentation,omitempty"`
+	// Width and Height are optional initial CSS pixel dimensions for a floating view.
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
 }
 
 // URIHandler hands links of one scheme to a tool.
@@ -155,10 +178,12 @@ func validID(id string) bool { return pluginName.MatchString(id) && len(id) <= 4
 // validFile reports whether name is a path inside the plugin with one of the
 // extensions.
 func validFile(name string, extensions ...string) bool {
-	if name == "" || len(name) > 200 || path.IsAbs(name) || path.Clean(name) != name || strings.Contains(name, "\\") || name == ".." || strings.HasPrefix(name, "../") {
-		return false
-	}
-	return slices.Contains(extensions, strings.ToLower(path.Ext(name)))
+	return validRelative(name) && slices.Contains(extensions, strings.ToLower(path.Ext(name)))
+}
+
+// validRelative reports whether name is a clean path inside a directory.
+func validRelative(name string) bool {
+	return name != "" && len(name) <= 200 && !path.IsAbs(name) && path.Clean(name) == name && !strings.ContainsAny(name, "\\\x00\r\n") && name != ".." && !strings.HasPrefix(name, "../")
 }
 
 // validOpenURL reports whether pattern is https to a named host, or http to
@@ -282,6 +307,19 @@ func (m *Manifest) check() error {
 			return fmt.Errorf("views %s: icon must be a PNG or SVG file inside the plugin", view.ID)
 		case view.Server != "" && !slices.Contains(servers, view.Server):
 			return fmt.Errorf("views %s: server %q is not one of mcpServers", view.ID, view.Server)
+		case view.Presentation != "" && view.Presentation != ViewPresentationPage && view.Presentation != ViewPresentationFloating:
+			return fmt.Errorf("views %s: presentation must be page or floating", view.ID)
+		case (view.Width != 0 || view.Height != 0) && view.Presentation != ViewPresentationFloating:
+			return fmt.Errorf("views %s: width and height are only for floating views", view.ID)
+		case view.Width != 0 && (view.Width < floatingViewMinWidth || view.Width > floatingViewMaxWidth):
+			return fmt.Errorf("views %s: width must be between %d and %d", view.ID, floatingViewMinWidth, floatingViewMaxWidth)
+		case view.Height != 0 && (view.Height < floatingViewMinHeight || view.Height > floatingViewMaxHeight):
+			return fmt.Errorf("views %s: height must be between %d and %d", view.ID, floatingViewMinHeight, floatingViewMaxHeight)
+		}
+		if view.Presentation != "" || view.Width != 0 || view.Height != 0 {
+			if floor, ok := engineFloor(m.Engines.Cage); !ok || slices.Compare(floor[:], floatingViewsSince[:]) < 0 {
+				return fmt.Errorf("views %s: presentation needs engines.cage of at least %d.%d.%d", view.ID, floatingViewsSince[0], floatingViewsSince[1], floatingViewsSince[2])
+			}
 		}
 		for _, pattern := range view.OpenURLs {
 			if !validOpenURL(pattern) {
@@ -304,6 +342,9 @@ func (m *Manifest) check() error {
 			return fmt.Errorf("uriHandlers %s: reveal %q is not one of views", handler.Scheme, handler.Reveal)
 		}
 		schemes = append(schemes, handler.Scheme)
+	}
+	if err := m.checkDesktopApps(schemes); err != nil {
+		return err
 	}
 	if len(m.Contributes.Settings) > 0 {
 		if floor, ok := engineFloor(m.Engines.Cage); !ok || slices.Compare(floor[:], settingsSince[:]) < 0 {
@@ -332,14 +373,46 @@ func (m *Manifest) check() error {
 	return nil
 }
 
+// requiredEngineFloor is the lowest application version that supports every
+// contributed feature declared by the manifest, or zero when none impose one.
+func (m Manifest) requiredEngineFloor() [3]int {
+	var need [3]int
+	bump := func(floor [3]int) {
+		if slices.Compare(floor[:], need[:]) > 0 {
+			need = floor
+		}
+	}
+	if m.Contributes != nil {
+		if len(m.Contributes.Settings) > 0 {
+			bump(settingsSince)
+		}
+		for _, view := range m.Contributes.Views {
+			if view.Presentation != "" || view.Width != 0 || view.Height != 0 {
+				bump(floatingViewsSince)
+				break
+			}
+		}
+		if len(m.Contributes.DesktopApps) > 0 {
+			bump(desktopAppsSince)
+		}
+	}
+	return need
+}
+
 // EngineSatisfied reports whether the application at version meets the
-// plugin's engines range. A manifest without one, and a build without a
-// version, always do.
+// plugin's engines range and any minimum version required by its declared
+// features. A build without a version always does.
 func (m Manifest) EngineSatisfied(version string) bool {
-	if m.Engines == nil || version == "" {
+	if version == "" {
 		return true
 	}
-	return engineSatisfied(m.Engines.Cage, version)
+	if m.Engines != nil && !engineSatisfied(m.Engines.Cage, version) {
+		return false
+	}
+	if need := m.requiredEngineFloor(); need != ([3]int{}) {
+		return engineSatisfied(fmt.Sprintf(">=%d.%d.%d", need[0], need[1], need[2]), version)
+	}
+	return true
 }
 
 // engineFloor is the lowest version an engines range accepts.

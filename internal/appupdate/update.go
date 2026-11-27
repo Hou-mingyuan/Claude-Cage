@@ -60,6 +60,34 @@ type State struct {
 	RetryAt        string `json:"retryAt"`
 	ArchivePath    string `json:"archivePath,omitempty"`
 	SHA256         string `json:"sha256,omitempty"`
+	selected       *candidate // original catalog entry, never accepted from JSON or flags
+}
+
+// Check uses the same release channel and transport as the native updaters.
+// Checking a fresh installation does not require creating a profile.
+func Check(ctx context.Context, configPath string) (State, error) {
+	client := updateClient(configPath)
+	defer client.CloseIdleConnections()
+	state, selected, err := checkRelease(ctx, client)
+	state.selected = selected
+	return state, err
+}
+
+func checkRelease(ctx context.Context, client *http.Client) (State, *candidate, error) {
+	metadata, cancel := context.WithTimeout(ctx, metadataTimeout)
+	defer cancel()
+	state := State{CurrentVersion: version.Version}
+	release, err := findRelease(metadata, client, version.Version)
+	if err != nil {
+		state.fail(err)
+		return state, nil, err
+	}
+	if release == nil {
+		state.Phase, state.Message = "current", "已是当前更新通道的最新版本"
+	} else {
+		state.Phase, state.LatestVersion, state.Message = "available", release.Version, "发现新版本，可下载更新"
+	}
+	return state, release, nil
 }
 
 type proxyUnavailableError struct{ message string }
@@ -93,67 +121,70 @@ func Run(configPath string, args []string, output io.Writer) int {
 	defer client.CloseIdleConnections()
 	state.Phase, state.Message = "checking", "正在检查更新"
 	emit()
-	metadata, finished := context.WithTimeout(ctx, metadataTimeout)
-	defer finished()
-	c, err := findRelease(metadata, client, version.Version)
+	var c *candidate
+	var err error
+	state, c, err = checkRelease(ctx, client)
 	if err != nil {
 		return fail(err)
 	}
-	if c == nil {
-		state.Phase, state.Message = "current", "已是当前更新通道的最新版本"
-		emit()
-		return 0
-	}
-	state.LatestVersion = c.Version
-	if args[0] == "check" {
-		state.Phase, state.Message = "available", "发现新版本，可下载更新"
+	if c == nil || args[0] == "check" {
 		emit()
 		return 0
 	}
 	if runtime.GOOS == "linux" {
 		return fail(errors.New("Linux 版本使用系统安装包更新，请从发布页面下载新版 .deb"))
 	}
-	digest, err := releaseDigest(metadata, client, *c)
+	localName := "Cage.dmg"
+	if runtime.GOOS == "windows" {
+		localName = "Cage-setup.exe"
+	}
+	state, err = fetchArchive(ctx, client, configPath, *c, localName, state, func(next State) { _ = enc.Encode(next) })
 	if err != nil {
 		return fail(err)
 	}
+	emit()
+	return 0
+}
+
+func fetchArchive(ctx context.Context, client *http.Client, configPath string, c candidate, localName string, state State, report func(State)) (State, error) {
+	metadata, cancel := context.WithTimeout(ctx, metadataTimeout)
+	digest, err := releaseDigest(metadata, client, c)
+	cancel()
+	if err != nil {
+		return state, err
+	}
 	directory := filepath.Join(filepath.Dir(configPath), "updates")
 	if err = host.EnsurePrivateDir(directory); err != nil {
-		return fail(errors.New("无法创建私有更新目录"))
+		return state, errors.New("无法创建私有更新目录")
 	}
 	if st, e := os.Lstat(directory); e != nil || !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
-		return fail(errors.New("更新目录必须是私有普通目录"))
+		return state, errors.New("更新目录必须是私有普通目录")
 	}
 
 	// One stable task directory lets an interrupted transfer continue after a
 	// retry or an App restart. The native App removes it after verification.
 	job := filepath.Join(directory, "download-resume")
 	if err = host.EnsurePrivateDir(job); err != nil {
-		return fail(errors.New("无法创建更新下载任务"))
+		return state, errors.New("无法创建更新下载任务")
 	}
 	if st, e := os.Lstat(job); e != nil || !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
-		return fail(errors.New("更新下载任务必须是私有普通目录"))
-	}
-	localName := "Cage.dmg"
-	if runtime.GOOS == "windows" {
-		localName = "Cage-setup.exe"
+		return state, errors.New("更新下载任务必须是私有普通目录")
 	}
 	archive := filepath.Join(job, localName)
 	state.Phase, state.Message, state.TotalBytes = "downloading", "正在下载更新", c.Archive.Size
-	emit()
+	report(state)
 	err = download(ctx, client, c.Archive, digest, archive, func(n int64) {
 		state.ReceivedBytes, state.Message = n, "正在下载更新"
-		emit()
+		report(state)
 	}, func() {
 		state.Message = "连接中断，正在从已下载的位置继续"
-		emit()
+		report(state)
 	})
 	if err != nil {
-		return fail(err)
+		return state, err
 	}
 	state.Phase, state.Message, state.ArchivePath, state.SHA256 = "downloaded", "下载摘要已校验，正在验证应用", archive, digest
-	emit()
-	return 0
+	return state, nil
 }
 
 func managedClient(ctx context.Context, configPath string) (*http.Client, error) {
@@ -327,6 +358,10 @@ func download(ctx context.Context, client *http.Client, a asset, digest, path st
 			}
 		}
 	}
+	if verifiedArchive(path, a.Size, digest) {
+		progress(a.Size)
+		return ctx.Err()
+	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return errors.New("上一次下载的安装包仍在使用，请稍后重试")
 	}
@@ -457,6 +492,27 @@ func download(ctx context.Context, client *http.Client, a asset, digest, path st
 	}
 	progress(offset)
 	return nil
+}
+
+// A CLI invocation can end after verification but before installation (for
+// example, while a task is running). Rehash the cached archive on retry.
+func verifiedArchive(path string, size int64, digest string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != size || host.CheckPrivateFile(path) != nil {
+		return false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return false
+	}
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.LimitReader(file, size+1))
+	return err == nil && n == size && hex.EncodeToString(hash.Sum(nil)) == digest
 }
 
 type progressWriter struct {

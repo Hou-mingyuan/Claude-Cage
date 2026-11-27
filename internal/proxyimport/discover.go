@@ -52,16 +52,28 @@ const (
 	// app settings, while mihomo runs from work/ with work/config.yaml.
 	Party
 	// OixCloud is FlClash for oixCloud. Its root config.yaml holds app settings
-	// without nodes and profiles/*.yaml may be age-encrypted ciphertext.
+	// without nodes and profiles/*.yaml may be age-encrypted ciphertext or, in
+	// the com.follow builds, a private container starting with "FLEN".
 	OixCloud
 	// Surge reads the INI-style .conf profiles of Surge for Mac.
 	Surge
 	// Nyanpasu is Clash Nyanpasu. Its runtime file moved between releases and
 	// its root config files may hold only app or core settings.
 	Nyanpasu
+	// SakuraCat stores config.json and offline_cache.json in a private encoded
+	// format, so the directory only yields a migration notice.
+	SakuraCat
+	// FlClash keeps its runtime config.yaml at the root and profiles as
+	// profiles/<id>.yaml. The same directory holds Flutter's own JSON files,
+	// such as shared_preferences.json, which are never node configs.
+	FlClash
 )
 
 const encryptedConfigError = "配置文件使用 age 加密，Cage 不会解密私有配置，无法直接导入。请从原客户端或服务商导出明文 Clash/Mihomo YAML 后通过“添加来源”导入，或手动添加节点"
+
+const flenConfigError = "FlClash for oixCloud 的配置以私有加密格式保存，Cage 不会解密，无法直接导入。请从服务商用户中心或客户端的导出入口取得兼容的 Clash/Mihomo 订阅或 YAML 后通过“添加来源”导入，或手动添加节点"
+
+const sakuraCatConfigError = "SakuraCat 的配置使用私有格式保存，Cage 不会读取或解密，也不能把它的本机代理端口当作节点。请通过 SakuraCat 支持的导出入口或服务商用户中心取得个人 Clash/Mihomo 订阅、YAML 或节点分享链接，再通过“添加来源”导入"
 
 type Location struct {
 	Client, Directory string
@@ -100,8 +112,7 @@ func Locations(platform, home, dataHome, configHome string) []Location {
 		nyanpasuHome = filepath.Join(dataHome, "Clash Nyanpasu", "config")
 	}
 	out := []Location{
-		{"FlClash", filepath.Join(dataHome, "com.follow.clash"), Plain, ""},
-		{"FlClash", filepath.Join(dataHome, "com.follow.clash", "profiles"), Plain, ""},
+		{"FlClash", filepath.Join(dataHome, "com.follow.clash"), FlClash, ""},
 		{"FlClash for oixCloud", filepath.Join(dataHome, "com.oixcloud.clash"), OixCloud, ""},
 		{"Clash Verge Rev", filepath.Join(dataHome, "io.github.clash-verge-rev.clash-verge-rev"), Verge, ""},
 		// Clash Neo is a Verge fork and keeps the same profile layout.
@@ -118,16 +129,22 @@ func Locations(platform, home, dataHome, configHome string) []Location {
 		out = append(out, Location{"Clash Nyanpasu", legacy, Nyanpasu, ""})
 	}
 	if platform == "darwin" {
+		// ClashX Meta keeps its YAML configs at the top level of
+		// ~/.config/clash.meta; it does not read XDG_CONFIG_HOME.
+		out = append(out, Location{"ClashX Meta", filepath.Join(home, ".config", "clash.meta"), Plain, ""})
+		if custom := filepath.Join(configHome, "clash.meta"); custom != filepath.Join(home, ".config", "clash.meta") {
+			out = append(out, Location{"ClashX Meta", custom, Plain, ""})
+		}
 		out = append(out, Location{"ShadowsocksX-NG", filepath.Join(home, ".ShadowsocksX-NG"), Plain, ""})
 		out = append(out, surgeProfileDirectories(home)...)
 	}
 	if platform == "windows" {
 		out = append(out,
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash"), Plain, ""},
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash", "profiles"), Plain, ""},
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "clash"), Plain, ""},
-			Location{"FlClash", filepath.Join(dataHome, "com.follow", "clash", "profiles"), Plain, ""},
+			Location{"FlClash", filepath.Join(dataHome, "com.follow", "FlClash"), FlClash, ""},
+			Location{"FlClash", filepath.Join(dataHome, "com.follow", "clash"), FlClash, ""},
 			Location{"FlClash for oixCloud", filepath.Join(dataHome, "com.oixcloud", "FlClash"), OixCloud, ""},
+			Location{"FlClash for oixCloud", filepath.Join(dataHome, "com.follow", "FlClash for oixCloud"), OixCloud, ""},
+			Location{"SakuraCat", filepath.Join(dataHome, "SakuraCat", "SakuraCat"), SakuraCat, ""},
 			Location{"Clash / Mihomo", filepath.Join(home, ".config", "clash"), Plain, ""},
 			Location{"Clash Verge", filepath.Join(home, ".config", "clash-verge"), Verge, ""},
 			Location{"ShadowsocksR", filepath.Join(dataHome, "ShadowsocksR"), Plain, ""})
@@ -179,6 +196,9 @@ func Scan(locations []Location, key []byte) []Config {
 			} else if isAgeEncrypted(data) {
 				encrypted = true
 				c.Error = encryptedConfigError
+			} else if loc.Layout == OixCloud && isFlenContainer(data) {
+				encrypted = true
+				c.Error = flenConfigError
 			} else {
 				c.Data, c.Warning, err = nodeData(root, providers, data)
 				if err != nil {
@@ -214,8 +234,28 @@ func Scan(locations []Location, key []byte) []Config {
 			}
 		}
 		switch loc.Layout {
+		case SakuraCat:
+			// A future plain Clash/Mihomo config.json stays importable; anything
+			// else is reported once without echoing file names or content.
+			c, ok, _ := build("config.json", "", "当前生效配置", "", true)
+			if ok && c.Error == "" {
+				out = append(out, c)
+				continue
+			}
+			var present []string
+			for _, file := range []string{"config.json", "offline_cache.json"} {
+				if info, err := os.Lstat(filepath.Join(root, file)); err == nil && info.Mode().IsRegular() {
+					present = append(present, file)
+				}
+			}
+			if len(present) == 0 {
+				continue
+			}
+			notice := Config{Client: loc.Client, Name: "私有格式配置", Error: sakuraCatConfigError}
+			signConfig(&notice, root, key, present...)
+			out = append(out, notice)
 		case OixCloud:
-			var encryptedFiles []string
+			var encryptedFiles, flenFiles []string
 			var fallbackErrors []Config
 			foundImportable := false
 			for _, subdir := range []string{"", "profiles"} {
@@ -229,7 +269,7 @@ func Scan(locations []Location, key []byte) []Config {
 						continue
 					}
 					ext := strings.ToLower(filepath.Ext(file.Name()))
-					if ext != ".yaml" && ext != ".yml" && ext != ".json" && ext != ".age" {
+					if (ext != ".yaml" && ext != ".yml" && ext != ".json" && ext != ".age") || flutterInternal[strings.ToLower(file.Name())] {
 						continue
 					}
 					if count >= 32 {
@@ -245,7 +285,11 @@ func Scan(locations []Location, key []byte) []Config {
 						continue
 					}
 					if encrypted {
-						encryptedFiles = append(encryptedFiles, rel)
+						if c.Error == flenConfigError {
+							flenFiles = append(flenFiles, rel)
+						} else {
+							encryptedFiles = append(encryptedFiles, rel)
+						}
 						continue
 					}
 					if ext == ".age" {
@@ -268,7 +312,14 @@ func Scan(locations []Location, key []byte) []Config {
 				}
 				signConfig(&notice, filepath.Join(root, "profiles"), key, encryptedFiles...)
 				out = append(out, notice)
-			} else if !foundImportable {
+			}
+			if len(flenFiles) > 0 {
+				sort.Strings(flenFiles)
+				notice := Config{Client: loc.Client, Name: "私有格式配置", Error: flenConfigError}
+				signConfig(&notice, root, key, flenFiles...)
+				out = append(out, notice)
+			}
+			if len(encryptedFiles) == 0 && len(flenFiles) == 0 && !foundImportable {
 				out = append(out, fallbackErrors...)
 			}
 		case Party:
@@ -377,6 +428,40 @@ func Scan(locations []Location, key []byte) []Config {
 			for _, p := range nyanpasuProfiles(data) {
 				add(filepath.Join("profiles", p.file), "", p.name, p.url, p.current)
 			}
+		case FlClash:
+			current := flclashCurrentProfile(root)
+			for _, subdir := range []string{"", "profiles"} {
+				files, err := listWithin(root, subdir)
+				if err != nil {
+					continue
+				}
+				count := 0
+				for _, file := range files {
+					name := file.Name()
+					ext := strings.ToLower(filepath.Ext(name))
+					if file.IsDir() || flutterInternal[strings.ToLower(name)] || (ext != ".yaml" && ext != ".yml" && ext != ".json") {
+						continue
+					}
+					if count >= 32 {
+						break
+					}
+					count++
+					label := name
+					isCurrent := subdir == "profiles" && current != "" && strings.TrimSuffix(name, filepath.Ext(name)) == current
+					if subdir == "" && (name == "config.yaml" || name == "config.json" || name == "gui-config.json") {
+						isCurrent = true
+						if name == "config.yaml" {
+							label = "当前生效配置"
+						}
+					}
+					c, ok, _ := build(filepath.Join(subdir, name), subdir, label, "", isCurrent)
+					// Other Flutter state can also be JSON. Only offer JSON files
+					// with importable nodes, as plain profiles may use this format.
+					if ok && (ext != ".json" || c.Error == "") {
+						out = append(out, c)
+					}
+				}
+			}
 		case Surge:
 			files, err := os.ReadDir(root)
 			if err != nil {
@@ -419,6 +504,44 @@ func Scan(locations []Location, key []byte) []Config {
 		return out[i].Current && !out[j].Current
 	})
 	return out
+}
+
+// flutterInternal lists files Flutter plugins write into a FlClash-family data
+// directory: shared_preferences_windows/linux and flutter_cache_manager.
+var flutterInternal = map[string]bool{
+	"shared_preferences.json": true,
+	"libcachedimagedata.json": true,
+}
+
+// flclashCurrentProfile returns the currentProfileId FlClash saves, as a JSON
+// string, under "flutter.config" in shared_preferences.json. The id may be a
+// string or a number depending on the release; anything unexpected yields "".
+func flclashCurrentProfile(root string) string {
+	data, err := readWithin(root, "shared_preferences.json")
+	if err != nil {
+		return ""
+	}
+	var prefs struct {
+		Config string `json:"flutter.config"`
+	}
+	if json.Unmarshal(data, &prefs) != nil || prefs.Config == "" {
+		return ""
+	}
+	var config struct {
+		Current json.RawMessage `json:"currentProfileId"`
+	}
+	if json.Unmarshal([]byte(prefs.Config), &config) != nil || len(config.Current) == 0 {
+		return ""
+	}
+	var id string
+	if json.Unmarshal(config.Current, &id) != nil {
+		var n json.Number
+		if json.Unmarshal(config.Current, &n) != nil {
+			return ""
+		}
+		id = n.String()
+	}
+	return id
 }
 
 type nyanpasuProfile struct {
@@ -528,6 +651,12 @@ func isAgeEncrypted(data []byte) bool {
 		bytes.HasPrefix(trimmed, []byte("-----BEGIN AGE ENCRYPTED FILE-----\r\n"))
 }
 
+// isFlenContainer only matches the four-byte "FLEN" marker; the container's
+// cipher is undocumented and Cage never attempts to decode it.
+func isFlenContainer(data []byte) bool {
+	return bytes.HasPrefix(data, []byte("FLEN"))
+}
+
 func listWithin(root, subdir string) ([]os.DirEntry, error) {
 	if subdir == "" {
 		return os.ReadDir(root)
@@ -594,6 +723,30 @@ func readWithin(root, relative string) ([]byte, error) {
 	return data, nil
 }
 
+// providerPath maps a proxy-provider cache path to a path relative to root.
+// Some clients, such as FlClash on Windows, record an absolute path; it is
+// accepted only when it lies under root, and readWithin still rejects links
+// that leave root.
+func providerPath(root, providers, path string) (string, bool) {
+	if filepath.IsLocal(path) {
+		return filepath.Join(providers, path), true
+	}
+	if !filepath.IsAbs(path) {
+		return "", false
+	}
+	if rel, err := filepath.Rel(root, path); err == nil && filepath.IsLocal(rel) {
+		return rel, true
+	}
+	// root has its links resolved, while the client may have recorded the
+	// same directory through a link or a Windows short name.
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, filepath.Join(dir, filepath.Base(path)))
+	return rel, err == nil && filepath.IsLocal(rel)
+}
+
 func nodeData(root, providers string, data []byte) ([]byte, string, error) {
 	var input struct {
 		DNS       yaml.Node        `yaml:"dns"`
@@ -626,11 +779,12 @@ func nodeData(root, providers string, data []byte) ([]byte, string, error) {
 	sort.Strings(names)
 	for i, name := range names {
 		provider := input.Providers[name]
-		if i >= 32 || !filepath.IsLocal(provider.Path) {
+		path, ok := providerPath(root, providers, provider.Path)
+		if i >= 32 || !ok {
 			missing++
 			continue
 		}
-		cached, err := readWithin(root, filepath.Join(providers, provider.Path))
+		cached, err := readWithin(root, path)
 		total += len(cached)
 		if err != nil || total > managedproxy.MaxImport {
 			missing++

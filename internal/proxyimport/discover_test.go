@@ -253,7 +253,7 @@ func TestScanWindowsFlClashFollowClashDirectory(t *testing.T) {
 			continue
 		}
 		switch e.Name {
-		case "config.yaml":
+		case "当前生效配置":
 			runtime = &entries[i]
 		case "123.yaml":
 			profile = &entries[i]
@@ -269,6 +269,71 @@ func TestScanWindowsFlClashFollowClashDirectory(t *testing.T) {
 	}
 }
 
+func TestScanFlClashSkipsFlutterInternalJSONAndMarksCurrentProfile(t *testing.T) {
+	const prefs = `{"flutter.config":"{\"currentProfileId\":%s,\"appSetting\":{\"locale\":\"zh_CN\"}}","flutter.token":"private-preference-token"}`
+	scan := func(t *testing.T, current string) map[string]Config {
+		t.Helper()
+		data := t.TempDir()
+		root := filepath.Join(data, "com.follow", "clash")
+		writeConfig(t, root, "config.yaml", testNode)
+		writeConfig(t, root, "profiles/1732000000001.yaml", testNode)
+		writeConfig(t, root, "profiles/1732000000002.yaml", testNode)
+		writeConfig(t, root, "profiles/imported.json", `{"proxies":[{"name":"json profile","type":"socks5","server":"node.example.com","port":1080}]}`)
+		writeConfig(t, root, "settings.json", `{"theme":"dark"}`)
+		writeConfig(t, root, "libCachedImageData.json", `[{"key":"https://image.example/private-cache-token","relativePath":"a.png"}]`)
+		if current != "" {
+			writeConfig(t, root, "shared_preferences.json", strings.Replace(prefs, "%s", current, 1))
+		}
+		entries := Scan(Locations("windows", t.TempDir(), data, ""), []byte("session"))
+		got := map[string]Config{}
+		for _, e := range entries {
+			if e.Error != "" || e.Nodes != 1 || e.Client != "FlClash" {
+				t.Fatalf("unexpected FlClash entry: %s", mustJSON(t, entries))
+			}
+			got[e.Name] = e
+		}
+		if len(got) != 4 || len(entries) != 4 || got["imported.json"].Nodes != 1 {
+			t.Fatalf("expected runtime config and three importable profiles: %s", mustJSON(t, entries))
+		}
+		view := mustJSON(t, entries)
+		for _, secret := range []string{"private-preference-token", "private-cache-token", root} {
+			if strings.Contains(view, secret) {
+				t.Fatalf("display metadata leaked %q", secret)
+			}
+		}
+		return got
+	}
+	for _, test := range []struct{ name, current, want string }{
+		{"numeric id", "1732000000002", "1732000000002.yaml"},
+		{"string id", `\"1732000000001\"`, "1732000000001.yaml"},
+		{"unknown id", "42", ""},
+		{"malformed config", `{`, ""},
+		{"no preferences", "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := scan(t, test.current)
+			if !got["当前生效配置"].Current {
+				t.Fatalf("runtime config.yaml not current: %s", mustJSON(t, got))
+			}
+			for _, name := range []string{"1732000000001.yaml", "1732000000002.yaml"} {
+				if got[name].Current != (name == test.want) {
+					t.Fatalf("profile %s current = %v, want %q current: %s", name, got[name].Current, test.want, mustJSON(t, got))
+				}
+			}
+		})
+	}
+
+	// FlClash for oixCloud shares the Flutter internals; they must not surface
+	// as parse errors next to its app settings config.yaml.
+	oixRoot := t.TempDir()
+	writeConfig(t, oixRoot, "config.yaml", "mixed-port: 7890\nmode: rule\n")
+	writeConfig(t, oixRoot, "shared_preferences.json", strings.Replace(prefs, "%s", "1", 1))
+	writeConfig(t, oixRoot, "libCachedImageData.json", `[]`)
+	oix := Scan([]Location{{"FlClash for oixCloud", oixRoot, OixCloud, ""}}, []byte("session"))
+	if len(oix) != 1 || oix[0].Name != "config.yaml" {
+		t.Fatalf("oixCloud Flutter internal files scanned: %s", mustJSON(t, oix))
+	}
+}
 func TestScanFlClashForOixCloudEncryptedProfiles(t *testing.T) {
 	const ageBinary = "age-encryption.org/v1\n-> X25519 private-recipient-marker\nciphertext-body\n--- mac\nbinary-payload"
 	const ageArmored = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3Yx\n-----END AGE ENCRYPTED FILE-----\n"
@@ -349,6 +414,142 @@ func TestScanFlClashForOixCloudEncryptedProfiles(t *testing.T) {
 	plain := Scan([]Location{{"FlClash", plainRoot, Plain, ""}}, []byte("session"))
 	if len(plain) != 1 || !strings.Contains(plain[0].Error, "age") || !strings.Contains(plain[0].Error, "添加来源") {
 		t.Fatalf("standard client age file did not report encrypted reason: %s", mustJSON(t, plain))
+	}
+}
+
+func TestScanWindowsFlClashForOixCloudFollowFlenContainer(t *testing.T) {
+	want := filepath.Join("/home/person", "AppData", "Roaming", "com.follow", "FlClash for oixCloud")
+	found := false
+	for _, loc := range Locations("windows", "/home/person", "", "") {
+		if loc.Directory == want {
+			found = loc.Client == "FlClash for oixCloud" && loc.Layout == OixCloud
+		}
+	}
+	if !found {
+		t.Fatal("missing com.follow FlClash for oixCloud location on windows")
+	}
+	for _, platform := range []string{"darwin", "linux"} {
+		for _, loc := range Locations(platform, "/home/person", "", "") {
+			if strings.HasSuffix(loc.Directory, "FlClash for oixCloud") {
+				t.Fatal("com.follow FlClash for oixCloud location outside windows:", loc)
+			}
+		}
+	}
+
+	const flen = "FLEN\x00\x01fictional-container-payload"
+	data := t.TempDir()
+	oixRoot := filepath.Join(data, "com.follow", "FlClash for oixCloud")
+	writeConfig(t, oixRoot, "config.yaml", flen)
+	writeConfig(t, oixRoot, "profiles/1001.yaml", flen)
+	writeConfig(t, filepath.Join(data, "com.follow", "FlClash"), "config.yaml", testNode)
+	configs := Scan(Locations("windows", t.TempDir(), data, ""), []byte("session"))
+	if len(configs) != 2 {
+		t.Fatalf("expected 1 importable FlClash config + 1 oixCloud notice, got %s", mustJSON(t, configs))
+	}
+	if configs[0].Client != "FlClash" || configs[0].Error != "" || configs[0].Nodes != 1 {
+		t.Fatalf("standard FlClash config broken or misordered: %s", mustJSON(t, configs[0]))
+	}
+	notice := configs[1]
+	if notice.Client != "FlClash for oixCloud" || notice.Name != "私有格式配置" || notice.Error != flenConfigError || notice.Nodes != 0 || len(notice.Data) != 0 || notice.Refreshable {
+		t.Fatalf("unexpected FLEN notice: %s", mustJSON(t, notice))
+	}
+	view := mustJSON(t, notice)
+	for _, secret := range []string{oixRoot, "fictional-container-payload", "1001.yaml", "config.yaml"} {
+		if strings.Contains(view, secret) {
+			t.Fatalf("display metadata leaked %q", secret)
+		}
+	}
+	locs := []Location{{"FlClash for oixCloud", oixRoot, OixCloud, ""}}
+	first := Scan(locs, []byte("session"))
+	if len(first) != 1 || first[0].ID != Scan(locs, []byte("session"))[0].ID || first[0].ID == Scan(locs, []byte("other-session"))[0].ID {
+		t.Fatal("FLEN notice handle not stable per session")
+	}
+
+	// age and FLEN files in one directory each keep their own reason.
+	writeConfig(t, oixRoot, "profiles/1002.yaml", "age-encryption.org/v1\n-> X25519 marker\n--- mac\npayload")
+	mixed := Scan(locs, []byte("session"))
+	if len(mixed) != 2 || mixed[0].Error != encryptedConfigError || mixed[1].Error != flenConfigError || mixed[0].SourceID == mixed[1].SourceID {
+		t.Fatalf("mixed age and FLEN files unexpected: %s", mustJSON(t, mixed))
+	}
+
+	// The marker is only meaningful inside oixCloud directories.
+	plainRoot := t.TempDir()
+	writeConfig(t, plainRoot, "config.yaml", flen)
+	plain := Scan([]Location{{"FlClash", plainRoot, Plain, ""}}, []byte("session"))
+	if len(plain) != 1 || plain[0].Error == flenConfigError || plain[0].Error == "" {
+		t.Fatalf("FLEN marker outside oixCloud changed the reason: %s", mustJSON(t, plain))
+	}
+}
+func TestScanWindowsSakuraCatPrivateConfig(t *testing.T) {
+	found := false
+	for _, loc := range Locations("windows", "/home/person", "", "") {
+		if loc.Client == "SakuraCat" {
+			found = loc.Layout == SakuraCat && loc.Directory == filepath.Join("/home/person", "AppData", "Roaming", "SakuraCat", "SakuraCat")
+		}
+	}
+	if !found {
+		t.Fatal("missing SakuraCat location on windows")
+	}
+	for _, platform := range []string{"darwin", "linux"} {
+		for _, loc := range Locations(platform, "/home/person", "", "") {
+			if loc.Layout == SakuraCat {
+				t.Fatal("SakuraCat location outside windows:", loc)
+			}
+		}
+	}
+
+	data := t.TempDir()
+	root := filepath.Join(data, "SakuraCat", "SakuraCat")
+	writeConfig(t, root, "config.json", "\x00\x17private-encoded-node-password\xff")
+	writeConfig(t, root, "offline_cache.json", "U2FrdXJhQ2F0LWNhY2hlLXRva2Vu")
+	writeConfig(t, root, "shared_preferences.json", `{"flutter.token":"private-preference-token"}`)
+	// Another client's readable config must stay separate and importable.
+	writeConfig(t, filepath.Join(data, "ShadowsocksR"), "config.yaml", testNode)
+	configs := Scan(Locations("windows", t.TempDir(), data, ""), []byte("session"))
+	var notice *Config
+	others := 0
+	for i, c := range configs {
+		if c.Client == "SakuraCat" {
+			if notice != nil {
+				t.Fatalf("SakuraCat reported more than once: %s", mustJSON(t, configs))
+			}
+			notice = &configs[i]
+		} else if c.Error == "" && c.Nodes == 1 {
+			others++
+		}
+	}
+	if notice == nil || others != 1 || configs[len(configs)-1].Client != "SakuraCat" {
+		t.Fatalf("unexpected scan result: %s", mustJSON(t, configs))
+	}
+	if notice.Name != "私有格式配置" || notice.Nodes != 0 || len(notice.Data) != 0 || notice.Refreshable {
+		t.Fatalf("unexpected SakuraCat notice: %s", mustJSON(t, *notice))
+	}
+	for _, want := range []string{"SakuraCat", "私有格式", "本机代理端口", "Clash/Mihomo", "添加来源"} {
+		if !strings.Contains(notice.Error, want) {
+			t.Fatalf("SakuraCat notice missing %q: %q", want, notice.Error)
+		}
+	}
+	view := mustJSON(t, configs)
+	for _, secret := range []string{root, "config.json", "offline_cache.json", "private-encoded-node-password", "U2FrdXJhQ2F0", "private-preference-token"} {
+		if strings.Contains(view, secret) {
+			t.Fatalf("display metadata leaked %q", secret)
+		}
+	}
+	locs := []Location{{"SakuraCat", root, SakuraCat, ""}}
+	id := Scan(locs, []byte("session"))[0].ID
+	if id != notice.ID || Scan(locs, []byte("other-session"))[0].ID == id {
+		t.Fatal("SakuraCat notice handle not stable per session")
+	}
+
+	plain := t.TempDir()
+	writeConfig(t, plain, "config.json", `{"proxies":[{"name":"a","type":"http","server":"192.0.2.1","port":1080}]}`)
+	if got := Scan([]Location{{"SakuraCat", plain, SakuraCat, ""}}, []byte("session")); len(got) != 1 || got[0].Error != "" || got[0].Nodes != 1 {
+		t.Fatalf("plain SakuraCat config.json not importable: %s", mustJSON(t, got))
+	}
+	empty := t.TempDir()
+	writeConfig(t, empty, "shared_preferences.json", `{}`)
+	if got := Scan([]Location{{"SakuraCat", empty, SakuraCat, ""}}, []byte("session")); len(got) != 0 {
+		t.Fatalf("SakuraCat notice without config files: %s", mustJSON(t, got))
 	}
 }
 
@@ -623,4 +824,79 @@ func TestLocationsClashNyanpasu(t *testing.T) {
 			t.Fatalf("%s (%q): got %q, want %q", test.platform, test.configHome, got, test.want)
 		}
 	}
+}
+
+// #867: ClashX Meta's YAML under ~/.config/clash.meta is offered on macOS only.
+func TestScanClashXMetaOnMacOS(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, filepath.Join(home, ".config", "clash.meta"), "config.yaml", testNode)
+	var found *Config
+	entries := Scan(Locations("darwin", home, "", ""), []byte("key"))
+	for i, e := range entries {
+		if e.Client == "ClashX Meta" && e.Name == "config.yaml" {
+			found = &entries[i]
+		}
+	}
+	if found == nil || found.Nodes != 1 || found.Error != "" {
+		t.Fatalf("ClashX Meta config not importable: %+v", entries)
+	}
+	custom := filepath.Join(t.TempDir(), "xdg")
+	var dirs []string
+	for _, loc := range Locations("darwin", home, "", custom) {
+		if loc.Client == "ClashX Meta" {
+			dirs = append(dirs, loc.Directory)
+		}
+	}
+	if want := filepath.Join(home, ".config", "clash.meta") + "|" + filepath.Join(custom, "clash.meta"); strings.Join(dirs, "|") != want {
+		t.Fatalf("ClashX Meta directories = %q, want %q", dirs, want)
+	}
+	for _, platform := range []string{"linux", "windows"} {
+		for _, loc := range Locations(platform, home, "", "") {
+			if loc.Client == "ClashX Meta" {
+				t.Fatalf("%s offers ClashX Meta: %+v", platform, loc)
+			}
+		}
+	}
+}
+
+func TestScanAbsoluteProviderPaths(t *testing.T) {
+	const cache = `proxies:
+  - {name: Residential, type: socks5, server: residential.example, port: 1080, password: private-provider-password}
+`
+	scan := func(t *testing.T, root, providerPath string) Config {
+		t.Helper()
+		writeConfig(t, root, "config.yaml", testNode+"proxy-providers:\n  demo: {path: '"+strings.ReplaceAll(providerPath, "'", "''")+"'}\n")
+		configs := Scan([]Location{{"FlClash", root, Plain, ""}}, []byte("session"))
+		if len(configs) != 1 || configs[0].Error != "" {
+			t.Fatalf("unexpected configs: %s", mustJSON(t, configs))
+		}
+		return configs[0]
+	}
+	t.Run("inside root", func(t *testing.T) {
+		root := t.TempDir()
+		writeConfig(t, root, "profiles/providers/demo/proxies/cache.yaml", cache)
+		c := scan(t, root, filepath.Join(root, "profiles", "providers", "demo", "proxies", "cache.yaml"))
+		if c.Nodes != 2 || c.Warning != "" || !strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("absolute provider path inside root not read: %s", mustJSON(t, c))
+		}
+	})
+	t.Run("outside root", func(t *testing.T) {
+		root, outside := t.TempDir(), t.TempDir()
+		writeConfig(t, outside, "cache.yaml", cache)
+		c := scan(t, root, filepath.Join(outside, "cache.yaml"))
+		if c.Nodes != 1 || c.Warning == "" || strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("absolute provider path outside root was read: %s", mustJSON(t, c))
+		}
+	})
+	t.Run("link escaping root", func(t *testing.T) {
+		root, outside := t.TempDir(), t.TempDir()
+		writeConfig(t, outside, "cache.yaml", cache)
+		if err := os.Symlink(outside, filepath.Join(root, "providers")); err != nil {
+			t.Skipf("cannot create symlink: %v", err)
+		}
+		c := scan(t, root, filepath.Join(root, "providers", "cache.yaml"))
+		if c.Nodes != 1 || c.Warning == "" || strings.Contains(string(c.Data), "private-provider-password") {
+			t.Fatalf("provider cache read through escaping link: %s", mustJSON(t, c))
+		}
+	})
 }

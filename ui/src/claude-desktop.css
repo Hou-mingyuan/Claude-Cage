@@ -1,3 +1,18 @@
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.management-content:has(> .plugin-desktop-app) {
+  padding: 0;
+  overflow: hidden;
+}
 .claude-desktop-view {
   position: relative;
   display: flex;
@@ -6,83 +21,43 @@
   height: 100%;
   min-height: 0;
 }
-.desktop-toolbar-reveal {
+.desktop-empty-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.desktop-version {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--chrome);
+  border: 1px solid var(--line-subtle);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.desktop-sidebar-reveal {
   position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 8px;
+  inset-inline-start: 8px;
   z-index: 5;
   display: flex;
   background: var(--toolbar);
   color: var(--toolbar-ink);
   border: 1px solid var(--line);
-  border-top: 0;
-  border-radius: 0 0 8px 8px;
+  border-radius: 8px;
   box-shadow: var(--shadow-xs);
-  opacity: 0.72;
+  opacity: 0.78;
   transition: opacity var(--duration-fast) var(--ease-out);
 }
-.desktop-toolbar-reveal:hover,
-.desktop-toolbar-reveal:focus-within {
+.desktop-sidebar-reveal:hover,
+.desktop-sidebar-reveal:focus-within {
   opacity: 1;
 }
-.desktop-toolbar-reveal .icon-button {
-  min-width: 28px;
-  min-height: 22px;
-  padding: 3px 6px;
-}
-.claude-desktop-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--toolbar);
-  color: var(--toolbar-ink);
-  min-height: var(--workbench-header-height);
-}
-.claude-desktop-toolbar > strong {
-  font-size: 0.9286rem;
-  font-weight: 500;
-}
-.desktop-version,
 .desktop-note {
   color: var(--muted);
   font-size: 12px;
-}
-.desktop-toolbar-spacer {
-  flex: 1;
-}
-.desktop-display-size {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.desktop-display-size .inline-select {
-  position: relative;
-  width: 11.5em;
-}
-.desktop-display-size .inline-select-list {
-  position: absolute;
-  top: 100%;
-  inset-inline: 0;
-  z-index: 1;
-}
-.desktop-display-size .inline-select-trigger {
-  width: auto;
-  padding: 5px 7px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--paper);
-  color: var(--ink);
-  font: inherit;
-}
-@media (max-width: 900px) {
-  .desktop-display-size { font-size: 0; }
-  .desktop-display-size .inline-select { font-size: 12px; }
 }
 .desktop-screen {
   position: relative;
@@ -147,17 +122,24 @@
 .account-desktop-list {padding-inline-start:14px;}
 .account-desktop-row,.account-desktop-panes,.account-desktop-pane header {display:flex;}
 .account-desktop-row {position:relative;align-items:center;border-radius:8px;margin-bottom:2px;min-height:38px;transition:background-color var(--duration-fast) var(--ease-out);}
+.account-desktop-nav > .account-desktop-row {margin-bottom:0;min-height:36px;}
 .account-desktop-row:hover {background:var(--hover);}
 .account-desktop-row.active {background:var(--selected, var(--hover));color:var(--strong);font-weight:550;}
+.account-desktop-row.active:hover {background:var(--selected, var(--hover));}
+.account-desktop-row.active > .sidebar-link > svg {color:var(--strong);}
 .account-desktop-row.active::before {content:"";position:absolute;inset-inline-start:2px;top:8px;bottom:8px;width:3px;border-radius:999px;background:var(--accent);}
 .account-desktop-row > .sidebar-link {flex:1;min-width:0;min-height:38px;background:transparent;}
+.account-desktop-nav > .account-desktop-row > .sidebar-link {min-height:36px;}
 .account-desktop-row > .sidebar-link:hover {background:transparent;}
-.account-desktop-row:is(:hover, :focus-within, :has([aria-expanded="true"])) .terminal-row-actions {visibility:visible;max-width:none;margin-inline-end:3px;opacity:1;transform:none;}
+.account-desktop-row.active .terminal-row-actions {background:linear-gradient(90deg, transparent, var(--selected, var(--hover)) 16px);}
+:dir(rtl) .account-desktop-row.active .terminal-row-actions {background:linear-gradient(270deg, transparent, var(--selected, var(--hover)) 16px);}
+.account-desktop-row:is(:hover, :focus-within, :has([aria-expanded="true"])) .terminal-row-actions {visibility:visible;pointer-events:auto;opacity:1;transform:translateY(-50%);}
+.account-desktop-row:is(:hover, :focus-within, :has([aria-expanded="true"])) .account-desktop-status {opacity:0;pointer-events:none;}
 .account-desktop-row .terminal-row-actions > button.desktop-delete-action:is(:hover, :focus-visible) {color:var(--danger);}
 .account-desktop-status {margin-inline-start:auto;flex:none;color:var(--muted);font-size:.7rem;}
-.account-desktop-list .sidebar-link > svg,.account-desktop-title > svg,.account-desktop-pane header > button {flex:none;}
+.account-desktop-nav .sidebar-link > svg,.account-desktop-title > svg,.account-desktop-pane header > button {flex:none;}
 .account-desktop-label {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.account-desktop-panes {height:100%;min-width:0;}
+.account-desktop-panes {position:relative;height:100%;min-width:0;}
 .account-desktop-pane {display:flex;flex:1;flex-direction:column;min-width:0;position:relative;}
 .account-desktop-pane + .account-desktop-pane {border-inline-start:1px solid var(--line);}
 .account-desktop-pane header {align-items:center;justify-content:space-between;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line);}
@@ -166,5 +148,9 @@
 .account-desktop-message {position:absolute;inset:auto 8px 8px;background:var(--paper);padding:6px;}
 
 .desktop-create-fields {display:grid;gap:8px;padding:6px 8px 10px;}
+.desktop-create-fields.desktop-create-flat {margin:4px 0 6px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface, var(--paper));}
 .desktop-create-fields label {display:grid;gap:4px;font-size:.85rem;}
 .desktop-create-fields .inline-select-trigger {width:100%;}
+.desktop-create-actions {display:flex;gap:6px;align-items:stretch;}
+.desktop-create-actions > button {min-height:32px;padding:6px 10px;font-size:.85rem;}
+.desktop-create-actions > .primary {flex:1;}

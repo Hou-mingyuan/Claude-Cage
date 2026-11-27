@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const version=fs.readFileSync(path.join(root,'VERSION'),'utf8').trim();
 assert.match(version,/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
+assert.equal(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version,version,'npm launcher version differs from VERSION');
 for(const directory of ['ui','www']){
  const pkg=JSON.parse(fs.readFileSync(path.join(root,directory,'package.json'),'utf8'));
  const lock=JSON.parse(fs.readFileSync(path.join(root,directory,'package-lock.json'),'utf8'));

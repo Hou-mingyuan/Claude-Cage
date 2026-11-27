@@ -76,7 +76,7 @@ function readCopy(language: typeof languages[number]) {
     downloadTitle: installation.title, downloadText: installParagraphs[1],
     downloadNote: installParagraphs[0], updateNote: installParagraphs.at(-1) || '',
     communityTitle: contribution.title, communityText: paragraphs(contribution.body.replace(/<p\b[^>]*>[\s\S]*?<\/p>/g, '')).at(-1) || '',
-    group: isChinese ? 'QQ 群 · 112745758' : 'QQ group · 112745758',
+    group: isChinese ? 'QQ 群 · 782087179' : 'QQ group · 782087179',
     wechat: isChinese ? '微信' : 'WeChat', docsTitle: contribution.title, docs,
     licenseTitle: license.title, licenseText: paragraphs(license.body).slice(0,-1).join('\n\n'),
     independent: paragraphs(license.body).at(-1) || '',

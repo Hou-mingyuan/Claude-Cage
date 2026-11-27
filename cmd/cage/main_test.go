@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/sylvinus/agent-vm/internal/cage"
 	"github.com/sylvinus/agent-vm/internal/cli"
+	"github.com/sylvinus/agent-vm/internal/managedproxy"
 	"github.com/sylvinus/agent-vm/internal/version"
 )
 
@@ -24,7 +26,6 @@ func TestEntryDropsInheritedUnsafeSwitchesBeforeDispatch(t *testing.T) {
 	// Git configuration changes, or access to the user's Cage profile.
 	unsafe := []string{
 		"AGENT_VM_UNSAFE_OPEN_NETWORK",
-		"AGENT_VM_UNSAFE_WRITABLE_GIT",
 		"AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS",
 	}
 	for _, name := range unsafe {
@@ -111,12 +112,20 @@ func TestStatelessCommandsNeedNoProfile(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "help", args: []string{"help"}, wantStdout: "Claude Cage"},
+		{name: "bare command", wantStdout: "cage <name> [args...]"},
+		{name: "implicit print", args: []string{"-p", "hello"}, wantCode: 2, wantStderr: "cage claude"},
+		{name: "implicit multiword prompt", args: []string{"review my changes"}, wantCode: 2, wantStderr: "cage claude"},
+		{name: "empty account name", args: []string{"", "hello"}, wantCode: 2, wantStderr: "cage claude"},
+		{name: "reserved auto", args: []string{"auto", "--help"}, wantCode: 2, wantStderr: "cage <名称>"},
 		{name: "short help", args: []string{"-h"}, wantStdout: "Claude Cage"},
 		{name: "version", args: []string{"version"}, wantStdout: version.Version},
 		{name: "long version", args: []string{"--version"}, wantStdout: version.Version},
 		{name: "short version", args: []string{"-V"}, wantStdout: version.Version},
 		{name: "version gate met", args: []string{"version", "--min", "0.0.0"}},
-		{name: "version gate missed", args: []string{"version", "--min", "99.0.0"}, wantCode: 1, wantStderr: "Update it:  update Cage"},
+		{name: "version gate missed", args: []string{"version", "--min", "99.0.0"}, wantCode: 1, wantStderr: "run 'cage update'"},
+		{name: "update help", args: []string{"update", "--help"}, wantStdout: "cage update [--check] [--yes]"},
+		{name: "update takes no package path", args: []string{"update", "/tmp/custom-installer"}, wantCode: 2, wantStderr: "Usage: cage update"},
+		{name: "update help with extra args", args: []string{"update", "--help", "x"}, wantCode: 2, wantStderr: "Usage: cage update"},
 		{name: "licenses", args: []string{"licenses"}, wantStdout: "MIT License"},
 		{name: "licenses usage", args: []string{"licenses", "x"}, wantCode: 2, wantStderr: "Usage: claude-cage licenses"},
 	}
@@ -195,5 +204,84 @@ func TestContainerInstallsGitHubCLIByDefault(t *testing.T) {
 	}
 	if !strings.Contains(script, "export AGENT_VM_INSTALL_GH=1\n") {
 		t.Fatal("fresh cloud environments would omit GitHub CLI")
+	}
+}
+
+func TestCheckProxyTransportReportsStaleInterfaceBeforeProbe(t *testing.T) {
+	origCheck, origProbe := checkProxyInterfaceBinding, probeProxyExitIP
+	t.Cleanup(func() {
+		checkProxyInterfaceBinding, probeProxyExitIP = origCheck, origProbe
+	})
+	probed := false
+	probeProxyExitIP = func(context.Context, cage.Config) (string, error) {
+		probed = true
+		return "203.0.113.10", nil
+	}
+	checkProxyInterfaceBinding = func(context.Context, string) error {
+		return &managedproxy.StaleInterfaceError{Bound: "enx001122", Current: "wlp4s0"}
+	}
+	err := checkProxyTransport(context.Background(), t.TempDir(), cage.DefaultConfig())
+	if err == nil || probed {
+		t.Fatalf("stale interface did not short-circuit probe: err=%v probed=%v", err, probed)
+	}
+	for _, want := range []string{"enx001122", "wlp4s0", "cage proxy-start"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+
+	checkProxyInterfaceBinding = func(context.Context, string) error { return os.ErrNotExist }
+	if err := checkProxyTransport(context.Background(), t.TempDir(), cage.DefaultConfig()); err != nil || !probed {
+		t.Fatalf("missing config.yaml should fall through to exit probe: err=%v probed=%v", err, probed)
+	}
+
+	probed = false
+	checkProxyInterfaceBinding = func(context.Context, string) error { return nil }
+	if err := checkProxyTransport(context.Background(), t.TempDir(), cage.DefaultConfig()); err != nil || !probed {
+		t.Fatalf("healthy interface check failed: err=%v probed=%v", err, probed)
+	}
+}
+
+func TestVerifyVMAssetsPermissionHint(t *testing.T) {
+	permErr := fmt.Errorf("mkdir %s: %w", filepath.Join("Temp", "cage-vm-assets-1"), os.ErrPermission)
+	err := verifyVMAssets(
+		func(string, string) (string, error) { return "", permErr },
+		func(string) error { t.Fatal("writeShare should not run on mktemp error"); return nil },
+	)
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected wrapped os.ErrPermission, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Low Mandatory Level") || !strings.Contains(err.Error(), "TEMP/TMP") {
+		t.Fatalf("missing actionable hint in permission error: %v", err)
+	}
+
+	otherErr := errors.New("disk full")
+	err = verifyVMAssets(
+		func(string, string) (string, error) { return "", otherErr },
+		func(string) error { return nil },
+	)
+	if !errors.Is(err, otherErr) || strings.Contains(err.Error(), "Low Mandatory Level") {
+		t.Fatalf("unexpected non-permission error formatting: %v", err)
+	}
+
+	var created string
+	err = verifyVMAssets(
+		func(_ string, pattern string) (string, error) {
+			d, e := os.MkdirTemp(t.TempDir(), pattern)
+			created = d
+			return d, e
+		},
+		func(dir string) error {
+			if dir != created {
+				t.Fatalf("writeShare got %q, want %q", dir, created)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("verifyVMAssets succeeded path failed: %v", err)
+	}
+	if _, statErr := os.Stat(created); !os.IsNotExist(statErr) {
+		t.Fatalf("temp directory %s was not cleaned up: %v", created, statErr)
 	}
 }

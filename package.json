@@ -1,0 +1,25 @@
+{
+  "name": "claude-cage",
+  "version": "0.2.2",
+  "description": "Install Cage and run its isolated Claude Code from your terminal",
+  "license": "MIT",
+  "repository": "github:Lee-xeo/Claude-Cage",
+  "homepage": "https://claude-cage.com/",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "cage": "packaging/npm/cage.mjs",
+    "claude-cage": "packaging/npm/cage.mjs"
+  },
+  "files": [
+    "packaging/npm/cage.mjs",
+    "packaging/npm/launcher.mjs",
+    "packaging/npm/version.mjs",
+    "packaging/npm/linux.mjs",
+    "packaging/npm/macos.mjs",
+    "packaging/npm/windows.mjs",
+    "packaging/npm/README.md",
+    "www/public/agent-bootstrap.mjs"
+  ]
+}

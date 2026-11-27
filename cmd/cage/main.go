@@ -26,7 +26,6 @@ import (
 	"github.com/sylvinus/agent-vm/internal/hostproxy"
 	"github.com/sylvinus/agent-vm/internal/limaembed"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
-	"github.com/sylvinus/agent-vm/internal/paths"
 	"github.com/sylvinus/agent-vm/internal/uilocale"
 	"github.com/sylvinus/agent-vm/internal/workbench"
 	"io"
@@ -38,9 +37,30 @@ import (
 
 const help = `Claude Cage — local isolated Claude development
 
+cage               Show this command overview
+cage claude [args...]   Run Claude Code with the default account in the current
+                   project. Pass Claude prompts, options and subcommands directly.
+                   git diff | cage claude -p "Review this diff" --output-format json
+cage <name> [args...]   Use the named Cage account for this invocation.
+                   Example: cage sarah -p "Review this project"
+                   Project invocations share the current folder automatically.
+cage start         Start Cage in the background and wait for its local environment
+                   --reset re-clones the VM; files and logins on its disk are lost
+cage status        Show the state of the background service and the environment
+cage account list  Show account numbers, stable IDs, names, Claude emails and status
+cage account use SELECTOR|auto    Select a default CLI account or use workbench scheduling
+cage account run SELECTOR [--] ARGS   Use an account just for this invocation
+cage account rename SELECTOR NAME     Change the local name used by cage <name>
+cage restart       Restart the local Cage service and environment using the existing disk
+                   Running tasks are interrupted.
+cage update [--check] [--yes]   Update the installed Cage application
+                   --check only checks for a release. --yes confirms installation.
+                   Save your work and run cage stop yourself if the environment is in use.
+cage update-tools  Update the tools installed inside the environment
+cage install-cli   Install the terminal command for this user
 cage desktop       Open the unified Cage workbench (desktop launcher)
 cage agent         Discover and use the versioned, JSON-only external Agent interface
-cage serve         Run its private localhost control service
+cage serve         Run the private localhost control service in the foreground
 cage server-entry --json  Issue a private SSH remote connection entry
 cage container-configure --json  Configure a Linux container from JSON stdin
 cage init          Create a private profile; add and select nodes in Cage settings
@@ -49,10 +69,9 @@ cage guest-os --json  Check host prerequisites for a same-system guest
 cage proxy-start   Start Cage's bundled proxy core with the applied node
 cage proxy-stop    Stop Cage's core and close external networking
 cage setup         Build the isolated base VM through the specified proxy
-cage up            Start the shared Cage environment, editor and browser
-                   --reset re-clones the VM; files and logins on its disk are lost
-cage login         Start cage services, then Claude's login flow inside the VM
-                   --reset re-clones the VM; files and logins on its disk are lost
+cage up            Open or bring forward the Cage desktop window
+cage login         Sign in to your Claude account in Cage's browser for Claude Code
+                   --reset re-clones the VM before Claude sign-in; files and logins on its disk are lost
 cage access        Inspect legacy viewer credentials (diagnostics only)
 cage shell         Open a shell in the shared environment
 cage run COMMAND   Execute a command in the shared environment: from the current
@@ -61,9 +80,7 @@ cage run COMMAND   Execute a command in the shared environment: from the current
                    --here requires the current directory (asks before sharing
                    it on a terminal, fails otherwise); --workdir DIR runs from
                    DIR in the environment
-cage claude        Run Claude Code in the shared environment
-cage stop          Stop the shared Cage environment and its proxy core
-                   --keep-proxy keeps the core running for an environment restart
+cage stop          Stop the local environment, its tasks, proxy and background service
 cage list          List this cage profile's VMs
 cage doctor        Diagnose the VM
 cage diagnostics --json PATH.zip   Export a redacted diagnostic bundle
@@ -72,7 +89,7 @@ cage licenses      Print third-party license notices
 
 Configuration: ~/.claude-cage/config.json (override CLAUDE_CAGE_CONFIG).
 Each configuration directory is an independent cage profile.
-Only explicitly opened project folders are shared. No host Claude credentials are imported.
+Project commands share their current folder. Management commands do not.
 `
 
 func main() {
@@ -95,27 +112,48 @@ func run() int {
 	// configured to relax agent-vm's protections.
 	for _, name := range []string{
 		"AGENT_VM_UNSAFE_OPEN_NETWORK",
-		"AGENT_VM_UNSAFE_WRITABLE_GIT",
 		"AGENT_VM_UNSAFE_DISABLE_SECURITY_PROMPTS",
 	} {
 		os.Unsetenv(name)
 	}
 	// The shared commands otherwise name agent-vm and suggest its installer.
 	cli.Command = "claude-cage"
-	cli.UpdateHint = "update Cage from the app, or with the installer or package that installed it"
+	cli.UpdateHint = "run 'cage update' to update Cage"
 	// --reset deletes the environment's disk with the user's files and logins.
 	cli.StaleBaseHint = "提示：Cage 的基础镜像比当前环境新。当前环境的磁盘会保留，不需要重建；请在 Cage 的“设置 > 环境与恢复”中更新环境组件或环境工具，也可以运行 cage update-tools。"
-	args := os.Args[1:]
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+	args, namedAccount, err := cageArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Print(help)
 		return 0
 	}
-	if text, ok := subcommandHelp(args); ok {
-		fmt.Print(text)
-		return 0
+	if !namedAccount {
+		if text, ok := subcommandHelp(args); ok {
+			fmt.Print(text)
+			return 0
+		}
+	}
+	var updateOptions hostUpdateOptions
+	if args[0] == "update" {
+		var err error
+		updateOptions, err = parseHostUpdateArgs(args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+	}
+	if args[0] == "up" && len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "Usage: cage up")
+		if slices.Contains(args[1:], "--reset") {
+			fmt.Fprintln(os.Stderr, "To rebuild the VM, use cage start --reset. Files and logins on its disk will be lost.")
+		}
+		return 2
 	}
 	var startArgs []string
-	if args[0] == "up" || args[0] == "login" {
+	if args[0] == "start" || args[0] == "login" || args[0] == "vm-start" {
 		var err error
 		startArgs, err = cli.StartArgs(args[1:])
 		if err != nil {
@@ -152,12 +190,10 @@ func run() int {
 		if len(args) != 1 {
 			return 2
 		}
-		dir, err := os.MkdirTemp("", "cage-vm-assets-")
-		if err != nil {
-			return fail(err)
-		}
-		defer os.RemoveAll(dir)
-		if _, err := limaembed.WriteShare(dir); err != nil {
+		if err := verifyVMAssets(os.MkdirTemp, func(dir string) error {
+			_, err := limaembed.WriteShare(dir)
+			return err
+		}); err != nil {
 			return fail(err)
 		}
 		return 0
@@ -167,9 +203,21 @@ func run() int {
 		home, _ := os.UserHomeDir()
 		path = filepath.Join(home, ".claude-cage", "config.json")
 	}
-	path, err := filepath.Abs(path)
+	path, err = filepath.Abs(path)
 	if err != nil {
 		return fail(err)
+	}
+	if args[0] == "update" {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if err := runHostUpdate(ctx, path, updateOptions, os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, workbench.HostCLIDiagnostic(err.Error()))
+			if ctx.Err() != nil {
+				return 130
+			}
+			return 1
+		}
+		return 0
 	}
 	if args[0] == "interface-language" {
 		if len(args) == 3 && args[1] == "--seed-windows-id" {
@@ -196,6 +244,39 @@ func run() int {
 	}
 	if err := host.ConfigureWindowsRuntime(); err != nil {
 		return fail(err)
+	}
+	if args[0] == "install-cli" {
+		if len(args) != 1 {
+			return fail(errors.New("usage: cage install-cli"))
+		}
+		return installTerminalCommand()
+	}
+	if namedAccount || slices.Contains([]string{"claude", "account", "start", "up", "status", "restart", "login"}, args[0]) || args[0] == "stop" && len(args) == 1 {
+		action := args[0]
+		parameters := args[1:]
+		if namedAccount {
+			action, parameters = "run-by-name", args
+		} else if action == "claude" {
+			action = "run"
+		} else if action != "account" && action != "start" && action != "login" && len(args) != 1 {
+			return fail(fmt.Errorf("usage: cage %s", action))
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		code, err := workbench.HostCLI(ctx, path, action, parameters, os.Stdin, os.Stdout, os.Stderr)
+		if err != nil {
+			if ctx.Err() != nil {
+				return 130
+			}
+			fmt.Fprintln(os.Stderr, workbench.HostCLIDiagnostic(err.Error()))
+			return code
+		}
+		return code
+	}
+	// The controller boots or synchronizes its guest through this private
+	// subprocess. The public "up" command only opens the native desktop.
+	if args[0] == "vm-start" {
+		args[0] = "up"
 	}
 	store := diagnostics.New(filepath.Dir(path))
 	diagnostics.SetDefault(store)
@@ -515,6 +596,7 @@ func run() int {
 	os.Setenv(cage.ConfigEnv, path)
 	profile := filepath.Dir(path)
 	state := filepath.Join(profile, "state")
+	limaHome := filepath.Join(state, "lima")
 	os.Unsetenv("CAGE_LIMA_CACHE_DIR")
 	os.Unsetenv("CAGE_LOGICAL_LIMA_HOME")
 	if !containerenv.Configured(profile) {
@@ -529,19 +611,17 @@ func run() int {
 		// Keep image caches on the same volume the initialization page shows,
 		// including the default location. The saved path survives app updates.
 		os.Setenv("CAGE_LIMA_CACHE_DIR", filepath.Join(location.Directory, "cache", "lima"))
+		limaHome, err = cage.ProfileLimaHome(profile, location.Custom)
+		if err != nil {
+			return fail(err)
+		}
 		if location.Custom {
-			// Resolve the profile prefix once, as Lima did before migration.
-			// Keep state itself logical so its original disk and socket paths survive.
-			realProfile, err := paths.Resolve(profile)
-			if err != nil {
-				return fail(err)
-			}
-			state = filepath.Join(realProfile, "state")
-			os.Setenv("CAGE_LOGICAL_LIMA_HOME", filepath.Join(state, "lima"))
+			state = filepath.Dir(limaHome)
+			os.Setenv("CAGE_LOGICAL_LIMA_HOME", limaHome)
 		}
 	}
 	os.Setenv("AGENT_VM_STATE_DIR", state)
-	os.Setenv("AGENT_VM_LIMA_HOME", filepath.Join(state, "lima"))
+	os.Setenv("AGENT_VM_LIMA_HOME", limaHome)
 	// Do not inherit host proxy settings or credentials into VM operations.
 	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "ftp_proxy", "no_proxy", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
 		os.Unsetenv(name)
@@ -602,7 +682,7 @@ func run() int {
 		// Use the same fixed exit services as the network check, so one
 		// blocked endpoint does not fail this check on its own.
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-		_, err := cage.ProbeExitIP(ctx, cfg)
+		err := checkProxyTransport(ctx, filepath.Dir(path), cfg)
 		cancel()
 		if err != nil {
 			return fail(fmt.Errorf("proxy transport check failed (no direct fallback): %w", err))
@@ -639,8 +719,8 @@ func run() int {
 		}
 		args = append([]string{"setup", "--memory", fmt.Sprint(memory), "--cpus", fmt.Sprint(cpus), "--disk", fmt.Sprint(disk), "--preinstall=node,python,chromium,gh,claude,code-server"}, requireWorkbenchTools(args[1:])...)
 	}
-	if args[0] == "up" || args[0] == "login" {
-		return startEnvironment(args[0], startArgs, cli.Stdio(), cli.Main, func() error {
+	if args[0] == "up" {
+		return startEnvironment(startArgs, cli.Stdio(), cli.Main, func() error {
 			return workbench.StartGuestServices(context.Background(), path, os.Stdout, os.Stderr)
 		})
 	}
@@ -693,17 +773,14 @@ func runGuestServiceStart(script string, stdio cli.IO, invoke func([]string, cli
 	return invoke([]string{"run", "bash", "-s"}, stdio)
 }
 
-func startEnvironment(command string, args []string, stdio cli.IO, invoke func([]string, cli.IO) int, startServices func() error) int {
+func startEnvironment(args []string, stdio cli.IO, invoke func([]string, cli.IO) int, startServices func() error) int {
 	if result := invoke(args, stdio); result != 0 {
 		return result
 	}
 	if err := startServices(); err != nil {
 		return fail(err)
 	}
-	fmt.Fprintln(stdio.Stdout, "Cage local services are ready. Open Cage, run cage desktop or run 'cage agent call network.check --wait 5m' to complete the required network checks. External networking stays closed until the workbench approves this VM; no local access password is required.")
-	if command == "login" {
-		return invoke([]string{"run", "--tty", "bash", "-lc", "source /etc/profile.d/claude-cage.sh; exec claude auth login"}, stdio)
-	}
+	fmt.Fprintln(stdio.Stdout, "Cage local services are ready. External networking requires workbench verification.")
 	return 0
 }
 
@@ -759,7 +836,7 @@ func subcommandHelp(args []string) (string, bool) {
 	if len(args) < 2 || args[1] != "--help" && args[1] != "-h" || helpPassthrough[args[0]] {
 		return "", false
 	}
-	if (args[0] == "up" || args[0] == "login") && len(args) != 2 {
+	if len(args) != 2 && slices.Contains([]string{"start", "up", "login", "update"}, args[0]) {
 		return "", false
 	}
 	var lines []string
@@ -826,11 +903,13 @@ func relay(configPath, kind string) int {
 		return 2
 	}
 	configureRelayCommand(cmd)
-	cmd.Env = append(os.Environ(), cage.ConfigEnv+"="+configPath)
+	cmd.Env = relayEnv(kind, configPath, os.Environ())
 	store := diagnostics.New(filepath.Dir(configPath))
-	out := store.Stream(source, "info")
+	out, stderr := store.Stream(source, "info"), store.Stream(source, "error")
+	if kind == "proxy" {
+		out, stderr = managedproxy.CoreLogStream(store, filepath.Dir(configPath), "info"), managedproxy.CoreLogStream(store, filepath.Dir(configPath), "error")
+	}
 	defer out.Close()
-	stderr := store.Stream(source, "error")
 	defer stderr.Close()
 	cmd.Stdout, cmd.Stderr = out, stderr
 	if err := cmd.Start(); err != nil {
@@ -868,6 +947,15 @@ func relay(configPath, kind string) int {
 	return 0
 }
 
+// The relay runs before the host proxy variables are cleared for VM
+// operations, so the proxy core would otherwise inherit them.
+func relayEnv(kind, configPath string, env []string) []string {
+	if kind == "proxy" {
+		env = managedproxy.WithoutHostProxyEnv(env)
+	}
+	return append(env, cage.ConfigEnv+"="+configPath)
+}
+
 func expectedRelayStop(err error, forwarded os.Signal) bool {
 	signal, ok := forwarded.(syscall.Signal)
 	if !ok {
@@ -879,4 +967,16 @@ func expectedRelayStop(err error, forwarded os.Signal) bool {
 	}
 	status, ok := exit.Sys().(syscall.WaitStatus)
 	return ok && status.Signaled() && status.Signal() == signal || exit.ExitCode() == 128+int(signal)
+}
+
+func verifyVMAssets(mktemp func(string, string) (string, error), writeShare func(string) error) error {
+	dir, err := mktemp("", "cage-vm-assets-")
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return fmt.Errorf("%w (ensure TEMP/TMP points to a writable directory; on Windows, executables built in a Low Mandatory Level / sandboxed checkout directory cannot write to %%TEMP%% — move the repository to a normal local directory such as C:\\src\\Claude-Cage)", err)
+		}
+		return err
+	}
+	defer os.RemoveAll(dir)
+	return writeShare(dir)
 }

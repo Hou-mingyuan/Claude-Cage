@@ -55,6 +55,7 @@ Claude Cage wuxuu terminalka, biraawsarka, tafatiraha, Claude Desktop-ka rasmiga
 
 ## Maxaad ku samayn kartaa Cage
 
+- **Claude Code ka isticmaal terminalka kombiyuutarkaaga (v0.2.2).** `cage login` wuxuu furaa biraawsarka Cage si aad u gasho koontadaada Claude. Ku qor `cage claude` galka mashruuca si aad galkaas ula wadaagto Cage oo aad kulan ugu bilowdo koontada caadiga ah. Haddii aad koonto u bixisay `sarah`, ku qor `cage sarah` si aad koontadaas u isticmaasho markan oo keliya. Amarka `cage` oo keliya wuxuu muujiyaa caawimada. `cage start` wuxuu gadaal ka bilaabaa adeegga Cage iyo mashiinka dalwadda ah ee kombiyuutarkaaga, wuxuuna sugaa ilaa deegaanku diyaar noqdo. `cage up` wuxuu furaa barnaamijka Cage ama wuxuu soo hormariyaa daaqaddiisa furan. Si aad Cage uga cusboonaysiiso terminalka, socodsii `cage update`. Marka xirmada npm ee v0.2.2 la daabaco, ku rakib `npm install -g claude-cage`. [Amarro iyo tusaalooyin](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **Ka shaqee hal daaqad.** Orod Claude Code gudaha terminalka, dib u eeg isbeddelada tifaftiraha, oo isticmaal browserka Cage si aad u aragto adeegyada oo aad u soo gasho.
 - **Fur dhammaan awoodaha adigoo adeegsanaya suuqa plugins-ka.** [Suuqa plugins-ka furan (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) ee «plugin = MCP + fidinta» wuxuu u ogolaadaa Claude inuu si ammaan ah oo la xakameeyo u adeegsado qalabka kombiyuutarkaaga (shaashadda iyo kiiboodhka/jiirka, faylasha Office, Blender, amarro) kuna daro boggag gaar ah Cage iyadoo leh oggolaansho cad iyo xaqiijinta nidaamka. [Hagaha plugins-ka](docs/guide/plugins.md) · [Tilmaanta horumarinta](docs/plugins.md)
 - **Hal deegaan oo fudud dhammaan nidaamyada.** Cage wuxuu macOS, Windows iyo Linux ku isticmaalaa isla deegaanka fudud ee Debian 13 isagoon u baahnayn nidaamyo marti oo badan oo adag, isla qalabka iyo isla habka shaqada. [Deegaanka Debian](docs/guide/guest-systems.md)
@@ -71,8 +72,10 @@ Claude Cage wuxuu terminalka, biraawsarka, tafatiraha, Claude Desktop-ka rasmiga
 U dir codsigan wakiilkaaga AI (codex, dsh, workbuddy - malaha maaha Claude Code 😁):
 
 ```markdown
-Soo qaado koodhkii ugu dambeeyay ee https://github.com/Lee-xeo/Claude-Cage, dhis, xirmo ka samee oo rakib. U habee proxy-ga Cage inuu isticmaalo node-ka xx ee Clash-kayga maxalliga ah oo uu ka baxo IP-gayga xx. La soco hawsha oo dhan, si toos ah u sax dhibaatooyinka, haddii loo baahdana issue u gudbi mashruuca si loo wanaajiyo iswaafajinta.
+Soo qaado koodhkii ugu dambeeyay ee https://github.com/Lee-xeo/Claude-Cage, dhis, xirmo ka samee oo rakib. Cage ku soo geli habaynta node-ka aan ku dhoofiyay [jidka faylka]. Haddii aan isticmaalo silsilad proxy, marka hore habee node-ka dhexdhexaadka ah, ka dibna kan bixitaanka. Hubi in IP-ga guud ee bixitaanku yahay [IP-ga la filayo]. La soco hawsha oo dhan, si toos ah u sax dhibaatooyinka, haddii loo baahdana issue u gudbi mashruuca si loo wanaajiyo iswaafajinta.
 ```
+
+Cinwaanka maxalliga ah ee Clash/Mihomo ama sing-box ku qaabilo xiriirrada, sida `127.0.0.1:7890`, looma adeegsan karo node-ka sare. [U soo wareeji silsiladda proxy-ga](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 Waxa kaliya ee aad u baahan tahay waa barta ugu dambeysa ee wakiil shabakad la isku halayn karo. Mashruucani ma dalacsiinayo bixiye wakiil; Waxaad heli kartaa bixiye laftaada, tusaale ahaan adoo raadiya shabakada qaladka madow.
 
@@ -130,9 +133,9 @@ Si aad u hesho tusmada buuxda, eeg [Tusmada dhokumentiyada](docs/README.md).
 
 Mashruucu si xawli ah ayuu u socdaa. Ku biir kooxda bulshada si aad ula wadaagto jawaab celinta; ilaaliyayaasha bulshada waa la soo dhawaynayaa.
 
-| QQ group · 112745758 | WeChat |
+| QQ group · 782087179 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

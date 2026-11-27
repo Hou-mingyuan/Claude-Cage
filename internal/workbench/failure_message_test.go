@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/host"
 )
 
@@ -75,6 +77,52 @@ func TestExecutionFailureNamesMissingQEMU(t *testing.T) {
 		message := executionFailure("准备 Debian 13 镜像", errors.New("exit status 1"), line).Error()
 		if !strings.Contains(message, "QEMU 组件") || !strings.Contains(message, "PATHEXT") {
 			t.Fatalf("%q -> %q", line, message)
+		}
+	}
+}
+
+func TestExecutionFailureNamesLimaHomeConflict(t *testing.T) {
+	rawSamples := []string{
+		`Error: could not query Lima: agent-vm's Lima home C:\Users\alice\.claude-cage\state\lima is also your own Lima's home: set AGENT_VM_LIMA_HOME to a folder for agent-vm alone`,
+		`agent-vm's Lima home /Users/alice/.claude-cage/state/lima is also your own Lima's home: set AGENT_VM_LIMA_HOME to a folder for agent-vm alone`,
+		`agent-vm's Lima home /home/alice/.claude-cage/state/lima is also your own Lima's home: set AGENT_VM_LIMA_HOME to a folder for agent-vm alone`,
+		`agent-vm's Lima home /data/.claude-cage/state/lima is also your own Lima's home: set AGENT_VM_LIMA_HOME to a folder for agent-vm alone`,
+	}
+	for _, raw := range rawSamples {
+		for _, output := range []string{raw, diagnostics.Redact(raw)} {
+			for _, action := range []string{"停止环境", "启动环境"} {
+				message := executionFailure(action, errors.New("exit status 1"), output).Error()
+				if !strings.Contains(message, "LIMA_HOME") || !strings.Contains(message, "官方安装包") || strings.Contains(message, "可识别") {
+					t.Fatalf("%s %q -> %q", action, output, message)
+				}
+			}
+		}
+	}
+}
+
+func TestExecutionFailureNamesLimaSocketPath(t *testing.T) {
+	for _, line := range []string{
+		"Error: instance name `base-building` too long: `C:\\Users\\alice\\private\\ssh.sock.1234` must be less than UNIX_PATH_MAX=108 characters, but is 175",
+		"Error: instance name `base-building` too long: `[home path]",
+		"Error: instance name \"my-workspace-12345678\" too long: `[home path]`",
+		"Error: socket path `/Users/alice/state/ssh.sock` is too long: >= UNIX_PATH_MAX=104",
+		"Error: VM name too long: its sockets in /Users/alice/state would need 175 characters, at most 107",
+		"Error: " + cage.LimaSocketPathReason,
+	} {
+		for _, output := range []string{line, diagnostics.Redact(line)} {
+			message := executionFailure("准备 Debian 13 镜像", errors.New("exit status 1"), output).Error()
+			if !strings.Contains(message, cage.LimaSocketPathReason) || !strings.Contains(message, "更短的本地目录") ||
+				strings.Contains(message, "alice") {
+				t.Fatalf("%q -> %q", output, message)
+			}
+		}
+	}
+	for _, line := range []string{
+		"Error: approval request too long",
+		"Error: approval request too long: `[home path]`",
+	} {
+		if msg := executionFailure("审核请求", errors.New("exit status 1"), line).Error(); strings.Contains(msg, cage.LimaSocketPathReason) {
+			t.Fatalf("unrelated error reported as a Lima socket failure: %q", msg)
 		}
 	}
 }

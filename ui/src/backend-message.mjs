@@ -24,6 +24,8 @@ const JOB_NAMES = new Set([
 ]);
 
 export const backendMessageKeys = [
+  "该账号命令名已被使用，请选择其他名称",
+  "账号命令名须以字母或数字开头，最多 64 个字符，可含 -、_ 和 .。不能使用纯数字、内部 ID 或保留命令。",
   // Issue #749: local proxy node validation & migration
   "本机代理端口不能用作节点。请导入原客户端的具体节点，在 Cage 中按中转到最终出口的顺序重新配置并应用",
   "原代理链包含本机代理端口。请导入各跳的具体节点后重建代理链",
@@ -45,6 +47,9 @@ export const backendMessageKeys = [
   "节点名称为空或过长",
   "节点名称重复，无法确定代理链引用",
   "节点协议暂不支持",
+  "MASQUE 节点暂不支持：Cage 目前不能导入 masque 协议节点，请向服务商获取同一出口的其他协议节点后重新导入",
+  "Clash Verge Ninja 专用的 ninja 协议，Cage 随附的标准 Mihomo 核心无法解析，请向服务商获取同一出口的标准 Mihomo 节点后重新导入",
+  "Clash Neo 专用的 nexo 协议，Cage 随附的标准 Mihomo 核心无法解析，请向服务商获取同一出口的标准 Mihomo 节点后重新导入",
   "节点服务器缺失或过长",
   "SSH 节点的 private-key 必须直接填写私钥内容，不能引用本机文件",
   "节点不能引用本机文件、网络接口或额外路由",
@@ -56,6 +61,9 @@ export const backendMessageKeys = [
   "第 {0} 个节点：{1}",
   "inline provider 设置了 override 或过滤规则，暂不支持；请展开为顶层 proxies 后再导入",
   "节点字段 {0} 存在重复写法，请仅保留一种",
+  "新设备已配对。",
+  "最多可同时配对 8 台设备，请先移除不需要的设备",
+  "未找到已配对的设备",
   "Hysteria2 字段 {0} 无效，未忽略该字段",
   "Hysteria2 字段 {0} 与 {1} 冲突",
   "旧 WebSocket 字段仅适用于 VMess、VLESS 或 Trojan 节点",
@@ -69,6 +77,7 @@ export const backendMessageKeys = [
   "WebSocket 请求头存在大小写不同的冲突写法",
   // Share-link errors
   "分享链接的协议暂不支持；请改用 Clash/Mihomo YAML",
+  "MASQUE 分享链接暂不支持：随附 Mihomo 核心的 masque 节点需要 ECDSA 客户端私钥和服务器公钥，这类链接只提供用户认证和 HTTP/3 传输参数，无法转换。Cage 目前也不能导入 MASQUE 节点，请向服务商获取其他协议的节点",
   "分享链接格式无效，缺少服务器、端口或凭据",
   "分享链接的伪装头类型暂不支持；请改用 Clash/Mihomo YAML",
   "分享链接的传输方式暂不支持；请改用 Clash/Mihomo YAML",
@@ -78,6 +87,7 @@ export const backendMessageKeys = [
   "VLESS 分享链接的安全层暂不支持；请改用 Clash/Mihomo YAML",
   "VMess 分享链接不是 v2rayN 格式；请改用 Clash/Mihomo YAML",
   "VMess 分享链接的安全层暂不支持；请改用 Clash/Mihomo YAML",
+  "Shadowrocket 分享链接含有暂不支持的参数；请改用 Clash/Mihomo YAML",
   "Shadowsocks 分享链接的 obfs 模式无效",
   "Shadowsocks 分享链接的插件暂不支持；请改用 Clash/Mihomo YAML",
   "Hysteria2 分享链接的混淆方式暂不支持",
@@ -121,6 +131,25 @@ export const backendMessageKeys = [
   "代理端口应为 1024–65535",
   "订阅来源不存在",
   "该来源包含当前代理链中的节点，请先选择并应用其他来源的节点",
+  "该来源正用于当前代理链或自动切换中转组，请先选择并应用其他路由",
+  "代理链配置无效，请重新配置代理",
+  "最终出口必须为单个固定节点，不能使用自动切换组",
+  "自动切换中转策略无效，请选择故障转移或最低延迟",
+  "自动切换中转组需要指定来源或自选节点列表",
+  "多跳代理链不能重复使用同一个中转来源",
+  "自动切换中转组引用的来源已被移除，请重新选择；原配置已保留",
+  "多跳代理链的中转节点池存在重叠，请调整各跳范围",
+  "自动切换中转组最多包含 {0} 个候选节点；请改用自选节点缩小范围",
+  "自动切换中转组至少需要 2 个可用中转节点",
+  "自动切换中转组没有可用的中转节点，请重新选择；原配置已保留",
+  "自动切换中转组包含无效节点",
+  "自动切换中转组不能包含重复节点",
+  "自动切换中转组中的节点已被移除，请重新选择；原配置已保留",
+  "自动切换中转组不能包含最终出口或其他固定跳节点",
+  "订阅更新移除了当前自动切换中转组中的全部可用节点；原配置已保留，请先调整代理链再更新",
+  "订阅更新后当前自动切换中转组无可用节点；原配置已保留，请先调整代理链再更新",
+  "已更新订阅，并从中转组自动移除 {0} 个已下线候选节点",
+  "node_ids 与 hops 只能填写一个",
   "订阅节点会在更新订阅时被覆盖，请在服务商处修改；只能编辑本地导入的节点",
   "服务器地址无效，请填写 IP 地址或域名",
   "节点端口应为 1–65535",
@@ -161,8 +190,11 @@ export const backendMessageKeys = [
   "当前生效配置",
   "已保存的配置",
   "加密配置",
+  "私有格式配置",
   "本机配置",
   "配置文件使用 age 加密，Cage 不会解密私有配置，无法直接导入。请从原客户端或服务商导出明文 Clash/Mihomo YAML 后通过“添加来源”导入，或手动添加节点",
+  "FlClash for oixCloud 的配置以私有加密格式保存，Cage 不会解密，无法直接导入。请从服务商用户中心或客户端的导出入口取得兼容的 Clash/Mihomo 订阅或 YAML 后通过“添加来源”导入，或手动添加节点",
+  "SakuraCat 的配置使用私有格式保存，Cage 不会读取或解密，也不能把它的本机代理端口当作节点。请通过 SakuraCat 支持的导出入口或服务商用户中心取得个人 Clash/Mihomo 订阅、YAML 或节点分享链接，再通过“添加来源”导入",
   "无法读取当前用户的配置目录，请重新检测或手动导入文件",
   "无法读取这份配置，请检查文件权限或改为手动导入",
   "这份配置没有可导入的节点，或格式暂不支持；请从原软件导出 Clash/Mihomo 配置",
@@ -229,11 +261,16 @@ export const backendMessageKeys = [
   "本次操作",
   "{0}失败：{1}。{2}",
   "{0}失败：{1}。",
+  "请检查宿主机到镜像站的网络连接，或稍后继续安装。",
+  "请检查宿主机到镜像站的网络连接，或稍后继续安装；已下载的部分会保留，继续安装时从断点续传。",
+  "启动前的代理出口检查未通过",
+  "代理出口预检未通过，首跳状态未确定，请检查宿主机经物理网卡到首跳节点端口的连接",
   "未能取得可识别的错误原因",
   "等待响应超时",
   "无法解析服务器域名",
   "服务器证书验证未通过",
   "服务器没有返回有效的加密连接响应",
+  "服务器在加密连接上返回了明文 HTTP 响应，协议或端口可能不匹配",
   "系统拒绝访问所需文件或目录",
   "所需文件或程序不存在",
   "磁盘剩余空间不足",
@@ -258,6 +295,8 @@ export const backendMessageKeys = [
   "文件尚未下载完成或已不可用",
   "所选本机扩展已不可用，请刷新清单",
   "Claude Desktop 尚未启动",
+  "至少保留一个 Desktop 实例，不能删除最后一个",
+  "默认 Desktop 已删除，请从实例列表打开其他 Desktop",
 ];
 
 function unquoteGo(raw) {
@@ -327,6 +366,12 @@ export function localizeBackendMessage(message, localize = translate) {
   }
   if ((m = trimmed.match(/^一次最多测速 (\d+) 个节点$/))) {
     return translateTemplate(localize, "一次最多测速 {0} 个节点", m[1]) ?? trimmed;
+  }
+  if ((m = trimmed.match(/^自动切换中转组最多包含 (\d+) 个候选节点；请改用自选节点缩小范围$/))) {
+    return translateTemplate(localize, "自动切换中转组最多包含 {0} 个候选节点；请改用自选节点缩小范围", m[1]) ?? trimmed;
+  }
+  if ((m = trimmed.match(/^已更新订阅，并从中转组自动移除 (\d+) 个已下线候选节点$/))) {
+    return translateTemplate(localize, "已更新订阅，并从中转组自动移除 {0} 个已下线候选节点", m[1]) ?? trimmed;
   }
   if ((m = trimmed.match(/^Cage 代理核心操作失败（([^）]+)）$/))) {
     return translateTemplate(localize, "Cage 代理核心操作失败（{0}）", m[1]) ?? trimmed;

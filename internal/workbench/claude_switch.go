@@ -231,6 +231,19 @@ func (s *Server) switchClaudeAccount(ctx context.Context, id string, input claud
 				return errors.New("原账号身份已改变，请先检查原会话登录")
 			}
 		}
+		// Check the live owner before creating a durable transfer. The guest
+		// checks again immediately before freezing a transcript or signalling.
+		if record.GuestConfig != "" {
+			var state struct {
+				Paused bool `json:"paused"`
+			}
+			if err := s.runCLIChannel(ctx, "active", map[string]string{"cli_id": record.CLIID, "config": record.GuestConfig}, &state); err != nil {
+				return err
+			}
+			if state.Paused {
+				return errors.New("Claude 已暂停，原会话仍占用此账号，请先继续对话")
+			}
+		}
 		record.Switch = &claudeAccountSwitch{ID: input.RequestID, Phase: "preparing", Source: claudeExecution{record.CLIID, record.Account, record.GuestConfig}, Target: selection, TargetLabel: a.Label, TargetID: uuid.NewString(), Connection: record.Connection, Continue: input.Continue}
 		if err := s.saveClaudeSwitch(record); err != nil {
 			return err
@@ -277,7 +290,7 @@ func (s *Server) switchClaudeAccount(ctx context.Context, id string, input claud
 		record.Executions = append(record.Executions, sw.Source)
 		record.CLIID, record.Account, record.AccountLabel, record.Launcher = sw.TargetID, sw.Target, sw.TargetLabel, "claude"
 		record.GuestConfig, record.Connection, record.TerminalID = "", "", ""
-		record.Resume, record.TerminalRunning, record.Active = false, false, false
+		record.Resume, record.TerminalRunning, record.Active, record.Paused = false, false, false, false
 		record.ResumeTranscript = result.Transcript
 		record.AccountFailure = ""
 		sw.Phase, sw.Error = "prepared", ""
@@ -423,7 +436,7 @@ func (s *Server) maybeSwitchClaudeAccount(ctx context.Context, id string, lastUs
 	if err == nil && observation != nil && s.observeCodeLogin(ctx, view, observation) {
 		return
 	}
-	if err != nil || view.AccountFailure != "rate_limit" || view.SwitchPolicy != "allow" || view.AccountSwitch != nil && view.AccountSwitch.Phase != "completed" {
+	if err != nil || view.Paused || view.AccountFailure != "rate_limit" || view.SwitchPolicy != "allow" || view.AccountSwitch != nil && view.AccountSwitch.Phase != "completed" {
 		return
 	}
 	s.claudeAccounts.mu.Lock()
@@ -457,7 +470,7 @@ func (s *Server) maybeSwitchClaudeAccount(ctx context.Context, id string, lastUs
 			}
 		}
 	}
-	active := s.mobileCLI.activeAccounts()
+	active := s.activeAccountRuns()
 	logins := make(map[string]bool)
 	for _, terminal := range s.terminals.snapshot() {
 		if terminal["closed"] == true {

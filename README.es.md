@@ -55,6 +55,7 @@ Claude Cage reúne terminal, navegador, editor, Claude Desktop oficial y mercado
 
 ## ¿Qué puedes hacer con la jaula?
 
+- **Usa Claude Code desde la terminal de tu equipo (v0.2.2).** `cage login` abre el navegador de Cage para iniciar sesión en tu cuenta de Claude. Ejecuta `cage claude` en la carpeta del proyecto para compartirla y abrir una sesión con la cuenta predeterminada. Si tienes una cuenta llamada `sarah`, usa `cage sarah` para elegirla solo en esa ejecución. El comando `cage` sin argumentos muestra la ayuda. `cage start` inicia en segundo plano el servicio de Cage y la máquina virtual local, y espera hasta que el entorno esté listo. `cage up` abre la aplicación de escritorio o trae su ventana al frente. Para actualizar Cage desde la terminal, ejecuta `cage update`. Cuando se publique el paquete npm de v0.2.2, podrás instalarlo con `npm install -g claude-cage`. [Comandos y ejemplos](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **Trabaja en una sola ventana.** Ejecute Claude Code en la terminal, revise los cambios en el editor y use el navegador Cage para obtener una vista previa de los servicios e iniciar sesión.
 - **Desbloquea todas las capacidades con el mercado de plugins.** El [mercado abierto de plugins (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) sigue la fórmula «plugin = MCP + extensión»: permite a Claude usar herramientas del equipo de forma segura y controlada (control de pantalla y teclado/ratón, documentos Office, Blender, comandos) y añadir vistas en espacio aislado a Cage con permisos explícitos y confirmación del usuario. [Guía de plugins](docs/guide/plugins.md) · [Especificación](docs/plugins.md)
 - **Un mismo entorno ligero en todas las plataformas.** Cage usa el mismo entorno Debian 13 ligero en macOS, Windows y Linux, sin mantener múltiples sistemas invitados complejos y con la misma forma de trabajar. [Entorno Debian](docs/guide/guest-systems.md)
@@ -71,8 +72,10 @@ Claude Cage reúne terminal, navegador, editor, Claude Desktop oficial y mercado
 Envíe esta solicitud a su agente de IA (codex, dsh, workbuddy; probablemente no Claude Code 😁):
 
 ```markdown
-Obtén el código fuente más reciente de https://github.com/Lee-xeo/Claude-Cage, compílalo, empaquétalo e instálalo. Configura el proxy de Cage para usar el nodo xx de mi Clash local y salir por mi IP xx. Supervisa todo el proceso, corrige directamente los problemas y, si es necesario, abre una issue en el proyecto para ayudar a mejorar la compatibilidad.
+Obtén el código fuente más reciente de https://github.com/Lee-xeo/Claude-Cage, compílalo, empaquétalo e instálalo. Importa en Cage el nodo que exporté a [ruta del archivo]. Si uso una cadena de proxies, configura primero el nodo intermedio y luego el de salida. Comprueba que la IP pública de salida coincida con [IP esperada]. Supervisa todo el proceso, corrige directamente los problemas y, si es necesario, abre una issue en el proyecto para ayudar a mejorar la compatibilidad.
 ```
+
+Cage no admite como nodo la dirección local en la que escucha Clash/Mihomo o sing-box, por ejemplo `127.0.0.1:7890`. [Migrar una cadena de proxies](docs/guide/network.md#把原客户端的代理链迁到-cage)
 
 Todo lo que necesita es un punto final de proxy de red confiable. Este proyecto no promueve ningún proveedor de proxy; Puede encontrar un proveedor usted mismo, por ejemplo buscando en el sitio web de Black Error.
 
@@ -130,9 +133,9 @@ Para consultar el índice completo, consulte [Índice de documentación](docs/RE
 
 El proyecto está evolucionando rápidamente. Únase al grupo comunitario para compartir comentarios; Los mantenedores de la comunidad son bienvenidos.
 
-| QQ group · 112745758 | WeChat |
+| QQ group · 782087179 | WeChat |
 | :---: | :---: |
-| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 112745758" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
+| <a href="assets/community-qq.png"><img src="assets/community-qq.png" alt="QQ group · 782087179" width="240" /></a> | <a href="www/src/assets/community-wechat.png"><img src="www/src/assets/community-wechat.png" alt="WeChat" width="240" /></a> |
 
 [Telegram](https://t.me/claude_cage)
 

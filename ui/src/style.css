@@ -1150,7 +1150,7 @@ button.large {
   margin: 0;
   color: var(--ink);
 }
-.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip) {
+:where(.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label)) {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1159,8 +1159,8 @@ button.large {
   margin-bottom: 17px;
   color: var(--ink);
 }
-.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(.archive-search-input):not(.proxy-search-input),
-.settings-content .inline-select-trigger {
+:where(.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(.archive-search-input):not(.proxy-search-input)),
+:where(.settings-content .inline-select-trigger) {
   height: 36px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1549,9 +1549,9 @@ button.large {
 }
 
 /* Reading sizes remain comfortable at a normal 1280px workbench window. */
-.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip),
-.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
-.settings-content .inline-select-trigger,
+:where(.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label)),
+:where(.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"])),
+:where(.settings-content .inline-select-trigger),
 .choice strong,
 .toggle-row strong,
 .settings-content h4,
@@ -1559,8 +1559,8 @@ button.large {
 .modal-footer button {
   font-size: 1rem;
 }
-.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(.archive-search-input):not(.proxy-search-input),
-.settings-content .inline-select-trigger {
+:where(.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(.archive-search-input):not(.proxy-search-input)),
+:where(.settings-content .inline-select-trigger) {
   height: 39px;
 }
 .section-title h3 {
@@ -1618,8 +1618,12 @@ button.large {
   color: var(--strong);
 }
 .remote-pair-instruction { margin: 0; color: var(--muted); font-size: 1rem; line-height: 1.7; }
-.remote-pair-device { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 8px 12px; margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
-.remote-pair-device strong { font-size: 1.1429rem; color: var(--strong); }
+.remote-pair-count { margin-left: 10px; font-size: 0.9286rem; font-weight: 500; color: var(--muted); vertical-align: middle; }
+.remote-pair-list { list-style: none; margin: 16px auto 0; padding: 0; max-width: 560px; display: grid; gap: 10px; text-align: left; }
+.remote-pair-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--chrome); }
+.remote-pair-item button { flex: none; min-height: 36px; padding: 6px 14px; }
+.remote-pair-device { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-start; gap: 8px 12px; margin: 0; min-width: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.remote-pair-device strong { font-size: 1.0714rem; color: var(--strong); }
 .remote-pair-device span { color: var(--muted); }
 .remote-pair-code { margin: 24px auto 0; }
 .remote-pair-code img {
@@ -1961,6 +1965,11 @@ svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.project-disclosure > .project-pin {
+  flex: none;
+  color: var(--muted);
+  margin-left: auto;
+}
 .project-disclosure > svg:first-child {
   color: var(--muted);
   transition: color var(--duration-fast) var(--ease-out);
@@ -1977,13 +1986,32 @@ svg {
   opacity: 0.36;
   transition: opacity var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
-.project-heading:is(:hover, :focus-within, .current-project) > .icon-button {
+.project-heading:is(:hover, :focus-within, .current-project, :has([aria-expanded="true"])) > .icon-button {
   opacity: 1;
 }
 @media (hover: none) {
   .project-heading > .icon-button {
     opacity: 1;
   }
+}
+.project-action-menu {
+  position: fixed;
+  right: auto;
+  min-width: 176px;
+  z-index: 40;
+}
+.project-action-menu .menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line-subtle, var(--line));
+}
+.project-action-menu .menu-item-danger {
+  color: var(--danger);
+}
+.project-action-menu .menu-item-danger:hover:not(:disabled),
+.project-action-menu .menu-item-danger:focus-visible:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, var(--paper));
 }
 .project-children {
   display: grid;
@@ -2100,21 +2128,39 @@ svg {
   color: var(--muted);
 }
 .terminal-row-actions {
+  position: absolute;
+  inset-inline-end: 4px;
+  top: 50%;
+  z-index: 2;
   display: flex;
   align-items: center;
+  padding-inline-start: 16px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, transparent, var(--hover) 16px);
   visibility: hidden;
-  max-width: 0;
-  overflow: hidden;
+  pointer-events: none;
   opacity: 0;
-  transform: translateX(10px);
+  transform: translateY(-50%) translateX(4px);
   transition: opacity 140ms ease, transform 140ms ease;
+}
+.sidebar-tab.active .terminal-row-actions {
+  background: linear-gradient(90deg, transparent, var(--selected) 16px);
+}
+:dir(rtl) .terminal-row-actions {
+  background: linear-gradient(270deg, transparent, var(--hover) 16px);
+}
+:dir(rtl) .sidebar-tab.active .terminal-row-actions {
+  background: linear-gradient(270deg, transparent, var(--selected) 16px);
 }
 .sidebar-tab:is(:hover, :focus-within, :has([aria-expanded="true"])) .terminal-row-actions {
   visibility: visible;
-  max-width: none;
-  margin-right: 3px;
+  pointer-events: auto;
   opacity: 1;
-  transform: none;
+  transform: translateY(-50%);
+}
+.sidebar-tab:is(:hover, :focus-within, :has([aria-expanded="true"])) :is(.tab-pin, .session-activity, .session-owner) {
+  opacity: 0;
+  pointer-events: none;
 }
 .terminal-row-actions > button {
   flex: 0 0 auto;
@@ -2671,6 +2717,16 @@ svg {
   flex: none;
   gap: 2px;
   color: var(--muted);
+  opacity: 0.52;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.project-picker-row:is(:hover, :focus-within, .selected) .project-picker-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .project-picker-actions {
+    opacity: 1;
+  }
 }
 .project-picker-row.selected > .project-picker-item > svg {
   color: var(--accent);
@@ -2678,6 +2734,24 @@ svg {
 .project-picker-actions .project-picker-remove:hover:not(:disabled) {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 8%, var(--paper));
+}
+.project-remove-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--danger) 4%, var(--paper));
+}
+.project-remove-confirm p {
+  margin: 0;
+}
+.project-remove-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 .project-picker-add {
   align-self: flex-start;

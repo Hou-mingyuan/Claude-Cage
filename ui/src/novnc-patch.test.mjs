@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { desktopTextInput } from "./desktop-text-input.mjs";
 
 // Applies internal/cage/novnc-patch.py to a private copy of the vendored noVNC
 // and drives the patched RFB._handleMouse with the events a host WebView sends.
@@ -122,6 +123,55 @@ function paste(RFB) {
 }
 
 const ctrlV = [[0xffe1, false], [0xffe3, true], [0x76, true], [0x76, false], [0xffe3, false], [0xffe1, true]];
+
+test("Windows Desktop commits to the current field with clipboard sync offline", async (t) => {
+  const RFB = await loadRFB(t);
+  if (!RFB) return;
+  const p = paste(RFB);
+  t.after(p.restore);
+  const requests = [];
+  let editable = true;
+  const desktop = desktopTextInput(p.rfb, async value => {
+    requests.push(value);
+    return { available: editable, context: "current-field" };
+  }, committed => committed, () => false);
+  const result = desktop.insert("中国", { committed: true });
+  await new Promise(resolve => setImmediate(resolve));
+  p.fence("cage-input-1");
+  await result;
+  assert.deepEqual(requests.map(value => value.mode), ["status", "begin", "commit"]);
+  assert.equal(requests[1].context, "current-field");
+  assert.equal(requests[2].session, requests[1].session);
+  assert.equal(requests[2].text, "中国");
+
+  editable = false;
+  const missing = desktop.insert("中国", { committed: true });
+  await new Promise(resolve => setImmediate(resolve));
+  p.fence("cage-input-2");
+  await assert.rejects(missing, /失去焦点/);
+  assert.equal(p.sent.some(([name]) => name === "extendedClipboardNotify"), false);
+});
+
+test("Windows Desktop without an input bridge completes fallback paste before Enter", async (t) => {
+  const RFB = await loadRFB(t);
+  if (!RFB) return;
+  const p = paste(RFB);
+  t.after(p.restore);
+  const desktop = desktopTextInput(p.rfb, async () => ({ available: false }), () => true, () => false);
+  const result = desktop.insert("中国", { committed: true });
+  p.rfb.sendKey(0xff0d, "Enter", true);
+  await new Promise(resolve => setImmediate(resolve));
+  p.fence("cage-input-1");
+  await new Promise(resolve => setImmediate(resolve));
+  p.fence("cage-paste-1");
+  p.request();
+  assert.deepEqual(p.keys, ctrlV);
+  assert.deepEqual(p.sent.find(([name]) => name === "extendedClipboardProvide")[2], ["中国"]);
+  p.fence("cage-paste-1-keys");
+  await result;
+  await p.rfb._cageInputChain;
+  assert.deepEqual(p.keys.at(-1), [0xff0d, true]);
+});
 
 test("a paste needs no clipboard reader in the guest before Ctrl+V", async (t) => {
   const RFB = await loadRFB(t);
