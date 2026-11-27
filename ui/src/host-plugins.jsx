@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, Blocks, Check, ChevronDown, ChevronRight, CircleAlert, Clock, Copy, Download, FileCode2, Folder, FolderOpen, Globe2,
-  Keyboard, LoaderCircle, Monitor, PanelLeft, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, SquareTerminal, Store, Trash2, TriangleAlert, Wrench,
+  Keyboard, LoaderCircle, Monitor, PanelLeft, Power, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, SquareTerminal, Store, Trash2, TriangleAlert, Wrench,
 } from "lucide-react";
 import { api, writeClipboard } from "./api";
 import { getClientContext, isRemoteClient, runtimeURL } from "./client-context.mjs";
@@ -396,11 +396,42 @@ function PluginPageIcon({ src }) {
   return <img className="plugin-page-icon" src={src} alt="" draggable="false" onError={() => setFailed(true)} />;
 }
 
-export function PluginPagesNav({ pages, selected, floatingOpen = [], onOpen }) {
+export function PluginPagesNav({ pages, selected, floatingOpen = [], desktopRunning = {}, disabled = false, onOpen, onDesktopStop }) {
   const tr = useTranslation();
   return pages.map(page => {
     const isSelected = !page.floating && selected === page.key;
     const isFloatingOpen = page.floating && floatingOpen.includes(page.key);
+    if (page.kind === "desktop-app") {
+      const isRunning = Boolean(desktopRunning[page.key]);
+      return (
+        <div key={page.key} className={`account-desktop-row ${isSelected ? "active" : ""}`}>
+          <button
+            className="sidebar-link"
+            aria-current={isSelected ? "page" : undefined}
+            onClick={() => onOpen(page)}
+            aria-label={tr("打开 {0}", (page.title))}
+          >
+            <PluginPageIcon key={page.icon} src={page.icon} />
+            {page.title}
+            {isRunning ? <span className="account-desktop-status" aria-hidden="true">●</span> : null}
+          </button>
+          {isRunning && onDesktopStop && (
+            <div className="terminal-row-actions" role="group" aria-label={tr("{0} 的操作", page.title)}>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={tr("关闭应用")}
+                title={tr("关闭应用")}
+                disabled={disabled}
+                onClick={(event) => onDesktopStop(page, event.currentTarget)}
+              >
+                <Power size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
     return (
       <button key={page.key} className={`sidebar-link ${isSelected ? "selected" : ""}`}
         aria-current={isSelected ? "page" : undefined}

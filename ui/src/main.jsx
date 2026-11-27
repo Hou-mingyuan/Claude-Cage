@@ -35,7 +35,7 @@ import { EnvironmentShield } from "./environment-shield";
 import { TailscalePanel } from "./tailscale";
 import { HostPluginsPanel, pluginPages, pluginPageTitle, useHostPlugins } from "./host-plugins";
 import { PluginView, FloatingPluginView } from "./plugin-view";
-import { PluginDesktopApp } from "./plugin-desktop-app";
+import { PluginDesktopApp, desktopAppPath } from "./plugin-desktop-app";
 import { WorkspaceSidebar } from "./workspace-sidebar";
 import { useCLISessions, desktopSessionRequest, sessionsChanged } from "./cli-sessions";
 import { SessionAccount } from "./session-account";
@@ -126,6 +126,9 @@ function App() {
   const [defaultDesktopRunning, setDefaultDesktopRunning] = useState(false);
   const [defaultDesktopStopped, setDefaultDesktopStopped] = useState(false);
   const [defaultDesktopSignal, setDefaultDesktopSignal] = useState(0);
+  const [pluginDesktopRunning, setPluginDesktopRunning] = useState({});
+  const [pluginDesktopStopped, setPluginDesktopStopped] = useState({});
+  const [pluginDesktopSignal, setPluginDesktopSignal] = useState(0);
   const [terminalChoice, setTerminalChoice] = useState(null);
   const [openingSession, setOpeningSession] = useState("");
   const [sessionAccount, setSessionAccount] = useState(null);
@@ -413,6 +416,8 @@ function App() {
     if (!running) {
       setDefaultDesktopRunning(false);
       setDefaultDesktopStopped(false);
+      setPluginDesktopRunning({});
+      setPluginDesktopStopped({});
     }
   }, [running]);
   const handleDefaultDesktopRunning = useCallback((isRunning) => {
@@ -420,6 +425,44 @@ function App() {
     if (isRunning) setDefaultDesktopStopped(false);
     if (status?.account_desktops_supported) void accountDesktops.refresh(true);
   }, [status?.account_desktops_supported, accountDesktops.refresh]);
+  const handlePluginDesktopRunning = useCallback((key, isRunning) => {
+    setPluginDesktopRunning((prev) => (prev[key] === isRunning ? prev : { ...prev, [key]: isRunning }));
+    if (isRunning) {
+      setPluginDesktopStopped((prev) => (prev[key] ? { ...prev, [key]: false } : prev));
+    }
+  }, []);
+  const desktopAppPages = pages.filter((page) => page.kind === "desktop-app");
+  const desktopAppKeys = desktopAppPages.map((page) => page.key).join("\n");
+  useEffect(() => {
+    if (!running || !status?.ready || !desktopAppKeys) return;
+    let cancelled = false;
+    for (const page of desktopAppPages) {
+      void api(`${desktopAppPath(page.plugin, page.app.id)}/status`)
+        .then((value) => {
+          if (!cancelled && value) handlePluginDesktopRunning(page.key, Boolean(value.running));
+        })
+        .catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [running, status?.ready, desktopAppKeys, handlePluginDesktopRunning]);
+  const stopPluginDesktopApp = async (page, anchor = null) => {
+    if (!(await confirm({
+      title: tr("关闭 {0}？", page.title),
+      body: tr("请先保存应用内的工作。浏览器和终端会继续运行。"),
+      confirm: tr("关闭应用"),
+      anchor,
+    }))) return;
+    try {
+      const path = desktopAppPath(page.plugin, page.app.id);
+      await api(`${path}/stop`, {});
+      setPluginDesktopRunning((prev) => ({ ...prev, [page.key]: false }));
+      setPluginDesktopStopped((prev) => ({ ...prev, [page.key]: true }));
+      setPluginDesktopSignal((n) => n + 1);
+      await refreshStatus.current?.();
+    } catch (e) {
+      notify(e.message);
+    }
+  };
   const stopDefaultDesktop = async (entry, anchor = null) => {
     if (!(await confirm({
       title: entry?.label ? tr("关闭 {0}？", desktopTitle(entry)) : "关闭 Claude Desktop？",
@@ -1861,7 +1904,8 @@ function App() {
             plugins={pluginsAvailable ? { model: hostPlugins, open: pluginSidebar, page: managementPage === "plugins" ? pluginPage : null,
               onConfirm: confirm, onOpen: () => setPluginSidebar(true), onBack: leavePlugins, onPage: openPluginPage,
               pages, pageOpen: managementPage === "plugin-view" ? pluginView : "",
-              floatingOpen: floatingPages.map(page => page.key), onView: openPluginView } : null}
+              floatingOpen: floatingPages.map(page => page.key), onView: openPluginView,
+              desktopRunning: pluginDesktopRunning, onDesktopStop: stopPluginDesktopApp } : null}
             updateAction={<AppUpdateButton updates={appUpdates} />}
             workspace={selectedProject || status.workspace}
             projects={projects}
@@ -1994,7 +2038,12 @@ function App() {
               )}
               <div className="management-content">
                 {managementPage === "plugin-view" && openPage?.kind === "desktop-app" ? <PluginDesktopApp key={`${currentClient.connection_id || "local"}:${pluginView}`}
-                  titleId={managementPage + "-title"} sidebarButton={sidebarButton()}
+                  titleId={managementPage + "-title"}
+                  sidebarCollapsed={sidebarCollapsed}
+                  onExpand={() => persist("cage-sidebar-collapsed", false, setSidebarCollapsed)}
+                  autoStart={!pluginDesktopStopped[openPage.key]}
+                  refreshSignal={pluginDesktopSignal}
+                  onRunningChange={(isRunning) => handlePluginDesktopRunning(openPage.key, isRunning)}
                   plugin={openPage.plugin} app={openPage.app} status={status} uploads={desktopFiles.uploads} visible={!settingsOpen && windowVisible}
                   keyboard={status.keyboard} systemClipboard={browser.capabilities?.systemClipboard !== false}
                   onStatus={notify} onFallback={(text, message) => setTransfer({ text, message })} onConfirm={confirm} onDetails={() => setDetails(true)}
