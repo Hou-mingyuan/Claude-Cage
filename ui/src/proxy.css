@@ -1887,6 +1887,34 @@ button.proxy-flow-chip.is-empty:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--danger, #bc4c4c) 45%, var(--line));
   color: var(--danger, #bc4c4c);
 }
+.proxy-hop-token.is-draggable {
+  cursor: grab;
+  padding-inline-start: 6px;
+  user-select: none;
+  transition:
+    opacity 120ms var(--ease-out),
+    border-color 120ms var(--ease-out),
+    box-shadow 120ms var(--ease-out);
+}
+.proxy-hop-token.is-draggable:active {
+  cursor: grabbing;
+}
+.proxy-hop-token.is-dragging {
+  opacity: 0.42;
+}
+.proxy-hop-token.is-drag-over {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+.proxy-hop-token-grip {
+  color: var(--muted);
+  opacity: 0.5;
+  flex: none;
+  transition: opacity 120ms var(--ease-out);
+}
+.proxy-hop-token.is-draggable:hover .proxy-hop-token-grip {
+  opacity: 0.9;
+}
 .proxy-hop-token-rank {
   display: inline-flex;
   align-items: center;

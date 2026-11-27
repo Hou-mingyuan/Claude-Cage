@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Check, ChevronDown, Layers, X } from "lucide-react";
+import { Check, ChevronDown, GripVertical, Layers, X } from "lucide-react";
 import { useTranslation } from "./interface-language.mjs";
 import {
   MAX_RELAY_NODES,
@@ -27,6 +27,7 @@ export function RelayHopField({
   onSelectSource,
   onToggleNode,
   onMoveNode,
+  onReorderNode,
   onClear,
   onStrategyChange,
 }) {
@@ -36,6 +37,8 @@ export function RelayHopField({
   const triggerRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [dragID, setDragID] = useState("");
+  const [dragOverID, setDragOverID] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -124,11 +127,64 @@ export function RelayHopField({
                 const missing = !usableIDs.has(nid);
                 const isLive = multiNode && liveActiveID === nid;
                 const showOrder = multiNode && isFallback;
+                const canDrag = showOrder && !disabled;
+                const isDragging = dragID === nid;
+                const isDragOver = dragOverID === nid && dragID && dragID !== nid;
                 return (
                   <span
                     key={nid}
-                    className={`proxy-hop-token${isLive ? " is-live" : ""}${missing ? " is-missing" : ""}`}
+                    draggable={canDrag}
+                    tabIndex={canDrag ? 0 : undefined}
+                    title={canDrag ? tr("拖动调整优先级") : undefined}
+                    className={`proxy-hop-token${isLive ? " is-live" : ""}${missing ? " is-missing" : ""}${canDrag ? " is-draggable" : ""}${isDragging ? " is-dragging" : ""}${isDragOver ? " is-drag-over" : ""}`}
+                    onClick={(event) => {
+                      if (canDrag) event.stopPropagation();
+                    }}
+                    onDragStart={(event) => {
+                      if (!canDrag) return;
+                      setDragID(nid);
+                      setDragOverID("");
+                      event.dataTransfer.effectAllowed = "move";
+                      try { event.dataTransfer.setData("text/plain", nid); } catch {}
+                    }}
+                    onDragOver={(event) => {
+                      if (!canDrag || !dragID || dragID === nid) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      if (dragOverID !== nid) setDragOverID(nid);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverID === nid) setDragOverID("");
+                    }}
+                    onDrop={(event) => {
+                      if (!canDrag) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const sourceID = dragID || event.dataTransfer.getData("text/plain");
+                      setDragID("");
+                      setDragOverID("");
+                      if (sourceID && sourceID !== nid) {
+                        onReorderNode?.(sourceID, nid);
+                      }
+                    }}
+                    onDragEnd={() => {
+                      setDragID("");
+                      setDragOverID("");
+                    }}
+                    onKeyDown={(event) => {
+                      if (!canDrag) return;
+                      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onMoveNode?.(nid, -1);
+                      } else if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onMoveNode?.(nid, 1);
+                      }
+                    }}
                   >
+                    {canDrag && <GripVertical size={11} className="proxy-hop-token-grip" aria-hidden="true" />}
                     {showOrder && (
                       <span className="proxy-hop-token-rank">
                         {pos === 0 ? tr("首选") : pos + 1}
@@ -136,37 +192,16 @@ export function RelayHopField({
                     )}
                     {isLive && <span className="proxy-relay-live-dot" aria-hidden="true" />}
                     <span className="proxy-hop-token-name" title={name}>{name}</span>
-                    {showOrder && (
-                      <>
-                        <button
-                          type="button"
-                          className="proxy-hop-token-btn"
-                          disabled={disabled || pos === 0}
-                          aria-label={tr("上移 {0}", name)}
-                          title={tr("提高优先级")}
-                          onClick={() => onMoveNode(nid, -1)}
-                        >
-                          <ArrowUp size={11} />
-                        </button>
-                        <button
-                          type="button"
-                          className="proxy-hop-token-btn"
-                          disabled={disabled || pos === hop.node_ids.length - 1}
-                          aria-label={tr("下移 {0}", name)}
-                          title={tr("降低优先级")}
-                          onClick={() => onMoveNode(nid, 1)}
-                        >
-                          <ArrowDown size={11} />
-                        </button>
-                      </>
-                    )}
                     <button
                       type="button"
                       className="proxy-hop-token-btn"
                       disabled={disabled}
                       aria-label={tr("移出候选池 {0}", name)}
                       title={tr("移出候选池")}
-                      onClick={() => onToggleNode(nid)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleNode(nid);
+                      }}
                     >
                       <X size={11} />
                     </button>

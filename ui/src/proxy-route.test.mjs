@@ -12,6 +12,7 @@ import {
   nodeHop,
   nodesClaimedByOtherHops,
   relayHop,
+  reorderNodeInRelayHop,
   resolveHopPickerIndex,
   restoreChainRoute,
   sanitizeRelayHopAfterExitChange,
@@ -90,6 +91,10 @@ test("priority reorder, bulk toggle, swap, and exit sanitize work cleanly", () =
   assert.deepEqual(hops[0].node_ids, ["hk1", "hk2", "jp1"]);
 
   hops = moveNodeInRelayHop(hops, 0, "jp1", -1);
+  assert.deepEqual(hops[0].node_ids, ["hk1", "jp1", "hk2"]);
+  hops = reorderNodeInRelayHop(hops, 0, "hk2", "hk1");
+  assert.deepEqual(hops[0].node_ids, ["hk2", "hk1", "jp1"]);
+  hops = reorderNodeInRelayHop(hops, 0, "hk2", "jp1");
   assert.deepEqual(hops[0].node_ids, ["hk1", "jp1", "hk2"]);
   hops = moveNodeInRelayHop(hops, 0, "hk2", -Infinity);
   assert.deepEqual(hops[0].node_ids, ["hk2", "hk1", "jp1"]);

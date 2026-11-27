@@ -3487,5 +3487,6 @@
   "自动选最低延迟节点，不影响最终出口 IP": "Choisit automatiquement le nœud le plus rapide sans changer l'IP de sortie finale",
   "按顺序自动顺延，不影响最终出口 IP": "Bascule dans l'ordre en cas de coupure sans changer l'IP de sortie finale",
   "多选节点或选整份订阅时自动切换": "Bascule automatiquement avec plusieurs nœuds ou un abonnement complet",
-  "经上一跳中转；多选或选整份订阅时自动切换": "Passe par le saut précédent ; bascule automatiquement avec plusieurs nœuds ou un abonnement complet"
+  "经上一跳中转；多选或选整份订阅时自动切换": "Passe par le saut précédent ; bascule automatiquement avec plusieurs nœuds ou un abonnement complet",
+  "拖动调整优先级": "Glisser pour réorganiser la priorité"
 }

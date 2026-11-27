@@ -51,6 +51,7 @@ import {
   nodeHop,
   nodesClaimedByOtherHops,
   relayHop,
+  reorderNodeInRelayHop,
   restoreChainRoute,
   sanitizeRelayHopAfterExitChange,
   savedHopsFromProxy,
@@ -1371,6 +1372,9 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                               onToggleNode={(nid) => toggleRelayHopNode(index, nid)}
                               onMoveNode={(nid, delta) =>
                                 setRouteDraft(moveNodeInRelayHop(route, index, nid, delta))
+                              }
+                              onReorderNode={(fromID, toID) =>
+                                setRouteDraft(reorderNodeInRelayHop(route, index, fromID, toID))
                               }
                               onClear={() =>
                                 updateRelayHop(index, (cur) =>
