@@ -31,10 +31,12 @@ import { SafetyMessage } from "./safety-message";
 import { isLocalListener } from "./proxy-server.mjs";
 import { groupNodesByRegion } from "./proxy-region.mjs";
 import {
+  appliedRouteTestKey,
   emptyFormDefaults as emptyForm,
   emptyManualDefaults as emptyManual,
   isSourceFormDirty,
   setupGuideProgress,
+  visibleRouteTestResult,
 } from "./proxy-setup-guide.mjs";
 import {
   MAX_RELAY_NODES,
@@ -114,6 +116,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     [rates, setRates] = useState({ up: 0, down: 0 });
   const [manual, setManual] = useState(emptyManual);
   const [routeDraft, setRouteDraft] = useState(null);
+  const [routeTest, setRouteTest] = useState(null);
   const [preferredMode, setPreferredMode] = useState(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [hostRefresh, setHostRefresh] = useState(false);
@@ -290,6 +293,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
           if (action === "import" && needsMigration) setTab("nodes");
         }
         setDelays({});
+        setRouteTest(null);
         if (action === "import-local") {
           setTab("nodes");
           setSearch("");
@@ -359,6 +363,32 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
       if (ids.length > 1 && alive.current) {
         const best = Object.entries(timings).sort((a, b) => a[1] - b[1])[0];
         setFastest(best ? best[0] : "");
+      }
+    } finally {
+      measuring.current = false;
+      if (alive.current) setPending("");
+    }
+  };
+  const testAppliedRoute = async () => {
+    const targetID = proxy?.selected;
+    const key = appliedRouteTestKey(proxy, active);
+    if (!targetID || !key || measuring.current) return;
+    measuring.current = true;
+    setPending("route-test");
+    setError("");
+    setRouteTest(null);
+    try {
+      const result = await api("/proxy/delay", { node_id: targetID });
+      delete delayReasons.current[targetID];
+      if (alive.current) {
+        setDelays((old) => ({ ...old, [targetID]: `${result.delay} ms` }));
+        setRouteTest({ key, ok: true, delay: result.delay, error: "" });
+      }
+    } catch (e) {
+      delayReasons.current[targetID] = e.message;
+      if (alive.current) {
+        setDelays((old) => ({ ...old, [targetID]: "不可用 / 未载入" }));
+        setRouteTest({ key, ok: false, delay: 0, error: e.message });
       }
     } finally {
       measuring.current = false;
@@ -439,6 +469,10 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     (node) => node.blocked_reason && (savedNodeIDs.has(node.id) || (proxy?.route || []).includes(node.id)),
   );
   const active = Boolean(proxy?.active) && !needsMigration;
+  const routeTestKey = appliedRouteTestKey(proxy, active);
+  const canTestRoute = Boolean(routeTestKey) && !routeChanged;
+  const routeTestPending = pending === "route-test";
+  const activeRouteTest = visibleRouteTestResult(routeTest, routeTestKey, routeChanged);
   const routeValidation = validateRouteHops(route, sources, usableIDs);
   const routeValid = routeValidation.valid;
   const sourceDirty = initializing && isSourceFormDirty(form, mode, manual, sources);
@@ -1477,15 +1511,35 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                 <span className="proxy-flow-endpoint">{tr("目标网站")}</span>
               </div>
               <div className="proxy-route-actions">
-                <span aria-live="polite">
+                <span
+                  aria-live="polite"
+                  className={
+                    routeTestPending
+                      ? "proxy-route-status"
+                      : activeRouteTest
+                        ? `proxy-route-status ${activeRouteTest.ok ? "is-ok" : "is-error"}`
+                        : "proxy-route-status"
+                  }
+                >
                   {!routeValid && firstMissingHop >= 0
                     ? hopIssueMessage(routeValidation.issuesByHop[firstMissingHop], firstMissingHop) ||
                       tr("请先选择{0}", hopLabel(firstMissingHop))
                     : routeChanged
                       ? tr("有未应用的代理修改")
-                      : active
-                        ? tr("当前配置已应用")
-                        : tr("选择完成后应用代理")}
+                      : routeTestPending
+                        ? tr("正在测速当前链路…")
+                        : activeRouteTest
+                          ? activeRouteTest.ok
+                            ? (
+                              <>
+                                <span className="proxy-route-status-dot" aria-hidden="true" />
+                                {tr("链路可用 · {0} ms", activeRouteTest.delay)}
+                              </>
+                            )
+                            : tr("链路测速失败")
+                          : active
+                            ? tr("当前配置已应用")
+                            : tr("选择完成后应用代理")}
                 </span>
                 <div>
                   {routeDraft !== null && (
@@ -1497,6 +1551,21 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                       }}
                     >
                       {tr("撤销修改")}
+                    </button>
+                  )}
+                  {canTestRoute && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title={tr("经当前已应用的代理链路测速，检查链路是否可用")}
+                      onClick={testAppliedRoute}
+                    >
+                      {routeTestPending ? (
+                        <LoaderCircle size={14} className="spin" />
+                      ) : (
+                        <Activity size={14} />
+                      )}
+                      {routeTestPending ? tr("测速中…") : tr("链路测速")}
                     </button>
                   )}
                   <button
@@ -1517,6 +1586,11 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                   </button>
                 </div>
               </div>
+              {activeRouteTest && !activeRouteTest.ok && (
+                <p role="alert" className="proxy-source-error">
+                  <SafetyMessage message={activeRouteTest.error} />
+                </p>
+              )}
               {proxy.route_error && !needsMigration && (
                 <p role="alert" className="proxy-source-error">
                   <SafetyMessage message={proxy.route_error} />

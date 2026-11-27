@@ -1086,6 +1086,27 @@ button.proxy-flow-chip.is-empty:hover:not(:disabled) {
   color: var(--muted);
   font-size: 12px;
 }
+.proxy-route-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.proxy-route-actions > span.proxy-route-status.is-ok {
+  color: var(--success);
+  font-weight: 560;
+}
+.proxy-route-actions > span.proxy-route-status.is-error {
+  color: var(--danger, #bc4c4c);
+  font-weight: 560;
+}
+.proxy-route-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  flex: none;
+}
 .proxy-route-actions > div {
   display: flex;
   gap: 8px;
