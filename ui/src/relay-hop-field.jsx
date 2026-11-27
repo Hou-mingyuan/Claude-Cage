@@ -4,7 +4,6 @@ import { useTranslation } from "./interface-language.mjs";
 import {
   MAX_RELAY_NODES,
   RELAY_STRATEGY_FALLBACK,
-  RELAY_STRATEGY_URL_TEST,
   hopCandidateIDs,
   isMultiNodeHop,
   sourceUsableRelayCount,
@@ -29,7 +28,6 @@ export function RelayHopField({
   onMoveNode,
   onReorderNode,
   onClear,
-  onStrategyChange,
 }) {
   const tr = useTranslation();
   const listID = useId();
@@ -340,36 +338,6 @@ export function RelayHopField({
               })}
             </React.Fragment>
           ))}
-        </div>
-      )}
-
-      {multiNode && (
-        <div className="proxy-hop-strategy-bar">
-          <span className="proxy-hop-strategy-label">{tr("切换方式")}</span>
-          <div className="proxy-hop-strategy-pills" role="group" aria-label={tr("切换方式")}>
-            <button
-              type="button"
-              aria-pressed={hop.strategy === RELAY_STRATEGY_FALLBACK}
-              disabled={disabled}
-              onClick={() => onStrategyChange(RELAY_STRATEGY_FALLBACK)}
-            >
-              {tr("断线顺延")}
-            </button>
-            <button
-              type="button"
-              aria-pressed={hop.strategy === RELAY_STRATEGY_URL_TEST}
-              disabled={disabled}
-              onClick={() => onStrategyChange(RELAY_STRATEGY_URL_TEST)}
-            >
-              {tr("最低延迟")}
-            </button>
-          </div>
-          {isSourceMode && liveActiveID && (
-            <span className="proxy-relay-live">
-              <span className="proxy-relay-live-dot" aria-hidden="true" />
-              <span>{routeName(liveActiveID)}</span>
-            </span>
-          )}
         </div>
       )}
     </div>

@@ -40,6 +40,7 @@ import {
 } from "./proxy-setup-guide.mjs";
 import {
   MAX_RELAY_NODES,
+  RELAY_STRATEGY_FALLBACK,
   RELAY_STRATEGY_URL_TEST,
   bulkToggleNodesInRelayHop,
   canSwapTwoHopRoute,
@@ -1310,6 +1311,38 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                       <div className="proxy-hop-control">
                         <div className="proxy-hop-label-row">
                           <label className="proxy-hop-label" htmlFor={`proxy-hop-${index}`}>{label}</label>
+                          {multiNode && (
+                            <div className="proxy-hop-strategy-pills" role="group" aria-label={tr("切换方式")}>
+                              <button
+                                type="button"
+                                aria-pressed={hop.strategy === RELAY_STRATEGY_FALLBACK}
+                                disabled={busy}
+                                title={tr("按顺序自动顺延，不影响最终出口 IP")}
+                                onClick={() =>
+                                  updateRelayHop(index, (cur) => ({ ...cur, strategy: RELAY_STRATEGY_FALLBACK }))
+                                }
+                              >
+                                {tr("断线顺延")}
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={hop.strategy === RELAY_STRATEGY_URL_TEST}
+                                disabled={busy}
+                                title={tr("自动选最低延迟节点，不影响最终出口 IP")}
+                                onClick={() =>
+                                  updateRelayHop(index, (cur) => ({ ...cur, strategy: RELAY_STRATEGY_URL_TEST }))
+                                }
+                              >
+                                {tr("最低延迟")}
+                              </button>
+                            </div>
+                          )}
+                          {multiNode && Boolean(hop.source_id) && liveActiveID && (
+                            <span className="proxy-relay-live">
+                              <span className="proxy-relay-live-dot" aria-hidden="true" />
+                              <span>{routeName(liveActiveID)}</span>
+                            </span>
+                          )}
                         </div>
                         {final ? (
                           <>
@@ -1381,22 +1414,10 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                                   relayHop({ strategy: cur.strategy, source_id: "", node_ids: [] }),
                                 )
                               }
-                              onStrategyChange={(nextStrategy) =>
-                                updateRelayHop(index, (cur) => ({ ...cur, strategy: nextStrategy }))
-                              }
                             />
                             {hopIssue && routeValidation.issuesByHop[index] !== "missing-relay-node" && (
                               <p className="proxy-relay-issue" role="status">{hopIssue}</p>
                             )}
-                            <small>
-                              {multiNode
-                                ? hop.strategy === RELAY_STRATEGY_URL_TEST
-                                  ? tr("自动选最低延迟节点，不影响最终出口 IP")
-                                  : tr("按顺序自动顺延，不影响最终出口 IP")
-                                : index === 0
-                                  ? tr("多选节点或选整份订阅时自动切换")
-                                  : tr("经上一跳中转；多选或选整份订阅时自动切换")}
-                            </small>
                           </>
                         )}
                       </div>
