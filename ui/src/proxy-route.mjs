@@ -373,6 +373,20 @@ export function moveNodeInRelayHop(hops, hopIndex, nodeID, delta) {
   return hops.map((hop, i) => (i === hopIndex ? { ...hop, node_ids: current } : hop));
 }
 
+export function reorderNodeInRelayHop(hops, hopIndex, fromID, toID) {
+  const target = hops[hopIndex];
+  if (!target || target.kind !== "relay" || target.source_id || !fromID || !toID || fromID === toID) {
+    return hops;
+  }
+  const current = [...(target.node_ids || [])];
+  const from = current.indexOf(fromID);
+  const to = current.indexOf(toID);
+  if (from < 0 || to < 0 || from === to) return hops;
+  current.splice(from, 1);
+  current.splice(to, 0, fromID);
+  return hops.map((hop, i) => (i === hopIndex ? { ...hop, node_ids: current } : hop));
+}
+
 export function canSwapTwoHopRoute(hops) {
   if (!Array.isArray(hops) || hops.length !== 2) return false;
   const h0 = hops[0];

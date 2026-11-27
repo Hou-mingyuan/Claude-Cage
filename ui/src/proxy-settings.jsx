@@ -31,13 +31,16 @@ import { SafetyMessage } from "./safety-message";
 import { isLocalListener } from "./proxy-server.mjs";
 import { groupNodesByRegion } from "./proxy-region.mjs";
 import {
+  appliedRouteTestKey,
   emptyFormDefaults as emptyForm,
   emptyManualDefaults as emptyManual,
   isSourceFormDirty,
   setupGuideProgress,
+  visibleRouteTestResult,
 } from "./proxy-setup-guide.mjs";
 import {
   MAX_RELAY_NODES,
+  RELAY_STRATEGY_FALLBACK,
   RELAY_STRATEGY_URL_TEST,
   bulkToggleNodesInRelayHop,
   canSwapTwoHopRoute,
@@ -49,6 +52,7 @@ import {
   nodeHop,
   nodesClaimedByOtherHops,
   relayHop,
+  reorderNodeInRelayHop,
   restoreChainRoute,
   sanitizeRelayHopAfterExitChange,
   savedHopsFromProxy,
@@ -114,6 +118,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     [rates, setRates] = useState({ up: 0, down: 0 });
   const [manual, setManual] = useState(emptyManual);
   const [routeDraft, setRouteDraft] = useState(null);
+  const [routeTest, setRouteTest] = useState(null);
   const [preferredMode, setPreferredMode] = useState(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [hostRefresh, setHostRefresh] = useState(false);
@@ -290,6 +295,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
           if (action === "import" && needsMigration) setTab("nodes");
         }
         setDelays({});
+        setRouteTest(null);
         if (action === "import-local") {
           setTab("nodes");
           setSearch("");
@@ -359,6 +365,32 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
       if (ids.length > 1 && alive.current) {
         const best = Object.entries(timings).sort((a, b) => a[1] - b[1])[0];
         setFastest(best ? best[0] : "");
+      }
+    } finally {
+      measuring.current = false;
+      if (alive.current) setPending("");
+    }
+  };
+  const testAppliedRoute = async () => {
+    const targetID = proxy?.selected;
+    const key = appliedRouteTestKey(proxy, active);
+    if (!targetID || !key || measuring.current) return;
+    measuring.current = true;
+    setPending("route-test");
+    setError("");
+    setRouteTest(null);
+    try {
+      const result = await api("/proxy/delay", { node_id: targetID });
+      delete delayReasons.current[targetID];
+      if (alive.current) {
+        setDelays((old) => ({ ...old, [targetID]: `${result.delay} ms` }));
+        setRouteTest({ key, ok: true, delay: result.delay, error: "" });
+      }
+    } catch (e) {
+      delayReasons.current[targetID] = e.message;
+      if (alive.current) {
+        setDelays((old) => ({ ...old, [targetID]: "不可用 / 未载入" }));
+        setRouteTest({ key, ok: false, delay: 0, error: e.message });
       }
     } finally {
       measuring.current = false;
@@ -439,6 +471,10 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     (node) => node.blocked_reason && (savedNodeIDs.has(node.id) || (proxy?.route || []).includes(node.id)),
   );
   const active = Boolean(proxy?.active) && !needsMigration;
+  const routeTestKey = appliedRouteTestKey(proxy, active);
+  const canTestRoute = Boolean(routeTestKey) && !routeChanged;
+  const routeTestPending = pending === "route-test";
+  const activeRouteTest = visibleRouteTestResult(routeTest, routeTestKey, routeChanged);
   const routeValidation = validateRouteHops(route, sources, usableIDs);
   const routeValid = routeValidation.valid;
   const sourceDirty = initializing && isSourceFormDirty(form, mode, manual, sources);
@@ -536,16 +572,8 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     const liveID = includeLive ? liveActiveNodeForHop(index, hop) : "";
     const count = hopCandidateIDs(hop, hopsList, sources, usableIDs).length;
     if (!hop.source_id && count === 0) return tr("待选择");
-    const base = hop.source_id
-      ? sourceName(hop.source_id)
-      : tr("自选 {0} 节点", count);
-    if (liveID) {
-      return tr("{0}（{1} · 当前 {2}）", base, strategyLabel(hop.strategy), routeName(liveID));
-    }
-    if (includeLive) {
-      return tr("{0}（{1} · {2} 节点）", base, strategyLabel(hop.strategy), count);
-    }
-    return base;
+    if (liveID) return routeName(liveID);
+    return hop.source_id ? sourceName(hop.source_id) : tr("中转组");
   };
   const hopIssueMessage = (code, index) => {
     switch (code) {
@@ -653,6 +681,31 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
     isChainMode &&
     hop0EligibleVisible.length > 0 &&
     hop0EligibleVisible.every((n) => transitCandidateSets[0].has(n.id));
+  const renderDelayButton = (n) => {
+    if (n.blocked_reason) return null;
+    const delayRaw = delays[n.id] || "";
+    const delayIsError = delayRaw === "不可用 / 未载入";
+    const delayLabel = delayRaw ? (delayIsError ? tr("不可用") : tr(delayRaw)) : tr("未测速");
+    const delayTitle = delayReasons.current[n.id]
+      ? localizeBackendMessage(delayReasons.current[n.id], tr)
+      : tr("检测此节点到 www.gstatic.com 的 HTTP 往返延迟，通常不含建连开销，不代表网页首开耗时");
+    return (
+      <button
+        type="button"
+        className={`proxy-delay-btn${delayRaw ? (delayIsError ? " is-error" : " is-measured") : ""}`}
+        aria-label={tr("测速 {0}", n.name)}
+        title={delayTitle}
+        disabled={busy || !proxy.running}
+        onClick={() => measure([n.id])}
+      >
+        <span className="proxy-delay-value">{delayLabel}</span>
+        <span className="proxy-delay-action" aria-hidden="true">
+          <Activity size={13} />
+          <span>{tr("测速")}</span>
+        </span>
+      </button>
+    );
+  };
   const renderNodeRow = (n) => {
     const isDraftExit = !n.blocked_reason && n.id === draftExitID;
     const inAnyTransit = !n.blocked_reason && transitCandidateSets.some((set) => set.has(n.id));
@@ -697,17 +750,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
               {roleBadge.text}
             </span>
           )}
-          <span className="proxy-delay" title={n.blocked_reason ? undefined : (delayReasons.current[n.id] ? localizeBackendMessage(delayReasons.current[n.id], tr) : undefined)}>
-            {!n.blocked_reason && (delays[n.id] ? tr(delays[n.id]) : tr("未测速"))}
-          </span>
-          <button
-            aria-label={tr("测速 {0}", (n.name))}
-            title={tr("检测此节点到 www.gstatic.com 的 HTTP 往返延迟，通常不含建连开销，不代表网页首开耗时")}
-            disabled={busy || !proxy.running || Boolean(n.blocked_reason)}
-            onClick={() => measure([n.id])}
-          >
-            <Activity size={14} />
-          </button>
+          {renderDelayButton(n)}
         </div>
       );
     }
@@ -780,17 +823,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
             <span>{isDraftExit ? tr("出口") : tr("设为出口")}</span>
           </button>
         </div>
-        <span className="proxy-delay" title={n.blocked_reason ? undefined : (delayReasons.current[n.id] ? localizeBackendMessage(delayReasons.current[n.id], tr) : undefined)}>
-          {!n.blocked_reason && (delays[n.id] ? tr(delays[n.id]) : tr("未测速"))}
-        </span>
-        <button
-          aria-label={tr("测速 {0}", (n.name))}
-          title={tr("检测此节点到 www.gstatic.com 的 HTTP 往返延迟，通常不含建连开销，不代表网页首开耗时")}
-          disabled={busy || !proxy.running || Boolean(n.blocked_reason)}
-          onClick={() => measure([n.id])}
-        >
-          <Activity size={14} />
-        </button>
+        {renderDelayButton(n)}
       </div>
     );
   };
@@ -1278,6 +1311,38 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                       <div className="proxy-hop-control">
                         <div className="proxy-hop-label-row">
                           <label className="proxy-hop-label" htmlFor={`proxy-hop-${index}`}>{label}</label>
+                          {multiNode && (
+                            <div className="proxy-hop-strategy-pills" role="group" aria-label={tr("切换方式")}>
+                              <button
+                                type="button"
+                                aria-pressed={hop.strategy === RELAY_STRATEGY_FALLBACK}
+                                disabled={busy}
+                                title={tr("按顺序自动顺延，不影响最终出口 IP")}
+                                onClick={() =>
+                                  updateRelayHop(index, (cur) => ({ ...cur, strategy: RELAY_STRATEGY_FALLBACK }))
+                                }
+                              >
+                                {tr("断线顺延")}
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={hop.strategy === RELAY_STRATEGY_URL_TEST}
+                                disabled={busy}
+                                title={tr("自动选最低延迟节点，不影响最终出口 IP")}
+                                onClick={() =>
+                                  updateRelayHop(index, (cur) => ({ ...cur, strategy: RELAY_STRATEGY_URL_TEST }))
+                                }
+                              >
+                                {tr("最低延迟")}
+                              </button>
+                            </div>
+                          )}
+                          {multiNode && Boolean(hop.source_id) && liveActiveID && (
+                            <span className="proxy-relay-live">
+                              <span className="proxy-relay-live-dot" aria-hidden="true" />
+                              <span>{routeName(liveActiveID)}</span>
+                            </span>
+                          )}
                         </div>
                         {final ? (
                           <>
@@ -1341,27 +1406,18 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                               onMoveNode={(nid, delta) =>
                                 setRouteDraft(moveNodeInRelayHop(route, index, nid, delta))
                               }
+                              onReorderNode={(fromID, toID) =>
+                                setRouteDraft(reorderNodeInRelayHop(route, index, fromID, toID))
+                              }
                               onClear={() =>
                                 updateRelayHop(index, (cur) =>
                                   relayHop({ strategy: cur.strategy, source_id: "", node_ids: [] }),
                                 )
                               }
-                              onStrategyChange={(nextStrategy) =>
-                                updateRelayHop(index, (cur) => ({ ...cur, strategy: nextStrategy }))
-                              }
                             />
                             {hopIssue && routeValidation.issuesByHop[index] !== "missing-relay-node" && (
                               <p className="proxy-relay-issue" role="status">{hopIssue}</p>
                             )}
-                            <small>
-                              {multiNode
-                                ? hop.strategy === RELAY_STRATEGY_URL_TEST
-                                  ? tr("定期测速并自动切换到最低延迟节点；不会改变最终出口 IP，全部不可用时保持断网。")
-                                  : tr("按顺序优先使用靠前节点，连不上时自动切换下一个；不会改变最终出口 IP，全部不可用时保持断网。")
-                                : index === 0
-                                  ? tr("本机先连这里；选 1 个为固定中转，多选或选整份订阅时自动切换")
-                                  : tr("经上一跳中转后再转发至下一跳；多选或选整份订阅时自动切换")}
-                            </small>
                           </>
                         )}
                       </div>
@@ -1437,7 +1493,13 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                   const singleID = singleNodeIDOfHop(hop);
                   const roleShort = final ? tr("出口") : multiNode ? tr("中转组") : tr("中转");
                   const liveID = liveActiveNodeForHop(index, hop);
-                  const count = routeValidation.candidateCounts[index] || 0;
+                  const chipText = singleID
+                    ? routeName(singleID)
+                    : liveID
+                      ? routeName(liveID)
+                      : hop.source_id
+                        ? sourceName(hop.source_id)
+                        : strategyLabel(hop.strategy);
                   return (
                     <React.Fragment key={index}>
                       <ArrowRight size={13} className="proxy-flow-arrow" aria-hidden="true" />
@@ -1445,20 +1507,7 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                         <span className={`proxy-flow-chip ${final ? "is-exit" : multiNode ? "is-relay-group" : "is-relay"}`}>
                           {multiNode && <Layers size={11} aria-hidden="true" />}
                           {route.length > 1 && <em>{roleShort}</em>}
-                          <strong>
-                            {singleID
-                              ? routeName(singleID)
-                              : hop.source_id
-                                ? sourceName(hop.source_id)
-                                : tr("自选 {0} 节点", count)}
-                          </strong>
-                          {multiNode && (
-                            <small className="proxy-flow-meta">
-                              {liveID
-                                ? tr("当前: {0}", routeName(liveID))
-                                : `${strategyLabel(hop.strategy)} · ${count}`}
-                            </small>
-                          )}
+                          <strong>{chipText}</strong>
                         </span>
                       ) : (
                         <button
@@ -1477,15 +1526,35 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                 <span className="proxy-flow-endpoint">{tr("目标网站")}</span>
               </div>
               <div className="proxy-route-actions">
-                <span aria-live="polite">
+                <span
+                  aria-live="polite"
+                  className={
+                    routeTestPending
+                      ? "proxy-route-status"
+                      : activeRouteTest
+                        ? `proxy-route-status ${activeRouteTest.ok ? "is-ok" : "is-error"}`
+                        : "proxy-route-status"
+                  }
+                >
                   {!routeValid && firstMissingHop >= 0
                     ? hopIssueMessage(routeValidation.issuesByHop[firstMissingHop], firstMissingHop) ||
                       tr("请先选择{0}", hopLabel(firstMissingHop))
                     : routeChanged
                       ? tr("有未应用的代理修改")
-                      : active
-                        ? tr("当前配置已应用")
-                        : tr("选择完成后应用代理")}
+                      : routeTestPending
+                        ? tr("正在测速当前链路…")
+                        : activeRouteTest
+                          ? activeRouteTest.ok
+                            ? (
+                              <>
+                                <span className="proxy-route-status-dot" aria-hidden="true" />
+                                {tr("链路可用 · {0} ms", activeRouteTest.delay)}
+                              </>
+                            )
+                            : tr("链路测速失败")
+                          : active
+                            ? tr("当前配置已应用")
+                            : tr("选择完成后应用代理")}
                 </span>
                 <div>
                   {routeDraft !== null && (
@@ -1497,6 +1566,21 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                       }}
                     >
                       {tr("撤销修改")}
+                    </button>
+                  )}
+                  {canTestRoute && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title={tr("经当前已应用的代理链路测速，检查链路是否可用")}
+                      onClick={testAppliedRoute}
+                    >
+                      {routeTestPending ? (
+                        <LoaderCircle size={14} className="spin" />
+                      ) : (
+                        <Activity size={14} />
+                      )}
+                      {routeTestPending ? tr("测速中…") : tr("链路测速")}
                     </button>
                   )}
                   <button
@@ -1517,6 +1601,11 @@ export function ProxySettings({ status, onApplied, onConfirm, onDirty, onSetupSt
                   </button>
                 </div>
               </div>
+              {activeRouteTest && !activeRouteTest.ok && (
+                <p role="alert" className="proxy-source-error">
+                  <SafetyMessage message={activeRouteTest.error} />
+                </p>
+              )}
               {proxy.route_error && !needsMigration && (
                 <p role="alert" className="proxy-source-error">
                   <SafetyMessage message={proxy.route_error} />

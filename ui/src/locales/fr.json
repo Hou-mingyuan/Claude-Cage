@@ -3483,5 +3483,17 @@
   "移出中转 1": "Retirer du relais 1",
   "全选当前为中转 1": "Tout ajouter au relais 1",
   "全选为中转": "Tout en relais",
-  "全选为中转 1": "Tout en relais 1"
+  "全选为中转 1": "Tout en relais 1",
+  "正在测速当前链路…": "Test de l'itinéraire actuel…",
+  "链路可用 · {0} ms": "Itinéraire disponible · {0} ms",
+  "链路测速失败": "Échec du test d'itinéraire",
+  "经当前已应用的代理链路测速，检查链路是否可用": "Mesure la latence via l'itinéraire proxy appliqué pour vérifier sa disponibilité",
+  "测速中…": "Test en cours…",
+  "链路测速": "Tester l'itinéraire",
+  "不可用": "Indisponible",
+  "自动选最低延迟节点，不影响最终出口 IP": "Choisit automatiquement le nœud le plus rapide sans changer l'IP de sortie finale",
+  "按顺序自动顺延，不影响最终出口 IP": "Bascule dans l'ordre en cas de coupure sans changer l'IP de sortie finale",
+  "多选节点或选整份订阅时自动切换": "Bascule automatiquement avec plusieurs nœuds ou un abonnement complet",
+  "经上一跳中转；多选或选整份订阅时自动切换": "Passe par le saut précédent ; bascule automatiquement avec plusieurs nœuds ou un abonnement complet",
+  "拖动调整优先级": "Glisser pour réorganiser la priorité"
 }
