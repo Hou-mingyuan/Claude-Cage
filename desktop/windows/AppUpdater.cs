@@ -276,10 +276,11 @@ internal sealed class AppUpdater : IDisposable
         catch (Exception error) { failure = error.Message; }
         finally
         {
-            if (started && !process.HasExited)
+            if (started)
             {
-                process.Kill();
-                await process.WaitForExitAsync();
+                if (!process.HasExited) process.Kill();
+                // Windows can expose an exit code before the process handle signals and releases its files.
+                if (!process.WaitForExit(0)) await Task.Run(process.WaitForExit);
             }
             if (archive != null) { try { Directory.Delete(Path.GetDirectoryName(archive)!, true); } catch (IOException) { } }
             if (failure != null) Change("failed", failure, true, retryAt);
