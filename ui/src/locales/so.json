@@ -1,4 +1,11 @@
 {
+  "Claude 已暂停，请先继续对话": "Claude waa la hakiyey. Marka hore sii wad wada hadalka.",
+  "Claude 已暂停": "Claude waa la hakiyey",
+  "已暂停": "La hakiyey",
+  "继续对话": "Sii wad wada hadalka",
+  "Claude 已暂停，原会话仍占用此账号，请先继续对话": "Claude waa la hakiyey, fadhigii horena weli wuxuu isticmaalayaa akoonkan. Marka hore sii wad wada hadalka.",
+  "原终端正在处理其他任务或会话已变化，请检查原终端。": "Terminalkii hore wuxuu wadaa hawl kale ama fadhigu wuu is beddelay. Hubi terminalkii hore.",
+  "无法在原终端恢复，请检查终端状态。": "Lagama sii wadi karo terminalkii hore. Hubi xaaladda terminalka.",
   "/Users/你的名字/.ssh/id_ed25519": "/Users/Magacaaga/.ssh/id_ed25519",
   "/Users/你的名字/Projects/my-project": "/Users/Magacaaga/Projects/my-project",
   "/home/你的名字/Projects/my-project": "/home/Magacaaga/Projects/my-project",

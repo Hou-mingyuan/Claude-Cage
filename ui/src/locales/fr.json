@@ -1,4 +1,11 @@
 {
+  "Claude 已暂停，请先继续对话": "Claude est en pause. Reprenez d’abord la conversation.",
+  "Claude 已暂停": "Claude est en pause",
+  "已暂停": "En pause",
+  "继续对话": "Reprendre la conversation",
+  "Claude 已暂停，原会话仍占用此账号，请先继续对话": "Claude est en pause et la session d’origine utilise toujours ce compte. Reprenez d’abord la conversation.",
+  "原终端正在处理其他任务或会话已变化，请检查原终端。": "Le terminal d’origine exécute une autre tâche ou la session a changé. Vérifiez ce terminal.",
+  "无法在原终端恢复，请检查终端状态。": "Impossible de reprendre dans le terminal d’origine. Vérifiez son état.",
   "/Users/你的名字/.ssh/id_ed25519": "/Users/votre-nom/.ssh/id_ed25519",
   "/Users/你的名字/Projects/my-project": "/Users/votre-nom/Projects/my-project",
   "/home/你的名字/Projects/my-project": "/home/votre-nom/Projects/my-project",

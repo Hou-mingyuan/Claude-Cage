@@ -33,6 +33,8 @@ async function requestAPI(path, { body, signal, keepalive } = {}) {
         : "Cage 已锁定。请在电脑上解锁，再重新读取。";
     } else if (isPlainText) {
       message = (await response.text()).trim().slice(0, 1200);
+      if (path.endsWith("/continue") && response.status === 409)
+        message = httpErrorMessage(path, response.status, message, "text/plain", "POST");
     }
     const error = new Error(message || httpErrorMessage(path, response.status));
     error.status = response.status;

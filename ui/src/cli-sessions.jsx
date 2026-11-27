@@ -62,7 +62,11 @@ export function useCLISessions(enabled, visible) {
     void load();
     return () => { live = false; clearTimeout(timer); };
   }, [enabled, visible, revision]);
-  return { sessions, error, loading, refresh };
+  const continued = view => {
+    setSessions(previous => previous.map(session => session.id === view.id ? { ...session, paused: view.paused } : session));
+    refresh();
+  };
+  return { sessions, error, loading, refresh, continued };
 }
 
 export function ArchivedSessions({ request = desktopSessionRequest, ready, onRestored }) {

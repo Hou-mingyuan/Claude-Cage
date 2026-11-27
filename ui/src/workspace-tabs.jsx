@@ -356,7 +356,7 @@ export function WorkspaceTabs({
                 className={tab.historySession ? "sidebar-session" : undefined}
                 aria-busy={opening || undefined}
                 aria-describedby={openError ? errorID : undefined}
-                aria-description={runningElsewhere ? runningNotice : undefined}
+                aria-description={tab.sessionPaused ? tr("已暂停") : runningElsewhere ? runningNotice : undefined}
                 aria-label={tab.claudeLabel ? `${title} · ${tab.claudeLabel}` : title}
                 aria-selected={tab.historySession ? undefined : tab.id === active}
                 aria-keyshortcuts={onSidebarReorder && tabs.length > 1 ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
@@ -412,7 +412,8 @@ export function WorkspaceTabs({
                 <span>{title}</span>
                 {tab.claudeLabel && <small className="claude-tab-profile">{tab.claudeLabel}</small>}
                 {saved[tab.id]?.pinned && <Pin size={11} className="tab-pin" />}
-                {!horizontal && !vertical && (opening || tab.sessionActive && !runningElsewhere) &&
+                {tab.sessionPaused && <small className="session-paused-label">{tr("已暂停")}</small>}
+                {!tab.sessionPaused && !horizontal && !vertical && (opening || tab.sessionActive && !runningElsewhere) &&
                   <LoaderCircle size={13} className="spin session-activity" role="img" aria-label={opening ? tr("正在打开会话") : tr("会话正在运行")} />}
               </button>
               {!horizontal && !vertical && runningElsewhere &&

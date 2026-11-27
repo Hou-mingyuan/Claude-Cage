@@ -46,7 +46,7 @@ func (s *Server) prepareCLIConnection(terminal *terminalSession, id string) {
 	go func() {
 		defer s.activities.Done()
 		defer terminal.finishCLIStartup()
-		ctx, cancel := context.WithTimeout(s.lifetimeContext(), 45*time.Second)
+		ctx, cancel := context.WithCancel(s.lifetimeContext())
 		defer cancel()
 		s.mobileCLI.mu.Lock()
 		record, err := s.mobileCLI.record(s.profile, id)
@@ -59,6 +59,8 @@ func (s *Server) prepareCLIConnection(terminal *terminalSession, id string) {
 		seen := map[string]time.Time{}
 		completed := map[string]bool{}
 		nextCheck := time.Now()
+		deadline := nextCheck.Add(45 * time.Second)
+		paused := false
 		for {
 			select {
 			case <-ctx.Done():
@@ -67,9 +69,23 @@ func (s *Server) prepareCLIConnection(terminal *terminalSession, id string) {
 				return
 			case <-ticker.C:
 			}
+			if !paused && time.Now().After(deadline) {
+				return
+			}
 			if time.Now().After(nextCheck) {
 				var current terminalConversation
 				if err := s.runCLIChannel(ctx, "view", map[string]string{"cli_id": record.CLIID, "config": record.GuestConfig, "connection": record.Connection}, &current); err != nil {
+					paused = false
+					nextCheck = time.Now().Add(time.Second)
+					continue
+				}
+				if paused {
+					// Time deliberately spent suspended is outside the startup
+					// budget. A phone can finish connecting even after a long pause.
+					deadline = time.Now().Add(45 * time.Second)
+				}
+				paused = current.Paused
+				if current.Paused {
 					nextCheck = time.Now().Add(time.Second)
 					continue
 				}
@@ -89,6 +105,9 @@ func (s *Server) prepareCLIConnection(terminal *terminalSession, id string) {
 					return
 				}
 				nextCheck = time.Now().Add(time.Second)
+			}
+			if paused {
+				continue
 			}
 			terminal.mu.Lock()
 			text := cliStartupText(terminal.history)

@@ -702,7 +702,7 @@ function App() {
     setActive(tab.id);
   };
   const openSessionTerminal = async session => {
-    if (session.running) return;
+    if (session.running && !session.paused) return;
     if (sessionOpenRequest.current?.id === session.id) return;
     sessionOpenRequest.current?.controller.abort();
     const controller = new AbortController();
@@ -2082,7 +2082,8 @@ function App() {
                     {visible && terminalHeader(tab)}
                     <div className="pane-body">
                       <TerminalView
-                        session={{ ...tab, id: tab.sessionId }}
+                        session={{ ...tab, id: tab.sessionId, paused: !tab.closed && cliSessions.sessions.some(s => s.id === tab.cli_session_id && s.paused) }}
+                        onContinued={cliSessions.continued}
                         onLoginTab={result => showBrowserResult({
                           id: result.id, kind: "web", login: true, incognito: result.incognito !== false, title: "账号授权",
                         })}

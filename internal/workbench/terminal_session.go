@@ -27,6 +27,7 @@ type terminalSession struct {
 	sharedID              string
 	connectionID          string
 	conversationEnded     bool
+	paused                bool
 	workspace             string
 	kind, claudeAccountID string
 	loginGuestID          string
@@ -104,7 +105,7 @@ func (t *terminalSession) summary() map[string]any {
 		}
 	}
 	return map[string]any{"id": t.id, "title": t.title, "closed": closed, "workspace": t.workspace, "kind": t.kind,
-		"claude_account_id": t.claudeAccountID, "claude_account_source": t.claudeAccountSource, "cli_session_id": t.sharedID,
+		"claude_account_id": t.claudeAccountID, "claude_account_source": t.claudeAccountSource, "cli_session_id": t.sharedID, "paused": t.paused,
 		"background_login": t.backgroundLogin, "login_notice": t.loginNotice, "cli_starting": t.cliStartupPendingLocked(), "host_input": t.hostInput}
 }
 
@@ -198,6 +199,11 @@ func (t *terminalSession) enqueueInput(ctx context.Context, input string) error 
 	defer t.mu.Unlock()
 	if t.closed {
 		return os.ErrClosed
+	}
+	// A stale viewer can still send keystrokes after a stop. Keep its stream
+	// open, but never queue that line for the job or its eventual shell.
+	if t.paused {
+		return nil
 	}
 	select {
 	case t.inputs <- input:

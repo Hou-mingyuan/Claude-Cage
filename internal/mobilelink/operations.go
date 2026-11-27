@@ -22,7 +22,7 @@ const (
 	linkOrigin  = "https://cage-mobile.invalid"
 )
 
-var sessionPath = regexp.MustCompile(`^/api/mobile/cli/sessions/[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}(/messages|/media|/stop|/approval|/open|/metadata|/account|/delete|/archive|/restore|/purge)?$`)
+var sessionPath = regexp.MustCompile(`^/api/mobile/cli/sessions/[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}(/messages|/media|/stop|/approval|/open|/continue|/metadata|/account|/delete|/archive|/restore|/purge)?$`)
 
 var surfacePath = regexp.MustCompile(`^/api/mobile/(?:browser|desktop)/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/(frame|action|close)$`)
 

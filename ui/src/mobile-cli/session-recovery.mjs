@@ -28,7 +28,7 @@ export async function recoverPendingMessage({signal, pending, read, send, progre
       const message = pending();
       if (!message) return true;
       const busy = ["running", "queued", "stopping"].includes(snapshot?.turns?.at(-1)?.status);
-      if (snapshot && snapshot.can_send !== false && !busy) {
+      if (snapshot && !snapshot.paused && snapshot.can_send !== false && !busy) {
         await send(message);
         if (signal.aborted) return false;
         if (!pending()) return true;

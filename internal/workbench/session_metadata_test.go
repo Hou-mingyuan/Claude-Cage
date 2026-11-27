@@ -167,6 +167,32 @@ func metadataFixture(t *testing.T) (*Server, string, string) {
 	return s, id, project
 }
 
+func TestArchiveAfterManualResumeLeavesShellOpen(t *testing.T) {
+	s, id, _ := metadataFixture(t)
+	record, err := s.mobileCLI.record(s.profile, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab := s.terminals.get(record.TerminalID)
+	connection := uuid.NewString()
+	tab.closed, tab.connectionID = false, connection
+	s.detachManualConversation(record)
+	if err := writePrivate(mobileRecordPath(s.profile, id), record); err != nil {
+		t.Fatal(err)
+	}
+	// On the next discovery the external CLI has exited, so the old closed
+	// connection can appear in the registry a second time.
+	if s.terminals.forConversation(connection) != nil || tab.ownsConversation() {
+		t.Fatal("discovery can reattach a manually reopened shell")
+	}
+	if err := s.setSessionArchived(id, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if s.terminals.get(tab.id) != tab || tab.closed {
+		t.Fatal("archiving the history closed the user's shell")
+	}
+}
+
 func TestSessionMetadataBidirectionalAndDurable(t *testing.T) {
 	s, id, project := metadataFixture(t)
 	path := "/api/mobile/cli/sessions/" + id

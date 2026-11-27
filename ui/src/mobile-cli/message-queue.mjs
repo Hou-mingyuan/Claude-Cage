@@ -51,6 +51,7 @@ export function canDrainQueue({
     ready &&
     session &&
     !session.single_turn &&
+    !session.paused &&
     session.can_send !== false &&
     !running &&
     !busy &&
