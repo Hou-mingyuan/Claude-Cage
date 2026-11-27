@@ -3476,5 +3476,7 @@
   "移出中转 1": "Ka saar gudbiye 1",
   "全选当前为中转 1": "Dhammaan kuwa muuqda u deji gudbiye 1",
   "全选为中转": "Dhammaan u deji gudbiye",
-  "全选为中转 1": "Dhammaan u deji gudbiye 1"
+  "全选为中转 1": "Dhammaan u deji gudbiye 1",
+  "拖动调整优先顺序（支持上下方向键）": "Jiid si aad u beddesho mudnaanta (faleebbooyinka kor iyo hoos waa la taageeraa)",
+  "直接拖动下方账号卡片调整优先顺序。": "Si toos ah u jiid kaararka koontada ee hoose si aad u hagaajiso mudnaanta."
 }

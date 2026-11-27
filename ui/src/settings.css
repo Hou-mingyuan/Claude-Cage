@@ -387,6 +387,54 @@
   color: var(--success);
   background: color-mix(in srgb, var(--success) 12%, transparent);
 }
+.settings-page .settings-content .settings-exit-probe {
+  display: inline-grid;
+  place-items: center;
+  min-width: 96px;
+  min-height: 32px;
+  padding: 4px 10px;
+  gap: 6px;
+}
+.settings-page .settings-content .settings-exit-probe.has-result {
+  border-color: transparent;
+  background: transparent;
+}
+.settings-page .settings-content .settings-exit-probe.has-result:is(:hover, :focus-visible):not(:disabled) {
+  border-color: var(--line);
+  background: var(--hover);
+  color: var(--strong);
+}
+.settings-page .settings-content .settings-exit-probe-idle,
+.settings-page .settings-content .settings-exit-probe-hover {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.settings-page .settings-content .settings-exit-probe-hover {
+  opacity: 0;
+  visibility: hidden;
+}
+.settings-page .settings-content .settings-exit-probe.has-result:is(:hover, :focus-visible):not(:disabled) .settings-exit-probe-idle {
+  opacity: 0;
+  visibility: hidden;
+}
+.settings-page .settings-content .settings-exit-probe.has-result:is(:hover, :focus-visible):not(:disabled) .settings-exit-probe-hover {
+  opacity: 1;
+  visibility: visible;
+}
+.settings-page .settings-content .settings-exit-probe-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.settings-page .settings-inline-value {
+  font-family: var(--code-font-family);
+  color: var(--muted);
+}
 /* Collapsible advanced disclosure card */
 .settings-page .settings-disclosure-card {
   margin-top: 24px;

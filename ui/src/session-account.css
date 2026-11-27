@@ -5,4 +5,9 @@
 .session-account-options .check-line { display: flex; align-items: start; gap: 7px; }
 .session-account-options input[type=checkbox] { flex: none; }
 .session-account--compact { padding: 6px 12px; flex: none; max-height: 65%; overflow-y: auto; }
-.session-account > button { display: inline-flex; align-items: center; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: inherit; font: inherit; cursor: pointer; }
+.session-account--inline { position: relative; flex: none; }
+.session-account--inline .session-account-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 26px; height: 26px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--chrome); color: var(--ink); font-size: .7857rem; cursor: pointer; transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out); }
+.session-account--inline .session-account-pill:hover { background: var(--hover); color: var(--strong); }
+.session-account--inline .session-account-pill[aria-expanded="true"] { background: var(--selected); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--strong); }
+.session-account--inline .session-account-options { position: absolute; top: calc(100% + 6px); inset-inline-end: 0; z-index: 25; width: min(340px, 85vw); max-height: min(460px, 70vh); overflow-y: auto; box-shadow: var(--shadow-md); }
+.session-account > button:not(.session-account-pill) { display: inline-flex; align-items: center; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: inherit; font: inherit; cursor: pointer; }

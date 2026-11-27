@@ -183,6 +183,7 @@ export function InitializationDNS({
               />
             </label>
             <label className="initialization-dns-switch">
+              <span>{tr("以上端点都不可用时改用 Google 公共 DNS（8.8.8.8）")}</span>
               <input
                 role="switch"
                 type="checkbox"
@@ -190,7 +191,6 @@ export function InitializationDNS({
                 onChange={(e) => updateField("dns_public_fallback", e.target.checked)}
                 disabled={disabled}
               />
-              <span>{tr("以上端点都不可用时改用 Google 公共 DNS（8.8.8.8）")}</span>
             </label>
           </div>
         )}
@@ -199,25 +199,31 @@ export function InitializationDNS({
           <p className="field-help">{tr("请先选择并应用代理节点，再测试加密 DNS。")}</p>
         )}
 
-        <div className="initialization-dns-actions">
-          <button
-            type="button"
-            disabled={disabled || !proxyApplied || !draft}
-            onClick={runCheck}
-          >
-            {testing && <LoaderCircle size={14} className="spin" />}
-            {testing ? tr("正在测试加密 DNS…") : tr("测试加密 DNS")}
-          </button>
-          <button
-            type="button"
-            className="primary"
-            disabled={disabled || !dirty}
-            onClick={saveDNS}
-          >
-            {saving && <LoaderCircle size={14} className="spin" />}
-            {saving ? tr("正在保存加密 DNS…") : tr("保存设置")}
-          </button>
-        </div>
+        {(proxyApplied || dirty || saving) && (
+          <div className="initialization-dns-actions">
+            {proxyApplied && (
+              <button
+                type="button"
+                disabled={disabled || !draft}
+                onClick={runCheck}
+              >
+                {testing && <LoaderCircle size={14} className="spin" />}
+                {testing ? tr("正在测试加密 DNS…") : tr("测试加密 DNS")}
+              </button>
+            )}
+            {(dirty || saving) && (
+              <button
+                type="button"
+                className="primary"
+                disabled={disabled || !dirty}
+                onClick={saveDNS}
+              >
+                {saving && <LoaderCircle size={14} className="spin" />}
+                {saving ? tr("正在保存加密 DNS…") : tr("保存设置")}
+              </button>
+            )}
+          </div>
+        )}
 
         {result && (
           <div className="initialization-dns-results" role="status">

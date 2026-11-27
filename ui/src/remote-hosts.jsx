@@ -618,26 +618,99 @@ function Environment({ context, refresh, children }) {
               <button disabled={Boolean(busy) || verifying} onClick={() => setImportSSH(true)}>
                 {tr("导入本机 SSH 配置")}
               </button>
-              {hosts.map((item) => (
-                <button
-                  className={`ssh-host-row ${selected === item.id ? "selected" : ""}`}
-                  key={item.id}
-                  aria-pressed={selected === item.id}
-                  disabled={Boolean(busy) || verifying}
-                  onClick={() => choose(item)}
-                >
-                  <Server size={15} />
-                  <span>
-                    <strong>{item.name}</strong>
-                    <small>
-                      {item.user}@{item.host}:{item.port}
-                    </small>
-                  </span>
-                  {context.host_id === item.id && active && (
-                    <Check size={15} aria-label={tr("已连接")} />
-                  )}
-                </button>
-              ))}
+              {hosts.map((item) => {
+                const isSelected = selected === item.id;
+                const isConnected = context.host_id === item.id && active;
+                return (
+                  <div className={`ssh-host-item${isSelected ? " is-selected" : ""}`} key={item.id}>
+                    <button
+                      className={`ssh-host-row ${isSelected ? "selected" : ""}`}
+                      aria-pressed={isSelected}
+                      disabled={Boolean(busy) || verifying}
+                      onClick={() => choose(item)}
+                    >
+                      <Server size={15} />
+                      <span>
+                        <strong>{item.name}</strong>
+                        <small>
+                          {item.user}@{item.host}:{item.port}
+                        </small>
+                      </span>
+                      {isConnected && (
+                        <Check size={15} aria-label={tr("已连接")} />
+                      )}
+                    </button>
+                    {isSelected && host && (
+                      <section className="ssh-host-actions ssh-host-actions--inline" aria-label={tr("所选主机操作")}>
+                        {host.auth.kind === "key_file" && !hostConnected && (
+                          <label>
+                            {tr("密钥口令（如果已设置）")}
+                            <input
+                              type="password"
+                              autoComplete="off"
+                              disabled={Boolean(busy)}
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                            />
+                          </label>
+                        )}
+                        {hostConnected ? (
+                          <button
+                            disabled={Boolean(busy)}
+                            onClick={() => act("disconnect", disconnect)}
+                          >
+                            {tr("断开连接")}
+                          </button>
+                        ) : (
+                          !pinnedFailure && (
+                            <button
+                              className="primary"
+                              disabled={
+                                Boolean(busy) || verifying || Boolean(decision)
+                              }
+                              onClick={() =>
+                                act("verify", () =>
+                                  requestTarget("remote", host, password || (needsDeploy && secretForTrust.current?.id === host.id ? secretForTrust.current.secret : ""), false, needsDeploy),
+                                )
+                              }
+                            >
+                              {busy === "verify" || verifying
+                                ? connectingLabel
+                                : needsDeploy ? tr("部署并连接") : tr("连接此主机")}
+                            </button>
+                          )
+                        )}
+                        <div className="remote-button-row">
+                          <button
+                            disabled={Boolean(busy) || hostConnected || verifying}
+                            onClick={() =>
+                              act("edit", async () => {
+                                if (candidate?.connection.host_id === host.id)
+                                  await cancel(candidate);
+                                setForm({ host });
+                              })
+                            }
+                          >
+                            {tr("编辑")}
+                          </button>
+                          <button
+                            disabled={Boolean(busy) || hostConnected || verifying}
+                            onClick={() =>
+                              act("remove-prompt", async () => {
+                                if (candidate?.connection.host_id === host.id)
+                                  await cancel(candidate);
+                                setRemove(host);
+                              })
+                            }
+                          >
+                            {tr("移除连接")}
+                          </button>
+                        </div>
+                      </section>
+                    )}
+                  </div>
+                );
+              })}
               {!hosts.length && (
                 <div className="ssh-empty">
                   <p>{tr("还没有远程主机")}</p>
@@ -646,74 +719,6 @@ function Environment({ context, refresh, children }) {
                     {tr("添加主机")}
                   </button>
                 </div>
-              )}
-              {host && (
-                <section className="ssh-host-actions" aria-label={tr("所选主机操作")}>
-                  {host.auth.kind === "key_file" && !hostConnected && (
-                    <label>
-                      {tr("密钥口令（如果已设置）")}
-                      <input
-                        type="password"
-                        autoComplete="off"
-                        disabled={Boolean(busy)}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                      />
-                    </label>
-                  )}
-                  {hostConnected ? (
-                    <button
-                      disabled={Boolean(busy)}
-                      onClick={() => act("disconnect", disconnect)}
-                    >
-                      {tr("断开连接")}
-                    </button>
-                  ) : (
-                    !pinnedFailure && (
-                      <button
-                        className="primary"
-                        disabled={
-                          Boolean(busy) || verifying || Boolean(decision)
-                        }
-                        onClick={() =>
-                          act("verify", () =>
-                            requestTarget("remote", host, password || (needsDeploy && secretForTrust.current?.id === host.id ? secretForTrust.current.secret : ""), false, needsDeploy),
-                          )
-                        }
-                      >
-                        {busy === "verify" || verifying
-                          ? connectingLabel
-                          : needsDeploy ? tr("部署并连接") : tr("连接此主机")}
-                      </button>
-                    )
-                  )}
-                  <div className="remote-button-row">
-                    <button
-                      disabled={Boolean(busy) || hostConnected || verifying}
-                      onClick={() =>
-                        act("edit", async () => {
-                          if (candidate?.connection.host_id === host.id)
-                            await cancel(candidate);
-                          setForm({ host });
-                        })
-                      }
-                    >
-                      {tr("编辑")}
-                    </button>
-                    <button
-                      disabled={Boolean(busy) || hostConnected || verifying}
-                      onClick={() =>
-                        act("remove-prompt", async () => {
-                          if (candidate?.connection.host_id === host.id)
-                            await cancel(candidate);
-                          setRemove(host);
-                        })
-                      }
-                    >
-                      {tr("移除连接")}
-                    </button>
-                  </div>
-                </section>
               )}
               {!context.client_only && (!local || localLost) && (
                 <div className="ssh-local-action">

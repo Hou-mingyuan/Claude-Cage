@@ -3476,5 +3476,7 @@
   "移出中转 1": "Retirer du relais 1",
   "全选当前为中转 1": "Tout ajouter au relais 1",
   "全选为中转": "Tout en relais",
-  "全选为中转 1": "Tout en relais 1"
+  "全选为中转 1": "Tout en relais 1",
+  "拖动调整优先顺序（支持上下方向键）": "Glisser pour modifier la priorité (flèches haut/bas prises en charge)",
+  "直接拖动下方账号卡片调整优先顺序。": "Faites glisser directement les cartes de compte ci-dessous pour ajuster l’ordre de priorité."
 }
