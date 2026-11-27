@@ -97,6 +97,8 @@ type Server struct {
 	mu                                               sync.Mutex
 	preferences                                      Preferences
 	jobs                                             jobManager
+	desktopAppOps                                    desktopAppOpManager
+	desktopAppOpRunner                               func(context.Context, desktopAppTarget, string) error
 	desktopOnboardingUntil                           time.Time
 	desktopOnboardingReleased                        bool
 	ready                                            bool

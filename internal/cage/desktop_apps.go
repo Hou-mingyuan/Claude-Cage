@@ -14,8 +14,14 @@ const DesktopAppDependencies = "ca-certificates curl gnupg dbus-x11 xauth x11-ut
 // session shares with Claude Desktop, and the handler that gives sign-in links
 // back to the application. It installs no service: the user opens the app.
 func DesktopAppSupportScript() string {
-	return "set -euo pipefail\n" + clientRuntimeScript() + sharedClipboardScript() + nativeInputScript() + DesktopFileSupportScript() + guestOpenScript() +
+	return "set -euo pipefail\n" +
+		"mkdir -p \"$HOME/.local/share/desktop-apps\"\n" +
+		"(\n" +
+		"exec 8>\"$HOME/.local/share/desktop-apps/support.lock\"\n" +
+		"flock -w 30 8\n" +
+		clientRuntimeScript() + sharedClipboardScript() + nativeInputScript() + DesktopFileSupportScript() + guestOpenScript() +
 		"sudo tee /usr/local/bin/desktop-app-open >/dev/null <<'DESKTOP_APP_OPEN'\n" + desktopAppOpen + "\nDESKTOP_APP_OPEN\nsudo chmod 0755 /usr/local/bin/desktop-app-open\n" +
 		"sudo install -d -m 0755 /usr/local/lib/desktop-apps\n" +
-		"printf 'cage-browser ALL=(cage) NOPASSWD: /usr/local/bin/desktop-app-open --stdin\\n' | sudo tee /etc/sudoers.d/desktop-apps >/dev/null\nsudo chmod 0440 /etc/sudoers.d/desktop-apps\n"
+		"printf 'cage-browser ALL=(cage) NOPASSWD: /usr/local/bin/desktop-app-open --stdin\\n' | sudo tee /etc/sudoers.d/desktop-apps >/dev/null\nsudo chmod 0440 /etc/sudoers.d/desktop-apps\n" +
+		")\n"
 }
