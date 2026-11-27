@@ -755,12 +755,30 @@ function Grants({ model, plugin, onConfirm }) {
 // PluginSettings is the form for the values a plugin asks the user for. The
 // app never sends a secret back: one that is set shows as such and can only
 // be replaced or cleared.
-function PluginSettings({ model, plugin, onConfirm }) {
+function PluginSettings({ model, plugin, onConfirm, hidden = false }) {
   const tr = useTranslation();
   const { busy, change } = model;
   const settings = plugin.settings || [];
   const [values, setValues] = useState(() => Object.fromEntries(settings.filter(item => item.type !== "secret").map(item => [item.id, item.value || ""])));
   const [secrets, setSecrets] = useState({}), [cleared, setCleared] = useState([]), [failed, setFailed] = useState(false);
+  const serverValuesRef = useRef(Object.fromEntries(settings.filter(item => item.type !== "secret").map(item => [item.id, item.value || ""])));
+  useEffect(() => {
+    const prevServer = serverValuesRef.current;
+    const nextServer = Object.fromEntries(settings.filter(item => item.type !== "secret").map(item => [item.id, item.value || ""]));
+    serverValuesRef.current = nextServer;
+    setValues(current => {
+      let changed = false;
+      const merged = { ...current };
+      for (const [id, nextVal] of Object.entries(nextServer)) {
+        // Only adopt refreshed server values for fields the user has not edited locally.
+        if ((current[id] || "") === (prevServer[id] || "") && (current[id] || "") !== nextVal) {
+          merged[id] = nextVal;
+          changed = true;
+        }
+      }
+      return changed ? merged : current;
+    });
+  }, [settings]);
   const key = `settings:${plugin.name}`, guest = plugin.kind === "guest";
   const dirty = settings.some(item => item.type !== "secret" && (values[item.id] || "") !== (item.value || ""))
     || Object.values(secrets).some(Boolean) || cleared.length > 0;
@@ -781,7 +799,7 @@ function PluginSettings({ model, plugin, onConfirm }) {
   };
   const set = (id, value) => setValues(previous => ({ ...previous, [id]: value }));
   return (
-    <form className="plugin-settings" onSubmit={save} aria-label={tr("设置")}>
+    <form className="plugin-config-form" hidden={hidden} onSubmit={save} aria-label={tr("设置")}>
       <p className="plugin-page-lead">{guest
         ? tr("这些值以环境变量交给插件在 Cage 环境中的程序，保存后插件会重新启动。密钥用你的 Cage 账户加密保存，之后不再显示；交给环境内的插件前需要你确认风险。")
         : tr("这些值以环境变量交给插件在这台电脑上的程序，保存后插件会重新启动。密钥用你的 Cage 账户加密保存，之后不再显示；Cage 锁定时，用到密钥的插件会停止，解锁后自动恢复。")}</p>
@@ -927,7 +945,10 @@ function Detail({ model, name, onConfirm, onPage }) {
       </nav>
       <div className="plugin-page-body">
         <div className="plugin-page-main" role="tabpanel">
-          {tab === "settings" && plugin?.settings?.length ? <PluginSettings key={JSON.stringify(plugin.settings)} model={model} plugin={plugin} onConfirm={onConfirm} />
+          {plugin?.settings?.length > 0 && (
+            <PluginSettings key={plugin.name} model={model} plugin={plugin} onConfirm={onConfirm} hidden={tab !== "settings"} />
+          )}
+          {tab === "settings" && plugin?.settings?.length ? null
           : tab === "contributions" && added.length ? <>
             <p className="plugin-page-lead">{tr("除了提供给 Claude 的工具，插件还会在应用中添加这些内容。")}</p>
             <ul className="plugin-permission-list">

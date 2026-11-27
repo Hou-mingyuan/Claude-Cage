@@ -40,10 +40,15 @@ export function Modal({ title, children, onClose, wide = false, footer, anchor }
   }, [anchor]);
   useEffect(() => {
     const previous = anchor || document.activeElement;
-    const first = panel.current.querySelector(
-      "input:not([disabled]),button:not([disabled]),select:not([disabled])",
-    );
-    first?.focus();
+    const current = panel.current;
+    const focusTarget =
+      (current.contains(document.activeElement) ? document.activeElement : null) ||
+      current.querySelector("[autofocus]:not([disabled])") ||
+      current.querySelector(
+        ':scope > :not(.modal-head) :is(input,textarea,select,button,[tabindex]):not([disabled]):not([tabindex="-1"])',
+      ) ||
+      current.querySelector("input:not([disabled]),button:not([disabled]),select:not([disabled])");
+    focusTarget?.focus();
     const key = (e) => {
       if (
         [...document.querySelectorAll('[role="dialog"]')].at(-1) !==
