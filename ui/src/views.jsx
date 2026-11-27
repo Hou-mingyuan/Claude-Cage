@@ -19,6 +19,7 @@ import { readClipboardContent, transferFiles, hasFiles, imagePayload, prepareCli
 import { terminalClipboardText } from "./terminal-clipboard.mjs";
 import { sendFiles, shellFilePaths } from "./file-transfer";
 import { installRemoteInput } from "./remote-input";
+import { desktopTextInput } from "./desktop-text-input.mjs";
 import { useWindowVisibility } from "./window-visibility";
 import { followDisplaySize } from "./remote-display.mjs";
 import { guestKeys } from "./guest-keys.mjs";
@@ -118,6 +119,11 @@ export const RemoteView = forwardRef(function RemoteView(
             onSuccess: () => setSizeError(false),
           });
           displayResize.current = sizing;
+          const desktopText = desktop && desktopTextInput(
+            client, value => api("/input", { target: "desktop", id: "desktop", ...value }),
+            committed => !disposed && (committed || current.current.visible),
+            () => window.cageSharedClipboardActive,
+          );
           const preparePaste = () => {
             const id = current.current.tabId;
             return prepareClipboardPaste(desktop ? "desktop" : "browser", id, {
@@ -137,6 +143,7 @@ export const RemoteView = forwardRef(function RemoteView(
             runKeyAction: action => client.cageRunInput(action),
           }, container, {
             systemClipboard: () => current.current.systemClipboard,
+            claudeDesktop: desktop,
             copyText: !desktop
               ? (_sendCopy, valid, { id, context, key }) => {
                 if (current.current.systemClipboard !== false) return undefined;
@@ -167,20 +174,7 @@ export const RemoteView = forwardRef(function RemoteView(
                     : sendImage(payload, desktop ? "desktop" : "browser", id, { prepared });
                 }, valid, !desktop && !current.current.systemClipboard ? text => prepared.send({ text }) : undefined);
             },
-            insertText: (text) => {
-              if (desktop) {
-                if (!window.cageSharedClipboardActive) return client.cagePasteText(text);
-                return client.cageRunInput(async () => {
-                  const valid = () => !disposed && current.current.visible;
-                  const state = await api("/input", { target: "desktop", id: "desktop", mode: "status" });
-                  if (!state.available || !valid()) throw new Error("输入位置已失去焦点，请重新点击输入框");
-                  const session = crypto.randomUUID().replaceAll("-", "");
-                  const begun = await api("/input", { target: "desktop", id: "desktop", mode: "begin", context: state.context, session, sequence: 0 });
-                  if (!begun.available || !valid()) throw new Error("输入位置已失去焦点，请重新点击输入框");
-                  const result = await api("/input", { target: "desktop", id: "desktop", mode: "commit", session, sequence: 1, text });
-                  if (!result.available) throw new Error("文字输入未完成，请重新点击输入框");
-                });
-              }
+            insertText: desktop ? desktopText.insert : (text) => {
               const id = current.current.tabId;
               return client.cageRunInput(() => {
                 if (disposed || !current.current.visible || current.current.tabId !== id)
@@ -200,7 +194,8 @@ export const RemoteView = forwardRef(function RemoteView(
             tabId: () => desktop ? "desktop" : current.current.tabId,
             caretRect: async (session) => {
               const id = desktop ? "desktop" : current.current.tabId;
-              const value = await api("/input", { target: desktop ? "desktop" : "browser", id, mode: "status", session });
+              const value = desktop ? await desktopText.status(session)
+                : await api("/input", { target: "browser", id, mode: "status", session });
               return !disposed && current.current.visible &&
                 (desktop ? "desktop" : current.current.tabId) === id ? value : null;
             },
