@@ -73,7 +73,7 @@ func DesktopEntry(fullConfig string, opts DesktopOptions) (DesktopResult, error)
 		if err != nil {
 			return err
 		}
-		return startDetached(func() *exec.Cmd {
+		return startDetached(windowHidden, func() *exec.Cmd {
 			cmd := exec.Command(exe, "serve-desktop")
 			cmd.Dir = profile
 			cmd.Env = append(vm.ChildEnv(), cage.ConfigEnv+"="+fullConfig)

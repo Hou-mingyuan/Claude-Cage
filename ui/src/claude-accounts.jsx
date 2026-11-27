@@ -277,9 +277,35 @@ function ProfileNotices({ notices }) {
   });
 }
 
+const accountNumber = number => "#" + String(number).padStart(2, "0");
+
 function accountCaption(profile) {
   const label = profile.label || profile.email;
-  return profile.number ? `#${String(profile.number).padStart(2, "0")} ${label}` : label;
+  return profile.number ? `${accountNumber(profile.number)} ${label}` : label;
+}
+
+function AccountNameForm({ profile, busy, perform, change }) {
+  const tr = useTranslation();
+  const [draft, setDraft] = useState(null);
+  const saved = profile.name || "";
+  const value = draft ?? saved;
+  return <form className="claude-account-setting-form" onSubmit={event => {
+    event.preventDefault();
+    if (!busy && value.trim() && value !== saved) perform(async () => {
+      const accounts = await change({ action: "update", id: profile.id, name: value });
+      if (!accounts?.some(account => account.id === profile.id && account.name === value)) {
+        throw new Error(tr("当前后台没有提供所需功能。请确认应用与后台已完成更新。"));
+      }
+      setDraft(null);
+    });
+  }}>
+    <label><span>{tr("账号命令名")}</span>
+      <input dir="auto" autoCapitalize="none" autoComplete="off" spellCheck={false} required
+        placeholder="sarah" value={value} readOnly={busy} onChange={event => setDraft(event.target.value)}
+        onKeyDown={event => { if (event.key === "Escape" && !busy && !event.nativeEvent.isComposing) { event.preventDefault(); setDraft(null); } }} />
+    </label>
+    <button type="submit" aria-label={tr("保存名称")} disabled={busy || !value.trim() || value === saved}>{tr("保存")}</button>
+  </form>;
 }
 
 function ProfileCard({ proxySources, desktopNetwork, profile, index, total, reorderable, dragState, onDragStart, onDragOver, onDrop, onDragEnd, onMove, environment, usageEnvironment, busy, active, defaultActive, perform, change, login, cancelDraft, removeAccount }) {
@@ -372,6 +398,10 @@ function ProfileCard({ proxySources, desktopNetwork, profile, index, total, reor
         <span className="claude-switch-track" aria-hidden="true" />
       </label>
     </div>
+    <p className="claude-profile-command">
+      <span>{tr(profile.name ? "终端" : "账号命令名")}</span>
+      {profile.name ? <code dir="ltr">cage {profile.name}</code> : <span>{tr("未设置")}</span>}
+    </p>
     <ProfileUsage quota={profile.quota} state={usage.state} />
     {hasRoutingConfig && !configOpen && (
       <div className="claude-config-chips">
@@ -389,6 +419,12 @@ function ProfileCard({ proxySources, desktopNetwork, profile, index, total, reor
     )}
     {configOpen && (
       <div className="claude-profile-config">
+        <dl className="claude-account-details">
+          {!!profile.number && <div><dt>{tr("Cage 编号")}</dt><dd><bdi>{accountNumber(profile.number)}</bdi></dd></div>}
+          <div><dt>{tr("Cage ID")}</dt><dd><code dir="ltr">{profile.id}</code></dd></div>
+          <div><dt>{tr("Claude 邮箱")}</dt><dd>{profile.email ? <bdi>{profile.email}</bdi> : "—"}</dd></div>
+        </dl>
+        <AccountNameForm profile={profile} busy={busy} perform={perform} change={change} />
         {desktopNetwork && <label className="claude-config-field"><span>{tr("账号出口")}</span>
           <InlineSelect inline aria-label={displayName + " " + tr("的代理节点")}
             value={profile.proxy_node_id || (profile.desktop_dedicated_network ? "legacy" : "")} disabled={busy}
@@ -402,7 +438,7 @@ function ProfileCard({ proxySources, desktopNetwork, profile, index, total, reor
             </optgroup>)}
           </InlineSelect>
         </label>}
-        <form className="claude-handoff-group" onSubmit={event => { event.preventDefault(); perform(() => change({action:"update",id:profile.id,handoff_group:group})); }}>
+        <form className="claude-account-setting-form" onSubmit={event => { event.preventDefault(); perform(() => change({action:"update",id:profile.id,handoff_group:group})); }}>
           <label><span>{tr("接续分组")}</span><input aria-label={tr("{0} 的接续分组", (displayName))} value={group} maxLength={32} placeholder={tr("未分组，不跨账号接续")} onChange={event => setGroup(event.target.value)} /></label>
           <button disabled={busy || group === (profile.handoff_group || "")}>{tr("保存")}</button>
         </form>

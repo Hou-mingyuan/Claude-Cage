@@ -294,7 +294,7 @@ export async function createWorkbench({
       state.split = body.left ? { left: body.left, right: body.right, fraction: 0.5 } : null;
       result = { split: state.split };
     }
-    else if (path === "/browser/events")
+    else if (path === "/browser/events" || path === "/notifications/events")
       return route.fulfill({
         contentType: "text/event-stream",
         body: ": fixture\n\n",

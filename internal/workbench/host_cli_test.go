@@ -4,48 +4,233 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-func TestHostCLIStartOnlyNeedsTheService(t *testing.T) {
+func TestHostCLIAccountNamesAndRenaming(t *testing.T) {
 	s := agentTestController(t)
-	s.account.lock()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	a := claudeAccount{ID: strings.Repeat("a", 24), Number: 3, Label: "old note", Name: "Sarah", Source: "managed", Email: "member@example.test", Status: "ready"}
+	if err := s.saveClaudeAccounts(claudeAccountList{Accounts: []claudeAccount{a}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer null.Close()
-	for _, action := range []string{"start", "start", "status"} {
-		out, err := os.CreateTemp(t.TempDir(), "result")
+	call := func(action string, args ...string) (int, string, error) {
+		t.Helper()
+		out, err := os.CreateTemp(t.TempDir(), "stdout")
 		if err != nil {
 			t.Fatal(err)
 		}
-		code, callErr := HostCLI(ctx, s.configPath, action, nil, null, out, null)
-		if err := out.Close(); err != nil {
-			t.Fatal(err)
+		defer out.Close()
+		code, err := HostCLI(ctx, s.configPath, action, args, null, out, null)
+		data, readErr := os.ReadFile(out.Name())
+		if readErr != nil {
+			t.Fatal(readErr)
 		}
-		body, err := os.ReadFile(out.Name())
-		if err != nil || callErr != nil || code != 0 {
-			t.Fatalf("%s: %d %v %v", action, code, callErr, err)
-		}
-		if !strings.Contains(string(body), cliServiceRunning) || (action == "status") != strings.Contains(string(body), "已锁定") {
-			t.Fatalf("%s returned %q", action, body)
+		return code, string(data), err
+	}
+	if code, _, err := call("account", "use", "#03"); code != 0 || err != nil {
+		t.Fatalf("select display number: %d %v", code, err)
+	}
+	if code, _, err := call("account", "rename", "03", "工作"); code != 0 || err != nil {
+		t.Fatalf("rename: %d %v", code, err)
+	}
+	code, output, err := call("account", "list")
+	fields := strings.Fields(output)
+	for _, want := range []string{"ID", "NAME", "EMAIL", "#3", a.ID, "工作", a.Email, "[CLI]"} {
+		if err != nil || code != 0 || !slices.Contains(fields, want) {
+			t.Fatalf("missing %q in account list: %q %d %v", want, output, code, err)
 		}
 	}
-	if _, unlocked := s.account.access(); unlocked || s.jobs.snapshot().ID != "" || s.hostCLIBrowser.ID != "" {
-		t.Fatal("starting the service changed workbench access, started an environment job or requested a browser")
+	for _, selector := range []string{"Sarah", "old", "missing"} {
+		if code, _, err := call("run-by-name", selector, "-p", "hello"); code == 0 || err == nil || !strings.Contains(err.Error(), "account list") {
+			t.Fatalf("unknown name %q: %d %v", selector, code, err)
+		}
+	}
+	if s.jobs.snapshot().ID != "" || s.vmRunning() {
+		t.Fatal("a missing name or an account edit started a guest operation")
+	}
+	if projects, err := s.projectPaths(); err != nil || len(projects) != 0 {
+		t.Fatalf("account management shared a directory: %q %v", projects, err)
+	}
+	list, err := s.cliAccountRoster()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selector := range []string{a.ID, "3", "#03", "工作", a.Email, a.Label} {
+		if id, err := resolveCLIAccount(list, selector); err != nil || id != a.ID {
+			t.Fatalf("explicit selector %q: %q %v", selector, id, err)
+		}
+	}
+	if _, err := list.byCLIName(a.Email); err == nil {
+		t.Fatal("a verified email was implicitly used as a shortcut name")
+	}
+	s.account.lock()
+	if code, _, err := call("account", "rename", "3", "blocked"); code == 0 || err == nil {
+		t.Fatal("locked workbench allowed a rename")
+	}
+}
+
+func TestHostCLINamedColdStartRejectsReassignedName(t *testing.T) {
+	s := agentTestController(t)
+	first := claudeAccount{Number: 1, ID: strings.Repeat("a", 24), Name: "work", Email: "one@example.test", Source: "managed", Status: "ready"}
+	second := claudeAccount{Number: 2, ID: strings.Repeat("b", 24), Name: "other", Email: "two@example.test", Source: "managed", Status: "ready"}
+	if err := s.saveClaudeAccounts(claudeAccountList{Accounts: []claudeAccount{first, second}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivate(filepath.Join(s.profile, "initialization.json"), initializationRecord{Version: 1, Completed: true}); err != nil {
+		t.Fatal(err)
+	}
+	s.deviceReset.startEnv = func(bool) error {
+		markTestVMRunning(t, s)
+		s.mu.Lock()
+		s.ready = true
+		s.mu.Unlock()
+		s.claudeAccounts.mu.Lock()
+		defer s.claudeAccounts.mu.Unlock()
+		first.Name, second.Name = "renamed", "work"
+		return s.saveClaudeAccounts(claudeAccountList{Accounts: []claudeAccount{first, second}})
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	code, err := HostCLI(ctx, s.configPath, "run-by-name", []string{"work", "-p", "private prompt"}, null, null, null)
+	if code == 0 || err == nil || !strings.Contains(err.Error(), "账号已变化") {
+		t.Fatalf("reassigned name: code=%d err=%v", code, err)
+	}
+	if projects, err := s.projectPaths(); err != nil || len(projects) != 0 {
+		t.Fatalf("reassigned name created a project: %q %v", projects, err)
+	}
+}
+
+func TestHostCLIStartBootsOnceWithoutSharingOrLoggingIn(t *testing.T) {
+	s := agentTestController(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := writePrivate(filepath.Join(s.profile, "initialization.json"), initializationRecord{Version: 1, Completed: true}); err != nil {
+		t.Fatal(err)
+	}
+	boots := 0
+	s.deviceReset.startEnv = func(bool) error {
+		markTestVMRunning(t, s)
+		s.mu.Lock()
+		s.ready = true
+		s.mu.Unlock()
+		boots++
+		return nil
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+
+	s.account.lock()
+	if code, err := HostCLI(ctx, s.configPath, "start", nil, null, null, null); code == 0 || err == nil || !strings.Contains(err.Error(), "解锁") || boots != 0 {
+		t.Fatalf("locked start: code=%d error=%v boots=%d", code, err, boots)
+	}
+	s.account.mu.Lock()
+	s.account.setKey(make([]byte, 32))
+	s.account.mu.Unlock()
+	for range 2 {
+		if code, err := HostCLI(ctx, s.configPath, "start", nil, null, null, null); code != 0 || err != nil {
+			t.Fatalf("start: code=%d err=%v", code, err)
+		}
+	}
+	if boots != 1 || !s.vmRunning() || s.hostCLIBrowser.ID != "" {
+		t.Fatalf("boots=%d vm=%v login request=%q", boots, s.vmRunning(), s.hostCLIBrowser.ID)
 	}
 	if projects, err := s.projectPaths(); err != nil || len(projects) > 0 {
-		t.Fatalf("service start shared a project: %v %v", projects, err)
+		t.Fatalf("start shared a project: %v %v", projects, err)
+	}
+}
+
+func TestRebuildDiskRequiresPrivateLocalCLI(t *testing.T) {
+	s := testServer(t)
+	rec := request(s, "POST", "/api/start", s.origin, `{"reset_disk_token":"not-a-launcher-token"}`, true)
+	if rec.Code != http.StatusForbidden || s.jobs.snapshot().ID != "" {
+		t.Fatalf("ordinary session submitted disk rebuild: code=%d, job=%+v", rec.Code, s.jobs.snapshot())
+	}
+}
+
+func TestHostCLIStartRequiresRunningGuestAndReportsOffline(t *testing.T) {
+	s := agentTestController(t)
+	if err := writePrivate(filepath.Join(s.profile, "initialization.json"), initializationRecord{Version: 1, Completed: true}); err != nil {
+		t.Fatal(err)
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var guestStarts atomic.Bool
+	s.deviceReset.startEnv = func(bool) error {
+		if guestStarts.Load() {
+			markTestVMRunning(t, s)
+		}
+		s.mu.Lock()
+		s.ready = true
+		s.mu.Unlock()
+		return networkCheckError{errors.New("exit check unavailable")}
+	}
+	logFile := filepath.Join(t.TempDir(), "stderr")
+	log, err := os.Create(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	if code, err := HostCLI(ctx, s.configPath, "start", nil, null, null, log); code == 0 || err == nil {
+		t.Fatal("start reported ready while the VM was stopped")
+	}
+	guestStarts.Store(true)
+	if code, err := HostCLI(ctx, s.configPath, "start", nil, null, null, log); code != 0 || err != nil {
+		t.Fatalf("offline start: code=%d err=%v", code, err)
+	}
+	output, err := os.ReadFile(logFile)
+	if err != nil || !strings.Contains(string(output), "外网尚未放行") {
+		t.Fatalf("missing offline status: %q err=%v", output, err)
+	}
+}
+
+func TestHostCLIStatusReportsRunningVMLocked(t *testing.T) {
+	s := agentTestController(t)
+	s.instanceID = randomToken()
+	markTestVMRunning(t, s)
+	s.account.lock()
+	out, err := os.CreateTemp(t.TempDir(), "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if code, err := HostCLI(ctx, s.configPath, "status", nil, out, out, out); code != 0 || err != nil {
+		t.Fatalf("status: code=%d err=%v", code, err)
+	}
+	got, err := os.ReadFile(out.Name())
+	_, unlocked := s.account.access()
+	if err != nil || unlocked || !strings.Contains(string(got), "环境正在运行") || !strings.Contains(string(got), "解锁") {
+		t.Fatalf("status=%q unlocked=%v err=%v", got, unlocked, err)
 	}
 }
 

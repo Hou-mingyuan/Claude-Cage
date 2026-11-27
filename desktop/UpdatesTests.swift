@@ -11,6 +11,20 @@ enum UpdatesTests {
         try expect(rejected, message)
     }
     static func main() throws {
+        let args = Array(CommandLine.arguments.dropFirst())
+        if args.count == 3, args[0] == "--test-cli-parent" {
+            let response = try CageUpdateFiles.run(args[1], ["--inspect-cli-parent", args[2]])
+            try expect(String(data: response, encoding: .utf8) == "verified\n", "kernel parent identity was not checked")
+            return
+        }
+        if args.count == 2, args[0] == "--inspect-cli-parent" {
+            let target = URL(fileURLWithPath: args[1]).resolvingSymlinksInPath()
+            try expect(CageUpdateProcess.isNativeParent(getppid(), target: target), "directly executed bundle native parent is accepted")
+            try expect(!CageUpdateProcess.isNativeParent(getpid(), target: target), "different PID rejected")
+            try expect(!CageUpdateProcess.isNativeParent(getppid(), target: target.deletingLastPathComponent()), "wrong installation rejected")
+            print("verified")
+            return
+        }
         try expect(CageUpdateVersion.isNewer("0.2.0-alpha.10", than: "0.2.0-alpha.9"), "numeric prerelease ordering")
         try expect(CageUpdateVersion.isNewer("0.2.0", than: "0.2.0-alpha.10"), "stable promotion")
         for invalid in ["0.2.0-alpha.01", "../0.3.0", "1.0", "1.0.0/../../"] {
@@ -22,6 +36,78 @@ enum UpdatesTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cage-updates-test-" + UUID().uuidString)
         try CageUpdateFiles.privateDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
+        let ownExecutable = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+        func fixtureBundle(_ name: String) throws -> URL {
+            let bundle = root.appendingPathComponent(name + ".app").resolvingSymlinksInPath()
+            try CageUpdateFiles.privateDirectory(bundle.appendingPathComponent("Contents/MacOS"))
+            return bundle
+        }
+        do {
+            let bundle = try fixtureBundle("NativeParent")
+            let native = bundle.appendingPathComponent("Contents/MacOS/Cage")
+            try FileManager.default.copyItem(at: ownExecutable, to: native)
+            let info = ["CFBundleExecutable":"Cage","CFBundleIdentifier":"io.github.lee-xeo.cli-update-qa","CFBundlePackageType":"APPL"]
+            try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: bundle.appendingPathComponent("Contents/Info.plist"))
+            _ = try CageUpdateFiles.run(native.path, ["--test-cli-parent", ownExecutable.path, bundle.path])
+            for text in ["", "INSTALL", "INSTALL\r\n", "install\n", "YES\n", " INSTALL\n", "INSTALL\n"] {
+                let pipe = Pipe()
+                try pipe.fileHandleForWriting.write(contentsOf: Data(text.utf8))
+                try pipe.fileHandleForWriting.close()
+                try expect(CageCLIUpdate.readConsent(from: pipe.fileHandleForReading) == (text == "INSTALL\n"), "require exact newline-terminated confirmation")
+            }
+            let receipt = Pipe()
+            try receipt.fileHandleForWriting.write(contentsOf: Data("{\"status\":\"committed\"}".utf8))
+            try expect(CageUpdateFiles.installerReply(from: receipt.fileHandleForReading, within: 0.04) == nil, "an incomplete commit receipt must time out")
+            let second = Pipe()
+            try second.fileHandleForWriting.write(contentsOf: Data("{\"status\":\"ready\"}\n{\"status\":\"committed\"}\n".utf8))
+            try expect(CageUpdateFiles.installerReply(from: second.fileHandleForReading)?["status"] as? String == "ready", "read one reply without consuming the next")
+            try expect(CageUpdateFiles.installerReply(from: second.fileHandleForReading, within: 1)?["status"] as? String == "committed", "real commit receipt")
+            let downloads = root.appendingPathComponent("cache-test/updates")
+            let cached = CageUpdateFiles.cachedArchive(in: downloads)
+            try CageUpdateFiles.privateDirectory(cached.deletingLastPathComponent())
+            let unrelated = cached.deletingLastPathComponent().appendingPathComponent("unrelated")
+            try Data("keep".utf8).write(to: unrelated)
+            try Data("archive".utf8).write(to: cached)
+            CageUpdateFiles.discardCachedArchive(in: downloads)
+            try expect(!FileManager.default.fileExists(atPath: cached.path) && FileManager.default.fileExists(atPath: unrelated.path), "remove only the one download, preserving other files")
+            try FileManager.default.createSymbolicLink(at: cached, withDestinationURL: unrelated)
+            CageUpdateFiles.discardCachedArchive(in: downloads)
+            try expect(FileManager.default.fileExists(atPath: unrelated.path), "cache disposal must not follow a symlink")
+            do {
+                let gui = try CageUpdateLock(directory: bundle, shared: true)
+                try withExtendedLifetime(gui) { try rejects("existing window keeps CLI out") { _ = try CageUpdateLock(directory: bundle) } }
+            }
+            do {
+                let cli = try CageUpdateLock(directory: bundle)
+                try withExtendedLifetime(cli) { try rejects("new window cannot race terminal updater") { _ = try CageUpdateLock(directory: bundle, shared: true) } }
+            }
+            do {
+                let first = try CageUpdateLock.worker(for: bundle)
+                try withExtendedLifetime(first) { try rejects("only one download per installed app") { _ = try CageUpdateLock.worker(for: bundle) } }
+            }
+            let next = try fixtureBundle("New")
+            do {
+                let parent = root.appendingPathComponent("shared-profile/updates")
+                let first = try CageUpdateLock.worker(for: bundle, downloadsAt: parent)
+                try withExtendedLifetime(first) {
+                    try rejects("another app cannot race the same download") { _ = try CageUpdateLock.worker(for: next, downloadsAt: parent) }
+                    _ = try CageUpdateLock.worker(for: next, downloadsAt: root.appendingPathComponent("unrelated/updates"))
+                }
+                try expect(!FileManager.default.fileExists(atPath: parent.path), "locking must not create an empty profile")
+            }
+            do {
+                let installs = [try CageUpdateLock.installer(for: bundle), try CageUpdateLock.installer(for: next)]
+                try withExtendedLifetime(installs) {
+                    try rejects("installer blocks a new downloader of the original") { _ = try CageUpdateLock.worker(for: bundle) }
+                    let original = root.appendingPathComponent("retired.app")
+                    try FileManager.default.copyItem(at: bundle, to: original)
+                    try CageUpdateFiles.replaceAndVerify(target: bundle, candidate: next, backup: original, manager: .default) { _ in }
+                    try rejects("installer keeps ownership after new app moves into place") { _ = try CageUpdateLock.worker(for: bundle) }
+                }
+            }
+            _ = try CageUpdateLock.worker(for: bundle)
+            print("PASS: native CLI parent, exact stdin consent, desktop/CLI exclusion and lock handoff through app replacement")
+        }
         do {
             let saved = ProcessInfo.processInfo.environment["CLAUDE_CAGE_CONFIG"]
             let directory = FileManager.default.currentDirectoryPath
@@ -41,6 +127,7 @@ enum UpdatesTests {
             try expect(CageProfile.configURL() == pinned, "helper keeps original profile after cwd changes")
             let inherited = try CageUpdateFiles.run("/bin/sh", ["-c", "printf '%s' \"$CLAUDE_CAGE_CONFIG\""])
             try expect(String(data: inherited, encoding: .utf8) == pinned.path, "actual child process inherits absolute profile")
+            try expect(CageProfile.relaunchEnvironment()["CLAUDE_CAGE_CONFIG"] == pinned.path, "relaunched app inherits the pinned profile")
         }
         let personalFiles = [
             "account.json", "favorites.json", "projects.json", "appearance.json", "workbench.json",
@@ -198,6 +285,7 @@ enum UpdatesTests {
         try expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("profile/updates/launch-\(confirmation).json").path), "explicit workbench readiness writes installer acknowledgement")
 
         let probeBundle = root.appendingPathComponent("retry-protocol.app")
+        try CageUpdateFiles.privateDirectory(probeBundle.appendingPathComponent("Contents/MacOS"))
         let resources = probeBundle.appendingPathComponent("Contents/Resources")
         try CageUpdateFiles.privateDirectory(resources)
         let countFile = root.appendingPathComponent("retry-invocations")
@@ -251,6 +339,7 @@ enum UpdatesTests {
             """.utf8)
             let legacyPlan = try JSONDecoder().decode(CageUpdatePlan.self, from: legacyPlanJSON)
             try expect(!legacyPlan.unsignedSource, "legacy update plan without unsignedSource must default to false")
+            try expect(!legacyPlan.requiresCommitReceipt, "legacy desktop callers do not expect a second helper reply")
             let upgradePlan = CageUpdatePlan(version: "0.2.1", team: cageOfficialAppleTeamID, target: "/Applications/Cage.app", candidate: "/tmp/Cage.app", backup: "/tmp/previous.app", parentPID: 1, resultPath: "/tmp/last-result.json", unsignedSource: true)
             let roundTripped = try JSONDecoder().decode(CageUpdatePlan.self, from: try JSONEncoder().encode(upgradePlan))
             try expect(roundTripped.unsignedSource, "unsignedSource flag must round-trip through CageUpdatePlan")
@@ -282,6 +371,7 @@ enum UpdatesTests {
             }
 
             let eligibilityBundle = root.appendingPathComponent("eligibility.app")
+            try CageUpdateFiles.privateDirectory(eligibilityBundle.appendingPathComponent("Contents/MacOS"))
             let eligibilityResources = eligibilityBundle.appendingPathComponent("Contents/Resources")
             try CageUpdateFiles.privateDirectory(eligibilityResources)
             let requestsFile = root.appendingPathComponent("eligibility-requests")

@@ -46,6 +46,7 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
     private var completeUpdateMenu: NSMenuItem!
     private var controllerNeedsUpdate = false
     private var appUpdater: CageAppUpdater!
+    private var desktopUpdateLock: CageUpdateLock?
 
     private struct DesktopEntry {
         let status: String
@@ -55,6 +56,10 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
 
     static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
+        if args.first == "--cli-update" {
+            guard args.count == 1 else { exit(2) }
+            CageCLIUpdate.run()
+        }
         if args == ["--confirm-codex-network"] {
             let data = FileHandle.standardInput.readDataToEndOfFile()
             guard data.count <= 131072,
@@ -96,6 +101,18 @@ final class CageApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNaviga
         NSSetUncaughtExceptionHandler { exception in CageDiagnostics.record("Uncaught native exception: \(exception.name.rawValue): \(exception.reason ?? "")\n\(exception.callStackSymbols.joined(separator: "\n"))") }
         let app = NSApplication.shared
         let delegate = CageApp()
+        do {
+            delegate.desktopUpdateLock = try CageUpdateLock(directory: Bundle.main.bundleURL, shared: true)
+            if UUID(uuidString: ProcessInfo.processInfo.environment["CAGE_UPDATE_CONFIRMATION"] ?? "") == nil {
+                try CageUpdateLock.checkInstaller(for: Bundle.main.bundleURL)
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = error is CageUpdateBusy ? "Cage 更新进行中" : "无法打开 Cage 工作台"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return
+        }
         app.delegate = delegate
         app.setActivationPolicy(.regular)
         withExtendedLifetime(delegate) { app.run() }

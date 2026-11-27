@@ -52,15 +52,15 @@ sudo apt install ./Cage-<版本>-linux-amd64.deb
 
 Linux 使用 Ctrl 快捷键：`Ctrl+O` 打开项目，`Ctrl+T` 新建网页，`Ctrl+L` 定位地址栏，`Ctrl+W` 关闭标签，`Ctrl+Shift+Enter` 新建终端。终端用 `Ctrl+Shift+C/V` 复制粘贴，`Ctrl+C` 中断命令。
 
-使用 v0.2.2 完整版时，从主机终端运行 `claude-cage login`，在 Cage 浏览器中登录 Claude 账号。然后进入项目目录运行 `claude-cage`，即可共享该目录并启动 Claude Code。若系统中 `cage` 这个命令名空闲，可用 `claude-cage install-cli` 安装短名。[本机终端命令与示例](guide/workbench.md#在本机终端使用-claude-code)
+使用 v0.2.2 完整版时，从主机终端运行 `claude-cage login`，在 Cage 浏览器中登录 Claude 账号。然后进入项目目录运行 `claude-cage claude`，即可共享该目录并用默认账号启动 Claude Code。输入 `claude-cage sarah` 可为这一次调用指定已命名的账号 `sarah`。若系统中 `cage` 这个命令名空闲，可用 `claude-cage install-cli` 安装短名。[本机终端命令与示例](guide/workbench.md#在本机终端使用-claude-code)
 
-关闭窗口保留后台环境与任务，再次打开 Cage 可重新连接。在应用内停止环境后退出，才能结束后台任务。Linux 本地账户使用密码解锁；设备快速解锁暂不提供。
+关闭窗口保留后台环境与任务。用 `claude-cage up` 可唤回桌面工作台，用 `claude-cage start` 可提前启动本机虚拟机。完成工作后，`claude-cage stop` 会结束本机环境里的任务，并停止虚拟机、代理和后台控制服务。Linux 本地账户使用密码解锁，设备快速解锁暂不提供。
 
 浏览器上传使用本机文件选择窗口，下载可通过 GTK“另存为”选择保存位置。侧栏“下载”提供打开文件、打开所在文件夹和再次另存为；文件按当前桌面关联的应用打开。操作与限制见[浏览器上传与下载](getting-started.md#浏览器上传与下载)。
 
 ## 更新与卸载
 
-Linux 版本通过系统安装包手动更新。应用内更新入口显示更新方式，不自动替换系统文件。先保存文件、停止环境并退出 Cage，再安装新版 `.deb`。安装器发现已安装的 Cage、控制服务或代理进程仍运行时，会拒绝覆盖并提示退出。
+v0.2.2 的完整版支持在终端运行 `claude-cage update --check` 检查版本，或用 `claude-cage update` 下载并校验官方 `.deb`。确认后由 APT 安装，使用普通账号时按系统提示授权。若安装器提示 Cage 仍在运行，请先保存工作，用 `claude-cage stop` 停止环境，退出工作台，再重试。也可手动安装新版 `.deb`。
 
 更新和卸载保留 `~/.claude-cage` 中的配置、代理与虚拟磁盘，下载暂存、原 `~/.claude-cage-workspace` 及自行打开的项目目录也保留。卸载命令为：
 

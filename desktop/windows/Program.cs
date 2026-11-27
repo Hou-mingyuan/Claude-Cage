@@ -14,6 +14,16 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args is ["--install-update"]) return UpdateInstaller.Run().GetAwaiter().GetResult();
+        if (args is ["--cli-update"])
+        {
+            try
+            {
+                var profileKey = InstanceKey();
+                using var cliMutex = new Mutex(true, @"Local\Cage-" + profileKey, out bool ownsDesktop);
+                return CliUpdatePipe.Start(profileKey, ownsDesktop).GetAwaiter().GetResult();
+            }
+            catch (Exception error) { return CliUpdate.Failure(Console.OpenStandardOutput(), error.Message).GetAwaiter().GetResult(); }
+        }
         if (args is ["--smoke-test", var output] && Path.IsPathFullyQualified(output))
         {
             SmokeOutput = output;
@@ -34,8 +44,7 @@ internal static class Program
             MessageBox.Show(InterfaceLanguage.Text("Cage 需要 Windows 10 22H2（19045）或 Windows 11，x64（Intel/AMD）系统。"), "Cage");
             return 1;
         }
-        var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
-        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sid + "\0" + Path.GetFullPath(Backend.Root).TrimEnd(Path.DirectorySeparatorChar).ToUpperInvariant())))[..24];
+        var key = InstanceKey();
         using var mutex = new Mutex(true, @"Local\Cage-" + key, out var owner);
         if (!owner)
         {
@@ -68,6 +77,8 @@ internal static class Program
                 catch (IOException) { }
             }
         });
+        // The wake pipe remains available while a terminal downloads an update.
+        form.Shown += (_, _) => _ = Task.Run(() => CliUpdatePipe.Serve(key, form.RunCLIUpdate, cancellation.Token));
         Application.Run(form); cancellation.Cancel();
         if (SmokeOutput == null) return 0;
         try
@@ -76,5 +87,11 @@ internal static class Program
             return report.RootElement.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.True ? 0 : 1;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return 1; }
+    }
+
+    private static string InstanceKey()
+    {
+        var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sid + "\0" + Path.GetFullPath(Backend.Root).TrimEnd(Path.DirectorySeparatorChar).ToUpperInvariant())))[..24];
     }
 }

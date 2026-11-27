@@ -85,7 +85,7 @@ func (b *browserResponseBody) Close() error {
 func (c *browserClient) request(ctx context.Context, token, method, path string, body []byte) ([]byte, error) {
 	timeout := 5 * time.Second
 	switch path {
-	case "/new", "/login-open":
+	case "/new", "/login-open", "/editor":
 		timeout = 25 * time.Second
 	case "/audit", "/paste-image", "/tailnet":
 		timeout = 20 * time.Second
@@ -129,6 +129,7 @@ func (c *browserClient) request(ctx context.Context, token, method, path string,
 			"Unknown browser action":                                     "浏览器组件不支持这次操作。请更新环境组件后再试。",
 			"Split controller unavailable":                               "分屏组件没有就绪。请更新环境组件后重新打开分屏。",
 			"Editor authentication is unavailable":                       "编辑器的本地登录会话不可用。请从 Cage 重新打开编辑器。",
+			"Editor is not installed":                                    "请先在设置中更新环境工具，再打开编辑器。",
 			"文件接收网页已切换，请返回原网页重试":                                         "文件接收网页已切换，请返回原网页重试。",
 			"浏览器组件未能恢复，请重启环境":                                            "浏览器组件未能恢复，请保存工作后重启环境。",
 			"不同浏览会话不能分屏":                                                 "所选页面属于不同浏览会话，无法放在同一个分屏中。请在同一会话中打开两个网页。",

@@ -3365,6 +3365,7 @@
   "链式代理需要至少 2 个不同节点（1 个中转 + 1 个出口），当前只有 {0} 个可用节点。": "Proxy silsilad ah wuxuu u baahan yahay ugu yaraan 2 node oo kala duwan (1 gudbiye + 1 bixitaan); hadda waxaad haysataa {0} keliya.",
   "首次配置还没有已应用的 Cage 代理，建议勾选上方选项通过主机网络获取订阅。": "Dejinta ugu horreysa weli ma jiro proxy Cage oo shaqaynaya; waxaa lagu talinayaa inaad saxdo ikhtiyaarka sare si aad uga soo dejiso shabakadda kombiyuutarka.",
   "高级：端口与代理诊断": "Sare: dekedda iyo baaritaanka proxy-ga",
+  "隐藏期间的输出超过回放上限，已接回最近的终端输出。": "Intii terminalku qarsoonaa, wax-soo-saarku wuxuu dhaafay xadka dib loo soo bandhigi karo. Wax-soo-saarkii ugu dambeeyay ayaa muuqda.",
   "正在本机终端输入。关闭本机终端后可在这里继续。": "Waxaad wax ku qoraysaa terminalka maxalliga ah. Xir si aad halkan uga sii waddo.",
   "模糊状态栏中的 IP 与位置": "Ka dhig IP-ga iyo goobta baarka xaaladda kuwo aan caddayn",
   "截图或共享屏幕时模糊底部状态栏中的出口 IP 和位置，鼠标悬停或键盘聚焦时显示。": "Wuxuu ka dhigaa IP-ga ka bixidda iyo goobta baarka xaaladda hoose kuwo aan caddayn marka aad sawir shaashadeed qaadayso ama shaashadda wadaagayso. Dul mari tilmaamaha ama kiiboodhka ku dooro si aad u aragto.",
@@ -3497,5 +3498,11 @@
   "经上一跳中转；多选或选整份订阅时自动切换": "Wuxuu sii maraa tallaabadii hore; marka la doorto node-yo badan ama isdiiwaangelinta oo dhan si toos ah ayuu u beddelmaa",
   "拖动调整优先级": "Jiid si aad u beddesho mudnaanta",
   "拖动调整优先顺序（支持上下方向键）": "Jiid si aad u beddesho mudnaanta (faleebbooyinka kor iyo hoos waa la taageeraa)",
-  "直接拖动下方账号卡片调整优先顺序。": "Si toos ah u jiid kaararka koontada ee hoose si aad u hagaajiso mudnaanta."
+  "直接拖动下方账号卡片调整优先顺序。": "Si toos ah u jiid kaararka koontada ee hoose si aad u hagaajiso mudnaanta.",
+  "账号命令名": "Magaca amarka akoonka",
+  "Cage 编号": "Lambarka Cage",
+  "Cage ID": "Aqoonsiga Cage",
+  "Claude 邮箱": "Iimaylka Claude",
+  "该账号命令名已被使用，请选择其他名称": "Magacan amarka akoonka hore ayaa loo isticmaalay. Dooro magac kale.",
+  "账号命令名须以字母或数字开头，最多 64 个字符，可含 -、_ 和 .。不能使用纯数字、内部 ID 或保留命令。": "Magaca amarka akoonku waa inuu ku bilaabmaa xaraf ama lambar, ugu badnaanna waa 64 xaraf. Wuxuu yeelan karaa -, _ iyo dhibic (.). Lama adeegsan karo tirooyin keliya, aqoonsi gudaha ah ama amar gaar loo haysto."
 }

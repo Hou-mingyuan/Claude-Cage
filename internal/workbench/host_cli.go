@@ -29,6 +29,7 @@ func hostCLIProof(token string) string {
 
 type hostCLIRequest struct {
 	Account    string
+	Name       string
 	Action     string
 	Args       []string
 	Directory  string
@@ -145,11 +146,11 @@ func (s *Server) hostCLI(w http.ResponseWriter, r *http.Request) {
 	_ = ws.SetReadDeadline(time.Time{})
 	c := &hostCLIConn{Conn: ws}
 	switch input.Action {
-	case "run":
+	case "run", "run-by-name":
 		err = s.hostCLIRun(r.Context(), c, input)
 	case "login":
 		err = s.hostCLILogin(r.Context(), c)
-	case "accounts", "account-status", "use-account":
+	case "accounts", "account-status", "use-account", "rename-account", "resolve-name":
 		err = s.cliAccountCommand(r.Context(), c, input)
 	default:
 		err = errors.New("未知的 Cage 终端操作")
@@ -254,6 +255,27 @@ func (s *Server) hostCLIStart(ctx context.Context, c *hostCLIConn, in hostCLIReq
 	if !ready || s.busy() {
 		return nil, errTerminalNotReady
 	}
+	var account claudeSelection
+	var err error
+	explicit := in.Action == "run-by-name" || in.Account != ""
+	if explicit {
+		list, err := s.cliAccountRoster()
+		if err != nil {
+			return nil, err
+		}
+		if in.Action == "run-by-name" {
+			account, err = namedCLIAccount(list, in.Name, in.Account)
+		} else {
+			var id string
+			id, err = resolveCLIAccount(list, in.Account)
+			if err == nil {
+				account, err = list.explicitCodeAccount(id)
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	if in.TTY {
 		if err := s.terminals.canStart(); err != nil {
 			return nil, err
@@ -261,7 +283,6 @@ func (s *Server) hostCLIStart(ctx context.Context, c *hostCLIConn, in hostCLIReq
 	}
 	global := cliGlobal(in.Args)
 	project, cwd, dir := "", "", ""
-	var err error
 	if !global {
 		if !filepath.IsAbs(in.Directory) {
 			return nil, errors.New("请选择绝对项目路径")
@@ -277,21 +298,7 @@ func (s *Server) hostCLIStart(ctx context.Context, c *hostCLIConn, in hostCLIReq
 		}
 		_, project = sharedRoot(runProjects{Groups: groups}, dir)
 	}
-	var account claudeSelection
-	if in.Account != "" {
-		list, err := s.cliAccountRoster()
-		if err != nil {
-			return nil, err
-		}
-		id, err := resolveCLIAccount(list, in.Account)
-		if err != nil {
-			return nil, err
-		}
-		account, err = s.selectClaudeAccount(id, false, project)
-		if err != nil {
-			return nil, err
-		}
-	} else if !cliInfo(in.Args) {
+	if !explicit && !cliInfo(in.Args) {
 		owner := project
 		if owner == "" {
 			owner = dir
@@ -428,7 +435,8 @@ func (s *Server) hostCLIStart(ctx context.Context, c *hostCLIConn, in hostCLIReq
 		return nil, err
 	}
 	published = true
-	if account.ID != "" {
+	// A single-use account does not become the project's next automatic pick.
+	if !explicit && account.ID != "" {
 		s.noteClaudeSelection(account.ID, project)
 	}
 	return p, nil

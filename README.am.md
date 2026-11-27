@@ -55,7 +55,7 @@ Claude Cage ተርሚናልን፣ አሳሽን፣ አርታዒን፣ ኦፊሴ�
 
 ## በ Cage ምን ማድረግ ይችላሉ
 
-- **Claude Codeን ከኮምፒውተርዎ ተርሚናል ይጠቀሙ (v0.2.2)።** `cage login` ወደ Claude መለያዎ ለመግባት የCage አሳሹን ይከፍታል። በፕሮጀክቱ አቃፊ ውስጥ `cage` ሲያስኬዱ አቃፊው ይጋራል፣ የClaude Code ክፍለ ጊዜም ይጀምራል። የጀርባ አገልግሎቱን አስቀድመው ለማስጀመር `cage start` ይጠቀሙ። [ትዕዛዞችና ምሳሌዎች](docs/guide/workbench.md#在本机终端使用-claude-code)
+- **Claude Codeን ከኮምፒውተርዎ ተርሚናል ይጠቀሙ (v0.2.2)።** `cage login` ወደ Claude መለያዎ ለመግባት የCage አሳሹን ይከፍታል። በፕሮጀክቱ አቃፊ ውስጥ `cage claude` ሲያስኬዱ አቃፊው ይጋራል፣ የClaude Code ክፍለ ጊዜም በነባሪው መለያ ይጀምራል። አንድን መለያ `sarah` ብለው ከሰየሙ፣ ለዚህ ጊዜ ብቻ ያንን መለያ ለመጠቀም `cage sarah` ያስኪዱ። `cage` ብቻውን የእገዛ መረጃውን ያሳያል። `cage start` የCage አገልግሎትንና በኮምፒውተርዎ ያለውን ምናባዊ ማሽን ከጀርባ ያስነሳል፣ አካባቢው ዝግጁ እስኪሆንም ይጠብቃል። `cage up` የCage ዴስክቶፕ መተግበሪያውን ይከፍታል ወይም ክፍት መስኮቱን ወደ ፊት ያመጣል። Cageን ከተርሚናሉ ለማዘመን `cage update` ያስኪዱ። የv0.2.2 npm ጥቅል ከታተመ በኋላ በ`npm install -g claude-cage` መጫን ይችላሉ። [ትዕዛዞችና ምሳሌዎች](docs/guide/workbench.md#在本机终端使用-claude-code)
 - **በአንድ መስኮት ውስጥ ይስሩ.** በተርሚናል ውስጥ የClaude ኮድን ያሂዱ፣ በአርታዒው ላይ የተደረጉ ለውጦችን ይገምግሙ እና አገልግሎቶችን አስቀድመው ለማየት እና ለመግባት የCage አሳሹን ይጠቀሙ።
 - **በፕለጊን ገበያ ሙሉ ችሎታዎችን ይክፈቱ።** ክፍቱ [የፕለጊን ገበያ (cage-plugins)](https://github.com/Lee-xeo/cage-plugins) በ«ፕለጊን = MCP + ቅጥያ» መሠረት Claude የኮምፒውተርዎን መሣሪያዎች (ስክሪንና ኪቦርድ/ማውስ፣ Office ሰነዶች፣ Blender፣ ትዕዛዞች) በግልጽ ፈቃድና ማረጋገጫ እንዲጠቀም እና ለCage ብጁ ገጾችን እንዲያክሉ ያስችላል። [የፕለጊን መመሪያ](docs/guide/plugins.md) · [የልማት መግለጫ](docs/plugins.md)
 - **በሁሉም መድረኮች አንድ ቀላል አካባቢ።** Cage በmacOS፣ Windows እና Linux ላይ ውስብስብ ብዙ እንግዳ ሥርዓቶችን ሳያስተዳድር ያንኑ ቀላል Debian 13 አካባቢ ከተመሳሳይ መሣሪያዎች እና አሠራር ጋር ይጠቀማል። [Debian አካባቢ](docs/guide/guest-systems.md)

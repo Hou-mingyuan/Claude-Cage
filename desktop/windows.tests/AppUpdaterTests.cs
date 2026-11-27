@@ -11,8 +11,10 @@ internal static class AppUpdaterTests
         var phase = Environment.GetEnvironmentVariable("CAGE_UPDATER_TEST_PHASE");
         if (phase == null) return false;
         File.AppendAllText(Path.Combine(Backend.Root, "update-requests"), operation + "\n");
+        if (phase == "early-current") { Console.WriteLine("""{"phase":"current"}"""); Environment.Exit(1); }
+        if (phase == "invalid-handoff") { Console.WriteLine("""{"phase":"handed_off"}"""); return true; }
         Console.WriteLine(JsonSerializer.Serialize(new {
-            phase = operation == "download" ? "failed" : phase,
+            phase = operation == "download" && phase != "current" ? "failed" : phase,
             latestVersion = "99.0.0", message = "fixture response",
             retryAt = phase == "failed" ? DateTimeOffset.UtcNow.AddHours(1).ToString("O") : "",
         }));
@@ -91,6 +93,27 @@ internal static class AppUpdaterTests
             await Exercise("install", "available", () => "fixture-publisher", "download", () => true);
             var failed = await Exercise("check", "failed", unsigned, "check");
             Check(failed["phase"] as string == "failed", "network failure was hidden as manual update");
+            async Task<string> TerminalPhase(string backendPhase, Func<string> certificate, int expectedExit)
+            {
+                File.WriteAllText(requests, "");
+                Environment.SetEnvironmentVariable("CAGE_UPDATER_TEST_PHASE", backendPhase);
+                using var cli = new AppUpdater(_ => {}, () => throw new Exception("unexpected installation"), () => {}, certificate, canUpgradeUnsigned: () => false);
+                using var output = new MemoryStream();
+                if (await cli.RunCLI(Stream.Null, output, new(null)) != expectedExit) throw new Exception("unexpected CLI update exit");
+                var lines = System.Text.Encoding.UTF8.GetString(output.ToArray()).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                return JsonSerializer.Deserialize<JsonElement>(lines[^1]).Text("phase");
+            }
+            Check(await TerminalPhase("available", () => throw new CryptographicException("untrusted"), 0) == "manual" &&
+                File.ReadAllText(requests) == "check\n", "manual CLI path downloaded an untrusted package");
+            Check(await TerminalPhase("current", () => "fixture-publisher", 0) == "current" &&
+                File.ReadAllText(requests) == "download\n", "cold CLI did not finish when already current");
+            Check(await TerminalPhase("failed", () => "fixture-publisher", 1) == "failed", "CLI lost a backend failure");
+            foreach (var (fixture, outcome) in new[] { ("early-current", "current"), ("invalid-handoff", "handed_off") })
+            {
+                var state = await Exercise("install", fixture, () => "fixture-publisher", "download");
+                Check((string?)state["phase"] == "failed" && !phases.Contains(outcome),
+                    "an incomplete download or a downloader event was allowed to declare the update result");
+            }
             Console.WriteLine("Windows updater eligibility: unsigned/untrusted manual fallback, eligible official upgrade, trusted download and cooldown passed.");
         }
         finally

@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sylvinus/agent-vm/internal/host"
 )
 
 func TestExportSafetyEvidenceRedactsAndExcludesPrivateFields(t *testing.T) {
 	profile := t.TempDir()
 	report := `{"policy":"cage-safety/2","created_at":"2026-11-07T04:00:00Z","configuration":"private-config-hash","run_id":"private-run-id","future_secret":"never-export","checks":[{"id":"guest_settings","title":"系统时区与语言","state":"failed","critical":true,"evidence":"locale invalid token=sample-private-token /home/alice/private 203.0.113.8","remedy":"重新应用设置","checked_at":"2026-11-07T04:00:01Z"}]}`
-	if err := os.WriteFile(filepath.Join(profile, "last-safety-report.json"), []byte(report), 0600); err != nil {
+	if err := host.CreatePrivateFile(filepath.Join(profile, "last-safety-report.json"), []byte(report)); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer

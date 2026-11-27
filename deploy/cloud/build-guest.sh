@@ -128,10 +128,10 @@ test ! -e /home/cage/.claude/.credentials.json
 test ! -e /home/cage/.claude.json
 test ! -e /home/cage/.claude-cage/account.json
 sh /usr/local/lib/cage-image-restore-sources
-systemctl stop ssh cage-audio
+systemctl stop ssh cage-audio.socket cage-audio.service
 systemctl stop systemd-journald@cage.service systemd-journald@cage.socket systemd-journald-dev-log@cage.socket 2>/dev/null || true
 systemctl stop systemd-journald.service systemd-journald.socket systemd-journald-dev-log.socket systemd-journald-audit.socket 2>/dev/null || true
-if systemctl is-active --quiet ssh cage-audio systemd-journald@cage.service; then exit 1; fi
+if systemctl is-active --quiet ssh cage-audio.socket cage-audio.service systemd-journald@cage.service; then exit 1; fi
 rm -f /etc/ssh/ssh_host_* /etc/ssh/cage_authorized_keys
 rm -rf /home/cage/.cache/cage/downloads /home/cage/.cache/mise /home/cage/.npm /home/cage/.config/code-server /home/cage/.config/pulse
 rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /var/log/journal/* /run/log/journal/*

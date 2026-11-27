@@ -121,7 +121,8 @@ try {
     Write-Host 'Building signed old and new fixture packages.'
     $old = Build-Package '0.1.7'
     $new = Build-Package '0.1.8'
-    foreach ($mode in @('success','installer-failure','startup-failure','signature-failure','digest-failure')) {
+    foreach ($mode in @('success','cli-success','cli-active','installer-failure','startup-failure','signature-failure','digest-failure')) {
+        $success = $mode -in @('success','cli-success')
         Write-Host "Running Windows update transaction: $mode"
         $scenario = Join-Path $root $mode
         $target = Join-Path $scenario 'installed application'
@@ -153,7 +154,7 @@ try {
             $linkCommand = 'mklink /J "' + (Join-Path $target 'linked-project') + '" "' + (Join-Path $scenario 'outside-project') + '"'
             & cmd.exe /d /c $linkCommand | Out-Null
             Check ($LASTEXITCODE -eq 0) 'Could not create the isolated project junction.'
-            if ($mode -eq 'success') {
+            if ($success) {
                 # A registered VM can keep its disk open while the update runs.
                 # CageData stays in place, so the open disk must not block it (#108).
                 $disk = [IO.File]::Open((Join-Path $target 'CageData/state/persistent.img'), 'Open', 'Read', 'Read')
@@ -162,9 +163,17 @@ try {
                 $holder = Start-Fixture (Join-Path $old.app 'Cage.exe') $profile @('--hold-directory', $target)
                 $null = Wait-File (Join-Path $profile 'held.json')
             }
-            $parent = Start-Fixture (Join-Path $target 'Cage.exe') $profile @('--start-update')
-            $rejected = $mode -in @('signature-failure','digest-failure')
-            if ($rejected) {
+            $parent = if ($mode -in @('cli-success','cli-active')) {
+                Start-Fixture (Join-Path $target 'resources/cage.exe') $profile @('--drive-cli')
+            } else { Start-Fixture (Join-Path $target 'Cage.exe') $profile @('--start-update') }
+            $rejected = $mode -in @('signature-failure','digest-failure','cli-active')
+            if ($mode -eq 'cli-active') {
+                $failure = Wait-File (Join-Path $profile 'parent-failed.json')
+                Check ($failure.phase -eq 'failed' -and $failure.message -like '*cage stop*') 'The terminal did not report the active-work prerequisite.'
+                Check ($parent.WaitForExit(30000) -and $parent.ExitCode -eq 1) 'The terminal did not finish after the active-work refusal.'
+                $probe = Get-Content (Join-Path $profile 'handoff-0.1.7.json') -Raw | ConvertFrom-Json
+                Check (!$probe.stop -and !(Test-Path -LiteralPath $updateDiagnostic)) 'The terminal stopped work or launched the installer after refusal.'
+            } elseif ($rejected) {
                 $failure = Wait-File (Join-Path $profile 'parent-failed.json')
                 Check ($failure.phase -eq 'failed') 'An invalid update did not report failure.'
                 Check ($parent.WaitForExit(30000) -and $parent.ExitCode -eq 1) 'The fixture did not finish after rejecting an invalid update.'
@@ -184,20 +193,24 @@ try {
                 $finished = Wait-File (Join-Path $profile 'helper-finished.json')
                 if ($helper) { Check ($helper.WaitForExit(180000)) 'The updater helper did not exit.' }
                 $result = Wait-File (Join-Path $profile 'updates/last-result.json')
-                Check ([bool]$result.success -eq ($mode -eq 'success')) "Unexpected installation result: $($result.message)"
+                Check ([bool]$result.success -eq $success) "Unexpected installation result: $($result.message)"
                 $expectedInstallerStatus = if ($mode -eq 'installer-failure') { 'failed' } else { 'success' }
                 Check ((Read-InstallerDiagnostic $updateDiagnostic).status -eq $expectedInstallerStatus) "The update installer did not record $expectedInstallerStatus."
-                Check ($finished.exit -eq $(if ($mode -eq 'success') { 0 } else { 1 })) 'The helper result and transaction return value disagreed.'
+                Check ($finished.exit -eq $(if ($success) { 0 } else { 1 })) 'The helper result and transaction return value disagreed.'
                 if ($helper) { Check ($helper.ExitCode -eq $finished.exit) "The helper process exit ($($helper.ExitCode)) disagreed with the transaction result ($($finished.exit))." }
             }
-            if ($mode -eq 'success') {
+            if ($success) {
                 $null = Wait-File (Join-Path $profile 'active.json')
+                if ($mode -eq 'cli-success') {
+                    $handoff = Wait-File (Join-Path $profile 'cli-handoff.json')
+                    Check ($handoff.confirmed -and $handoff.waited) 'The installer ran before the confirmed terminal caller released its installed executable.'
+                }
                 Check ([Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $target 'Cage.exe')).ProductVersion -eq '0.1.8') 'The update did not install the requested version.'
             } elseif (!$rejected) {
                 $reopened = Wait-File (Join-Path $profile 'reopened.json')
                 Check ($reopened.version -eq '0.1.7' -and $reopened.profile -eq $profile) 'The original application did not reopen with its original profile.'
             }
-            if ($mode -ne 'success') {
+            if (!$success) {
                 Check ((Get-FileHash -LiteralPath (Join-Path $target 'Cage.exe')).Hash -eq $originalHash) 'The failed update did not retain the original program bytes.'
             }
             $project = if ($mode -eq 'startup-failure') { 'saved by new version' } else { 'original project' }

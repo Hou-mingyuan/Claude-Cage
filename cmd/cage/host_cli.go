@@ -1,30 +1,32 @@
 package main
 
-// Reserve only Cage's existing public commands and internal launch protocols.
-// A new upstream flag or subcommand automatically reaches the guest CLI.
-func cageCommand(args []string) bool {
+import (
+	"errors"
+
+	"github.com/sylvinus/agent-vm/internal/cagecmd"
+)
+
+// Only explicit Claude and named-account invocations may forward arguments
+// to the guest. The account name stays separate from its Claude arguments.
+func cageArgs(args []string) (command []string, named bool, err error) {
 	if len(args) == 0 {
-		return false
+		return []string{"help"}, false, nil
 	}
-	switch args[0] {
-	case "help", "--help", "-h", "version", "--version", "-V", "licenses", "agent", "verify-web-assets", "verify-vm-assets", "guest-os", "interface-language",
-		"container-runtime", "container-configure", "container-install-script", "container-network", "container-tap", "server-entry", "diagnostic-event", "diagnostics", "log-relay", "app-update",
-		"clipboard-files", "upload-files", "browser-file", "desktop-file", "share-project", "serve-desktop", "serve", "desktop", "prepare-update", "init", "stop", "list", "info",
-		"proxy-start", "proxy-stop", "up", "login", "shell", "run", "claude", "doctor", "access", "name", "check", "setup", "update-tools", "hostagent", "start", "restart", "status", "install-cli", "account":
-		return true
-	case "--debug":
-		for _, arg := range args {
-			if arg != "--debug" {
-				return arg == "hostagent"
+	if cagecmd.IsCommand(args[0]) {
+		return args, false, nil
+	}
+	if args[0] == "--debug" {
+		for _, word := range args {
+			if word != "--debug" {
+				if word == "hostagent" {
+					return args, false, nil
+				}
+				break
 			}
 		}
 	}
-	return false
-}
-
-func cageArgs(args []string) []string {
-	if !cageCommand(args) {
-		return append([]string{"claude"}, args...)
+	if !cagecmd.ValidAccountName(args[0]) {
+		return nil, false, errors.New("使用默认账号请运行 cage claude [参数]，指定账号请运行 cage <名称> [参数]。运行 cage 查看帮助。")
 	}
-	return args
+	return args, true, nil
 }

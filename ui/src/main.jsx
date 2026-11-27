@@ -2107,7 +2107,7 @@ function App() {
                             ? terminalControls.current.set(tab.id, control)
                             : terminalControls.current.delete(tab.id)
                         }
-                        visible={visible && !settingsOpen && !managementPage}
+                        visible={visible && windowVisible && !settingsOpen && !managementPage}
                         focused={active === tab.id}
                         onStatus={notify}
                         onAccountChanged={view => { if (view?.desktop_terminal_id && view.desktop_terminal_id !== tab.sessionId) void openSessionTerminal({id:tab.cli_session_id}); }}

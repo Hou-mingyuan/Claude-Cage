@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -40,6 +41,11 @@ type terminalSession struct {
 	cmd                   *exec.Cmd
 	file                  terminalPTY
 	history               []byte
+	outputEnd             uint64
+	viewEpoch             context.Context
+	viewGeneration        string
+	viewStream            uint64
+	replay                *terminalReplay
 	loginNotice           string
 	dismissed             bool
 	exitOK                bool
@@ -149,6 +155,7 @@ func (t *terminalSession) stopPTY() {
 func (t *terminalSession) close() {
 	t.mu.Lock()
 	t.dismissed = true
+	t.forgetReplayLocked()
 	t.mu.Unlock()
 	t.stopPTY()
 	if t.done != nil {
@@ -263,15 +270,23 @@ type terminalSubscription struct {
 func (t *terminalSession) subscribe() *terminalSubscription {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.subscribeLocked(t.history)
+}
+
+const terminalLoginHistory = "请在 Cage 浏览器的临时登录页完成授权。若页面提供验证码，可返回此终端输入。\r\n"
+
+func (t *terminalSession) subscribeLocked(tail []byte) *terminalSubscription {
 	channel := make(chan []byte, 64)
 	if t.closed {
 		close(channel)
 	} else {
 		t.clients[channel] = true
 	}
-	history := append([]byte(nil), t.history...)
+	var history []byte
 	if t.kind == "claude-login" {
-		history = []byte("请在 Cage 浏览器的临时登录页完成授权。若页面提供验证码，可返回此终端输入。\r\n")
+		history = []byte(terminalLoginHistory)
+	} else {
+		history = bytes.Clone(tail)
 	}
 	return &terminalSubscription{History: history, Output: channel, CLIStartup: t.cliStartupDone,
 		CLIStarting: t.cliStartupPendingLocked(), session: t, channel: channel}
@@ -317,13 +332,13 @@ func (t *terminalSession) read() {
 	for {
 		n, err := t.file.Read(buffer)
 		if n > 0 {
-			chunk := append([]byte(nil), buffer[:n]...)
 			t.mu.Lock()
 			if t.kind != "claude-login" {
-				t.history = append(t.history, chunk...)
-				if len(t.history) > 512<<10 {
-					t.history = t.history[len(t.history)-(512<<10):]
-				}
+				t.recordOutputLocked(buffer[:n])
+			}
+			var chunk []byte
+			if len(t.clients) != 0 {
+				chunk = bytes.Clone(buffer[:n])
 			}
 			for channel := range t.clients {
 				select {

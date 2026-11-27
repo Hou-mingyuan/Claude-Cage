@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 )
 
 func (s *Server) cliPinnedAccount() (string, error) {
@@ -29,12 +31,24 @@ func (s *Server) cliPinnedAccount() (string, error) {
 }
 
 func resolveCLIAccount(list claudeAccountList, selector string) (string, error) {
-	if selector == "" {
+	if strings.TrimSpace(selector) == "" {
 		return "", errors.New("请提供 cage account list 中的账号编号")
 	}
+	// IDs and human-readable numbers remain stable across renames. Accept
+	// the zero-padded number shown by the desktop as well as the CLI spelling.
+	number, numberErr := strconv.ParseUint(strings.TrimPrefix(selector, "#"), 10, 32)
+	for _, a := range list.Accounts {
+		if a.ID == selector || numberErr == nil && number > 0 && uint64(a.Number) == number {
+			return a.ID, nil
+		}
+	}
+	if id, err := list.byCLIName(selector); err == nil {
+		return id, nil
+	}
+	// Explicit account subcommands also accept an email or an old display label.
 	var id string
 	for _, a := range list.Accounts {
-		if a.ID != selector && strconv.FormatUint(uint64(a.Number), 10) != strings.TrimPrefix(selector, "#") && !strings.EqualFold(a.Email, selector) && a.Label != selector {
+		if !strings.EqualFold(a.Email, selector) && a.Label != selector {
 			continue
 		}
 		if id != "" {
@@ -46,6 +60,39 @@ func resolveCLIAccount(list claudeAccountList, selector string) (string, error) 
 		return "", errors.New("找不到该 Claude 账号，请运行 cage account list")
 	}
 	return id, nil
+}
+
+func namedCLIAccount(list claudeAccountList, name, expectedID string) (claudeSelection, error) {
+	id, err := list.byCLIName(name)
+	if err != nil {
+		return claudeSelection{}, err
+	}
+	if expectedID != "" && expectedID != id {
+		return claudeSelection{}, errors.New("这个名称对应的账号已变化，请核对 cage account list 后重试")
+	}
+	return list.explicitCodeAccount(id)
+}
+
+func (s *Server) renameHostCLIAccount(ctx context.Context, selector, name string) error {
+	s.claudeAccounts.mu.Lock()
+	defer s.claudeAccounts.mu.Unlock()
+	list, err := s.loadClaudeAccounts()
+	if err != nil {
+		return err
+	}
+	id, err := resolveCLIAccount(list, selector)
+	if err != nil {
+		return err
+	}
+	if err = list.renameCLIAccount(id, name); err != nil {
+		return err
+	}
+	s.account.mu.Lock()
+	defer s.account.mu.Unlock()
+	if !s.mobileAuthorized(ctx) {
+		return errMobileLocked
+	}
+	return s.saveClaudeAccounts(list)
 }
 
 func (s *Server) cliAccountRoster() (claudeAccountList, error) {
@@ -70,9 +117,25 @@ func (s *Server) saveCLIAccount(ctx context.Context, id string, onlyIfUnpinned b
 }
 
 func (s *Server) cliAccountCommand(ctx context.Context, c *hostCLIConn, in hostCLIRequest) error {
+	if in.Action == "rename-account" {
+		if err := s.renameHostCLIAccount(ctx, in.Account, in.Name); err != nil {
+			return err
+		}
+		return c.event(hostCLIEvent{Type: "exit", Message: "Cage 账号名称已保存。"})
+	}
 	list, err := s.cliAccountRoster()
 	if err != nil {
 		return err
+	}
+	if in.Action == "resolve-name" {
+		account, err := namedCLIAccount(list, in.Name, "")
+		if err != nil {
+			return err
+		}
+		if _, err = io.WriteString(hostCLIOutput{c, 'o'}, account.ID); err != nil {
+			return err
+		}
+		return c.event(hostCLIEvent{Type: "exit"})
 	}
 	if in.Action == "account-status" {
 		count := 0
@@ -114,11 +177,11 @@ func (s *Server) cliAccountCommand(ctx context.Context, c *hostCLIConn, in hostC
 	if len(list.Accounts) == 0 {
 		b.WriteString("尚未登记 Claude 账号，可运行 cage login。\n")
 	}
+	table := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
+	if len(list.Accounts) > 0 {
+		fmt.Fprintln(table, "#\tID\tNAME\tEMAIL\tSTATUS")
+	}
 	for _, a := range list.Accounts {
-		label := a.Label
-		if label == "" {
-			label = a.Email
-		}
 		state := a.Status
 		if a.CodeUnlinked {
 			state = "需授权"
@@ -127,8 +190,9 @@ func (s *Server) cliAccountCommand(ctx context.Context, c *hostCLIConn, in hostC
 		if a.ID == pin {
 			mark = " [CLI]"
 		}
-		fmt.Fprintf(&b, "#%d\t%s\t%s%s\n", a.Number, label, state, mark)
+		fmt.Fprintf(table, "#%d\t%s\t%s\t%s\t%s%s\n", a.Number, a.ID, a.Name, a.Email, state, mark)
 	}
+	table.Flush()
 	if _, err = (hostCLIOutput{c, 'o'}).Write([]byte(b.String())); err != nil {
 		return err
 	}

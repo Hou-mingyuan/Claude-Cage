@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
-	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -172,18 +172,42 @@ func BindInterface(data []byte, name string) ([]byte, error) {
 	return yaml.Marshal(config)
 }
 
+// Address checks also protect old runtime files. A malformed per-node route
+// makes BindingMatches fail, but must not hide a retired local server.
+type routeField struct {
+	value   string
+	invalid bool
+}
+
+func (f *routeField) UnmarshalYAML(node *yaml.Node) error {
+	f.invalid = node.Decode(&f.value) != nil
+	return nil
+}
+
+type runtimeBindings struct {
+	Interface string `yaml:"interface-name"`
+	Proxies   []struct {
+		Server      string     `yaml:"server"`
+		DialerProxy routeField `yaml:"dialer-proxy"`
+		Interface   routeField `yaml:"interface-name"`
+	} `yaml:"proxies"`
+}
+
+// A service monitors one active runtime. Keep only the routing fields of
+// the most recently decoded file; every reader still checks the file bytes.
+var lastBindings parsedConfig[*runtimeBindings]
+
+func readRuntimeBindings(path string) (*runtimeBindings, error) {
+	return lastBindings.read(path, math.MaxInt64, func(data []byte) (*runtimeBindings, error) {
+		var config runtimeBindings
+		err := yaml.Unmarshal(data, &config)
+		return &config, err
+	})
+}
+
 func BoundInterface(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	config, err := readRuntimeBindings(path)
 	if err != nil {
-		return "", err
-	}
-	var config struct {
-		Interface string `yaml:"interface-name"`
-		Proxies   []struct {
-			Server string `yaml:"server"`
-		} `yaml:"proxies"`
-	}
-	if err := yaml.Unmarshal(data, &config); err != nil {
 		return "", err
 	}
 	local := newLocalServers()
@@ -202,29 +226,18 @@ func BindingMatches(path, physical string) bool {
 	if physical == "" {
 		return false
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var config struct {
-		Interface string `yaml:"interface-name"`
-		Proxies   []struct {
-			Server      string `yaml:"server"`
-			DialerProxy string `yaml:"dialer-proxy"`
-			Interface   string `yaml:"interface-name"`
-		} `yaml:"proxies"`
-	}
-	if err := yaml.Unmarshal(data, &config); err != nil || config.Interface != physical {
+	config, err := readRuntimeBindings(path)
+	if err != nil || config.Interface != physical {
 		return false
 	}
 	local := newLocalServers()
 	var resolver *nodeInterfaceResolver
 	for _, proxy := range config.Proxies {
-		if local.contains(proxy.Server) {
+		if proxy.DialerProxy.invalid || proxy.Interface.invalid || local.contains(proxy.Server) {
 			return false
 		}
-		want := resolveNodeInterface(proxy.Server, proxy.DialerProxy, physical, &resolver)
-		have := proxy.Interface
+		want := resolveNodeInterface(proxy.Server, proxy.DialerProxy.value, physical, &resolver)
+		have := proxy.Interface.value
 		if have == physical {
 			have = ""
 		}

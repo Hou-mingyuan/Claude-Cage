@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -297,9 +298,22 @@ func TestRelayGroupRefreshRelaxedPruning(t *testing.T) {
 
 func findTestMihomo(t *testing.T) string {
 	t.Helper()
+	if p := os.Getenv("CAGE_TEST_REAL_MIHOMO"); p != "" {
+		if !filepath.IsAbs(p) {
+			t.Fatal("CAGE_TEST_REAL_MIHOMO must be an absolute path to the test binary")
+		}
+		return p
+	}
+	if p, err := CorePath(); err == nil {
+		return p
+	}
+	name := "mihomo"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
 	candidates := []string{
-		filepath.Join("..", "..", "_output", "proxy-core", "mihomo"),
-		filepath.Join("..", "..", "_output", "bin", "mihomo"),
+		filepath.Join("..", "..", "_output", "proxy-core", name),
+		filepath.Join("..", "..", "_output", "bin", name),
 	}
 	for _, p := range candidates {
 		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
@@ -407,7 +421,7 @@ func startTestConnectProxy(t *testing.T, hits *atomic.Int32) (addr string, stop 
 func TestRelayGroupRealMihomoValidationAndFailover(t *testing.T) {
 	mihomoPath := findTestMihomo(t)
 	if mihomoPath == "" {
-		t.Skip("bundled mihomo binary not found under _output/proxy-core/mihomo")
+		t.Skip("set CAGE_TEST_REAL_MIHOMO or provide the bundled Mihomo binary")
 	}
 	profile := t.TempDir()
 	s, err := Load(profile)
@@ -475,7 +489,8 @@ func TestRelayGroupRealMihomoValidationAndFailover(t *testing.T) {
 	mixedPort := probeLn.Addr().(*net.TCPAddr).Port
 	probeLn.Close()
 
-	sockDir, err := os.MkdirTemp("/tmp", "cage-relay-test-*")
+	// Keep the Unix socket path short on every supported host.
+	sockDir, err := os.MkdirTemp("", "relay-")
 	if err != nil {
 		t.Fatal(err)
 	}

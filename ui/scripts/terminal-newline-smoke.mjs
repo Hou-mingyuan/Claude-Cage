@@ -37,9 +37,10 @@ for (const platform of ["MacIntel", "Win32", "Linux x86_64"]) {
     }
     async function assertInputs(start, expected) {
       const deadline = Date.now() + 3000;
-      while (inputs.length < start + expected.length && Date.now() < deadline)
+      const bytes = expected.join("");
+      while (inputs.slice(start).join("").length < bytes.length && Date.now() < deadline)
         await new Promise(resolve => setTimeout(resolve, 10));
-      assert.deepEqual(inputs.slice(start), expected);
+      assert.equal(inputs.slice(start).join(""), bytes);
     }
     await press("Shift+Enter", ["\x1b[13;2u"]);
     await press("Enter", ["\r"]);

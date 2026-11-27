@@ -34,6 +34,7 @@ type claudeAccountInput struct {
 	Action                  string            `json:"action"`
 	Identity                string            `json:"identity"`
 	ID                      string            `json:"id"`
+	Name                    *string           `json:"name,omitempty"`
 	Label                   string            `json:"label"`
 	Enabled                 *bool             `json:"enabled"`
 	HandoffGroup            *string           `json:"handoff_group"`

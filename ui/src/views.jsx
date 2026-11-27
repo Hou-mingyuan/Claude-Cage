@@ -17,6 +17,7 @@ import { api, writeClipboard, nativeAvailable } from "./api";
 import { runtimeSocketURL } from "./client-context.mjs";
 import { readClipboardContent, transferFiles, hasFiles, imagePayload, prepareClipboardPaste, sendImage } from "./image-transfer";
 import { terminalClipboardText } from "./terminal-clipboard.mjs";
+import { openTerminalStream } from "./terminal-stream.mjs";
 import { sendFiles, shellFilePaths } from "./file-transfer";
 import { installRemoteInput } from "./remote-input";
 import { desktopTextInput } from "./desktop-text-input.mjs";
@@ -269,7 +270,15 @@ export const RemoteView = forwardRef(function RemoteView(
   );
 });
 
-export function TerminalView({ session, visible, focused = true, onStatus, onControls, onAccountChanged, onLoginTab, onContinued }) {
+export function TerminalView(props) {
+  const [opened, setOpened] = useState(props.visible);
+  useEffect(() => { if (props.visible) setOpened(true); }, [props.visible]);
+  const privateLogin = (props.session.terminalKind || props.session.kind) === "claude-login";
+  if (!props.visible && (!opened || privateLogin)) return null;
+  return <OpenedTerminalView {...props} />;
+}
+
+function OpenedTerminalView({ session, visible, focused = true, onStatus, onControls, onAccountChanged, onLoginTab, onContinued }) {
   const tr = useTranslation();
   const { appearance, theme, variant } = useAppearance();
   const box = useRef(),
@@ -277,23 +286,39 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
     fit = useRef(),
     socket = useRef();
   const [connected, setConnected] = useState(false),
-    [attempt, setAttempt] = useState(0),
+    [screenReady, setScreenReady] = useState(false),
+    [historyGap, setHistoryGap] = useState(false),
     [preparing, setPreparing] = useState(Boolean(session.cli_session_id && !session.closed));
   const revealStartup = useRef();
   const hostInput = useRef(false);
   hostInput.current = Boolean(session.host_input);
   const paused = useRef(false);
   paused.current = Boolean(session.paused);
-  const replaying = useRef(false);
+  const replayingHistory = useRef(false);
+  const discardInput = useRef(null);
   useEffect(() => {
-    if (instance.current) instance.current.options.disableStdin = Boolean(session.paused || replaying.current);
+    if (session.paused) discardInput.current?.();
+    if (instance.current) instance.current.options.disableStdin = Boolean(session.paused || replayingHistory.current);
   }, [session.paused]);
+  const sessionClosed = useRef(false);
+  sessionClosed.current = Boolean(session.closed);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const focusedRef = useRef(focused);
   focusedRef.current = focused;
   useEffect(() => {
+    setConnected(false);
+    setScreenReady(false);
+    setHistoryGap(false);
     let disposed = false, emittingPaste = false, inputChain = Promise.resolve();
+    let inputTimer = null, pendingInput = [], inputGeneration = 0;
+    const clearPendingInput = () => {
+      inputGeneration++;
+      clearTimeout(inputTimer);
+      inputTimer = null;
+      pendingInput = [];
+    };
+    discardInput.current = clearPendingInput;
     const enqueue = (action) => {
       const result = inputChain.then(action);
       inputChain = result;
@@ -330,11 +355,6 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
     terminal.open(box.current);
     instance.current = terminal;
     fit.current = fitter;
-    const ws = new WebSocket(
-      runtimeSocketURL(`/terminals/${session.id}/stream`),
-    );
-    ws.binaryType = "arraybuffer";
-    socket.current = ws;
     let startupPending = Boolean(session.cli_session_id && !session.closed);
     let startupVisible = !startupPending;
     setPreparing(startupPending);
@@ -348,7 +368,7 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
     revealStartup.current = reveal;
     // A stalled launch or login prompt must remain accessible. The output is
     // retained in xterm throughout preparation, including on reconnect.
-    const startupTimer = startupPending ? setTimeout(reveal, 8000) : null;
+    let startupTimer = startupPending ? setTimeout(reveal, 8000) : null;
     const painted = () => {
       if (disposed || startupPending || startupVisible) return;
       const buffer = terminal.buffer.active;
@@ -361,7 +381,7 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
     };
     const startupRender = terminal.onRender(painted);
     const resize = () => {
-      if (!visibleRef.current) return;
+      if (!visibleRef.current || ws.readyState !== WebSocket.OPEN) return;
       try {
         fitter.fit();
         if (!hostInput.current && ws.readyState === WebSocket.OPEN)
@@ -374,15 +394,79 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
           );
       } catch {}
     };
-    ws.onopen = () => {
-      setConnected(true);
-      resize();
-      if (startupVisible && visibleRef.current && focusedRef.current) terminal.focus();
-    };
-    let historyFrame = false;
-    replaying.current = false;
+    replayingHistory.current = false;
+    let outputEnded = false;
+    const ws = openTerminalStream({
+      url: () => runtimeSocketURL(`/terminals/${session.id}/stream`),
+      // xterm 6 exposes handler registration but no public parser position.
+      // Use its actual state only at the replay/live boundary so split control
+      // strings and UTF-8 C1 introducers need no second terminal parser.
+      pendingControl() {
+        const input = terminal._core._inputHandler;
+        return input._parser.currentState !== input._parser.initialState || input._utf8Decoder.interim[0] === 0xc2;
+      },
+      ended: () => sessionClosed.current,
+      control(state) {
+        if (state.type === "terminal-end") outputEnded = true;
+        if (state.type === "cli-startup") {
+          startupPending = state.pending;
+          if (startupPending && startupVisible) {
+            startupVisible = false;
+            setPreparing(true);
+            clearTimeout(startupTimer);
+            startupTimer = setTimeout(reveal, 8000);
+          }
+          terminal.refresh(0, terminal.rows - 1);
+        }
+      },
+      write(data, historical, done) {
+        replayingHistory.current = historical;
+        terminal.options.disableStdin = historical || paused.current;
+        terminal.write(data, () => {
+          if (disposed) return;
+          replayingHistory.current = false;
+          terminal.options.disableStdin = paused.current;
+          done();
+        });
+      },
+      restore(mode, done) {
+        setHistoryGap(mode === "gap");
+        if (mode === "reset") {
+          terminal.reset();
+          done();
+          return;
+        }
+        // End any partial control string and return to the normal screen.
+        // DECSTR resets terminal modes without erasing its existing scrollback.
+        replayingHistory.current = true;
+        terminal.options.disableStdin = true;
+        terminal.write("\x18\x1b\\\x1b[?1049l\x1b[!p\x1b[0m\r\n", () => {
+          if (disposed) return;
+          replayingHistory.current = false;
+          terminal.options.disableStdin = paused.current;
+          done();
+        });
+      },
+      connection(active, parked) {
+        if (disposed) return;
+        if (!active) clearPendingInput();
+        setConnected(active);
+        if (parked || (!active && !outputEnded && !sessionClosed.current)) {
+          setScreenReady(false);
+          terminal.blur();
+        }
+        if (!parked && !active) reveal();
+      },
+      ready() {
+        if (disposed || !visibleRef.current) return;
+        setScreenReady(true);
+        resize();
+        if (startupVisible && focusedRef.current) terminal.focus();
+      },
+    });
+    socket.current = ws;
     const clipboardHandler = terminal.parser.registerOscHandler(52, async (data) => {
-      if (disposed || replaying.current || !visibleRef.current || !focusedRef.current || !box.current?.contains(document.activeElement)) return true;
+      if (disposed || replayingHistory.current || !visibleRef.current || !focusedRef.current || !box.current?.contains(document.activeElement)) return true;
       const text = terminalClipboardText(data);
       if (text === undefined) return true;
       try {
@@ -391,37 +475,8 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
       } catch { if (!disposed) onStatus("无法写入本机剪贴板"); }
       return true;
     });
-    ws.onmessage = (event) => {
-      if (typeof event.data === "string") {
-        let state;
-        try { state = JSON.parse(event.data); } catch { return; }
-        if (state.type === "cli-startup") {
-          startupPending = state.pending;
-          terminal.refresh(0, terminal.rows - 1);
-        }
-        if (state.type === "history") historyFrame = true;
-        return;
-      }
-      if (historyFrame) {
-        historyFrame = false;
-        replaying.current = true;
-        // History includes old device/color queries. Answering them again can
-        // overflow the remote PTY input queue and close the new connection.
-        // Keep input disabled until xterm has finished parsing the replay;
-        // subsequent live output must still receive normal terminal replies.
-        terminal.options.disableStdin = true;
-        terminal.write(new Uint8Array(event.data), () => {
-          if (!disposed) {
-            replaying.current = false;
-            terminal.options.disableStdin = paused.current;
-          }
-        });
-      } else terminal.write(new Uint8Array(event.data));
-    };
-    ws.onclose = () => { if (!disposed) { setConnected(false); reveal(); } };
-    let inputTimer = null, pendingInput = [];
     const send = (data) => {
-      if (hostInput.current || paused.current) return;
+      if (hostInput.current || paused.current || !visibleRef.current || replayingHistory.current) return;
       if (disposed || ws.readyState !== WebSocket.OPEN) throw new Error("终端已断开，请重新连接后重试");
       // A redraw can produce several synchronous device replies. Preserve
       // byte order but send each event-loop batch as one PTY input message.
@@ -430,36 +485,40 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
         inputTimer = null;
         const data = pendingInput.join("");
         pendingInput = [];
-        if (!disposed && !paused.current && ws.readyState === WebSocket.OPEN)
+        if (!disposed && visibleRef.current && !hostInput.current && !paused.current && ws.readyState === WebSocket.OPEN)
           ws.send(JSON.stringify({ type: "input", data }));
       }, 0);
     };
     terminal.onData((data) => {
       // Replayed history can contain DA/DSR/OSC queries; xterm's answers to
       // them belong to a past screen and would flood the shell's input.
-      if (disposed || replaying.current || paused.current) return;
+      if (disposed || replayingHistory.current || paused.current || !visibleRef.current) return;
+      const generation = inputGeneration;
       if (emittingPaste) send(data);
-      else void enqueue(() => send(data)).catch(() => {});
+      else void enqueue(() => { if (generation === inputGeneration) send(data); }).catch(() => {});
     });
     const receive = (content) => {
       if (hostInput.current || paused.current) return;
+      const generation = inputGeneration;
+      const pasteAllowed = () => generation === inputGeneration && !disposed && visibleRef.current && focusedRef.current &&
+        !hostInput.current && !paused.current && ws.readyState === WebSocket.OPEN;
       // Attach rejection immediately, even while another image is in flight.
       const ready = Promise.resolve(content).then(value => ({ value }), error => ({ error }));
       onStatus("正在传递剪贴板内容…");
       void enqueue(async () => {
         const { value, error } = await ready;
         if (error) throw error;
-        if (disposed || !visibleRef.current || !focusedRef.current || ws.readyState !== WebSocket.OPEN) throw new Error("终端已切换或断开，请重新粘贴");
+        if (!pasteAllowed()) throw new Error("终端已切换或断开，请重新粘贴");
         let text = value.text || "";
         if (value.files || value.fileSelection) {
-          const result = await sendFiles(value, "terminal", session.id, { valid: () => !disposed && visibleRef.current && focusedRef.current && ws.readyState === WebSocket.OPEN });
+          const result = await sendFiles(value, "terminal", session.id, { valid: pasteAllowed });
           text = shellFilePaths(result.paths);
         }
         if (value.png) {
-          const result = await sendImage(value, "terminal", session.id, { valid: () => !disposed && visibleRef.current && focusedRef.current && ws.readyState === WebSocket.OPEN });
+          const result = await sendImage(value, "terminal", session.id, { valid: pasteAllowed });
           text = shellFilePaths([result.path]);
         }
-        if (disposed || !visibleRef.current || !focusedRef.current) throw new Error("终端已切换，请回到原终端重新粘贴");
+        if (!pasteAllowed()) throw new Error("终端已切换，请回到原终端重新粘贴");
         // Honor xterm's bracketed-paste mode without enqueuing behind this job.
         emittingPaste = true;
         try { terminal.paste(text); } finally { emittingPaste = false; }
@@ -514,7 +573,7 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
     host.addEventListener("copy", onCopy, true);
     onControls?.({
       edit(action) {
-        if (!box.current?.contains(document.activeElement)) return false;
+        if (!visibleRef.current || !focusedRef.current || !box.current?.contains(document.activeElement)) return false;
         if (action === "copy") {
           copySelection();
           return true;
@@ -581,11 +640,11 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
     });
     const observer = new ResizeObserver(resize);
     observer.observe(box.current);
-    resize();
+    ws.setVisible(visibleRef.current);
     return () => {
       disposed = true;
-      clearTimeout(inputTimer);
-      pendingInput = [];
+      discardInput.current = null;
+      clearPendingInput();
       clearTimeout(startupTimer);
       revealStartup.current = null;
       startupRender.dispose();
@@ -597,12 +656,15 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
       onControls?.(null);
       observer.disconnect();
       ws.close();
+      socket.current = null;
       terminal.dispose();
       instance.current = null;
     };
-  }, [session.id, session.cli_session_id, attempt]);
+  }, [session.id, session.cli_session_id]);
   useEffect(() => {
+    socket.current?.setVisible(visible);
     if (visible) {
+      if (socket.current?.readyState !== WebSocket.OPEN) return;
       fit.current?.fit();
       if (focused && !preparing) instance.current?.focus();
       const ws = socket.current,
@@ -621,22 +683,23 @@ export function TerminalView({ session, visible, focused = true, onStatus, onCon
   return (
     <div className={`terminal-view ${visible ? "" : "concealed"}`}>
       {session.workspace_notice && <p className="connection-banner" role="status">{session.workspace_notice}</p>}
-      {session.paused && <PausedSession id={session.cli_session_id} request={terminalAccountRequest} onContinued={onContinued} disabled={!connected} />}
+      {visible && session.paused && <PausedSession id={session.cli_session_id} request={terminalAccountRequest} onContinued={onContinued} disabled={!connected} />}
       {session.host_input && <p className="connection-banner" role="status">{tr("正在本机终端输入。关闭本机终端后可在这里继续。")}</p>}
-      <div className={`terminal-host ${preparing ? "terminal-preparing" : ""}`} ref={box} aria-hidden={preparing || undefined} />
+      {historyGap && <p className="connection-banner" role="status">{tr("隐藏期间的输出超过回放上限，已接回最近的终端输出。")}</p>}
+      <div className={`terminal-host ${preparing || !screenReady ? "terminal-preparing" : ""}`} ref={box} aria-hidden={preparing || !screenReady || undefined} />
       {preparing && (
         <div className="terminal-startup" role="status">
           <span>{tr("正在准备 Claude 会话…")}</span>
           <button onClick={() => revealStartup.current?.()}>{tr("显示启动过程")}</button>
         </div>
       )}
-      {!connected && (
+      {(!connected || (!screenReady && !preparing)) && (
         <div className="terminal-note">
           {session.closed
             ? session.login_notice || tr("终端会话已结束。可点击项目右侧的终端图标新建终端。")
             : tr("正在连接终端…")}
-          {!session.closed && (
-            <button onClick={() => setAttempt((v) => v + 1)}>
+          {!session.closed && !connected && (
+            <button onClick={() => { setScreenReady(false); socket.current?.reconnect(); }}>
               <RefreshCw size={13} />
               {tr("重新连接")}
             </button>

@@ -12,24 +12,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/cagecmd"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 	"golang.org/x/term"
 )
 
 type hostCLIStatus struct {
-	Ready         bool
+	Ready         bool  `json:"ready"`
 	Running       bool  `json:"vm_running"`
 	NetworkOpen   *bool `json:"network_open"`
 	NetworkPaused bool  `json:"network_paused"`
-	Job           Job
+	Job           Job   `json:"job"`
 }
 
 const cliServiceRunning = "Cage 后台服务正在运行。"
+const cliStatusPath = "/api/status?view=runtime"
 
 func cliCall(ctx context.Context, c *controllerClient, method, path string, in, out any) error {
 	code, reason, err := c.callReason(ctx, method, path, in, out)
@@ -45,7 +48,7 @@ func cliCall(ctx context.Context, c *controllerClient, method, path string, in, 
 	return &AgentError{HTTPStatus: code, Message: reason}
 }
 
-func waitCLIJob(ctx context.Context, c *controllerClient, job Job) error {
+func waitCLIJob(ctx context.Context, c *controllerClient, job Job, allowOffline bool) error {
 	if job.ID == "" {
 		return errors.New("后台没有返回环境任务编号")
 	}
@@ -64,32 +67,38 @@ func waitCLIJob(ctx context.Context, c *controllerClient, job Job) error {
 		}
 		job = next
 	}
-	if job.Error != "" {
-		return errors.New(job.Error)
-	}
 	if job.Canceled || job.SupersededBy != "" {
 		return errors.New("环境任务已取消或被替换")
+	}
+	if job.Error != "" && !(allowOffline && job.NetworkCheckFailed) {
+		return errors.New(job.Error)
 	}
 	return nil
 }
 
-func runCLILifecycle(ctx context.Context, c *controllerClient, action string) error {
+func runCLILifecycle(ctx context.Context, c *controllerClient, action string, allowOffline bool) error {
 	var job Job
-	if err := cliCall(ctx, c, "POST", "/api/"+action, struct{}{}, &job); err != nil {
+	path := "/api/" + action
+	var input any = struct{}{}
+	if action == "rebuild" {
+		path = "/api/start"
+		input = map[string]string{"reset_disk_token": hostCLIProof(c.record.Token)}
+	}
+	if err := cliCall(ctx, c, "POST", path, input, &job); err != nil {
 		var e *AgentError
 		if !errors.As(err, &e) || e.HTTPStatus != 409 {
 			return err
 		}
 		var status hostCLIStatus
-		if cliCall(ctx, c, "GET", "/api/status", nil, &status) != nil || !status.Job.Running || status.Job.Kind != action {
+		if cliCall(ctx, c, "GET", cliStatusPath, nil, &status) != nil || !status.Job.Running || status.Job.Kind != action {
 			return err
 		}
 		job = status.Job
 	}
-	return waitCLIJob(ctx, c, job)
+	return waitCLIJob(ctx, c, job, allowOffline)
 }
 
-func launchHostCLIDesktop(config string) error {
+func launchHostCLIDesktop(config string, windowOnly bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -99,16 +108,24 @@ func launchHostCLIDesktop(config string) error {
 		return err
 	}
 	dir := filepath.Dir(exe)
+	windowSetting := "0"
+	if windowOnly {
+		windowSetting = "1"
+	}
+	launchEnv := []string{cage.ConfigEnv + "=" + config, desktopWindowOnlyEnv + "=" + windowSetting}
 	var command string
 	var args []string
 	switch runtime.GOOS {
 	case "darwin":
 		bundle := filepath.Dir(filepath.Dir(dir))
 		if filepath.Ext(bundle) != ".app" {
-			return errors.New("请使用 Cage.app 内的终端命令以打开登录窗口")
+			return errors.New("请使用 Cage.app 自带的终端命令打开工作台")
 		}
 		command = "/usr/bin/open"
-		args = []string{"-a", bundle, "--env", cage.ConfigEnv + "=" + config}
+		args = []string{"-a", bundle}
+		for _, entry := range launchEnv {
+			args = append(args, "--env", entry)
+		}
 	case "windows":
 		command = filepath.Join(filepath.Dir(dir), "Cage.exe")
 	default:
@@ -120,9 +137,9 @@ func launchHostCLIDesktop(config string) error {
 	if _, err = os.Stat(command); err != nil {
 		return errors.New("无法找到随 Cage 安装的桌面窗口")
 	}
-	return startDetached(func() *exec.Cmd {
+	return startDetached(windowVisible, func() *exec.Cmd {
 		cmd := exec.Command(command, args...)
-		cmd.Env = append(os.Environ(), cage.ConfigEnv+"="+config)
+		cmd.Env = append(os.Environ(), launchEnv...)
 		return cmd
 	})
 }
@@ -130,7 +147,7 @@ func launchHostCLIDesktop(config string) error {
 // A freshly opened desktop may still be on its environment chooser. Select
 // the local workload with the same generation checks as the native window.
 func showHostCLIDesktop(ctx context.Context, config string, workload *controllerClient) error {
-	if err := launchHostCLIDesktop(config); err != nil {
+	if err := launchHostCLIDesktop(config, false); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -152,21 +169,30 @@ func showHostCLIDesktop(ctx context.Context, config string, workload *controller
 			if err := cliCall(ctx, desktop, "GET", "/api/client/context", nil, &view); err != nil {
 				return err
 			}
+			if view.Mode == "remote" || view.Candidate != nil && view.Candidate.Mode != "local" {
+				return errors.New("Cage 窗口正在使用远程环境。请切换到本机环境后重试此命令。")
+			}
 			if view.Mode == "local" && view.State.State == "connected" {
-				// The desktop can adopt an idle headless controller by restarting
-				// it. Authenticate to the workload now selected by that window.
-				next, err := agentConnect(ctx, config)
+				// A hidden window may still point at the controller replaced by
+				// restart. Probe its selected generation before showing login.
+				selected := *desktop
+				selected.connectionID = view.ConnectionID
+				code, err := selected.callContext(ctx, "GET", "/api/account", nil, nil)
 				if err != nil {
 					return err
 				}
-				next.connectionID = "local"
-				next.client.Timeout = workload.client.Timeout
-				workload.close()
-				*workload = *next
-				return nil
-			}
-			if view.Mode == "remote" || view.Candidate != nil && view.Candidate.Mode != "local" {
-				return errors.New("Cage 窗口正在使用远程环境。请切换到本机环境后重试此命令。")
+				if code == http.StatusOK {
+					next, err := connectHostCage(ctx, config, false)
+					if err != nil {
+						return err
+					}
+					workload.close()
+					*workload = *next
+					return nil
+				}
+				if code != http.StatusConflict && code != http.StatusBadGateway && code != http.StatusServiceUnavailable {
+					return fmt.Errorf("无法确认 Cage 窗口的本机连接（HTTP %d）", code)
+				}
 			}
 			input := switchRequest{Mode: "local", ConnectionID: view.ConnectionID}
 			path := ""
@@ -215,15 +241,37 @@ func cliWorkbenchAccessHint(ctx context.Context, c *controllerClient) (string, e
 	return "请在 Cage 窗口完成本机工作台的首次设置。", nil
 }
 
-func cliWaitAccess(ctx context.Context, c *controllerClient, config string, interactive bool, stderr io.Writer) (status hostCLIStatus, err error) {
-	shown := false
+// Resume only a trust grant the user already enabled. The same service that
+// verifies the private local credential also enforces an explicit manual lock.
+func cliResumeTrusted(ctx context.Context, c *controllerClient) bool {
+	var account accountView
+	if cliCall(ctx, c, "GET", "/api/account", nil, &account) != nil || account.RequireAuthentication || (!account.TrustedLocal && !account.TrustedLogin) {
+		return false
+	}
+	local, err := c.localControl(ctx, "status", desktopLocalRequest{})
+	if err != nil {
+		return false
+	}
+	var reply trustedLoginReply
+	in := trustedLoginRequest{Action: "resume", Token: c.record.Token, InstanceID: local.InstanceID}
+	return cliCall(ctx, c, "POST", "/api/desktop-local/trusted-login", in, &reply) == nil && reply.Error == ""
+}
+
+func cliWaitAccess(ctx context.Context, c *controllerClient, config string, interactive, needsEnvironment bool, stderr io.Writer) (status hostCLIStatus, err error) {
+	shown, triedTrust := false, false
 	for {
-		err = cliCall(ctx, c, "GET", "/api/status", nil, &status)
+		err = cliCall(ctx, c, "GET", cliStatusPath, nil, &status)
 		var hint string
 		if err != nil {
 			var access *AgentError
 			if !errors.As(err, &access) || access.HTTPStatus != http.StatusLocked {
 				return status, err
+			}
+			if !triedTrust {
+				triedTrust = true
+				if cliResumeTrusted(ctx, c) {
+					continue
+				}
 			}
 			if !shown {
 				if hint, err = cliWorkbenchAccessHint(ctx, c); err != nil {
@@ -231,7 +279,7 @@ func cliWaitAccess(ctx context.Context, c *controllerClient, config string, inte
 				}
 			}
 		} else {
-			if status.Ready {
+			if status.Ready || !needsEnvironment {
 				return status, nil
 			}
 			var init initializationView
@@ -261,107 +309,171 @@ func cliWaitAccess(ctx context.Context, c *controllerClient, config string, inte
 	}
 }
 
+func connectHostCage(ctx context.Context, config string, ensure bool) (*controllerClient, error) {
+	if ensure {
+		start, cancel := context.WithTimeout(ctx, 40*time.Second)
+		err := AgentStartService(start, config)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+	}
+	c, err := agentConnect(ctx, config)
+	if err == nil {
+		c.connectionID = "local"
+		c.client.Timeout = 2 * time.Minute
+	}
+	return c, err
+}
+
+func stopHostCage(ctx context.Context, config string, interactive bool, stderr io.Writer) error {
+	profile := filepath.Dir(config)
+	free, err := controllerLockStatus(profile)
+	if err != nil {
+		return err
+	}
+	if free {
+		running, err := controllerVMState(profile)
+		if err != nil {
+			return err
+		}
+		if !running {
+			return managedproxy.Stop(profile)
+		}
+	}
+	// An orphaned VM needs its workload controller to close the network gate,
+	// stop tasks and unmount projects through the same path as the workbench.
+	c, err := connectHostCage(ctx, config, true)
+	if err != nil {
+		return err
+	}
+	defer c.close()
+	view, err := c.localControl(ctx, "status", desktopLocalRequest{})
+	if err != nil {
+		return err
+	}
+	if !view.Known {
+		return errors.New("无法确认本机环境的状态，请在 Cage 工作台检查后重试")
+	}
+	if view.Busy || view.Running || view.LiveTerminals > 0 {
+		if _, err = cliWaitAccess(ctx, c, config, interactive, false, stderr); err != nil {
+			return err
+		}
+		if err = runCLILifecycle(ctx, c, "stop", false); err != nil {
+			return err
+		}
+		view, err = c.localControl(ctx, "status", desktopLocalRequest{})
+		if err != nil {
+			return err
+		}
+	}
+	if !view.Known || view.Busy || view.Running || view.LiveTerminals != 0 {
+		return errors.New("本机仍有任务或虚拟机在运行，请查看停止结果")
+	}
+	return c.releaseLocal(ctx, view.DesktopLocalStatus, false)
+}
+
 // HostCLI is the entry point of the installed local command. Management
 // requests never create a project and the execution socket is pinned locally.
 func HostCLI(ctx context.Context, config, action string, args []string, in, out, errOut *os.File) (int, error) {
-	var selector string
+	if action == "up" {
+		if err := launchHostCLIDesktop(config, true); err != nil {
+			return 1, err
+		}
+		return 0, nil
+	}
+	if action == "stop" || action == "restart" {
+		if err := stopHostCage(ctx, config, term.IsTerminal(int(in.Fd())) && term.IsTerminal(int(out.Fd())), errOut); err != nil {
+			return 1, err
+		}
+		if action == "stop" {
+			fmt.Fprintln(out, "Cage 环境和后台服务已停止。")
+			return 0, nil
+		}
+		action = "start"
+	}
+	rebuild := (action == "start" || action == "login") && slices.Contains(args, "--reset")
+	var selector, name string
+	if action == "run-by-name" {
+		if len(args) == 0 || !cagecmd.ValidAccountName(args[0]) {
+			return 2, errors.New("用法：cage <账号名称> [Claude 参数]")
+		}
+		name, args = args[0], args[1:]
+	}
 	if action == "account" {
 		switch {
 		case len(args) == 1 && args[0] == "list":
 			action = "accounts"
 		case len(args) == 2 && args[0] == "use":
 			action, selector = "use-account", args[1]
-		case len(args) >= 2 && args[0] == "run":
+		case len(args) == 3 && args[0] == "rename":
+			action, selector, name = "rename-account", args[1], args[2]
+		case len(args) >= 2 && args[0] == "run" && strings.TrimSpace(args[1]) != "":
 			action, selector, args = "run", args[1], args[2:]
 			if len(args) > 0 && args[0] == "--" {
 				args = args[1:]
 			}
 		default:
-			return 2, errors.New("用法：cage account list | use <编号或 auto> | run <编号> [--] [Claude 参数]")
+			return 2, errors.New("用法：cage account list | use <账号或 auto> | run <账号> [--] [Claude 参数] | rename <账号> <新名称>")
 		}
 	}
 	profile := filepath.Dir(config)
-	if (action == "stop" || action == "status") && controllerLockFree(profile) {
+	if action == "status" && controllerLockFree(profile) {
 		running, err := controllerVMState(profile)
 		if err != nil {
 			return 1, err
 		}
-		if !running || action == "status" {
-			if action == "status" {
-				fmt.Fprintln(out, "Cage 后台服务未运行。")
-			}
-			if !running && action == "stop" {
-				if err = managedproxy.Stop(profile); err != nil {
-					return 1, err
-				}
-			}
-			if running {
-				fmt.Fprintln(out, "Cage 环境正在运行。")
-			} else {
-				fmt.Fprintln(out, "Cage 环境已停止。")
-			}
-			return 0, nil
+		fmt.Fprintln(out, "Cage 后台服务未运行。")
+		if running {
+			fmt.Fprintln(out, "Cage 环境正在运行。")
+		} else {
+			fmt.Fprintln(out, "Cage 环境已停止。")
 		}
+		return 0, nil
 	}
-	if action != "status" {
-		start, cancel := context.WithTimeout(ctx, 40*time.Second)
-		err := AgentStartService(start, config)
-		cancel()
-		if err != nil {
-			return 1, err
-		}
-		if action == "start" {
-			fmt.Fprintln(out, cliServiceRunning)
-			return 0, nil
-		}
-	}
-	c, err := agentConnect(ctx, config)
+	c, err := connectHostCage(ctx, config, action != "status")
 	if err != nil {
 		return 1, err
 	}
 	defer c.close()
-	c.connectionID = "local"
-	c.client.Timeout = 2 * time.Minute
 	if action == "status" {
 		fmt.Fprintln(out, cliServiceRunning)
 	}
-	if action == "accounts" || action == "use-account" {
-		return cliExchange(ctx, c, hostCLIRequest{Action: action, Account: selector}, in, out, errOut, out)
+	if action == "accounts" || action == "use-account" || action == "rename-account" {
+		return cliExchange(ctx, c, hostCLIRequest{Action: action, Account: selector, Name: name}, in, out, errOut, out)
 	}
 	var status hostCLIStatus
-	if action == "status" || action == "stop" || action == "restart" {
-		if err = cliCall(ctx, c, "GET", "/api/status", nil, &status); err != nil {
+	if action == "status" {
+		if err = cliCall(ctx, c, "GET", cliStatusPath, nil, &status); err != nil {
 			var access *AgentError
-			if action == "status" && errors.As(err, &access) && access.HTTPStatus == http.StatusLocked {
+			if errors.As(err, &access) && access.HTTPStatus == http.StatusLocked {
 				hint, err := cliWorkbenchAccessHint(ctx, c)
 				if err != nil {
 					return 1, err
+				}
+				local, err := c.localControl(ctx, "status", desktopLocalRequest{})
+				if err != nil {
+					return 1, err
+				}
+				if local.Known && local.Running {
+					fmt.Fprintln(out, "Cage 环境正在运行。")
+				} else if local.Known {
+					fmt.Fprintln(out, "Cage 环境已停止。")
 				}
 				fmt.Fprintln(out, hint)
 				return 0, nil
 			}
 			return 1, err
 		}
-		if action == "status" {
-			if status.Ready {
-				fmt.Fprintln(out, "Cage 环境已就绪。")
-				return cliExchange(ctx, c, hostCLIRequest{Action: "account-status"}, in, out, errOut, out)
-			} else if status.Running {
-				fmt.Fprintln(out, "Cage 环境正在准备。")
-			} else {
-				fmt.Fprintln(out, "Cage 环境已停止。")
-			}
-			return 0, nil
-		}
-		if status.Running || status.Ready || status.Job.Running || action == "stop" {
-			if err = runCLILifecycle(ctx, c, "stop"); err != nil {
-				return 1, err
-			}
-		}
-		if action == "stop" {
+		if status.Ready && status.Running {
+			fmt.Fprintln(out, "Cage 环境已就绪。")
+			return cliExchange(ctx, c, hostCLIRequest{Action: "account-status"}, in, out, errOut, out)
+		} else if status.Running {
+			fmt.Fprintln(out, "Cage 环境正在准备。")
+		} else {
 			fmt.Fprintln(out, "Cage 环境已停止。")
-			return 0, nil
 		}
+		return 0, nil
 	}
 	_, printMode := cliOption(args, "-p", "--print")
 	inputTTY := term.IsTerminal(int(in.Fd()))
@@ -376,32 +488,61 @@ func HostCLI(ctx context.Context, config, action string, args []string, in, out,
 	if action == "login" {
 		fmt.Fprintln(errOut, "正在准备 Claude 账号授权…")
 	}
-	status, err = cliWaitAccess(ctx, c, config, canOpen, errOut)
+	status, err = cliWaitAccess(ctx, c, config, canOpen, action != "run-by-name", errOut)
 	if err != nil {
 		return 1, err
 	}
-	if status.Job.Kind == "start" && status.Job.Running {
-		if err := waitCLIJob(ctx, c, status.Job); err != nil {
+	if action == "run-by-name" && (!status.Ready || status.Job.Running && (status.Job.Kind == "start" || status.Job.Kind == "rebuild")) {
+		// Resolve before a cold start or a wait. Pin the same ID at admission so
+		// reassigning a name during boot cannot send the prompt to another account.
+		var resolved strings.Builder
+		code, err := cliExchange(ctx, c, hostCLIRequest{Action: "resolve-name", Name: name}, strings.NewReader(""), &resolved, errOut, nil)
+		if err != nil || code != 0 {
+			return code, err
+		}
+		selector = resolved.String()
+		if !validClaudeID(selector) {
+			return 1, errors.New("后台未能确认这个名称对应的账号")
+		}
+		if !status.Ready {
+			status, err = cliWaitAccess(ctx, c, config, canOpen, true, errOut)
+			if err != nil {
+				return 1, err
+			}
+		}
+	}
+	if status.Job.Running && (status.Job.Kind == "start" || status.Job.Kind == "rebuild") {
+		if status.Job.Kind == "rebuild" {
+			rebuild = false // This invocation is joining the rebuild already underway.
+		}
+		if err := waitCLIJob(ctx, c, status.Job, action == "start"); err != nil {
 			return 1, err
 		}
-		if err := cliCall(ctx, c, "GET", "/api/status", nil, &status); err != nil {
+		if err := cliCall(ctx, c, "GET", cliStatusPath, nil, &status); err != nil {
 			return 1, err
 		}
 	}
-	if !status.Ready {
+	if !status.Ready || action == "start" && !status.Running || rebuild {
 		fmt.Fprintln(errOut, "正在启动 Cage 环境…")
-		if err = runCLILifecycle(ctx, c, "start"); err != nil {
+		operation := "start"
+		if rebuild {
+			operation = "rebuild"
+		}
+		if err = runCLILifecycle(ctx, c, operation, action == "start"); err != nil {
 			return 1, err
 		}
-		if err = cliCall(ctx, c, "GET", "/api/status", nil, &status); err != nil {
+		if err = cliCall(ctx, c, "GET", cliStatusPath, nil, &status); err != nil {
 			return 1, err
 		}
-		if !status.Ready {
+		if !status.Ready || action == "start" && !status.Running {
 			return 1, errors.New("环境尚未就绪，请在 Cage 工作台查看启动详情")
 		}
 	}
-	if action == "restart" {
-		fmt.Fprintln(out, "Cage 环境已就绪。")
+	if action == "start" {
+		fmt.Fprintln(out, "Cage 后台服务和本机环境已就绪。")
+		if status.NetworkOpen != nil && !*status.NetworkOpen {
+			fmt.Fprintln(errOut, "本机环境可用，外网尚未放行。请在工作台查看联网检查。")
+		}
 		return 0, nil
 	}
 	if status.Running && status.NetworkOpen != nil && !*status.NetworkOpen && (action == "login" || !cliGlobal(args) && !cliSubcommand(args)) {
@@ -412,13 +553,13 @@ func HostCLI(ctx context.Context, config, action string, args []string, in, out,
 		}
 	}
 	var dir string
-	if action == "run" && !cliGlobal(args) {
+	if (action == "run" || action == "run-by-name") && !cliGlobal(args) {
 		dir, err = os.Getwd()
 		if err != nil {
 			return 1, err
 		}
 	}
-	request := hostCLIRequest{Action: action, Account: selector, Args: args, Directory: dir, TTY: tty}
+	request := hostCLIRequest{Action: action, Account: selector, Name: name, Args: args, Directory: dir, TTY: tty}
 	if tty {
 		cols, rows, _ := term.GetSize(int(out.Fd()))
 		request.Cols, request.Rows = uint16(cols), uint16(rows)
@@ -433,7 +574,7 @@ func HostCLI(ctx context.Context, config, action string, args []string, in, out,
 		return login()
 	}
 	code, err := cliExchange(ctx, c, request, stdin, out, errOut, out)
-	if errors.Is(err, errHostCLILogin) && tty {
+	if errors.Is(err, errHostCLILogin) && tty && action == "run" && selector == "" {
 		if loginCode, loginErr := login(); loginErr != nil || loginCode != 0 {
 			return loginCode, loginErr
 		}

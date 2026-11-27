@@ -37,16 +37,26 @@ import (
 
 const help = `Claude Cage — local isolated Claude development
 
-cage [prompt / Claude options / subcommand]
-                   Run the official Claude Code in the current project. The
-                   current folder is shared automatically. Example:
-                   git diff | cage -p "Review this diff" --output-format json
-cage start         Start or reuse the local Cage service in the background
+cage               Show this command overview
+cage claude [args...]   Run Claude Code with the default account in the current
+                   project. Pass Claude prompts, options and subcommands directly.
+                   git diff | cage claude -p "Review this diff" --output-format json
+cage <name> [args...]   Use the named Cage account for this invocation.
+                   Example: cage sarah -p "Review this project"
+                   Project invocations share the current folder automatically.
+cage start         Start Cage in the background and wait for its local environment
+                   --reset re-clones the VM; files and logins on its disk are lost
 cage status        Show the state of the background service and the environment
-cage account list  Show registered Claude Code accounts
-cage account use ID|auto    Select a CLI account or use workbench scheduling
-cage account run ID [--] ARGS   Use an account just for this invocation
-cage restart       Restart the local environment, interrupt its tasks, and wait until ready
+cage account list  Show account numbers, stable IDs, names, Claude emails and status
+cage account use SELECTOR|auto    Select a default CLI account or use workbench scheduling
+cage account run SELECTOR [--] ARGS   Use an account just for this invocation
+cage account rename SELECTOR NAME     Change the local name used by cage <name>
+cage restart       Restart the local Cage service and environment using the existing disk
+                   Running tasks are interrupted.
+cage update [--check] [--yes]   Update the installed Cage application
+                   --check only checks for a release. --yes confirms installation.
+                   Save your work and run cage stop yourself if the environment is in use.
+cage update-tools  Update the tools installed inside the environment
 cage install-cli   Install the terminal command for this user
 cage desktop       Open the unified Cage workbench (desktop launcher)
 cage agent         Discover and use the versioned, JSON-only external Agent interface
@@ -59,8 +69,7 @@ cage guest-os --json  Check host prerequisites for a same-system guest
 cage proxy-start   Start Cage's bundled proxy core with the applied node
 cage proxy-stop    Stop Cage's core and close external networking
 cage setup         Build the isolated base VM through the specified proxy
-cage up            Start the shared Cage environment, editor and browser
-                   --reset re-clones the VM; files and logins on its disk are lost
+cage up            Open or bring forward the Cage desktop window
 cage login         Sign in to your Claude account in Cage's browser for Claude Code
                    --reset re-clones the VM before Claude sign-in; files and logins on its disk are lost
 cage access        Inspect legacy viewer credentials (diagnostics only)
@@ -71,11 +80,7 @@ cage run COMMAND   Execute a command in the shared environment: from the current
                    --here requires the current directory (asks before sharing
                    it on a terminal, fails otherwise); --workdir DIR runs from
                    DIR in the environment
-cage claude ARGS   Send every following argument to Claude Code in Cage
-                   (including commands such as doctor or stop <session-id>)
-cage stop          Stop the shared Cage environment, its tasks and its proxy core
-                   The background control service can continue running.
-                   --keep-proxy keeps the core running for an environment restart
+cage stop          Stop the local environment, its tasks, proxy and background service
 cage list          List this cage profile's VMs
 cage doctor        Diagnose the VM
 cage diagnostics --json PATH.zip   Export a redacted diagnostic bundle
@@ -113,24 +118,42 @@ func run() int {
 	}
 	// The shared commands otherwise name agent-vm and suggest its installer.
 	cli.Command = "claude-cage"
-	cli.UpdateHint = "update Cage from the app, or with the installer or package that installed it"
+	cli.UpdateHint = "run 'cage update' to update Cage"
 	// --reset deletes the environment's disk with the user's files and logins.
 	cli.StaleBaseHint = "提示：Cage 的基础镜像比当前环境新。当前环境的磁盘会保留，不需要重建；请在 Cage 的“设置 > 环境与恢复”中更新环境组件或环境工具，也可以运行 cage update-tools。"
-	args := cageArgs(os.Args[1:])
+	args, namedAccount, err := cageArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
 	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Print(help)
 		return 0
 	}
-	if text, ok := subcommandHelp(args); ok {
-		fmt.Print(text)
-		return 0
+	if !namedAccount {
+		if text, ok := subcommandHelp(args); ok {
+			fmt.Print(text)
+			return 0
+		}
 	}
-	if args[0] == "start" && len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "Usage: cage start")
+	var updateOptions hostUpdateOptions
+	if args[0] == "update" {
+		var err error
+		updateOptions, err = parseHostUpdateArgs(args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+	}
+	if args[0] == "up" && len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "Usage: cage up")
+		if slices.Contains(args[1:], "--reset") {
+			fmt.Fprintln(os.Stderr, "To rebuild the VM, use cage start --reset. Files and logins on its disk will be lost.")
+		}
 		return 2
 	}
 	var startArgs []string
-	if args[0] == "up" || args[0] == "login" {
+	if args[0] == "start" || args[0] == "login" || args[0] == "vm-start" {
 		var err error
 		startArgs, err = cli.StartArgs(args[1:])
 		if err != nil {
@@ -180,9 +203,21 @@ func run() int {
 		home, _ := os.UserHomeDir()
 		path = filepath.Join(home, ".claude-cage", "config.json")
 	}
-	path, err := filepath.Abs(path)
+	path, err = filepath.Abs(path)
 	if err != nil {
 		return fail(err)
+	}
+	if args[0] == "update" {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if err := runHostUpdate(ctx, path, updateOptions, os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, workbench.HostCLIDiagnostic(err.Error()))
+			if ctx.Err() != nil {
+				return 130
+			}
+			return 1
+		}
+		return 0
 	}
 	if args[0] == "interface-language" {
 		if len(args) == 3 && args[1] == "--seed-windows-id" {
@@ -216,16 +251,19 @@ func run() int {
 		}
 		return installTerminalCommand()
 	}
-	if slices.Contains([]string{"claude", "account", "start", "status", "restart"}, args[0]) || len(args) == 1 && (args[0] == "login" || args[0] == "stop") {
+	if namedAccount || slices.Contains([]string{"claude", "account", "start", "up", "status", "restart", "login"}, args[0]) || args[0] == "stop" && len(args) == 1 {
 		action := args[0]
-		if action == "claude" {
+		parameters := args[1:]
+		if namedAccount {
+			action, parameters = "run-by-name", args
+		} else if action == "claude" {
 			action = "run"
-		} else if action != "account" && len(args) != 1 {
+		} else if action != "account" && action != "start" && action != "login" && len(args) != 1 {
 			return fail(fmt.Errorf("usage: cage %s", action))
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
-		code, err := workbench.HostCLI(ctx, path, action, args[1:], os.Stdin, os.Stdout, os.Stderr)
+		code, err := workbench.HostCLI(ctx, path, action, parameters, os.Stdin, os.Stdout, os.Stderr)
 		if err != nil {
 			if ctx.Err() != nil {
 				return 130
@@ -234,6 +272,11 @@ func run() int {
 			return code
 		}
 		return code
+	}
+	// The controller boots or synchronizes its guest through this private
+	// subprocess. The public "up" command only opens the native desktop.
+	if args[0] == "vm-start" {
+		args[0] = "up"
 	}
 	store := diagnostics.New(filepath.Dir(path))
 	diagnostics.SetDefault(store)
@@ -676,8 +719,8 @@ func run() int {
 		}
 		args = append([]string{"setup", "--memory", fmt.Sprint(memory), "--cpus", fmt.Sprint(cpus), "--disk", fmt.Sprint(disk), "--preinstall=node,python,chromium,gh,claude,code-server"}, requireWorkbenchTools(args[1:])...)
 	}
-	if args[0] == "up" || args[0] == "login" {
-		return startEnvironment(args[0], startArgs, cli.Stdio(), cli.Main, func() error {
+	if args[0] == "up" {
+		return startEnvironment(startArgs, cli.Stdio(), cli.Main, func() error {
 			return workbench.StartGuestServices(context.Background(), path, os.Stdout, os.Stderr)
 		})
 	}
@@ -730,17 +773,14 @@ func runGuestServiceStart(script string, stdio cli.IO, invoke func([]string, cli
 	return invoke([]string{"run", "bash", "-s"}, stdio)
 }
 
-func startEnvironment(command string, args []string, stdio cli.IO, invoke func([]string, cli.IO) int, startServices func() error) int {
+func startEnvironment(args []string, stdio cli.IO, invoke func([]string, cli.IO) int, startServices func() error) int {
 	if result := invoke(args, stdio); result != 0 {
 		return result
 	}
 	if err := startServices(); err != nil {
 		return fail(err)
 	}
-	fmt.Fprintln(stdio.Stdout, "Cage local services are ready. Open Cage, run cage desktop or run 'cage agent call network.check --wait 5m' to complete the required network checks. External networking stays closed until the workbench approves this VM; no local access password is required.")
-	if command == "login" {
-		return invoke([]string{"run", "--tty", "bash", "-lc", "source /etc/profile.d/claude-cage.sh; exec claude auth login"}, stdio)
-	}
+	fmt.Fprintln(stdio.Stdout, "Cage local services are ready. External networking requires workbench verification.")
 	return 0
 }
 
@@ -796,7 +836,7 @@ func subcommandHelp(args []string) (string, bool) {
 	if len(args) < 2 || args[1] != "--help" && args[1] != "-h" || helpPassthrough[args[0]] {
 		return "", false
 	}
-	if len(args) != 2 && slices.Contains([]string{"start", "up", "login"}, args[0]) {
+	if len(args) != 2 && slices.Contains([]string{"start", "up", "login", "update"}, args[0]) {
 		return "", false
 	}
 	var lines []string

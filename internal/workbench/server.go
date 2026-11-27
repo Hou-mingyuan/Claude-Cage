@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/containerenv"
 	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/guestos"
 	"github.com/sylvinus/agent-vm/internal/host"
 	"github.com/sylvinus/agent-vm/internal/hostimage"
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 	"github.com/sylvinus/agent-vm/internal/usererror"
+	"github.com/sylvinus/agent-vm/internal/vmname"
 	"io"
 	"io/fs"
 	"log"
@@ -799,6 +801,16 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	if requestInitiator(r) == jobInitiatorSetup {
 		s.touchDesktopOnboarding()
 	}
+	if r.URL.Query().Get("view") == "runtime" {
+		running := s.vmRunning()
+		s.mu.Lock()
+		open := s.networkOpenLocked(time.Now())
+		state := hostCLIStatus{Ready: s.ready, Running: running, NetworkOpen: &open, NetworkPaused: s.networkPaused, Job: s.jobs.snapshot()}
+		s.mu.Unlock()
+		state.Job.Log = ""
+		jsonReply(w, state)
+		return
+	}
 	projects, err := s.projectPaths()
 	if err != nil {
 		requestError(w, errors.New("无法读取项目列表，请检查项目配置"))
@@ -1017,12 +1029,24 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		guestInstallRequest
 		// SetAsideAbandoned moves an environment of a no longer supported
 		// system aside, unchanged, before a Debian environment is created.
-		SetAsideAbandoned bool `json:"set_aside_abandoned"`
+		SetAsideAbandoned bool   `json:"set_aside_abandoned"`
+		ResetDiskToken    string `json:"reset_disk_token"`
 	}
 	if r.ContentLength != 0 && !readJSON(w, r, &request) {
 		return
 	}
 	input := request.guestInstallRequest
+	rebuild := request.ResetDiskToken != ""
+	if rebuild {
+		if !s.hasTrustedView(r) || requestConnection(r) != "local" || !equalSecret(request.ResetDiskToken, hostCLIProof(s.token)) {
+			http.Error(w, "请从本机 Cage 终端命令确认重建虚拟磁盘", http.StatusForbidden)
+			return
+		}
+		if containerenv.Configured(s.profile) || request.SetAsideAbandoned || input.System != "" || input.GuestProfile != nil {
+			http.Error(w, "只支持重建现有本机虚拟机", http.StatusConflict)
+			return
+		}
+	}
 	if input.GuestProfile != nil {
 		if err := input.GuestProfile.Validate(); err != nil {
 			requestError(w, err)
@@ -1051,6 +1075,10 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if pending != nil {
+		if rebuild {
+			http.Error(w, "请先完成现有安装，再重建本机虚拟机", http.StatusConflict)
+			return
+		}
 		input.System = pending.System
 		s.beginGuestInstall(w, r, input)
 		return
@@ -1068,14 +1096,29 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "当前环境无法启动所选客户机系统，请保留原环境并重新检查安装选择", http.StatusConflict)
 		return
 	}
-	s.launchRequest(w, r, "start", func() error {
+	kind := "start"
+	if rebuild {
+		kind = "rebuild"
+	}
+	s.launchRequest(w, r, kind, func() error {
 		if err := s.prepareGuestProfile(input.GuestProfile); err != nil {
 			return err
 		}
 		if err := s.prepareEnvironment(); err != nil {
 			return err
 		}
-		return s.startEnvironment(true)
+		if rebuild {
+			stateDir := filepath.Join(s.profile, "state")
+			marker, err := os.Stat(filepath.Join(stateDir, ".agent-vm-base-version"))
+			if err != nil || !marker.Mode().IsRegular() || !limaInstanceReady(filepath.Join(stateDir, "lima", vmname.Template)) {
+				return errors.New("基础虚拟机尚未准备好，请先运行 cage setup")
+			}
+			if err := s.stopEnvironment(); err != nil {
+				return err
+			}
+			return s.startEnvironmentDisk(true, true)
+		}
+		return s.hookStartEnv(true)
 	})
 }
 

@@ -24,6 +24,8 @@ const JOB_NAMES = new Set([
 ]);
 
 export const backendMessageKeys = [
+  "该账号命令名已被使用，请选择其他名称",
+  "账号命令名须以字母或数字开头，最多 64 个字符，可含 -、_ 和 .。不能使用纯数字、内部 ID 或保留命令。",
   // Issue #749: local proxy node validation & migration
   "本机代理端口不能用作节点。请导入原客户端的具体节点，在 Cage 中按中转到最终出口的顺序重新配置并应用",
   "原代理链包含本机代理端口。请导入各跳的具体节点后重建代理链",

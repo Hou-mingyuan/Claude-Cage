@@ -265,9 +265,23 @@ func TestHostCLIOfficialExecutable(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(home, ".bash_profile"), []byte("export PATH="+shellescape.Quote(bin)+":/usr/bin:/bin\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	mobileTestSSH(t, s, home, []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin", "CLAUDE_CONFIG_DIR=" + filepath.Join(home, "config"),
+	// The guest normally verifies the selected subscription in its own
+	// directory. Use two distinct IDs here to exercise that launch contract
+	// with a loopback provider and without a real subscription.
+	sarah := claudeAccount{Number: 3, ID: strings.Repeat("b", 24), ProfileID: strings.Repeat("c", 24),
+		Name: "Sarah", Email: "sarah@example.test", Organization: "example", Source: "managed", Status: "ready"}
+	helper := "#!/bin/sh\n" +
+		"test \"$1\" = native && test \"$2\" = " + sarah.guestID() +
+		" && test \"$CAGE_CLAUDE_SUBJECT\" = " + claudeIdentityHash(sarah.Email, sarah.Organization) + " || exit 42\n" +
+		"shift 2\nexec claude \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "fixture-account"), []byte(helper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	mobileTestSSHRewrite(t, s, home, []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin", "CLAUDE_CONFIG_DIR=" + filepath.Join(home, "config"),
 		"ANTHROPIC_API_KEY=sk-ant-local-fixture", "ANTHROPIC_BASE_URL=" + model.URL, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1",
-		"HTTPS_PROXY=http://127.0.0.1:1", "HTTP_PROXY=http://127.0.0.1:1", "NO_PROXY=127.0.0.1,localhost", "LANG=en_US.UTF-8"})
+		"HTTPS_PROXY=http://127.0.0.1:1", "HTTP_PROXY=http://127.0.0.1:1", "NO_PROXY=127.0.0.1,localhost", "LANG=en_US.UTF-8"}, func(command string) string {
+		return strings.ReplaceAll(command, "/usr/local/bin/cage-claude-account", "fixture-account")
+	})
 	call := func(stdin string, args ...string) string {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -284,13 +298,13 @@ func TestHostCLIOfficialExecutable(t *testing.T) {
 		}
 		return string(body)
 	}
-	if got := call("", "mcp", "--help"); !strings.Contains(got, "claude mcp") {
+	if got := call("", "claude", "mcp", "--help"); !strings.Contains(got, "claude mcp") {
 		t.Fatal(got)
 	}
 	if projects, err := s.projectPaths(); err != nil || len(projects) != 0 {
 		t.Fatalf("help created a project: %v %v", projects, err)
 	}
-	body := call("follow-up\n", "-p", "--bare", "--no-session-persistence", "--output-format", "json", "summarize stdin")
+	body := call("follow-up\n", "claude", "-p", "--bare", "--no-session-persistence", "--output-format", "json", "summarize stdin")
 	var result struct {
 		Result  string
 		IsError bool `json:"is_error"`
@@ -306,7 +320,7 @@ func TestHostCLIOfficialExecutable(t *testing.T) {
 	defer terminalIn.Close()
 	interactiveInput, finish := context.WithTimeout(context.Background(), 12*time.Second)
 	defer finish()
-	printCmd := exec.CommandContext(interactiveInput, binary, "-p", "--bare", "--no-session-persistence", "follow-up from a terminal")
+	printCmd := exec.CommandContext(interactiveInput, binary, "claude", "-p", "--bare", "--no-session-persistence", "follow-up from a terminal")
 	printCmd.Dir, printCmd.Stdin = project, terminalIn
 	printCmd.Env = append(os.Environ(), "CLAUDE_CAGE_CONFIG="+s.configPath)
 	if data, err := printCmd.Output(); err != nil || !strings.Contains(string(data), "isolated continuation") {
@@ -315,7 +329,7 @@ func TestHostCLIOfficialExecutable(t *testing.T) {
 	if got, err := s.projectPaths(); err != nil || !reflect.DeepEqual(got, []string{project}) {
 		t.Fatalf("projects=%v err=%v", got, err)
 	}
-	stream := call("", "-p", "--bare", "--no-session-persistence", "--output-format", "stream-json", "--verbose", "follow-up")
+	stream := call("", "claude", "-p", "--bare", "--no-session-persistence", "--output-format", "stream-json", "--verbose", "follow-up")
 	frames := strings.Split(strings.TrimSpace(stream), "\n")
 	if len(frames) < 2 {
 		t.Fatal(stream)
@@ -328,7 +342,7 @@ func TestHostCLIOfficialExecutable(t *testing.T) {
 	id := uuid.NewString()
 	verifySession := func(args ...string) {
 		t.Helper()
-		body := call("", append([]string{"-p", "--bare", "--output-format", "json"}, args...)...)
+		body := call("", append([]string{"claude", "-p", "--bare", "--output-format", "json"}, args...)...)
 		var reply struct {
 			SessionID string `json:"session_id"`
 			IsError   bool   `json:"is_error"`
@@ -340,10 +354,35 @@ func TestHostCLIOfficialExecutable(t *testing.T) {
 	verifySession("--session-id", id, "follow-up one")
 	verifySession("--resume", id, "follow-up two")
 	verifySession("--continue", "follow-up three")
+	other := claudeAccount{ID: strings.Repeat("a", 24), Number: 2, Name: "work", Email: "work@example.test", Source: "managed", Enabled: true, Status: "ready"}
+	if err := s.saveClaudeAccounts(claudeAccountList{Accounts: []claudeAccount{other, sarah}}); err != nil {
+		t.Fatal(err)
+	}
+	call("", "account", "use", "work")
+	s.noteClaudeSelection(other.ID, project)
+	if got := call("", "sarah", "mcp", "--help"); !strings.Contains(got, "claude mcp") {
+		t.Fatal(got)
+	}
+	named := call("follow-up\n", "sarah", "-p", "--bare", "--no-session-persistence", "--output-format", "json", "summarize stdin")
+	result.Result = ""
+	if err := json.Unmarshal([]byte(named), &result); err != nil || result.IsError || result.Result != "isolated continuation" {
+		t.Fatalf("named Claude invocation: %s", named)
+	}
+	if pin, err := s.cliPinnedAccount(); err != nil || pin != other.ID {
+		t.Fatalf("named invocation changed the default: %q, %v", pin, err)
+	}
+	call("", "account", "use", "auto")
+	sarah.Enabled = true
+	if err := s.saveClaudeAccounts(claudeAccountList{Accounts: []claudeAccount{other, sarah}}); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := s.cliDefaultAccount(project); err != nil || next.ID != other.ID {
+		t.Fatalf("single-use account changed the project's automatic selection: %+v, %v", next, err)
+	}
 	s.account.lock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	locked := exec.CommandContext(ctx, binary, "mcp", "--help")
+	locked := exec.CommandContext(ctx, binary, "sarah", "mcp", "--help")
 	locked.Env = append(os.Environ(), "CLAUDE_CAGE_CONFIG="+s.configPath)
 	locked.Dir = project
 	if data, err := locked.Output(); err == nil || len(data) != 0 {
@@ -352,6 +391,12 @@ func TestHostCLIOfficialExecutable(t *testing.T) {
 }
 
 func TestHostCLIDetachedTerminalAcceptsDesktopInput(t *testing.T) {
+	t.Run("default", func(t *testing.T) { checkDetachedCLI(t, "") })
+	t.Run("named", func(t *testing.T) { checkDetachedCLI(t, "Sarah") })
+}
+
+func checkDetachedCLI(t *testing.T, name string) {
+	t.Helper()
 	s := agentTestController(t)
 	s.ready = true
 	s.claudeAccounts.probe = func(context.Context, string) (claudeGuestSnapshot, error) {
@@ -360,6 +405,16 @@ func TestHostCLIDetachedTerminalAcceptsDesktopInput(t *testing.T) {
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
+	}
+	request := hostCLIRequest{Action: "run", Directory: dir, TTY: true, Cols: 80, Rows: 24}
+	var expectedID string
+	if name != "" {
+		expectedID = strings.Repeat("a", 24)
+		a := claudeAccount{ID: expectedID, Name: name, Email: "fixture@example.test", Source: "managed", Status: "ready"}
+		if err := s.saveClaudeAccounts(claudeAccountList{Accounts: []claudeAccount{a}}); err != nil {
+			t.Fatal(err)
+		}
+		request.Action, request.Name = "run-by-name", name
 	}
 	s.projectShares = map[string]*projectShare{dir: {}}
 	mobileTestSSHRewrite(t, s, t.TempDir(), []string{"PATH=/usr/bin:/bin"}, func(string) string {
@@ -388,7 +443,7 @@ func TestHostCLIDetachedTerminalAcceptsDesktopInput(t *testing.T) {
 		return ws
 	}
 	native := dial("/api/host-cli")
-	if err := native.WriteJSON(hostCLIRequest{Action: "run", Directory: dir, TTY: true, Cols: 80, Rows: 24}); err != nil {
+	if err := native.WriteJSON(request); err != nil {
 		t.Fatal(err)
 	}
 	readTerminalViewerUntil(t, native, "guest-ready")
@@ -400,6 +455,9 @@ func TestHostCLIDetachedTerminalAcceptsDesktopInput(t *testing.T) {
 	s.terminals.mu.Unlock()
 	if session == nil {
 		t.Fatal("native PTY was not visible to the workbench")
+	}
+	if session.claudeAccountID != expectedID {
+		t.Fatalf("workbench PTY is bound to %q; want %q", session.claudeAccountID, expectedID)
 	}
 	viewer := dial("/api/terminals/" + session.id + "/stream")
 	readTerminalViewerUntil(t, viewer, "guest-ready")

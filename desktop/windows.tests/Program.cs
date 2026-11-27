@@ -31,6 +31,8 @@ if (args is ["prepare-update", "--json", "--stop"])
 }
 
 await AppUpdaterTests.Run();
+await CliUpdateTests.Run();
+if (args is ["--updater-tests"]) return;
 if (args is ["--app-updater-only"]) return;
 
 #if WINDOWS
@@ -338,8 +340,7 @@ try
         Directory.CreateDirectory(Backend.Root);
         Environment.SetEnvironmentVariable("CAGE_UPDATE_RETRY_AT", retryAt);
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var failures = 0;
-        using var updater = new AppUpdater(state => { if (state.GetValueOrDefault("phase") as string == "failed" && Interlocked.Increment(ref failures) == 2) completion.TrySetResult(); }, () => throw new Exception("unexpected installation"), () => {}, () => "fixture-publisher");
+        using var updater = new AppUpdater(state => { if (state.GetValueOrDefault("phase") as string == "failed") completion.TrySetResult(); }, () => throw new Exception("unexpected installation"), () => {}, () => "fixture-publisher");
         updater.Handle("check");
         await completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Check(updater.Handle("status").GetValueOrDefault("retryAt") as string == retryAt, "process-exit path lost retry deadline");

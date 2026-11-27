@@ -48,6 +48,13 @@ func gatewayFixture(t *testing.T) (*Server, *gatewayLocalFixture) {
 	return s, f
 }
 
+func (f *gatewayLocalFixture) Attach(ctx context.Context, controllerID string) (*remotehost.Session, error) {
+	if controllerID != f.status.ControllerID {
+		return nil, errViewChanged
+	}
+	return f.Connect(ctx)
+}
+
 func (f *gatewayLocalFixture) Connect(ctx context.Context) (*remotehost.Session, error) {
 	f.connections.Add(1)
 	return &remotehost.Session{Origin: f.endpoint.URL, Client: f.endpoint.Client(), Transport: f.endpoint.Client().Transport, Context: ctx, Manifest: remotehost.PublicManifest{Platform: "linux", InstanceID: strings.Repeat("a", 64)}}, nil

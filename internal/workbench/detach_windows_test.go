@@ -11,8 +11,8 @@ import (
 )
 
 func TestDetachedServiceLeavesCallerJobWhenPermitted(t *testing.T) {
-	inside := detachedProcessAttributes(false)
-	outside := detachedProcessAttributes(true)
+	inside := detachedProcessAttributes(false, windowHidden)
+	outside := detachedProcessAttributes(true, windowHidden)
 	for _, attributes := range []*syscall.SysProcAttr{inside, outside} {
 		if !attributes.HideWindow || attributes.CreationFlags&windows.CREATE_NO_WINDOW == 0 || attributes.CreationFlags&windows.CREATE_NEW_PROCESS_GROUP == 0 {
 			t.Fatalf("background service must stay windowless in its own process group: %#v", attributes)
@@ -30,13 +30,23 @@ func TestDetachedServiceLeavesCallerJobWhenPermitted(t *testing.T) {
 	}
 }
 
+func TestDetachedDesktopShowsItsFirstWindow(t *testing.T) {
+	for _, breakaway := range []bool{false, true} {
+		service := detachedProcessAttributes(breakaway, windowHidden)
+		window := detachedProcessAttributes(breakaway, windowVisible)
+		if window.HideWindow || window.CreationFlags != service.CreationFlags {
+			t.Fatalf("desktop launcher must allow the first window and retain process isolation: %#v", window)
+		}
+	}
+}
+
 func TestStartDetachedRunsService(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var started *exec.Cmd
-	if err := startDetached(func() *exec.Cmd {
+	if err := startDetached(windowHidden, func() *exec.Cmd {
 		started = exec.Command(executable, "-test.run=^$")
 		return started
 	}); err != nil {

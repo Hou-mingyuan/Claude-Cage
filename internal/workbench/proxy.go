@@ -894,11 +894,11 @@ func (s *Server) refreshProxySubscriptions() {
 	if err != nil {
 		return
 	}
-	if _, err := p.Route(); errors.Is(err, managedproxy.ErrLocalProxyNode) {
-		return
-	}
 	for _, src := range p.Sources {
 		if src.URL != "" && src.Interval > 0 && time.Since(src.Updated) >= time.Duration(src.Interval)*time.Hour && time.Since(src.Attempted) > 15*time.Minute {
+			if _, err := p.Route(); errors.Is(err, managedproxy.ErrLocalProxyNode) {
+				return
+			}
 			// Automatic refresh never opts into a host-network fallback.
 			_, _ = s.submitJob("proxy-update", func() error { return s.changeProxy("refresh", proxyInput{ID: src.ID}, nil) })
 			return

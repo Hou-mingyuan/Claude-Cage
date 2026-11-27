@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -386,39 +387,52 @@ func (s *Server) discoverConversations(ctx context.Context, paths []string, reus
 		if record != nil && !record.Terminal {
 			continue
 		}
-		if record != nil && item.ExternalRunning {
-			s.detachManualConversation(record)
-		}
-		if record == nil {
+		newRecord := record == nil
+		if newRecord {
 			record = &mobileRecord{mobileSession: mobileSession{mobileSummary: mobileSummary{ID: uuid.NewString(), Workspace: workspace}, Turns: []mobileTurn{}}, CLIID: item.CLIID, Terminal: true, Resume: true}
 			record.Generation = m.epochLocked()
-			record.Account, record.AccountLabel = matchDiscoveredAccount(list, item.Config)
-		} else if record.Launcher == "" && record.Account.ID == "" && item.Config != "" {
-			record.Account, record.AccountLabel = matchDiscoveredAccount(list, item.Config)
 		}
-		if a := list.find(record.Account.ID); a != nil {
-			record.AccountLabel = a.Label
+		// Discovery updates scalar metadata only. Keep the live record and
+		// its existing transcript intact until a changed record is durable.
+		next := *record
+		if newRecord || (next.Launcher == "" && next.Account.ID == "" && item.Config != "") {
+			next.Account, next.AccountLabel = matchDiscoveredAccount(list, item.Config)
 		}
-		record.Workspace = workspace
-		if record.Paused != item.Paused {
-			record.Paused = item.Paused
-			record.Revision++
+		if a := list.find(next.Account.ID); a != nil {
+			next.AccountLabel = a.Label
 		}
-		record.Active = item.Active
-		record.Title, record.GuestConfig, record.Connection = item.Title, item.Config, item.Connection
-		record.GuestWorkspace = item.Workspace
-		if item.Connection != "" {
-			if terminal := s.terminals.forConversation(item.Connection); terminal != nil {
-				record.TerminalID = terminal.id
-				terminal.mu.Lock()
-				terminal.sharedID = record.ID
-				terminal.paused = item.Paused
-				terminal.mu.Unlock()
+		next.Workspace = workspace
+		if next.Paused != item.Paused {
+			next.Paused = item.Paused
+			next.Revision++
+		}
+		next.Active = item.Active
+		next.Title, next.GuestConfig, next.Connection = item.Title, item.Config, item.Connection
+		next.GuestWorkspace = item.Workspace
+		var terminal *terminalSession
+		if item.ExternalRunning {
+			next.TerminalID = ""
+		} else if item.Connection != "" {
+			terminal = s.terminals.forConversation(item.Connection)
+			if terminal != nil {
+				next.TerminalID = terminal.id
 			}
 		}
-		record.UpdatedAt = time.UnixMilli(int64(item.UpdatedAt * 1000)).UTC()
-		if err := writePrivate(mobileRecordPath(s.profile, record.ID), record); err != nil {
-			return err
+		next.UpdatedAt = time.UnixMilli(int64(item.UpdatedAt * 1000)).UTC()
+		if newRecord || !reflect.DeepEqual(record, &next) {
+			if err := writePrivate(mobileRecordPath(s.profile, next.ID), &next); err != nil {
+				return err
+			}
+			if item.ExternalRunning && record.TerminalID != "" {
+				s.detachManualConversation(record)
+			}
+			*record = next
+		}
+		if terminal != nil {
+			terminal.mu.Lock()
+			terminal.sharedID = record.ID
+			terminal.paused = next.Paused
+			terminal.mu.Unlock()
 		}
 		m.catalog[record.ID] = record.summary()
 		running[record.ID] = running[record.ID] || item.Running
