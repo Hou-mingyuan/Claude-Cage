@@ -955,11 +955,52 @@ func (s *Server) runSafetyCheck() (returned error) {
 	return nil
 }
 
+// isMaintenanceInstallJob names background download/install jobs during which
+// existing guest applications keep running and need the egress lease renewed.
+func isMaintenanceInstallJob(kind string) bool {
+	switch kind {
+	case "environment-tools", "claude-desktop-install", "claude-desktop-update", "desktop-app-install", "desktop-app-update":
+		return true
+	default:
+		return false
+	}
+}
+
 // Monitoring renews a short host-owned lease without replaying the disruptive
 // failure drill. Lost supervision eventually closes existing guest connections.
 func (s *Server) networkMonitorBlockedLocked() bool {
 	job := s.jobs.snapshot()
-	return s.closing || s.networkPaused || (job.Running && job.Kind != "environment-tools" && job.Kind != "claude-desktop-install")
+	return s.closing || s.networkPaused || (job.Running && !isMaintenanceInstallJob(job.Kind))
+}
+
+// keepNetworkAliveDuringInstall periodically renews the egress lease while a
+// long software download runs inside the operation lock, so other open apps
+// keep their network connections.
+func (s *Server) keepNetworkAliveDuringInstall(parent context.Context) func() {
+	monitorContext, stopMonitor := context.WithCancel(parent)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-monitorContext.Done():
+				return
+			case <-ticker.C:
+				s.monitorSafety()
+			}
+		}
+	}()
+	return func() {
+		stopMonitor()
+		s.mu.Lock()
+		if s.monitorCancel != nil {
+			s.monitorCancel()
+		}
+		s.mu.Unlock()
+		<-done
+	}
 }
 
 func (s *Server) monitorSafety() {

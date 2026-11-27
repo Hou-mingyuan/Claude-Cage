@@ -11,6 +11,7 @@ import { api, nativeAvailable } from "./api";
 import { SafetyMessage } from "./safety-message";
 import { RemoteView } from "./views";
 import { useWindowVisibility } from "./window-visibility";
+import { isVMLifecycleJobRunning } from "./plugin-desktop-app-state.mjs";
 import "./claude-desktop.css";
 import { useTranslation } from "./interface-language.mjs";
 
@@ -46,6 +47,7 @@ export function ClaudeDesktop({
   const lastRunning = useRef(null);
   const ownJob = status.job?.kind?.startsWith("claude-desktop-");
   const busy = submitting || Boolean(status.job?.running) || Boolean(jobID);
+  const pollBlocked = isVMLifecycleJobRunning(status.job) || Boolean(status.job?.running && ownJob);
   const refresh = async (valid = () => true) => {
     const revision = statusRevision.current;
     const request = statusRequest.current ??= api("/claude-desktop");
@@ -89,16 +91,19 @@ export function ClaudeDesktop({
     void refresh();
   }, [refreshSignal, status.vm_running]);
   useEffect(() => {
-    if (!screenVisible || !status.vm_running || status.job?.running) return;
+    if (!screenVisible || !status.vm_running || pollBlocked) return;
     let disposed = false;
     let timer;
     const poll = async () => {
       const value = await refresh(() => !disposed);
       if (disposed) return;
       if (value && !opened.current) {
-        opened.current = true;
-        if (autoStart && value.installed && !value.running && !value.failed && !jobID)
+        if (autoStart && value.installed && !value.running && !value.failed && !jobID && !status.job?.running) {
+          opened.current = true;
           await run("start");
+        } else if (!autoStart || value.running || value.failed || !value.installed) {
+          opened.current = true;
+        }
       }
       if (!disposed) timer = setTimeout(poll, 5000);
     };
@@ -107,7 +112,7 @@ export function ClaudeDesktop({
       disposed = true;
       clearTimeout(timer);
     };
-  }, [screenVisible, status.vm_running, status.job?.running]);
+  }, [screenVisible, status.vm_running, pollBlocked, status.job?.running]);
   useEffect(() => {
     if (!jobID || status.job?.id !== jobID || status.job.running) return;
     setJobID("");
@@ -219,7 +224,7 @@ export function ClaudeDesktop({
               {!desktop && (
                 <button
                   className="quiet-button"
-                  disabled={busy}
+                  disabled={submitting || !status.vm_running || pollBlocked}
                   onClick={refresh}
                 >
                   {tr("重新读取状态")}
