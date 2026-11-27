@@ -140,14 +140,17 @@ internal static class SharedClipboard
         return new { ok = true };
     }
 
-    // Word processors and spreadsheets publish a rendered picture next to the
-    // text they copied. Such a copy is text: sharing the picture would replace
-    // the text with an image on both sides.
-    public static string? RichText()
+    // A cell range can advertise a bitmap preview without advertising RTF.
+    // Even an empty formatted cell should keep its native formats on the host.
+    public static string? RichText(IDataObject? data)
     {
-        if (!Clipboard.ContainsText() || !Clipboard.ContainsData(DataFormats.Rtf)) return null;
-        var text = Clipboard.GetText();
-        return text.Length > 0 ? text : null;
+        if (data == null) return null;
+        var formats = data.GetFormats(autoConvert: false);
+        var cells = formats.Any(format =>
+            format is "Biff12" or "Biff8" or "Biff5" or "XML Spreadsheet" || format == DataFormats.CommaSeparatedValue);
+        if (!cells && !formats.Contains(DataFormats.Rtf)) return null;
+        if (data.TryGetData<string>(DataFormats.UnicodeText, autoConvert: true, out var text) && text.Length > 0) return text;
+        return cells ? "" : null;
     }
 
     public static async Task<object> Read(JsonElement request, CancellationToken token)
@@ -179,7 +182,7 @@ internal static class SharedClipboard
             catch (OperationCanceledException) { throw new IOException("剪贴板文件传递已取消"); }
             finally { readers.Remove(selected); await Collect(); }
         }
-        if (RichText() is { } copied)
+        if (RichText(Clipboard.GetDataObject()) is { } copied)
         {
             lastImageDigest = null;
             return new { revision, text = copied };
@@ -264,7 +267,13 @@ internal static class SharedClipboard
                 lastImageDigest = null;
                 var value = text.GetString() ?? "";
                 if (System.Text.Encoding.UTF8.GetByteCount(value) > 2 * 1024 * 1024) throw new InvalidDataException("文本不能超过 2 MB");
-                if (value.Length == 0) Clipboard.Clear(); else Clipboard.SetText(value);
+                // A guest may echo the cell text with Unix line endings. Keep
+                // the original clipboard owner, formulas and formatting.
+                var existing = RichText(Clipboard.GetDataObject());
+                if (existing == null || existing.Replace("\r\n", "\n") != value.Replace("\r\n", "\n"))
+                {
+                    if (value.Length == 0) Clipboard.Clear(); else Clipboard.SetText(value);
+                }
             }
             else throw new InvalidDataException("剪贴板格式无效");
             var writtenRevision = Revision;
