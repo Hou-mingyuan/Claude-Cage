@@ -258,7 +258,9 @@ static Command *backend_arguments(const char *const *args, guint seconds, Backen
 }
 static void backend(const char *action, const char *option, BackendCallback callback, gpointer data) {
     const char *args[] = {app.backend, action, "--json", option, NULL};
-    backend_arguments(args, 180, callback, data);
+    gboolean completing_update = strcmp(action, "desktop") == 0 && g_strcmp0(option, "--complete-update") == 0;
+    /* Allow the seven-minute Go stop-job deadline plus backend handoff and startup. */
+    backend_arguments(args, completing_update ? 9 * 60 : 180, callback, data);
 }
 static void script(const char *code) {
     if (app.web && app.port && valid_workbench(webkit_web_view_get_uri(app.web), app.port, FALSE))

@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -8,10 +9,81 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
+
+type updateStopTransport func(*http.Request) (*http.Response, error)
+
+func (f updateStopTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestUpdateHandoffWaitsForSlowStop(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		stopAfter  time.Duration
+		wantUpdate bool
+	}{
+		{name: "Lima stop finishes after the old updater deadline", stopAfter: 6*time.Minute + 10*time.Second, wantUpdate: true},
+		{name: "stop never completes within the update deadline", stopAfter: 10 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := t.TempDir()
+			lock, err := openControllerLock(profile, os.O_CREATE|os.O_RDWR)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := lock.Close(); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Test(t, func(t *testing.T) {
+				var stopRequested time.Time
+				handedOff := false
+				client := &controllerClient{
+					profile: profile,
+					origin:  "http://localhost:17778",
+					launch:  launchResponse{URL: "http://localhost:17778/#ticket", Controller: ControllerIdentity{Protocol: controlProtocol}},
+					client: &http.Client{Transport: updateStopTransport(func(req *http.Request) (*http.Response, error) {
+						var body string
+						switch req.URL.Path {
+						case "/api/session", "/api/client/context":
+							body = `{}`
+						case "/api/stop":
+							stopRequested = time.Now()
+							body = `{"id":"stop-job","running":true}`
+						case "/api/status":
+							if time.Since(stopRequested) < tc.stopAfter {
+								body = `{"vm_running":true,"job":{"id":"stop-job","running":true}}`
+							} else {
+								body = `{"vm_running":false,"job":{"id":"stop-job","running":false}}`
+							}
+						case "/api/terminals":
+							body = `[]`
+						case "/api/handoff":
+							if time.Since(stopRequested) < tc.stopAfter {
+								t.Error("handoff preceded completion of the stop job")
+							}
+							handedOff = true
+							body = `{}`
+						default:
+							t.Fatalf("unexpected request %s", req.URL.Path)
+						}
+						return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+					})},
+				}
+				err := client.stopAndHandoff()
+				if tc.wantUpdate && (err != nil || !handedOff) {
+					t.Fatalf("stopped after %v, handoff=%t, error=%v", tc.stopAfter, handedOff, err)
+				}
+				if !tc.wantUpdate && (handedOff || err == nil || !strings.Contains(err.Error(), "停止环境超时")) {
+					t.Fatalf("unfinished stop handed off=%t, error=%v", handedOff, err)
+				}
+			})
+		})
+	}
+}
 
 func TestUpdaterTrustedStop(t *testing.T) {
 	for _, tc := range []struct {

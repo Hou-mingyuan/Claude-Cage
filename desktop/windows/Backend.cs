@@ -8,6 +8,9 @@ namespace Cage.Windows;
 
 internal static class Backend
 {
+    // Allow the Go stop-job deadline plus backend handoff and startup.
+    internal static readonly TimeSpan UpdateStopDeadline = TimeSpan.FromMinutes(9);
+
     public static bool ClientOnly => File.Exists(Path.Combine(AppContext.BaseDirectory, "resources", "client-only"));
     private static string ConfigPath => Path.GetFullPath(
         Environment.GetEnvironmentVariable("CLAUDE_CAGE_CONFIG") is { Length: > 0 } configured

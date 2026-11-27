@@ -422,7 +422,8 @@ internal sealed class MainWindow : Form
         try
         {
             smokePhase = "starting_backend";
-            var (exit, data) = await Backend.Json(["desktop", "--json", ..options], lifetime.Token);
+            TimeSpan? deadline = options.Contains("--complete-update") ? Backend.UpdateStopDeadline : null;
+            var (exit, data) = await Backend.Json(["desktop", "--json", ..options], lifetime.Token, deadline);
             smokePhase = "backend_returned";
             if (exit != 0) throw new IOException(data.Text("message") is { Length: > 0 } detail ? detail : InterfaceLanguage.Text("工作台未能启动"));
             controllerNeedsUpdate = data.Text("status") != "ready";
