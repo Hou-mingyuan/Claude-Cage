@@ -1064,6 +1064,9 @@ func (s *Server) monitorSafetyWithProbe(probe func(context.Context, cage.Config)
 	s.publishGate(state)
 	if state.Mode != cage.GateOpen || state.Report == nil {
 		timing.result = "gate_not_open"
+		if state.Mode == cage.GateClosed && !state.Fault {
+			timing.result, timing.gateRun, timing.gateEpoch = "gate_closed", state.RunID, state.Epoch
+		}
 		// A packet helper can reconnect before the next GUI status tick. Its
 		// gate stays closed until a fresh check, even though the helper never
 		// exited and the new receipt is already available.

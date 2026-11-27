@@ -24,6 +24,9 @@ func TestDesktopLocalProbeLeavesColdProfileUntouched(t *testing.T) {
 	if err != nil || !st.Available || !st.Known || st.Running || st.ServiceRunning {
 		t.Fatalf("cold probe: %+v %v", st, err)
 	}
+	if _, err = d.Attach(context.Background(), "departed-controller"); !errors.Is(err, errControllerUnavailable) {
+		t.Fatalf("window-only attach to a stopped service: %v", err)
+	}
 	if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
 		t.Fatalf("probe initialized a local workload: %v %v", entries, err)
 	}
@@ -153,6 +156,14 @@ func TestDesktopLocalAuthenticatedViewAndIdleExit(t *testing.T) {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+	if _, err := d.Attach(ctx, "previous-controller"); err == nil {
+		t.Fatal("window-only attach accepted a replaced controller")
+	}
+	attached, err := d.Attach(ctx, st.ControllerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = attached.Close()
 	session, err := d.Connect(ctx)
 	if err != nil {
 		t.Fatal(err)

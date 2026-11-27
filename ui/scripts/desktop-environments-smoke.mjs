@@ -70,6 +70,8 @@ const { browser, page, state, errors } = await createWorkbench({
   clientContext: view,
   clientRequest: async (route, path, body) => {
     const reply = (value) => route.fulfill({ json: value });
+    if (path === "/client/language") return reply({ language: "system", active: "zh-CN", system: "zh-CN" });
+    if (path === "/client/notifications") return reply({});
     if (path === "/client/hosts") return reply({ hosts: [host, second] });
     if (path === "/client/local-status") return reply(local);
     if (path === "/client/context") {
@@ -83,7 +85,7 @@ const { browser, page, state, errors } = await createWorkbench({
       }
       return reply(view);
     }
-    assert.equal(body.connection_id, view.connection_id, "stale client intent");
+    assert.equal(body?.connection_id, view.connection_id, "unexpected client request or stale intent: " + path);
     actions.push([path, body]);
     if (path === "/client/candidate") {
       view.candidate = {
@@ -241,9 +243,28 @@ try {
     ),
     true,
   );
+  switchTo("none");
+  view.window_only = true;
+  const beforeWindow = actions.length;
+  await page.reload();
+  await page.getByRole("heading", { name: "选择工作环境" }).waitFor();
+  await page.getByRole("button", { name: "连接 SSH 主机", exact: true }).waitFor();
+  assert.equal(actions.length, beforeWindow, "opening a window created a workload");
+  await click("进入本机工作台");
+  await page.getByRole("navigation", { name: "主导航" }).waitFor();
+  assert.equal(view.mode, "local");
+  assert.equal(actions[beforeWindow][1].local_controller_id, undefined);
+
+  switchTo("none");
+  Object.assign(local, { service_running: true, controller_id: "running-local" });
+  const beforeAttach = actions.length;
+  await page.reload();
+  await page.getByRole("navigation", { name: "主导航" }).waitFor();
+  assert.equal(view.mode, "local");
+  assert.equal(actions[beforeAttach][1].local_controller_id, "running-local");
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: on-demand workbench, SSH sidebar round trip, candidate failure, cancel/keep/stop, locked local stop, confirmed background stop and disconnect.",
+    "PASS: normal desktop startup, window-only chooser, pinned local attachment, SSH switch, disconnect and local stop.",
     reports,
   );
 } catch (error) {

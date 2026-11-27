@@ -38,10 +38,24 @@ func (d *desktopLocal) available() bool {
 	return filepath.IsAbs(d.executable) && err == nil && info.Mode().IsRegular() && (runtime.GOOS == "windows" || info.Mode()&0111 != 0)
 }
 
+const desktopLocalOperationBusy = "本机正在执行操作，请稍后重试"
+
 func (c *controllerClient) localControl(ctx context.Context, action string, input desktopLocalRequest) (desktopLocalReply, error) {
 	var reply desktopLocalReply
 	input.Token = c.record.Token
-	status, err := c.callContext(ctx, http.MethodPost, "/api/desktop-local/"+action, input, &reply)
+	path := "/api/desktop-local/" + action
+	deadline := time.Now().Add(3 * time.Second)
+	status, reason, err := c.callReason(ctx, http.MethodPost, path, input, &reply)
+	// A routine monitor briefly holds the operation lock. The identical
+	// release request still checks controller identity, job and VM state.
+	for action == "release" && err == nil && status == http.StatusConflict && reason == desktopLocalOperationBusy && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return reply, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+		status, reason, err = c.callReason(ctx, http.MethodPost, path, input, &reply)
+	}
 	if err != nil {
 		return reply, err
 	}
@@ -115,6 +129,30 @@ func (d *desktopLocal) Status(ctx context.Context) (DesktopLocalStatus, error) {
 	}
 	view.Available = available
 	return view.DesktopLocalStatus, nil
+}
+
+// Attach opens a view of the observed controller. A window-only launch must
+// never bootstrap or replace a workload if it vanishes during the handshake.
+func (d *desktopLocal) Attach(ctx context.Context, controllerID string) (*remotehost.Session, error) {
+	c, err := connectController(d.profile)
+	if err != nil {
+		return nil, err
+	}
+	defer c.close()
+	want, err := currentController()
+	if err != nil || !want.matches(c.launch.Controller) || !sameControllerConfig(c.launch.ConfigPath, d.config) || c.launch.ClientOnly || c.launch.DesktopGateway {
+		return nil, errors.New("本机后台身份已变化，请重新选择")
+	}
+	bootstrap, cancel := context.WithTimeout(ctx, localBootstrapTimeout)
+	defer cancel()
+	view, err := c.localControl(bootstrap, "status", desktopLocalRequest{})
+	if err != nil {
+		return nil, err
+	}
+	if !view.Known || controllerID == "" || view.ControllerID != controllerID {
+		return nil, errors.New("本机后台已变化，请重新选择")
+	}
+	return d.localSession(ctx, bootstrap, c, view)
 }
 
 func (d *desktopLocal) Connect(ctx context.Context) (_ *remotehost.Session, returned error) {
@@ -445,6 +483,10 @@ func (d *desktopLocal) Release(ctx context.Context, expected DesktopLocalStatus,
 		return errors.New("本机控制服务已变化，请刷新后重试")
 	}
 	defer c.close()
+	return c.releaseLocal(ctx, expected, stop)
+}
+
+func (c *controllerClient) releaseLocal(ctx context.Context, expected DesktopLocalStatus, stop bool) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	request := desktopLocalRequest{ControllerID: expected.ControllerID, Stop: stop, Running: expected.Running, Terminals: expected.LiveTerminals}
@@ -495,10 +537,10 @@ func (d *desktopLocal) Release(ctx context.Context, expected DesktopLocalStatus,
 	}
 	// Unlike a cold selector probe, this explicit release may query an existing
 	// local container engine to verify that its workload actually stopped.
-	if _, err := os.Lstat(filepath.Join(d.profile, "control.json")); !os.IsNotExist(err) || !controllerLockFree(d.profile) {
+	if _, err := os.Lstat(filepath.Join(c.profile, "control.json")); !os.IsNotExist(err) || !controllerLockFree(c.profile) {
 		return errors.New("本机控制服务状态已变化，请重新确认")
 	}
-	if running, err := controllerVMState(d.profile); err != nil || running || managedproxy.ConfirmStopped(ctx, d.profile) != nil {
+	if running, err := controllerVMState(c.profile); err != nil || running || managedproxy.ConfirmStopped(ctx, c.profile) != nil {
 		return errors.New("本机资源状态待确认")
 	}
 	return nil

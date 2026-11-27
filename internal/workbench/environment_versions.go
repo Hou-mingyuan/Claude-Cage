@@ -209,7 +209,7 @@ func (s *Server) synchronizeEnvironment() error {
 	if recovering {
 		s.setMessage("正在恢复环境组件并重建清单，工作台终端保持运行…")
 	}
-	if err := s.runCage("up"); err != nil {
+	if err := s.runCage("vm-start"); err != nil {
 		return err
 	}
 	if err := s.attach(); err != nil {

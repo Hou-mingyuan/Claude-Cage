@@ -19,6 +19,17 @@ Windows ARM64 和 Linux ARM64 暂不支持。平台依赖详情见 [Windows 指�
 
 这里选择的是运行 Cage 的电脑平台。三个平台上的环境都是 Debian 13，无需另外选择系统，见[Debian 环境](guest-systems.md)。
 
+### 从 npm 安装
+
+从官方 v0.2.2 npm 包发布起，装有 Node.js 20 或更高版本的电脑也可从终端安装完整版。
+
+```sh
+npm install -g claude-cage
+cage --version
+```
+
+npm 安装终端入口。单独输入 `cage` 可查看帮助。运行 `cage version` 时，入口会查找本机已安装的 Cage。已有兼容版本便直接使用原来的安装和账号；新电脑会下载同版本的官方安装包并校验，Linux 按系统提示授权 APT 安装。macOS 上已有的旧版若提示先在工作台升级，请完成升级后重试。首次下载需要联网。`cage update --check` 只检查版本，尚未安装原生程序时也不会触发安装。之后可用 `cage update` 升级本机应用。进入项目文件夹后运行 `cage claude` 使用默认账号，或用 `cage sarah` 只为这次调用选择名为 `sarah` 的账号。若旧预览版不支持按名选择，请按终端提示升级工作台。Linux 上若需保留系统已有的同名 `cage` 命令，可把 npm 包安装到独立前缀，运行该前缀下的 `bin/claude-cage`。[终端使用示例](workbench.md#在本机终端使用-claude-code)
+
 <figure class="guide-shot">
   <a href="../../www/public/docs/screenshots/account-setup.jpg" target="_blank" rel="noopener" aria-label="查看原图：首次创建 Cage 账户"><img src="../../www/public/docs/screenshots/account-setup.jpg" alt="首次创建 Cage 账户" width="2560" height="1764" loading="lazy" decoding="async" /></a>
   <figcaption>首次创建 Cage 账户。截图版本：0.1.6-alpha-preview（开发构建） · macOS 原生应用 · 2026-11-07。<a href="../../www/public/docs/screenshots/account-setup.jpg" target="_blank" rel="noopener">查看原图（2560 × 1764） ↗</a></figcaption>

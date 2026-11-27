@@ -3365,6 +3365,7 @@
   "链式代理需要至少 2 个不同节点（1 个中转 + 1 个出口），当前只有 {0} 个可用节点。": "El proxy encadenado requiere al menos 2 nodos distintos (1 intermedio + 1 salida); ahora solo tienes {0}.",
   "首次配置还没有已应用的 Cage 代理，建议勾选上方选项通过主机网络获取订阅。": "En la primera configuración aún no hay un proxy de Cage activo; marca la opción de arriba para descargar usando la red del equipo.",
   "高级：端口与代理诊断": "Avanzado: puerto y diagnóstico de proxy",
+  "隐藏期间的输出超过回放上限，已接回最近的终端输出。": "La salida superó el límite de reproducción mientras el terminal estaba oculto. Se muestra la salida más reciente.",
   "正在本机终端输入。关闭本机终端后可在这里继续。": "La entrada está conectada al terminal local. Ciérralo para continuar aquí.",
   "模糊状态栏中的 IP 与位置": "Difuminar la IP y la ubicación en la barra de estado",
   "截图或共享屏幕时模糊底部状态栏中的出口 IP 和位置，鼠标悬停或键盘聚焦时显示。": "Difumina la IP de salida y la ubicación en la barra de estado inferior al hacer capturas o compartir pantalla. Pasa el puntero o enfoca con el teclado para verlas.",
@@ -3497,5 +3498,11 @@
   "经上一跳中转；多选或选整份订阅时自动切换": "Pasa por el salto anterior; cambia automáticamente al elegir varios nodos o una suscripción completa",
   "拖动调整优先级": "Arrastra para cambiar la prioridad",
   "拖动调整优先顺序（支持上下方向键）": "Arrastra para cambiar la prioridad (compatible con las teclas de flecha arriba/abajo)",
-  "直接拖动下方账号卡片调整优先顺序。": "Arrastra directamente las tarjetas de cuenta de abajo para ajustar el orden de prioridad."
+  "直接拖动下方账号卡片调整优先顺序。": "Arrastra directamente las tarjetas de cuenta de abajo para ajustar el orden de prioridad.",
+  "账号命令名": "Nombre de comando de la cuenta",
+  "Cage 编号": "Número de Cage",
+  "Cage ID": "ID de Cage",
+  "Claude 邮箱": "Correo de Claude",
+  "该账号命令名已被使用，请选择其他名称": "Este nombre de comando ya está en uso. Elige otro.",
+  "账号命令名须以字母或数字开头，最多 64 个字符，可含 -、_ 和 .。不能使用纯数字、内部 ID 或保留命令。": "El nombre de comando de la cuenta debe comenzar por una letra o un dígito y tener como máximo 64 caracteres. Puede incluir guiones (-), guiones bajos (_) y puntos (.). No se admiten nombres compuestos solo por dígitos, identificadores internos ni comandos reservados."
 }

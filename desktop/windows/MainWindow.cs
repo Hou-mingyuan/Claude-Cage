@@ -219,6 +219,9 @@ internal sealed class MainWindow : Form
         Script($"window.cageWindowVisible = {(visible ? "true" : "false")}; window.dispatchEvent(new Event('cage-window-visibility'));");
         PublishFocus(visible && Form.ActiveForm == this);
     }
+    internal Task<int> RunCLIUpdate(Stream stream, UpdateClients clients, CancellationToken lifetime) =>
+        InvokeAsync<int>(async token => await updater.RunCLI(stream, stream, clients, token), lifetime);
+
     private void PublishUpdate(Dictionary<string, object?> state) {
         if (state.TryGetValue("phase", out var phase) && phase as string == "failed") _ = Backend.Report("App update failed: " + state.GetValueOrDefault("message"));
         Script("window.dispatchEvent(new CustomEvent('cage-app-update',{detail:" + JsonSerializer.Serialize(state) + "}));");

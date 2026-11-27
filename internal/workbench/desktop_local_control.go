@@ -88,7 +88,7 @@ func (s *Server) desktopLocalControl(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, s.desktopLocalSnapshot())
 	case "release":
 		if !s.op.TryLock() {
-			http.Error(w, "本机正在执行操作，请稍后重试", http.StatusConflict)
+			http.Error(w, desktopLocalOperationBusy, http.StatusConflict)
 			return
 		}
 		view := s.desktopLocalSnapshot()

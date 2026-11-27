@@ -31,6 +31,7 @@ type claudeAccount struct {
 	DesktopDedicatedNetwork bool         `json:"desktop_dedicated_network,omitempty"`
 	Number                  uint32       `json:"number"`
 	ID                      string       `json:"id"`
+	Name                    string       `json:"name"`
 	Label                   string       `json:"label"`
 	Source                  string       `json:"source"`
 	ProfileID               string       `json:"profile_id,omitempty"`
@@ -204,7 +205,7 @@ func (s *Server) loadClaudeAccounts() (claudeAccountList, error) {
 		return list, err
 	}
 	// Assign legacy records in their saved order before a caller can reorder them.
-	err = list.assignNumbers()
+	err = list.prepareCLIAccounts()
 	return list, err
 }
 
@@ -233,7 +234,7 @@ func (list *claudeAccountList) assignNumbers() error {
 }
 
 func (s *Server) saveClaudeAccounts(list claudeAccountList) error {
-	if err := list.assignNumbers(); err != nil {
+	if err := list.prepareCLIAccounts(); err != nil {
 		return err
 	}
 	if err := writePrivate(filepath.Join(s.profile, "claude-accounts.json"), list); err != nil {
@@ -279,28 +280,36 @@ func (list *claudeAccountList) change(input claudeAccountInput) error {
 	if a == nil {
 		return errors.New("未找到 Claude 账号，请刷新面板")
 	}
+	next := *a
 	if input.Label != "" {
 		if !validClaudeLabel(label) && (label == "" || label != a.Email) {
 			return errors.New("备注最多 64 个字符，不能含控制字符")
 		}
-		a.Label = label
+		next.Label = label
 	}
 	if input.DesktopDedicatedNetwork != nil {
 		if input.ProxyNodeID != nil || a.ProxyNodeID != "" {
 			return errors.New("请从账号出口选择代理节点或跟随环境出口")
 		}
-		a.DesktopDedicatedNetwork = *input.DesktopDedicatedNetwork
+		next.DesktopDedicatedNetwork = *input.DesktopDedicatedNetwork
 	}
 	if input.Enabled != nil {
-		a.Enabled = *input.Enabled
+		next.Enabled = *input.Enabled
 	}
 	if input.HandoffGroup != nil {
 		group := strings.TrimSpace(*input.HandoffGroup)
 		if len(group) > 64 || strings.IndexFunc(group, unicode.IsControl) >= 0 {
 			return errors.New("接续分组最多 64 字节，不能含控制字符")
 		}
-		a.HandoffGroup = group
+		next.HandoffGroup = group
 	}
+	if input.Name != nil {
+		if err := list.renameCLIAccount(input.ID, *input.Name); err != nil {
+			return err
+		}
+		next.Name = a.Name
+	}
+	*a = next
 	return nil
 }
 
@@ -421,6 +430,20 @@ func (a claudeAccount) headroom(now time.Time) (float64, bool) {
 // must not replace Subject or GuestID by looking the record up again.
 type claudeSelection struct{ ID, GuestID, Subject string }
 
+func (list claudeAccountList) explicitCodeAccount(id string) (claudeSelection, error) {
+	a := list.find(id)
+	if a == nil || a.CodeUnlinked || a.Status != "ready" || !validClaudeID(a.ID) || !validClaudeGuestID(a.guestID()) {
+		return claudeSelection{}, errClaudeNeedsLogin
+	}
+	subject := (claudeGuestSnapshot{LoggedIn: true, Email: a.Email, Organization: a.Organization}).subject()
+	if subject == "" {
+		return claudeSelection{}, errClaudeNeedsLogin
+	}
+	// Participation controls automatic scheduling only. The official runner
+	// checks this subject again in the launch directory, including defaults.
+	return claudeSelection{ID: a.ID, GuestID: a.guestID(), Subject: subject}, nil
+}
+
 func (s *Server) selectClaudeAccount(requestedID string, login bool, workspace string) (claudeSelection, error) {
 	var empty claudeSelection
 	m := &s.claudeAccounts
@@ -462,13 +485,7 @@ func (s *Server) selectClaudeAccount(requestedID string, login bool, workspace s
 		return claudeSelection{ID: requestedID, GuestID: guestID}, nil
 	}
 	if requestedID != "" && requestedID != "auto" {
-		a := list.find(requestedID)
-		if a == nil || a.Status != "ready" || a.Email == "" {
-			return empty, errClaudeNeedsLogin
-		}
-		// Participation controls automatic scheduling only. The official runner
-		// checks this subject again in the launch directory, including defaults.
-		return claudeSelection{ID: a.ID, GuestID: a.guestID(), Subject: claudeIdentityHash(a.Email, a.Organization)}, nil
+		return list.explicitCodeAccount(requestedID)
 	}
 	if len(list.Accounts) == 0 {
 		return empty, nil

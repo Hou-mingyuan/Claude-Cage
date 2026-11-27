@@ -3365,6 +3365,7 @@
   "链式代理需要至少 2 个不同节点（1 个中转 + 1 个出口），当前只有 {0} 个可用节点。": "Le proxy en chaîne nécessite au moins 2 nœuds distincts (1 relais + 1 sortie) ; vous en avez actuellement {0}.",
   "首次配置还没有已应用的 Cage 代理，建议勾选上方选项通过主机网络获取订阅。": "Lors de la première configuration, aucun proxy Cage n'est encore actif : cochez l'option ci-dessus pour télécharger via le réseau hôte.",
   "高级：端口与代理诊断": "Avancé : port et diagnostic proxy",
+  "隐藏期间的输出超过回放上限，已接回最近的终端输出。": "La sortie a dépassé la limite de relecture pendant que le terminal était masqué. La sortie la plus récente est affichée.",
   "正在本机终端输入。关闭本机终端后可在这里继续。": "La saisie se fait dans le terminal local. Fermez-le pour continuer ici.",
   "模糊状态栏中的 IP 与位置": "Flouter l’IP et la position dans la barre d’état",
   "截图或共享屏幕时模糊底部状态栏中的出口 IP 和位置，鼠标悬停或键盘聚焦时显示。": "Floute l’IP de sortie et la position dans la barre d’état inférieure pour les captures ou le partage d’écran. Survolez-les ou donnez-leur le focus au clavier pour les afficher.",
@@ -3497,5 +3498,11 @@
   "经上一跳中转；多选或选整份订阅时自动切换": "Passe par le saut précédent ; bascule automatiquement avec plusieurs nœuds ou un abonnement complet",
   "拖动调整优先级": "Glisser pour réorganiser la priorité",
   "拖动调整优先顺序（支持上下方向键）": "Glisser pour modifier la priorité (flèches haut/bas prises en charge)",
-  "直接拖动下方账号卡片调整优先顺序。": "Faites glisser directement les cartes de compte ci-dessous pour ajuster l’ordre de priorité."
+  "直接拖动下方账号卡片调整优先顺序。": "Faites glisser directement les cartes de compte ci-dessous pour ajuster l’ordre de priorité.",
+  "账号命令名": "Nom de commande du compte",
+  "Cage 编号": "Numéro Cage",
+  "Cage ID": "Identifiant Cage",
+  "Claude 邮箱": "Adresse e-mail Claude",
+  "该账号命令名已被使用，请选择其他名称": "Ce nom de commande est déjà utilisé. Choisissez-en un autre.",
+  "账号命令名须以字母或数字开头，最多 64 个字符，可含 -、_ 和 .。不能使用纯数字、内部 ID 或保留命令。": "Le nom de commande du compte doit commencer par une lettre ou un chiffre et comporter au plus 64 caractères. Les tirets (-), les tirets bas (_) et les points (.) sont autorisés. Les noms composés uniquement de chiffres, les identifiants internes et les commandes réservées sont interdits."
 }

@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C
+umask 077
+cd /
+
+# This non-setuid helper runs under the system's usual sudo policy. It never
+# opens a path supplied by the caller or interprets an APT option from stdin.
+fail() { printf '%s\n' "$1" >&2; exit 1; }
+[ "$(id -u)" = 0 ] && [ "$#" = 2 ] || fail 'Cage 软件包更新需要管理员授权。'
+version=$1
+digest=$2
+case $version in ''|[!0-9]*|*[!a-zA-Z0-9.~+-]*) fail 'Cage 软件包版本无效。' ;; esac
+case $digest in *[!0-9a-f]*) fail 'Cage 软件包 SHA-256 摘要无效。' ;; esac
+[ "${#digest}" = 64 ] || fail 'Cage 软件包 SHA-256 摘要无效。'
+
+status=$(dpkg-query -W -f='${Status}\t${Architecture}' claude-cage)
+[ "$status" = "$(printf 'install ok installed\tamd64')" ] || fail '系统中的 claude-cage 未完整安装或已被锁定版本。'
+installed=$(dpkg-query -W -f='${Version}' claude-cage)
+dpkg --compare-versions "$version" gt "$installed" || fail '系统已安装相同或更新的 Cage 版本，请重新检查更新。'
+
+# Keep a private copy through both verification and the APT transaction.
+# Read one byte beyond the catalog's 2 GiB limit to detect oversized input.
+stage=$(mktemp -d /var/tmp/claude-cage-update.XXXXXXXX)
+archive=$stage/claude-cage.deb
+trap 'rm -f -- "$archive"; rmdir -- "$stage"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+head -c 2147483649 > "$archive"
+[ "$(stat -c %s "$archive")" -le 2147483648 ] || fail 'Cage 软件包超出允许大小。'
+printf '%s  %s\n' "$digest" "$archive" | sha256sum --check --status - || fail 'Cage 软件包在交给 APT 前未通过 SHA-256 校验。'
+# shellcheck disable=SC2016 # dpkg-deb expands its own field names.
+metadata=$(dpkg-deb --show --showformat='${Package}\t${Version}\t${Architecture}' "$archive")
+[ "$metadata" = "$(printf 'claude-cage\t%s\tamd64' "$version")" ] || fail 'Cage 软件包的名称、版本或架构不符。'
+
+# _apt can read the verified copy, but only root can replace it. Existing
+# package maintainer scripts protect running Cage processes across users.
+chmod 0644 "$archive"
+chmod 0755 "$stage"
+if ( : < /dev/tty ) 2>/dev/null; then
+	apt-get --assume-yes --no-remove install "$archive" < /dev/tty
+else
+	apt-get --assume-yes --no-remove install "$archive" < /dev/null
+fi
+installed=$(dpkg-query -W -f='${db:Status-Status} ${Version}' claude-cage)
+[ "$installed" = "installed $version" ] || fail 'APT 已退出，但 dpkg 未确认安装目标版本。请检查系统软件包状态。'
+printf 'Cage 已升级到 %s。\n' "$(printf '%s' "$version" | tr '~' '-')"

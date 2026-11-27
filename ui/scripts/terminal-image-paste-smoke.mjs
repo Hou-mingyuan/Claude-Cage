@@ -42,17 +42,23 @@ for (const platform of ["MacIntel", "Win32", "Linux x86_64"]) {
     await page.getByRole("button", { name: "启动 Cage 环境", exact: true }).click();
     await page.getByRole("button", { name: "新建终端", exact: true }).first().click();
     await page.getByRole("menuitem", { name: /Claude/ }).first().click();
+    await page.getByRole("button", { name: "创建 Claude Code 终端", exact: true }).click();
     await page.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent.includes("Claude"));
     await page.locator(".xterm-helper-textarea").focus();
     const expected = "\x1b[200~'/guest/attachments/image-test.png' \x1b[201~";
+    let expectedInput = "";
+    const expectInput = async bytes => {
+      expectedInput += bytes;
+      await wait(() => inputs.join("").length >= expectedInput.length);
+      assert.equal(inputs.join(""), expectedInput);
+    };
     // Claude's Ctrl+V reads the host image; Enter waits for its guest path.
     await page.keyboard.press("Control+v");
     await wait(() => images.length === 1);
     await page.keyboard.press("Enter");
     assert.deepEqual(inputs, []);
     release();
-    await wait(() => inputs.length === 2);
-    assert.deepEqual(inputs, [expected, "\r"]);
+    await expectInput(expected + "\r");
     assert.equal(images[0].png, png);
     assert.equal(images[0].target, "terminal");
     assert.equal(images[0].id, "claude-image");
@@ -60,16 +66,14 @@ for (const platform of ["MacIntel", "Win32", "Linux x86_64"]) {
     await page.keyboard.press(platform === "MacIntel" ? "Meta+v" : "Control+Shift+V");
     await wait(() => images.length === 2);
     release();
-    await wait(() => inputs.length === 3);
-    assert.equal(inputs.at(-1), expected);
+    await expectInput(expected);
     assert.equal(reads, 2);
 
     // The desktop Edit > Paste action shares the same image path.
     assert.equal(await page.evaluate(() => window.cageEditAction("paste")), true);
     await wait(() => images.length === 3);
     release();
-    await wait(() => inputs.length === 4);
-    assert.equal(inputs.at(-1), expected);
+    await expectInput(expected);
 
     fail = true;
     await page.keyboard.press("Control+v");
@@ -77,12 +81,11 @@ for (const platform of ["MacIntel", "Win32", "Linux x86_64"]) {
     await page.keyboard.press("Enter");
     release();
     await page.getByText("测试：图片传递失败", { exact: true }).waitFor();
-    assert.equal(inputs.length, 4, "a failed image must cancel its queued Enter");
+    assert.equal(inputs.join(""), expectedInput, "a failed image must cancel its queued Enter");
     fail = false;
     clipboard = { text: "paste after failure" };
     await page.keyboard.press("Control+v");
-    await wait(() => inputs.length === 5);
-    assert.equal(inputs.at(-1), "\x1b[200~paste after failure\x1b[201~");
+    await expectInput("\x1b[200~paste after failure\x1b[201~");
     assert.deepEqual(errors, []);
     console.log(`${platform}: native Ctrl+V, primary paste, Edit > Paste, image/Enter ordering and failure recovery passed`);
   } catch (error) {

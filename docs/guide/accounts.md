@@ -36,7 +36,11 @@ Cage 可以直接从 Desktop 识别登录。
 
 ## 为 Claude Code 终端选账号
 
-在本机终端，`cage account list` 可查看已登记的账号。用 `cage account use 2` 为后续 CLI 调用选定账号 2，或用 `cage account run 2 -- -p "你好"` 只指定一次。输入 `cage account use auto` 可恢复工作台的自动分配。[终端账号命令](workbench.md#选择-claude-账号)
+在本机运行 `cage account list` 查看账号。`ID` 是 Cage 分配的固定标识，`NAME` 是你可以修改的命令行名称，`EMAIL` 是 Claude 登录确认的邮箱。升级后，已有账号会优先沿用可以用作命令的唯一备注，其次尝试邮箱中 `@` 前的部分。两者都不可用时，Cage 会分配类似 `account-3` 的名称。
+
+例如，核对邮箱后，运行 `cage account rename 03 sarah` 就可把编号 03 的账号命名为 `sarah`。也可以在工作台的账号卡片中展开设置，修改“账号命令名”。接下来在项目中输入 `cage sarah` 或 `cage sarah -p "你好"`，这一次调用就会使用该账号。账号名称忽略大小写，改名后原有会话仍绑定同一个 ID。
+
+`cage claude` 按当前的 CLI 默认选择启动。要把后续调用固定到某个账号，可用 `cage account use 03`，用 `cage account use auto` 可恢复工作台的自动分配。既有脚本可继续用 `cage account run 03 -- -p "你好"` 指定单次账号。[终端账号命令](workbench.md#选择-claude-账号)
 
 点项目旁的“新建终端”，选“Claude 终端”。在“启动账号”选一个已添加的账号，或选“在此终端登录”。多个终端可使用同一账号。若选择的账号还需要授权，先完成授权，再继续打开原项目。若在已有终端用 `/login` 换号，同用这份登录资料的其他终端会暂停，并保留原账号和历史。
 

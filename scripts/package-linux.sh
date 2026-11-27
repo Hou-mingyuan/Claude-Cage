@@ -22,6 +22,7 @@ ln -s ../lib/claude-cage/cage-desktop "$stage/usr/bin/cage-desktop"
 install -m 644 packaging/linux/io.github.lee_xeo.Cage.desktop "$stage/usr/share/applications/"
 install -m 644 logo.png "$stage/usr/share/icons/hicolor/512x512/apps/io.github.lee_xeo.Cage.png"
 install -m 644 docs/linux.md "$stage/usr/share/doc/claude-cage/README.md"
+install -m 755 packaging/linux/install-update "$stage/usr/lib/claude-cage/install-update"
 install -m 755 packaging/linux/preinst "$stage/DEBIAN/preinst"
 install -m 755 packaging/linux/preinst "$stage/DEBIAN/prerm"
 # dpkg-shlibdeps derives glibc/GTK dependencies from the build distribution.

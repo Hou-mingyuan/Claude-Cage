@@ -39,7 +39,7 @@ if (args.Length > 0 && args[0] == "prepare-update")
     Record("handoff-" + AppUpdater.Version, new {
         profile = root, version = AppUpdater.Version, executable = Environment.ProcessPath, stop = args.Contains("--stop"),
     });
-    Console.WriteLine("{\"status\":\"prepared\"}");
+    Console.WriteLine(JsonSerializer.Serialize(new { status = mode == "cli-active" ? "stop_required" : "prepared" }));
     return 0;
 }
 if (args is ["app-update", "download"])
@@ -56,6 +56,40 @@ if (args is ["app-update", "download"])
         archivePath = archive, sha256 = digest, retryAt = "",
     }));
     return 0;
+}
+if (args is ["--cli-update"])
+    return await CliUpdate.Standalone(Console.OpenStandardInput(), Console.OpenStandardOutput(), CliUpdate.Caller());
+if (args is ["--drive-cli"])
+{
+    // This fixture executes from the installed resources/cage.exe. It holds that
+    // image briefly after the real handoff, as a terminal flushing its output can.
+    var target = Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!.FullName;
+    var start = Backend.StartInfo(Path.Combine(target, "Cage.exe"), "--cli-update");
+    start.RedirectStandardInput = true;
+    start.Environment["CAGE_UPDATE_CALLER_PID"] = Environment.ProcessId.ToString();
+    using var native = Process.Start(start) ?? throw new IOException("CLI update relay failed to start");
+    using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+    bool confirmed = false;
+    while (await native.StandardOutput.ReadLineAsync(deadline.Token) is { } line)
+    {
+        var state = JsonSerializer.Deserialize<JsonElement>(line);
+        switch (state.Text("phase"))
+        {
+            case "ready":
+                await native.StandardInput.BaseStream.WriteAsync("INSTALL\n"u8.ToArray(), deadline.Token);
+                await native.StandardInput.BaseStream.FlushAsync(deadline.Token);
+                confirmed = true; break;
+            case "failed":
+                native.StandardInput.Close(); await native.WaitForExitAsync(deadline.Token);
+                Record("parent-failed", state); return 1;
+            case "handed_off":
+                await Task.Delay(TimeSpan.FromSeconds(7), deadline.Token);
+                var waited = !File.Exists(Path.Combine(root, "update-installer.json"));
+                Record("cli-handoff", new { confirmed, waited });
+                return confirmed && waited ? 0 : 1;
+        }
+    }
+    return 1;
 }
 if (args is ["--start-update"])
 {

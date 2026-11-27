@@ -25,6 +25,89 @@ enum CageProfile {
     // Every helper and relaunched app inherits the same absolute profile, even
     // when its working directory differs from the original launch directory.
     static func pinEnvironment() { setenv("CLAUDE_CAGE_CONFIG", configURL().path, 1) }
+
+    static func relaunchEnvironment() -> [String: String] {
+        var selected = ["CLAUDE_CAGE_CONFIG": configURL().path]
+        for key in ["HOME", "CFFIXED_USER_HOME"] {
+            if let value = ProcessInfo.processInfo.environment[key], value.hasPrefix("/") { selected[key] = value }
+        }
+        return selected
+    }
+}
+
+struct CageUpdateBusy: LocalizedError {
+    var errorDescription: String? { "此安装或配置正由其他 Cage 工作台或更新器使用。请在已打开的工作台更新，或退出后重试 cage update。" }
+}
+
+/// All profiles using an installed bundle coordinate on the same kernel locks.
+/// Locks on the bundle/Contents directories never modify a signed app.
+final class CageUpdateLock {
+    private let descriptor: Int32
+    private init(fd: Int32, shared: Bool = false) throws {
+        guard fd >= 0 else { throw CageUpdateError("无法访问当前 Cage 安装目录") }
+        if flock(fd, (shared ? LOCK_SH : LOCK_EX) | LOCK_NB) != 0 {
+            let busy = errno == EWOULDBLOCK
+            close(fd)
+            if busy { throw CageUpdateBusy() }
+            throw CageUpdateError("无法锁定 Cage 更新任务，请检查安装位置后重试。")
+        }
+        descriptor = fd
+    }
+    convenience init(directory: URL, shared: Bool = false) throws {
+        try self.init(fd: open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC), shared: shared)
+    }
+    deinit { close(descriptor) }
+
+    // A source build and a released app may point at the same profile. Each
+    // must protect its shared download-resume and install results as well.
+    static func profile(_ root: URL, installing: Bool) throws -> CageUpdateLock {
+        let size = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
+        guard size > 0 else { throw CageUpdateError("无法访问当前用户的临时目录") }
+        var path = [CChar](repeating: 0, count: size)
+        guard confstr(_CS_DARWIN_USER_TEMP_DIR, &path, size) > 0 else { throw CageUpdateError("无法访问当前用户的临时目录") }
+        let name = SHA256.hash(data: Data(root.resolvingSymlinksInPath().standardizedFileURL.path.utf8)).map { String(format: "%02x", $0) }.joined()
+        let file = URL(fileURLWithPath: String(cString: path)).appendingPathComponent("cage-update-" + name + (installing ? ".install" : ".download"))
+        return try CageUpdateLock(fd: open(file.path, O_RDONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600))
+    }
+    static func worker(for bundle: URL, downloadsAt root: URL? = nil) throws -> [CageUpdateLock] {
+        let worker = try CageUpdateLock(directory: bundle.appendingPathComponent("Contents"))
+        try checkInstaller(for: bundle)
+        guard let root else { return [worker] }
+        let download = try profile(root, installing: false)
+        _ = try profile(root, installing: true)
+        return [worker, download]
+    }
+
+    // The installer claims this directory in BOTH the old and new bundle before
+    // replying ready. New callers therefore see the guard across replacement.
+    static func installer(for bundle: URL) throws -> CageUpdateLock {
+        try CageUpdateLock(directory: bundle.appendingPathComponent("Contents/MacOS"))
+    }
+    static func checkInstaller(for bundle: URL) throws { _ = try installer(for: bundle) }
+}
+
+enum CageUpdateProcess {
+    static func executable(_ pid: pid_t) -> URL? {
+        var path = [CChar](repeating: 0, count: 4096)
+        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return nil }
+        return URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath()
+    }
+    static func isNativeParent(_ pid: pid_t, target: URL) -> Bool {
+        let expected = target.appendingPathComponent("Contents/MacOS/Cage")
+        guard pid == getppid(), expected.path == expected.resolvingSymlinksInPath().path,
+              executable(pid)?.path == expected.path else { return false }
+        if let registered = NSRunningApplication(processIdentifier: pid)?.bundleURL {
+            return registered.resolvingSymlinksInPath().path == target.path
+        }
+        return true
+    }
+    static func hasOtherWindow(_ bundle: URL) -> Bool {
+        let executablePath = bundle.resolvingSymlinksInPath().appendingPathComponent("Contents/MacOS/Cage").path
+        return NSWorkspace.shared.runningApplications.contains {
+            $0.processIdentifier != getpid() && $0.bundleURL?.resolvingSymlinksInPath().path == bundle.resolvingSymlinksInPath().path &&
+                executable($0.processIdentifier)?.path == executablePath
+        }
+    }
 }
 
 final class CageUpdateValidation {
@@ -38,6 +121,7 @@ final class CageUpdateValidation {
         lock.lock(); defer { lock.unlock() }
         if cancelled { throw CageUpdateError("更新验证已取消") }
     }
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
     func start(_ value: Process) throws {
         lock.lock(); defer { lock.unlock() }
         if cancelled { throw CageUpdateError("更新验证已取消") }
@@ -71,8 +155,9 @@ struct CageUpdatePlan: Codable {
     let parentPID: Int32
     let resultPath: String
     let unsignedSource: Bool
+    let requiresCommitReceipt: Bool
 
-    init(version: String, team: String, target: String, candidate: String, backup: String, parentPID: Int32, resultPath: String, unsignedSource: Bool = false) {
+    init(version: String, team: String, target: String, candidate: String, backup: String, parentPID: Int32, resultPath: String, unsignedSource: Bool = false, requiresCommitReceipt: Bool = false) {
         self.version = version
         self.team = team
         self.target = target
@@ -81,6 +166,7 @@ struct CageUpdatePlan: Codable {
         self.parentPID = parentPID
         self.resultPath = resultPath
         self.unsignedSource = unsignedSource
+        self.requiresCommitReceipt = requiresCommitReceipt
     }
 
     init(from decoder: Decoder) throws {
@@ -93,6 +179,7 @@ struct CageUpdatePlan: Codable {
         parentPID = try container.decode(Int32.self, forKey: .parentPID)
         resultPath = try container.decode(String.self, forKey: .resultPath)
         unsignedSource = try container.decodeIfPresent(Bool.self, forKey: .unsignedSource) ?? false
+        requiresCommitReceipt = try container.decodeIfPresent(Bool.self, forKey: .requiresCommitReceipt) ?? false
     }
 }
 
@@ -121,6 +208,33 @@ enum CageUpdateVersion {
 }
 
 enum CageUpdateFiles {
+    static func cachedArchive(in root: URL) -> URL {
+        root.resolvingSymlinksInPath().appendingPathComponent("download-resume/Cage.dmg")
+    }
+    static func discardCachedArchive(in root: URL) {
+        let archive = cachedArchive(in: root)
+        guard archive.resolvingSymlinksInPath().path == archive.path else { return }
+        try? FileManager.default.removeItem(at: archive)
+        _ = rmdir(archive.deletingLastPathComponent().path)
+    }
+    static func installerReply(from input: FileHandle, within seconds: TimeInterval? = nil) -> [String: Any]? {
+        let deadline = seconds.map { ProcessInfo.processInfo.systemUptime + $0 }
+        var data = Data()
+        while data.count < 16384 {
+            if let deadline {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                guard remaining > 0 else { return nil }
+                var descriptor = pollfd(fd: input.fileDescriptor, events: Int16(POLLIN), revents: 0)
+                let result = poll(&descriptor, 1, Int32(ceil(remaining * 1000)))
+                if result == -1 && errno == EINTR { continue }
+                guard result > 0 else { return nil }
+            }
+            guard let byte = try? input.read(upToCount: 1), let value = byte.first else { return nil }
+            if value == 10 { return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] }
+            data.append(value)
+        }
+        return nil
+    }
     static func parentHasExited(_ parentPID: pid_t) -> Bool {
         getppid() != parentPID
     }
@@ -131,10 +245,11 @@ enum CageUpdateFiles {
         }
         return parentHasExited(parentPID)
     }
-    static func restore(backup: URL, target: URL, manager: FileManager) throws {
+    static func restore(backup: URL, target: URL, manager: FileManager, beforeReplace: (URL) throws -> Void = { _ in }) throws {
         let copy = backup.deletingLastPathComponent().appendingPathComponent("restore-" + UUID().uuidString + ".app")
         try FileManager.default.copyItem(at: backup, to: copy)
         defer { try? FileManager.default.removeItem(at: copy) }
+        try beforeReplace(copy)
         if FileManager.default.fileExists(atPath: target.path) {
             _ = try manager.replaceItemAt(target, withItemAt: copy, backupItemName: nil, options: [.usingNewMetadataOnly])
         } else {
@@ -328,6 +443,90 @@ enum CageUpdateFiles {
     }
 }
 
+/// The terminal can authorize an install only after it receives a verified
+/// "ready" event. The native installer remains the owner of replacement and rollback.
+final class CageCLIUpdate {
+    private let bundle: URL
+    private var windowLock: CageUpdateLock?
+    private var finishing = false
+    private var awaitingConsent = false
+    private var signals: [DispatchSourceSignal] = []
+    private lazy var updater = CageAppUpdater(bundleURL: bundle, onChange: { [weak self] state in self?.receive(state) },
+                                              quit: {}, reconnect: {}, headless: true)
+    private init(bundle: URL) { self.bundle = bundle.resolvingSymlinksInPath() }
+
+    static func run() -> Never {
+        CageProfile.pinEnvironment()
+        signal(SIGPIPE, SIG_IGN)
+        let session = CageCLIUpdate(bundle: Bundle.main.bundleURL)
+        session.start()
+        return withExtendedLifetime(session) { dispatchMain() }
+    }
+
+    private func start() {
+        do {
+            windowLock = try CageUpdateLock(directory: bundle)
+            if CageUpdateProcess.hasOtherWindow(bundle) {
+                receive(["phase": "waiting", "message": "此安装的 Cage 工作台已打开。请在工作台更新，或退出后重试 cage update。"])
+                return
+            }
+        } catch {
+            receive(["phase": error is CageUpdateBusy ? "waiting" : "failed", "message": error.localizedDescription])
+            return
+        }
+        for number in [SIGINT, SIGTERM] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler { [weak self] in self?.finish(code: 1) }
+            source.resume()
+            signals.append(source)
+        }
+        _ = updater.handle("install")
+    }
+
+    static func readConsent(from input: FileHandle) -> Bool {
+        for expected in "INSTALL\n".utf8 {
+            guard let byte = try? input.read(upToCount: 1), byte.first == expected else { return false }
+        }
+        return true
+    }
+
+    private func receive(_ state: [String: Any]) {
+        guard !finishing, let phase = state["phase"] as? String else { return }
+        let fields = ["phase", "message", "currentVersion", "latestVersion", "receivedBytes", "totalBytes", "officialUpgrade", "retryAt", "retryable"]
+        do {
+            var data = try JSONSerialization.data(withJSONObject: state.filter { fields.contains($0.key) })
+            data.append(10)
+            try FileHandle.standardOutput.write(contentsOf: data)
+        } catch {
+            finish(code: 1)
+            return
+        }
+        switch phase {
+        case "ready":
+            guard !awaitingConsent else { return }
+            awaitingConsent = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                let authorized = Self.readConsent(from: .standardInput)
+                DispatchQueue.main.async {
+                    guard !self.finishing else { return }
+                    if authorized && !CageUpdateProcess.hasOtherWindow(self.bundle) { _ = self.updater.handle("complete") }
+                    else { self.receive(["phase": "waiting", "message": authorized ? "Cage 工作台已打开，请在工作台更新或退出后重试。" : "尚未确认安装，原应用已保留。"]) }
+                }
+            }
+        case "current", "manual", "waiting", "handed_off": finish(code: 0)
+        case "failed": finish(code: 1)
+        default: break
+        }
+    }
+
+    private func finish(code: Int32) {
+        guard !finishing else { return }
+        finishing = true
+        if !updater.prepareForTermination({ exit(code) }) { exit(code) }
+    }
+}
+
 /// Watches one process ID via kqueue EVFILT_PROC/NOTE_EXIT so background
 /// helpers never rely on cached NSRunningApplication.isTerminated state.
 final class CageUpdateProcessMonitor {
@@ -407,7 +606,7 @@ final class CageUpdateProcessMonitor {
     }
 }
 
-/// Owns update state for one native window. All state transitions run on main.
+/// All transitions for a desktop or terminal update run on the main queue.
 final class CageAppUpdater {
     private static let unsignedManualMessage = "当前 macOS 应用未签名或签名无法验证，请从官方发布页下载安装包，退出 Cage 后替换原应用；配置、凭据、项目和虚拟机磁盘会保留。"
     private let bundleURL: URL
@@ -417,6 +616,8 @@ final class CageAppUpdater {
     private let reconnect: () -> Void
     private let readTeam: () throws -> String
     private let canUpgradeUnsigned: () -> Bool
+    private let headless: Bool
+    private var ownership: [CageUpdateLock]?
     private var state: [String: Any]
     private var worker: Process?
     private var validationTask: CageUpdateValidation?
@@ -429,9 +630,10 @@ final class CageAppUpdater {
     private var waitingForTermination = false
     private var installationCommitted = false
 
-    init(bundleURL: URL, onChange: @escaping ([String: Any]) -> Void, quit: @escaping () -> Void, reconnect: @escaping () -> Void, readTeam: (() throws -> String)? = nil, canUpgradeUnsigned: (() -> Bool)? = nil) {
+    init(bundleURL: URL, onChange: @escaping ([String: Any]) -> Void, quit: @escaping () -> Void, reconnect: @escaping () -> Void, readTeam: (() throws -> String)? = nil, canUpgradeUnsigned: (() -> Bool)? = nil, headless: Bool = false) {
         let resolved = bundleURL.resolvingSymlinksInPath()
         self.bundleURL = resolved
+        self.headless = headless
         self.onChange = onChange; self.quit = quit; self.reconnect = reconnect
         self.readTeam = readTeam ?? { try CageUpdateFiles.signingInfo(resolved, bundle: true, currentApp: true) }
         self.canUpgradeUnsigned = canUpgradeUnsigned ?? {
@@ -443,7 +645,7 @@ final class CageAppUpdater {
         let version = Bundle(url: bundleURL)?.object(forInfoDictionaryKey: "CageVersion") as? String ?? "开发版本"
         state = ["phase": "idle", "currentVersion": version, "message": ""]
         let resultURL = root.appendingPathComponent("last-result.json")
-        if let data = try? Data(contentsOf: resultURL), data.count < 16384,
+        if !headless, let data = try? Data(contentsOf: resultURL), data.count < 16384,
            let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             state["message"] = result["message"] as? String ?? ""
             if result["success"] as? Bool == false { state["phase"] = "failed"; state["retryable"] = true }
@@ -477,7 +679,13 @@ final class CageAppUpdater {
         case "complete":
             if !busy && worker == nil && validationTask == nil && installer == nil && prepared != nil { beginInstallation() }
         case "cancel":
-            if installer == nil && state["phase"] as? String != "installing" { generation += 1; if let worker { CageUpdateFiles.stop(worker) }; validationTask?.cancel(); change(["phase": prepared == nil ? "available" : "ready", "message": "更新已暂停，可稍后继续", "retryable": true]) }
+            if installer == nil && state["phase"] as? String != "installing" {
+                generation += 1
+                if let worker { CageUpdateFiles.stop(worker) }
+                validationTask?.cancel()
+                if worker == nil && validationTask == nil && prepared == nil { ownership = nil }
+                change(["phase": prepared == nil ? "available" : "ready", "message": "更新已暂停，可稍后继续", "retryable": true])
+            }
         default: break
         }
         return state
@@ -532,7 +740,10 @@ final class CageAppUpdater {
         for (key, value) in values { state[key] = value }
         onChange(state)
     }
-    private func failure(_ message: String, retryAt: String = "") { change(["phase": "failed", "message": message, "retryable": true, "retryAt": retryAt]) }
+    private func failure(_ message: String, retryAt: String = "") {
+        if worker == nil && validationTask == nil && prepared == nil { ownership = nil }
+        change(["phase": "failed", "message": message, "retryable": true, "retryAt": retryAt])
+    }
     private var cage: URL { bundleURL.appendingPathComponent("Contents/Resources/cage") }
     private func resolveUpdatePublisher() -> (team: String, unsignedSource: Bool)? {
         if let ownTeam = try? readTeam() { return (ownTeam, false) }
@@ -540,6 +751,12 @@ final class CageAppUpdater {
         return nil
     }
     private func startDownload(checkOnly: Bool) {
+        do {
+            if ownership == nil { ownership = try CageUpdateLock.worker(for: bundleURL, downloadsAt: checkOnly ? nil : root) }
+        } catch {
+            change(["phase": error is CageUpdateBusy ? "waiting" : "failed", "message": error.localizedDescription, "retryable": true])
+            return
+        }
         generation += 1; let operation = generation
         change(["phase": "checking", "message": "正在检查更新，优先使用主机网络", "receivedBytes": 0, "totalBytes": 0, "retryable": false, "retryAt": ""])
         // Signed installs pin strictly to their own Team ID. Eligible unsigned
@@ -555,9 +772,10 @@ final class CageAppUpdater {
                 let process = Process(); process.executableURL = self.cage; process.arguments = ["app-update", checkOnly || team == nil ? "check" : "download"]
                 let pipe = Pipe(); process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
                 self.worker = process
-                do { try process.run() } catch { self.worker = nil; self.failure("无法启动更新检查，请确认应用组件完整"); return }
+                do { try process.run() } catch { self.worker = nil; self.ownership = nil; self.failure("无法启动更新检查，请确认应用组件完整"); return }
                 DispatchQueue.global(qos: .utility).async {
                     var pending = Data(); var last: [String: Any]?
+                    var lastVisible: [String: Any]?
                     while true {
                         let chunk = pipe.fileHandleForReading.availableData
                         if chunk.isEmpty { break }
@@ -565,7 +783,9 @@ final class CageAppUpdater {
                         if pending.count > 65536 { process.terminate(); break }
                         while let end = pending.firstIndex(of: 10) {
                             let line = pending.prefix(upTo: end); pending.removeSubrange(...end)
-                            guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
+                            guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                                  let phase = value["phase"] as? String,
+                                  ["checking", "current", "available", "downloading", "downloaded", "waiting", "failed"].contains(phase) else { continue }
                             last = value
                             var visible = value; visible.removeValue(forKey: "archivePath"); visible.removeValue(forKey: "sha256")
                             if team == nil && visible["phase"] as? String == "available" {
@@ -579,18 +799,29 @@ final class CageAppUpdater {
                             } else {
                                 visible["officialUpgrade"] = unsignedSource
                             }
-                            DispatchQueue.main.async { if self.generation == operation { self.change(visible) } }
+                            lastVisible = visible
+                            if ["checking", "downloading", "downloaded"].contains(phase) {
+                                DispatchQueue.main.async { if self.generation == operation { self.change(visible) } }
+                            }
                         }
                     }
                     process.waitUntilExit()
-                    let result = last
+                    let result = last, final = lastVisible
                     DispatchQueue.main.async {
                         if self.worker === process { self.worker = nil }
-                        guard self.generation == operation else { return }
+                        guard self.generation == operation else { self.ownership = nil; return }
+                        if !checkOnly, team != nil, let result, result["phase"] as? String == "downloaded", process.terminationStatus == 0 {
+                            self.verifyDownload(result, operation: operation)
+                            return
+                        }
+                        self.ownership = nil
                         if process.terminationStatus != 0 {
                             self.failure(result?["message"] as? String ?? "更新请求未完成，请重试", retryAt: result?["retryAt"] as? String ?? "")
-                        } else if !checkOnly, team != nil, let result, result["phase"] as? String == "downloaded" {
-                            self.verifyDownload(result, operation: operation)
+                        } else if let final, let phase = final["phase"] as? String,
+                                  ["current", "manual", "waiting", "failed"].contains(phase) || (checkOnly && phase == "available") {
+                            self.change(final)
+                        } else {
+                            self.failure("更新检查未返回完整结果，请重试")
                         }
                     }
                 }
@@ -601,20 +832,30 @@ final class CageAppUpdater {
         guard let path = result["archivePath"] as? String, let hash = result["sha256"] as? String,
               let version = result["latestVersion"] as? String, hash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { failure("下载进程返回了无效安装包"); return }
         let archive = URL(fileURLWithPath: path).resolvingSymlinksInPath()
-        guard archive.path.hasPrefix(root.resolvingSymlinksInPath().path + "/download-"), archive.lastPathComponent == "Cage.dmg" else { failure("安装包路径不属于本次私有下载"); return }
+        let downloadDirectory = archive.deletingLastPathComponent()
+        guard downloadDirectory.deletingLastPathComponent().path == root.resolvingSymlinksInPath().path,
+              downloadDirectory.lastPathComponent.hasPrefix("download-"), archive.lastPathComponent == "Cage.dmg" else { failure("安装包路径不属于本次私有下载"); return }
+        let keepForRetry = headless && archive.path == CageUpdateFiles.cachedArchive(in: root).path
+        let discardDownload = {
+            if keepForRetry { CageUpdateFiles.discardCachedArchive(in: self.root) }
+            else { try? FileManager.default.removeItem(at: downloadDirectory) }
+        }
         change(["phase": "verifying", "message": "正在验证 Apple 签名和应用内容", "retryable": false])
         let task = CageUpdateValidation()
         validationTask = task
         DispatchQueue.global(qos: .userInitiated).async {
             defer {
                 task.finish()
-                DispatchQueue.main.async { if self.validationTask === task { self.validationTask = nil } }
+                DispatchQueue.main.async {
+                    if self.validationTask === task { self.validationTask = nil }
+                    if self.prepared == nil && self.worker == nil && self.validationTask == nil { self.ownership = nil }
+                }
             }
             let directory = self.root.appendingPathComponent("verified-" + UUID().uuidString, isDirectory: true)
             do {
                 try task.checkCancellation()
                 guard let resolved = self.resolveUpdatePublisher() else {
-                    try? FileManager.default.removeItem(at: archive.deletingLastPathComponent())
+                    discardDownload()
                     DispatchQueue.main.async {
                         if self.generation == operation {
                             self.change(["phase": "manual", "message": Self.unsignedManualMessage, "retryable": false, "retryAt": ""])
@@ -627,7 +868,7 @@ final class CageAppUpdater {
                 try CageUpdateFiles.privateDirectory(directory)
                 let app = try CageUpdateFiles.extract(archive: archive, hash: hash, version: version, team: team, directory: directory, validation: task)
                 try task.checkCancellation()
-                try? FileManager.default.removeItem(at: archive.deletingLastPathComponent())
+                if !keepForRetry { discardDownload() }
                 DispatchQueue.main.async {
                     if self.generation != operation { try? FileManager.default.removeItem(at: directory); return }
                     self.prepared = (directory, app, version, team, unsignedSource)
@@ -636,13 +877,17 @@ final class CageAppUpdater {
                 }
             } catch {
                 try? FileManager.default.removeItem(at: directory)
-                try? FileManager.default.removeItem(at: archive.deletingLastPathComponent())
+                if !keepForRetry || !task.isCancelled { discardDownload() }
                 DispatchQueue.main.async { if self.generation == operation { self.failure(error.localizedDescription) } }
             }
         }
     }
     private func beginInstallation() {
         guard let prepared, installer == nil else { return }
+        if CageUpdateProcess.hasOtherWindow(bundleURL) {
+            change(["phase": "waiting", "message": "此安装还有其他 Cage 工作台。请保存工作并退出其他窗口后重试更新。", "retryable": true])
+            return
+        }
         change(["phase": "installing", "message": "正在准备安装更新", "retryable": false, "officialUpgrade": prepared.unsignedSource])
         let operation = generation
         let task = CageUpdateValidation()
@@ -664,7 +909,11 @@ final class CageAppUpdater {
                         throw CageUpdateError("请先将 Cage 安装到应用程序目录，再自动更新")
                     }
                 }
-                try CageUpdateFiles.verifyApp(prepared.app, version: prepared.version, team: prepared.team, validation: task)
+                do { try CageUpdateFiles.verifyApp(prepared.app, version: prepared.version, team: prepared.team, validation: task) }
+                catch {
+                    if self.headless && !task.isCancelled { CageUpdateFiles.discardCachedArchive(in: self.root) }
+                    throw error
+                }
                 let helper = prepared.directory.appendingPathComponent("CageUpdateInstaller")
                 let originalHelper = self.bundleURL.appendingPathComponent("Contents/Resources/CageUpdateInstaller")
                 try? FileManager.default.removeItem(at: helper)
@@ -674,7 +923,7 @@ final class CageAppUpdater {
                 }
                 let plan = CageUpdatePlan(version: prepared.version, team: prepared.team, target: self.bundleURL.path, candidate: prepared.app.path,
                     backup: prepared.directory.appendingPathComponent("previous.app").path, parentPID: ProcessInfo.processInfo.processIdentifier,
-                    resultPath: self.root.appendingPathComponent("last-result.json").path, unsignedSource: prepared.unsignedSource)
+                    resultPath: self.root.appendingPathComponent("last-result.json").path, unsignedSource: prepared.unsignedSource, requiresCommitReceipt: self.headless)
                 let planURL = prepared.directory.appendingPathComponent("install.json")
                 try CageUpdateFiles.write(JSONEncoder().encode(plan), to: planURL)
                 try task.checkCancellation()
@@ -688,17 +937,25 @@ final class CageAppUpdater {
         installer = process; installerInput = input
         do { try process.run() } catch { installer = nil; installerInput = nil; failure("无法启动安全安装程序"); return }
         DispatchQueue.global(qos: .userInitiated).async {
-            var data = Data()
-            while data.count < 16384 {
-                let byte = output.fileHandleForReading.readData(ofLength: 1)
-                if byte.isEmpty || byte == Data([10]) { break }
-                data.append(byte)
-            }
-            let response = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let response = CageUpdateFiles.installerReply(from: output.fileHandleForReading)
             DispatchQueue.main.async {
                 guard self.installer === process, !self.waitingForTermination else { return }
-                if response?["status"] as? String == "ready" { self.prepareEnvironment() }
+                if response?["status"] as? String == "ready" && (!self.headless || response?["canConfirmCommit"] as? Bool == true) { self.prepareEnvironment() }
                 else { self.abortInstaller(); self.failure(response?["message"] as? String ?? "安全安装准备失败，原应用已保留") }
+            }
+        }
+    }
+    private func awaitCommitReceipt(from process: Process) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let output = (process.standardOutput as? Pipe)?.fileHandleForReading
+            let reply = output.flatMap { CageUpdateFiles.installerReply(from: $0, within: 15) }
+            DispatchQueue.main.async {
+                if reply?["status"] as? String == "committed" {
+                    self.change(["phase": "handed_off", "message": "安全安装程序已接手，将启动新版 Cage 核验后完成安装"])
+                    self.quit()
+                } else {
+                    self.failure("安装请求已发送，但未收到安全安装程序接手的确认。请核对安装状态和当前版本。")
+                }
             }
         }
     }
@@ -729,16 +986,22 @@ final class CageAppUpdater {
                     guard !self.waitingForTermination else { return }
                     switch result["status"] as? String {
                     case "prepared" where process.terminationStatus == 0:
-                        guard self.installer?.isRunning == true else { self.failure("安装程序已退出，原应用已保留"); self.reconnect(); return }
+                        guard let installer = self.installer, installer.isRunning, let input = self.installerInput else { self.failure("安装程序已退出，原应用已保留"); self.reconnect(); return }
                         do {
-                            try self.installerInput?.fileHandleForWriting.write(contentsOf: Data("COMMIT\n".utf8))
-                            try self.installerInput?.fileHandleForWriting.close()
+                            try input.fileHandleForWriting.write(contentsOf: Data("COMMIT\n".utf8))
+                            try input.fileHandleForWriting.close()
                             self.installationCommitted = true
-                            self.change(["phase": "installing", "message": "正在安装并重启 Cage"])
-                            self.quit()
+                            if self.headless { self.awaitCommitReceipt(from: installer) }
+                            else {
+                                self.change(["phase": "installing", "message": "正在安装并重启 Cage"])
+                                self.quit()
+                            }
                         } catch { self.abortInstaller(); self.failure("无法开始安装，原应用已保留"); self.reconnect() }
                     case "stop_required":
-                        self.abortInstaller(); self.failure("环境仍在运行，请在工作台停止环境后重试安装")
+                        self.abortInstaller()
+                        let reason = result["message"] as? String ?? "环境仍在运行"
+                        if self.headless { self.change(["phase": "waiting", "message": reason + "。保存工作后运行 cage stop，再重试 cage update。"]) }
+                        else { self.failure(reason + "。请在工作台停止环境后重试安装") }
                     default:
                         self.abortInstaller(); self.failure(result["message"] as? String ?? "环境未能安全停止，更新未安装")
                     }

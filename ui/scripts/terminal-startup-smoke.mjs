@@ -30,6 +30,7 @@ for (const platform of ["darwin", "windows", "linux"]) {
     await page.getByRole("button", { name: "启动 Cage 环境", exact: true }).click();
     await page.getByRole("button", { name: "新建终端", exact: true }).first().click();
     await page.getByRole("menuitem", { name: /Claude/ }).first().click();
+    await page.getByRole("button", { name: "创建 Claude Code 终端", exact: true }).click();
     await page.getByText("正在准备 Claude 会话…", { exact: true }).waitFor();
     await page.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent.includes("Loading development channels"));
     assert.equal(await page.locator(".terminal-host").isVisible(), false);

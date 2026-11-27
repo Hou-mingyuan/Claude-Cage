@@ -32,27 +32,29 @@ try{
   });
 
   await page.getByRole("button",{name:"Claude 账号管理",exact:true}).click();
-  await page.getByText("调度设置 · 均衡分配",{exact:true}).click();
+  await page.getByRole("button",{name:"均衡分配",exact:true}).click();
   const select=page.getByRole("combobox",{name:"新会话分配",exact:true});
   const policy=page.getByRole("combobox",{name:"新会话切换授权",exact:true});
   const before=(await policy.boundingBox()).y;
   await select.click();
   assert.ok((await policy.boundingBox()).y>before+20,"options must occupy layout space");
   await select.press("End");await select.press("Enter");
-  await page.getByRole("region",{name:"账号优先顺序"}).count();
   assert.equal(scheduling.mode,"sequential");
-  await page.getByRole("button",{name:"提高 账号 B 的优先级"}).click();
-  await page.waitForFunction(()=>document.querySelector('.claude-account-order')?.textContent.startsWith('1. 账号 B'));
+  const priorityHandle = {name:"账号优先顺序 · 账号 B", exact:true};
+  await page.getByRole("button",priorityHandle).press("ArrowUp");
+  await page.getByRole("article").first().getByRole("button",priorityHandle).waitFor();
   assert.equal(profiles[0].id,"b");
   await policy.click();await page.getByRole("option",{name:"额度耗尽后自动接续",exact:true}).click();
   assert.equal(scheduling.switch_policy,"allow");
-  await page.getByRole("textbox",{name:"账号 A 的接续分组"}).fill("本人账号");
-  await page.getByRole("article",{name:"账号 A",exact:true}).getByRole("button",{name:"保存分组"}).click();
+  const accountA = page.getByRole("article",{name:"账号 A",exact:true});
+  await accountA.getByRole("button",{name:"设置",exact:true}).click();
+  await accountA.getByRole("textbox",{name:"账号 A 的接续分组"}).fill("本人账号");
+  await accountA.getByRole("button",{name:"保存",exact:true}).click();
   assert.equal(profiles.find(a=>a.id==="a").handoff_group,"本人账号");
   await page.screenshot({path:fileURLToPath(new URL("scheduling-desktop.png",out))});
   await page.reload();
   await page.getByRole("button",{name:"Claude 账号管理",exact:true}).click();
-  await page.getByText("调度设置 · 顺序优先",{exact:true}).waitFor();
+  await page.getByRole("button",{name:"顺序优先",exact:true}).waitFor();
 
   const phoneContext=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,userAgent:"CageMobile/1"});
   const phone=await phoneContext.newPage();

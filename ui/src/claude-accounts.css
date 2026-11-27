@@ -176,13 +176,13 @@
   font-weight: 550;
   color: var(--muted);
 }
-.claude-handoff-group {
+.claude-account-setting-form {
   display: flex;
   align-items: end;
   gap: 6px;
   min-width: 0;
 }
-.claude-handoff-group label {
+.claude-account-setting-form label {
   display: grid;
   flex: 1;
   min-width: 0;
@@ -191,9 +191,18 @@
   color: var(--muted);
   gap: 5px;
 }
-.claude-handoff-group input { width: 100%; min-width: 0; height: 34px !important; font-size: 0.8571rem; }
+.claude-account-setting-form input { width: 100%; min-width: 0; height: 34px !important; font-size: 0.8571rem; }
 .claude-config-field .inline-select-trigger { height: 34px !important; font-size: 0.8571rem; }
-.claude-handoff-group button { flex: none; min-height: 34px; height: 34px; padding: 0 11px; font-size: 0.82rem; }
+.claude-account-setting-form button { flex: none; min-height: 34px; height: 34px; padding: 0 11px; font-size: 0.82rem; }
+.claude-profile-command, .claude-account-details {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.claude-profile-command { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; margin: 8px 0 0; }
+.claude-profile-command code, .claude-account-details dd { color: var(--ink); overflow-wrap: anywhere; }
+.claude-account-details { display: flex; flex-wrap: wrap; grid-column: 1 / -1; gap: 8px 18px; margin: 0; }
+.claude-account-details > div { min-width: 0; max-width: 100%; }
+.claude-account-details dd { margin: 2px 0 0; }
 .claude-config-chips {
   display: flex;
   flex-wrap: wrap;

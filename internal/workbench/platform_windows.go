@@ -36,12 +36,14 @@ func processExists(pid int) bool {
 func terminateLegacy(pid int) error {
 	return errors.New("Windows 不支持接管未验证的旧版后台")
 }
-func detachedProcessAttributes(breakaway bool) *syscall.SysProcAttr {
+func detachedProcessAttributes(breakaway bool, visibility windowVisibility) *syscall.SysProcAttr {
 	flags := uint32(windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW)
 	if breakaway {
 		flags |= windows.CREATE_BREAKAWAY_FROM_JOB
 	}
-	return &syscall.SysProcAttr{HideWindow: true, CreationFlags: flags}
+	// CREATE_NO_WINDOW suppresses a console. HideWindow also hides the GUI
+	// on its first ShowWindow call, so only request it for background work.
+	return &syscall.SysProcAttr{HideWindow: visibility == windowHidden, CreationFlags: flags}
 }
 
 // CreateProcess fails with access denied when the caller's job does not

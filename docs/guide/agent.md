@@ -14,7 +14,7 @@ keywords: Agent CLI JSON 自动化 配置 接口 安装 诊断 修复 capabiliti
 
 ## Agent 从哪里开始
 
-下文的 `cage agent` 是供外部 Agent 配置和检查 Cage 的 JSON 接口，安装包中的实际命令见下表。在本机终端向 Claude Code 提问、传入管道或恢复会话，请使用同一程序的 `cage`、`cage -p` 或 `cage -r`。Linux 安装包的命令名为 `claude-cage`。[主机终端使用示例](workbench.md#在本机终端使用-claude-code)
+下文的 `cage agent` 是供外部 Agent 配置和检查 Cage 的 JSON 接口，安装包中的实际命令见下表。在本机终端向 Claude Code 提问、传入管道或恢复会话，请用 `cage claude` 启动默认账号的会话，用 `cage claude -p` 读取管道或用 `cage claude -r` 恢复会话。脚本要选指定账号时，可用 `cage sarah -p`，其中 `sarah` 是已登记的名称。Linux 安装包的命令名为 `claude-cage`。[主机终端使用示例](workbench.md#在本机终端使用-claude-code)
 
 | 平台 | 默认 CLI 位置 | 调用示例 |
 | --- | --- | --- |
@@ -69,7 +69,7 @@ cage agent call account.status
 cage agent host.inspect
 ```
 
-`init` 仅创建缺失的默认配置；已有有效配置会保留，损坏配置会报错。`service.start` 只启动缺失的本机后台，复用同一构建的现有后台，拒绝替换不匹配的构建。它不启动虚拟机。`doctor` 只读取当前状态，不启动服务、不更改网络或应用修复。
+`init` 仅创建缺失的默认配置，已有有效配置会保留，损坏配置会报错。`cage agent service.start` 启动缺失的本机控制服务，复用同一构建的现有服务，遇到不匹配的构建会报错。此时虚拟机保持原来的状态，Agent 完成配置后可调用 `environment.start`。用户在主机终端运行 `cage start` 则会一并启动本机虚拟机，等待环境就绪。`doctor` 只读取当前状态。[主机终端命令](workbench.md#后台服务与运行环境)
 
 `service.start` 继承调用者进程所在的权限与沙箱上下文，无法脱离调用者沙箱运行；在受限的 Agent 沙箱中仅放开 Cage 配置目录的写入权限不足以调用系统虚拟化接口或运行虚拟机。若 Agent 运行在受限沙箱内，请在宿主普通环境中启动原生 Cage 桌面应用，让后台服务在沙箱外运行后再由 Agent 连接操作。`host.inspect` 是在当前 CLI 进程内执行的本地探测：在 macOS 受限沙箱中读取 `kern.hv_support` 可能返回权限错误（如 `Operation not permitted`），这只说明当前调用上下文无权检测，不代表主机缺乏虚拟化或已运行的原生桌面后台不可用；不要据此触发重建、重装或误判主机不兼容，应在普通终端运行 `sysctl kern.hv_support` 核对，或结合已运行原生后台的 `status`、`guest.options` 判断状态（`guest.options` 返回 `available: false` 也反映当前环境就绪状态，而非硬件虚拟化检测结果）。
 

@@ -112,12 +112,20 @@ func TestStatelessCommandsNeedNoProfile(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "help", args: []string{"help"}, wantStdout: "Claude Cage"},
+		{name: "bare command", wantStdout: "cage <name> [args...]"},
+		{name: "implicit print", args: []string{"-p", "hello"}, wantCode: 2, wantStderr: "cage claude"},
+		{name: "implicit multiword prompt", args: []string{"review my changes"}, wantCode: 2, wantStderr: "cage claude"},
+		{name: "empty account name", args: []string{"", "hello"}, wantCode: 2, wantStderr: "cage claude"},
+		{name: "reserved auto", args: []string{"auto", "--help"}, wantCode: 2, wantStderr: "cage <名称>"},
 		{name: "short help", args: []string{"-h"}, wantStdout: "Claude Cage"},
 		{name: "version", args: []string{"version"}, wantStdout: version.Version},
 		{name: "long version", args: []string{"--version"}, wantStdout: version.Version},
 		{name: "short version", args: []string{"-V"}, wantStdout: version.Version},
 		{name: "version gate met", args: []string{"version", "--min", "0.0.0"}},
-		{name: "version gate missed", args: []string{"version", "--min", "99.0.0"}, wantCode: 1, wantStderr: "Update it:  update Cage"},
+		{name: "version gate missed", args: []string{"version", "--min", "99.0.0"}, wantCode: 1, wantStderr: "run 'cage update'"},
+		{name: "update help", args: []string{"update", "--help"}, wantStdout: "cage update [--check] [--yes]"},
+		{name: "update takes no package path", args: []string{"update", "/tmp/custom-installer"}, wantCode: 2, wantStderr: "Usage: cage update"},
+		{name: "update help with extra args", args: []string{"update", "--help", "x"}, wantCode: 2, wantStderr: "Usage: cage update"},
 		{name: "licenses", args: []string{"licenses"}, wantStdout: "MIT License"},
 		{name: "licenses usage", args: []string{"licenses", "x"}, wantCode: 2, wantStderr: "Usage: claude-cage licenses"},
 	}

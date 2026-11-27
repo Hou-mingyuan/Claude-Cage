@@ -1,8 +1,8 @@
-# Publish browser assets while the web endpoint is stopped, so clients cannot
-# mix old and new noVNC modules during an upgrade.
-if systemctl is-active --quiet cage-webvnc; then
-  sudo systemctl stop cage-webvnc
-fi
+# Pause the legacy web viewer while publishing its static modules. A listening
+# activation socket could otherwise start the viewer again during an update.
+for unit in cage-webvnc.socket cage-webvnc.service; do
+  if systemctl is-active --quiet "$unit"; then sudo systemctl stop "$unit"; fi
+done
 if ! command -v ip >/dev/null || ! test -x /usr/sbin/iptables || ! command -v Xtigervnc >/dev/null || ! command -v openbox >/dev/null || ! command -v xrandr >/dev/null || ! command -v xdotool >/dev/null || ! command -v ibus-daemon >/dev/null || ! /usr/bin/python3 -c 'import gi; gi.require_version("IBus", "1.0"); gi.require_version("Gtk", "3.0")' 2>/dev/null; then
   sudo env DEBIAN_FRONTEND=noninteractive APT_CONFIG="${CAGE_APT_CONFIG:-/dev/null}" apt-get install -y --no-install-recommends tigervnc-standalone-server tigervnc-tools openbox x11-xserver-utils xdotool libgtk-3-0 ibus ibus-gtk3 gir1.2-ibus-1.0 gir1.2-gtk-3.0 python3-gi python3-xlib xsettingsd iproute2 iptables
 fi
@@ -27,7 +27,7 @@ sudo tee /usr/local/bin/cage-editor-start >/dev/null <<'SCRIPT'
 #!/bin/sh
 set -eu
 workspace=$(cat /home/cage/.config/claude-cage/editor-workspace)
-exec /usr/bin/code-server --bind-addr 127.0.0.1:18080 --config /home/cage/.config/claude-cage/code-server.yaml --disable-telemetry --disable-update-check --disable-workspace-trust --disable-proxy "$workspace"
+exec /usr/bin/code-server --socket /run/code-server/desktop/http.sock --config /home/cage/.config/claude-cage/code-server.yaml --disable-telemetry --disable-update-check --disable-workspace-trust --disable-proxy "$workspace"
 SCRIPT
 sudo chmod 0755 /usr/local/bin/cage-editor-start
 sudo tee /etc/systemd/system/cage-editor.service >/dev/null <<'UNIT'
@@ -38,11 +38,34 @@ User=cage
 WorkingDirectory=/home/cage
 Environment=HOME=/home/cage
 EnvironmentFile=/etc/claude-cage/environment
+RuntimeDirectory=code-server/desktop
+RuntimeDirectoryMode=0700
 ExecStart=/usr/local/bin/cage-log-run /usr/local/bin/cage-editor-start
+TimeoutStartSec=15
+ExecStartPost=/bin/sh -c 'until curl -fsS --noproxy "*" --max-time 1 --unix-socket /run/code-server/desktop/http.sock http://localhost/healthz >/dev/null 2>&1; do sleep .1; done'
 LogNamespace=cage
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=15
+UNIT
+# Older code-server builds support a Unix socket but do not accept an
+# inherited listener. PID 1 queues first connections until the editor is ready.
+sudo tee /etc/systemd/system/cage-editor.socket >/dev/null <<'UNIT'
+[Unit]
+Description=Cage file editor listener
+[Socket]
+ListenStream=127.0.0.1:18080
+Service=cage-editor-forward.service
+UNIT
+sudo tee /etc/systemd/system/cage-editor-forward.service >/dev/null <<'UNIT'
+[Unit]
+Description=Cage file editor connection
+Requires=cage-editor.service
+After=cage-editor.service
+[Service]
+User=cage
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd /run/code-server/desktop/http.sock
+NoNewPrivileges=true
 UNIT
 printf 'cage-browser ALL=(root) NOPASSWD: /usr/bin/systemctl restart cage-editor.service\n' | sudo tee /etc/sudoers.d/cage-editor >/dev/null
 sudo chmod 0440 /etc/sudoers.d/cage-editor
@@ -147,13 +170,21 @@ fi
 sudo tee /etc/systemd/system/cage-webvnc.service >/dev/null <<'UNIT'
 [Unit]
 Description=Claude Cage browser web access
-Requires=cage-display.service
+Requires=cage-display.service cage-webvnc.socket
 After=cage-display.service
 [Service]
 User=cage-browser
-ExecStart=/usr/local/bin/cage-log-run /usr/bin/websockify --web=/usr/local/share/cage-webvnc 127.0.0.1:16080 127.0.0.1:15900
+StandardInput=socket
+StandardOutput=journal
+ExecStart=/usr/local/bin/cage-log-run /usr/bin/websockify --inetd --web=/usr/local/share/cage-webvnc 127.0.0.1:15900
 LogNamespace=cage
 Restart=on-failure
+UNIT
+sudo tee /etc/systemd/system/cage-webvnc.socket >/dev/null <<'UNIT'
+[Unit]
+Description=Cage browser web viewer listener
+[Socket]
+ListenStream=127.0.0.1:16080
 UNIT
 sudo systemctl daemon-reload
 
