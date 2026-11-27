@@ -1,3 +1,7 @@
+.management-content:has(> .plugin-desktop-app) {
+  padding: 0;
+  overflow: hidden;
+}
 .claude-desktop-view {
   position: relative;
   display: flex;
@@ -5,6 +9,24 @@
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+.claude-desktop-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+  flex: none;
+}
+.desktop-version {
+  font-size: 0.8571rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.desktop-toolbar-spacer {
+  flex: 1;
 }
 .desktop-sidebar-reveal {
   position: absolute;
@@ -100,7 +122,10 @@
 .account-desktop-row > .sidebar-link {flex:1;min-width:0;min-height:38px;background:transparent;}
 .account-desktop-nav > .account-desktop-row > .sidebar-link {min-height:36px;}
 .account-desktop-row > .sidebar-link:hover {background:transparent;}
-.account-desktop-row:is(:hover, :focus-within, :has([aria-expanded="true"])) .terminal-row-actions {visibility:visible;max-width:none;margin-inline-end:3px;opacity:1;transform:none;}
+.account-desktop-row.active .terminal-row-actions {background:linear-gradient(90deg, transparent, var(--selected, var(--hover)) 16px);}
+:dir(rtl) .account-desktop-row.active .terminal-row-actions {background:linear-gradient(270deg, transparent, var(--selected, var(--hover)) 16px);}
+.account-desktop-row:is(:hover, :focus-within, :has([aria-expanded="true"])) .terminal-row-actions {visibility:visible;pointer-events:auto;opacity:1;transform:translateY(-50%);}
+.account-desktop-row:is(:hover, :focus-within, :has([aria-expanded="true"])) .account-desktop-status {opacity:0;pointer-events:none;}
 .account-desktop-row .terminal-row-actions > button.desktop-delete-action:is(:hover, :focus-visible) {color:var(--danger);}
 .account-desktop-status {margin-inline-start:auto;flex:none;color:var(--muted);font-size:.7rem;}
 .account-desktop-nav .sidebar-link > svg,.account-desktop-title > svg,.account-desktop-pane header > button {flex:none;}

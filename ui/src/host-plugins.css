@@ -419,8 +419,8 @@ p.plugin-grants-empty { margin-top: 10px; }
 .plugin-grant-add { display: flex; gap: 8px; align-items: center; margin-top: 12px; min-width: 0; }
 .plugin-grant-add select { flex: 1; min-width: 0; height: 32px; }
 .plugin-grant-add button { flex: none; padding: 3px 12px; font-size: 0.8571rem; }
-.plugin-settings { display: flex; flex-direction: column; gap: 14px; }
-.plugin-settings .plugin-page-lead { margin-bottom: 0; }
+.plugin-config-form { display: flex; flex-direction: column; gap: 14px; }
+.plugin-config-form .plugin-page-lead { margin-bottom: 0; }
 .plugin-setting { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
 .plugin-setting > label { display: flex; gap: 8px; align-items: baseline; }
 .plugin-setting > label strong { color: var(--strong); font-size: 0.9643rem; }

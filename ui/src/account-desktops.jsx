@@ -548,6 +548,7 @@ export function DesktopPane({
   claudeDesktop = false,
   path: instancePath = entry(account.id),
   heading,
+  showHeader = true,
   inputLabel = "Claude Desktop 输入",
   closeLabel = "关闭实例",
   ready = true,
@@ -771,14 +772,16 @@ export function DesktopPane({
       onPointerDownCapture={onFocus}
       onFocusCapture={onFocus}
     >
-      <header>
-        <strong className="account-desktop-title" title={title(account)}>
-          {heading ?? <DesktopAccountLabel account={account} />}
-        </strong>
-        <button disabled={busy} onClick={close}>
-          {tr(closeLabel)}
-        </button>
-      </header>
+      {showHeader && (
+        <header>
+          <strong className="account-desktop-title" title={title(account)}>
+            {heading ?? <DesktopAccountLabel account={account} />}
+          </strong>
+          <button disabled={busy} onClick={close}>
+            {tr(closeLabel)}
+          </button>
+        </header>
+      )}
       <div className="account-desktop-screen" ref={box} />
       {sizeError && !message && (
         <div className="account-desktop-message" role="alert">

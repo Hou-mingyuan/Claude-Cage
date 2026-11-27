@@ -1150,7 +1150,7 @@ button.large {
   margin: 0;
   color: var(--ink);
 }
-.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label) {
+:where(.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label)) {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1159,8 +1159,8 @@ button.large {
   margin-bottom: 17px;
   color: var(--ink);
 }
-.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(.archive-search-input):not(.proxy-search-input),
-.settings-content .inline-select-trigger {
+:where(.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(.archive-search-input):not(.proxy-search-input)),
+:where(.settings-content .inline-select-trigger) {
   height: 36px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1549,9 +1549,9 @@ button.large {
 }
 
 /* Reading sizes remain comfortable at a normal 1280px workbench window. */
-.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label),
-.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]),
-.settings-content .inline-select-trigger,
+:where(.settings-content label:not(.check-line):not(.choice):not(.toggle-row):not(.settings-switch-row):not(.appearance-switch):not(.theme-swatch-chip):not(.proxy-hop-label)),
+:where(.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"])),
+:where(.settings-content .inline-select-trigger),
 .choice strong,
 .toggle-row strong,
 .settings-content h4,
@@ -1559,8 +1559,8 @@ button.large {
 .modal-footer button {
   font-size: 1rem;
 }
-.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(.archive-search-input):not(.proxy-search-input),
-.settings-content .inline-select-trigger {
+:where(.settings-content input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not(.archive-search-input):not(.proxy-search-input)),
+:where(.settings-content .inline-select-trigger) {
   height: 39px;
 }
 .section-title h3 {
@@ -2128,21 +2128,39 @@ svg {
   color: var(--muted);
 }
 .terminal-row-actions {
+  position: absolute;
+  inset-inline-end: 4px;
+  top: 50%;
+  z-index: 2;
   display: flex;
   align-items: center;
+  padding-inline-start: 16px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, transparent, var(--hover) 16px);
   visibility: hidden;
-  max-width: 0;
-  overflow: hidden;
+  pointer-events: none;
   opacity: 0;
-  transform: translateX(10px);
+  transform: translateY(-50%) translateX(4px);
   transition: opacity 140ms ease, transform 140ms ease;
+}
+.sidebar-tab.active .terminal-row-actions {
+  background: linear-gradient(90deg, transparent, var(--selected) 16px);
+}
+:dir(rtl) .terminal-row-actions {
+  background: linear-gradient(270deg, transparent, var(--hover) 16px);
+}
+:dir(rtl) .sidebar-tab.active .terminal-row-actions {
+  background: linear-gradient(270deg, transparent, var(--selected) 16px);
 }
 .sidebar-tab:is(:hover, :focus-within, :has([aria-expanded="true"])) .terminal-row-actions {
   visibility: visible;
-  max-width: none;
-  margin-right: 3px;
+  pointer-events: auto;
   opacity: 1;
-  transform: none;
+  transform: translateY(-50%);
+}
+.sidebar-tab:is(:hover, :focus-within, :has([aria-expanded="true"])) :is(.tab-pin, .session-activity, .session-owner) {
+  opacity: 0;
+  pointer-events: none;
 }
 .terminal-row-actions > button {
   flex: 0 0 auto;

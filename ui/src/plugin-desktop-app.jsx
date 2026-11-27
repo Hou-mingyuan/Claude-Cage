@@ -107,8 +107,6 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
         }}
       />}
       <header className="claude-desktop-toolbar">
-        <Monitor size={18} />
-        <strong>{app.title}</strong>
         <span className="desktop-version">{state?.version ? `v${state.version}` : tr("官方最新版")}</span>
         <span className="desktop-toolbar-spacer" />
         {state?.installed && <button className="quiet-button" disabled={busy} onClick={update}>{tr("更新应用")}</button>}
@@ -142,6 +140,7 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
               account={{ id: state.id, label: app.title }}
               path={path}
               heading={app.title}
+              showHeader={false}
               inputLabel={tr("{0} 输入", app.title)}
               closeLabel="关闭应用"
               visible={visible}
