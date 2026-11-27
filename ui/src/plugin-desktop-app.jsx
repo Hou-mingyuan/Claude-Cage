@@ -15,7 +15,7 @@ export const desktopAppPath = (plugin, app) =>
 // PluginDesktopApp is a vendor's application that a plugin runs in the
 // environment: installed from the vendor's source at its latest release,
 // updated from here, and shown in a display of its own.
-export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = true, keyboard, systemClipboard = true,
+export function PluginDesktopApp({ plugin, app, titleId, sidebarButton, status, uploads = [], visible = true, keyboard, systemClipboard = true,
   onStatus, onFallback, onConfirm, onDetails, onProjectOpened }) {
   const tr = useTranslation();
   const path = desktopAppPath(plugin, app.id);
@@ -106,15 +106,17 @@ export function PluginDesktopApp({ plugin, app, status, uploads = [], visible = 
           await onProjectOpened?.(workspace);
         }}
       />}
-      <header className="claude-desktop-toolbar">
+      <header className="chrome management-header claude-desktop-toolbar">
+        {sidebarButton}
+        <h1 id={titleId} tabIndex={-1}>{app.title}</h1>
         <span className="desktop-version">{state?.version ? `v${state.version}` : tr("官方最新版")}</span>
         <span className="desktop-toolbar-spacer" />
         {state?.installed && <button className="quiet-button" disabled={busy} onClick={update}>{tr("更新应用")}</button>}
-        {state?.installed && !state.running && <button className="quiet-button" disabled={busy} onClick={remove}><Trash2 size={15} />{tr("卸载")}</button>}
+        {state?.installed && !state.running && <button className="quiet-button" disabled={busy} onClick={remove}><Trash2 size={14} />{tr("卸载")}</button>}
         {state?.running && <button className="quiet-button" disabled={busy} onClick={async () => {
           if (await onConfirm({ title: tr("关闭 {0}？", app.title), body: tr("请先保存应用内的工作。浏览器和终端会继续运行。"), confirm: tr("关闭应用") })) run("stop");
-        }}><Power size={15} />{tr("关闭应用")}</button>}
-        <button className="icon-button" aria-label={tr("刷新") + " " + app.title + " " + tr("状态")} disabled={busy} onClick={() => refresh()}>
+        }}><Power size={14} />{tr("关闭应用")}</button>}
+        <button className="icon-button" aria-label={tr("刷新") + " " + app.title + " " + tr("状态")} title={tr("刷新")} disabled={busy} onClick={() => refresh()}>
           <RefreshCw size={15} />
         </button>
       </header>

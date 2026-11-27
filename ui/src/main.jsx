@@ -1986,12 +1986,15 @@ function App() {
           )}
           {managementPage && (
             <main className="management-page" aria-labelledby={managementPage + "-title"}>
-              <header className="chrome management-header">
-                {sidebarButton()}
-                <h1 id={managementPage + "-title"} tabIndex={-1}>{managementPage === "tailscale" ? "Tailscale" : managementPage === "plugins" && pluginPage ? pluginPageTitle(hostPlugins, pluginPage) : managementPage === "plugin-view" ? openPage?.title || tr("插件页面") : tr("Claude 账号管理")}</h1>
-              </header>
+              {!(managementPage === "plugin-view" && openPage?.kind === "desktop-app") && (
+                <header className="chrome management-header">
+                  {sidebarButton()}
+                  <h1 id={managementPage + "-title"} tabIndex={-1}>{managementPage === "tailscale" ? "Tailscale" : managementPage === "plugins" && pluginPage ? pluginPageTitle(hostPlugins, pluginPage) : managementPage === "plugin-view" ? openPage?.title || tr("插件页面") : tr("Claude 账号管理")}</h1>
+                </header>
+              )}
               <div className="management-content">
                 {managementPage === "plugin-view" && openPage?.kind === "desktop-app" ? <PluginDesktopApp key={`${currentClient.connection_id || "local"}:${pluginView}`}
+                  titleId={managementPage + "-title"} sidebarButton={sidebarButton()}
                   plugin={openPage.plugin} app={openPage.app} status={status} uploads={desktopFiles.uploads} visible={!settingsOpen && windowVisible}
                   keyboard={status.keyboard} systemClipboard={browser.capabilities?.systemClipboard !== false}
                   onStatus={notify} onFallback={(text, message) => setTransfer({ text, message })} onConfirm={confirm} onDetails={() => setDetails(true)}

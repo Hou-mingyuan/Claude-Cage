@@ -14,19 +14,51 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 44px;
-  padding: 6px 16px;
+  min-height: var(--workbench-header-height, 44px);
+  padding: 0 16px;
   border-bottom: 1px solid var(--line);
-  background: var(--chrome);
+  background: var(--paper);
   flex: none;
 }
+.claude-desktop-toolbar h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .desktop-version {
-  font-size: 0.8571rem;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--chrome);
+  border: 1px solid var(--line-subtle);
+  font-size: 0.75rem;
+  line-height: 1.5;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 .desktop-toolbar-spacer {
   flex: 1;
+  min-width: 8px;
+}
+.claude-desktop-toolbar .quiet-button {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 10px;
+  gap: 5px;
+  font-size: 0.82rem;
+  border-radius: 7px;
+  flex: none;
+  white-space: nowrap;
+}
+.claude-desktop-toolbar .icon-button {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  flex: none;
 }
 .desktop-sidebar-reveal {
   position: absolute;
