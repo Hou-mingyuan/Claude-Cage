@@ -85,7 +85,9 @@ replace_once('    clipboardPasteFrom(text) {', '''    // Cage: serialize the cli
             RFB.messages.clientFence(this._sock, (1 << 31) | 1, id);
         });
         if (this._rfbConnectionState !== 'connected') throw new Error('Input disconnected');
-        return action((...key) => this._cageSendKey(...key));
+        // These operations keep the current queue position. Queuing a new
+        // paste from inside the action would wait for the action itself.
+        return action((...key) => this._cageSendKey(...key), text => this._cagePasteText(text));
     }
 
     cagePasteContent(content, pasteImage, valid, pasteText) {

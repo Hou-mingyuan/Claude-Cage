@@ -229,31 +229,37 @@ export function installRemoteInput(
     },
     true,
   );
-  const sendText = (text) => {
-    if (disposed || !isActive() || !text) return;
-    // X0tigervnc cannot map arbitrary Unicode to its finite X11 keycode pool.
-    // The browser inserts committed text directly, without clipboard mutation.
-    insertText(text).catch(() => {
-      if (!disposed) onStatus("文字输入未完成，请重新连接画面后重试");
+  // Each Windows IME batch belongs to the desktop that accepted the input.
+  // A pane can lose focus between the last input event and this queue write.
+  const sendConfirmedText = (text) => {
+    insertText(text, { committed: true }).catch(() => {
+      onFallback(text, "文字输入未完成，请重新连接画面后重试");
     });
   };
-  // Some Windows IMEs hand a selected phrase to WebView2 as one plain
-  // insertion per ideograph. Each insertText is a separate guest transaction,
-  // so the phrase would appear piece by piece. Send the burst at once; any
-  // other input flushes it first so the guest keeps the typing order.
   const flushText = () => {
+    if (!pendingText) return;
     clearTimeout(pendingTimer);
     const text = pendingText;
     pendingText = "";
-    sendText(text);
+    sendConfirmedText(text);
   };
   const commit = (text) => {
     if (disposed || !isActive() || !text) return;
-    if (!webviewComposition()) { sendText(text); return; }
+    if (!webviewComposition()) {
+      insertText(text).catch(() => {
+        if (!disposed) onStatus("文字输入未完成，请重新连接画面后重试");
+      });
+      return;
+    }
+    // A single input event can contain an entire phrase or dictation. Keep it
+    // intact and send it directly when it does not fit in the burst buffer.
     if (pendingText.length + text.length > 1024) flushText();
+    if (text.length >= 1024) {
+      sendConfirmedText(text);
+      return;
+    }
+    if (!pendingText) pendingTimer = setTimeout(flushText, 8);
     pendingText += text;
-    clearTimeout(pendingTimer);
-    pendingTimer = setTimeout(flushText, 8);
   };
   // ASCII punctuation is left to the host input method so it can choose e.g.
   // fullwidth "？". Some methods (Sogou) never answer with an input event, so

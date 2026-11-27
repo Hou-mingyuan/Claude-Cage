@@ -129,12 +129,12 @@ function fixture(native = false, browserComposition = false, options = {}) {
       preparePaste: options.preparePaste,
       copyText: options.copyText,
       onStatus: (t) => statuses.push(t),
-      onFallback() {},
-      isActive: () => true,
+      onFallback: options.onFallback || (() => {}),
+      isActive: options.isActive || (() => true),
       setCopyContext: async (context, valid) => { if (valid()) copyContexts.push(context); },
-      insertText: async (text) => {
+      insertText: options.insertText || (async (text) => {
         texts.push(text);
-      },
+      }),
       insertComposition: browserComposition ? async (id, value) => {
         if (id !== currentTabId) throw new Error("Input target changed");
         compositions.push({ id, ...value });
@@ -505,6 +505,75 @@ test("Windows Claude Desktop sends a phrase delivered per ideograph as one inser
     await clock.advance(100);
     assert.deepEqual(f.texts, ["今天天气很好"]);
   } finally { f.controller.dispose(); }
+});
+
+test("a stream of ideographs flushes eight milliseconds after the first character", async () => {
+  const clock = fakeClock();
+  const f = fixture(false, false, { ...clock, claudeDesktop: true });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    f.key("keydown", "中", "");
+    await clock.advance(7);
+    f.key("keydown", "国", "");
+    await clock.advance(1);
+    assert.deepEqual(f.texts, ["中国"]);
+  } finally { f.controller.dispose(); }
+});
+
+test("a single oversized dictation bypasses the buffer intact after earlier text", async () => {
+  const clock = fakeClock();
+  const f = fixture(false, false, { ...clock, claudeDesktop: true });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    const dictated = "中".repeat(1023) + "🙂";
+    f.key("keydown", "前", "");
+    f.target.value = dictated;
+    inputEvent(f, "input", { data: dictated, inputType: "insertText" });
+    assert.deepEqual(f.texts, ["前", dictated]);
+    await clock.advance(8);
+    assert.deepEqual(f.texts, ["前", dictated]);
+  } finally { f.controller.dispose(); }
+});
+
+test("switching panes drains text accepted by the old pane and ignores subsequent input", async () => {
+  const clock = fakeClock();
+  let active = true;
+  const delivered = [];
+  const f = fixture(false, false, {
+    ...clock, claudeDesktop: true, isActive: () => active,
+    insertText: async (text, { committed }) => {
+      if (active || committed) delivered.push(text);
+    },
+  });
+  try {
+    f.win.chrome = { webview: {} };
+    f.rfb.focus();
+    f.key("keydown", "中", "");
+    active = false;
+    f.controller.deactivate();
+    f.key("keydown", "文", "");
+    await clock.advance(8);
+    assert.deepEqual(delivered, ["中"]);
+  } finally { f.controller.dispose(); }
+});
+
+test("closing the original connection keeps undelivered text available for manual recovery", async () => {
+  const clock = fakeClock(), recovered = [];
+  let active = true;
+  const f = fixture(false, false, {
+    ...clock, claudeDesktop: true, isActive: () => active,
+    insertText: async () => { throw new Error("Input disconnected"); },
+    onFallback: text => recovered.push(text),
+  });
+  f.win.chrome = { webview: {} };
+  f.rfb.focus();
+  f.key("keydown", "字", "");
+  active = false;
+  f.controller.dispose();
+  await clock.advance(8);
+  assert.deepEqual(recovered, ["字"]);
 });
 
 test("a pending phrase is sent before the next key, click, composition or blur", async () => {

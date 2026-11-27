@@ -18,6 +18,7 @@ import { BrowserUploads } from "./browser-uploads";
 import { ProjectDialog } from "./project-dialog";
 import { sendFiles } from "./file-transfer";
 import { shareClipboard } from "./shared-clipboard.mjs";
+import { commitDesktopText } from "./desktop-text-input.mjs";
 import { desktopInputChannel } from "./desktop-input-channel.mjs";
 import { installRemoteInput } from "./remote-input";
 import { guestKeys } from "./guest-keys.mjs";
@@ -662,10 +663,11 @@ export function DesktopPane({
           sizingRef.current = sizing;
           input.current?.dispose();
           channel?.dispose();
-          channel = desktopInputChannel(() => new WebSocket(runtimeSocketURL(path + "/input")));
+          const connection = desktopInputChannel(() => new WebSocket(runtimeSocketURL(path + "/input")));
+          channel = connection;
           const request = async (value) => {
             if (value.mode !== "cancel" && !valid()) throw new Error("输入实例已切换，请重新点击输入框");
-            const result = await channel.request(value);
+            const result = await connection.request(value);
             if (value.mode !== "cancel" && !valid()) throw new Error("输入实例已切换，请重新点击输入框");
             return result;
           };
@@ -699,17 +701,17 @@ export function DesktopPane({
                     return result;
                   })
                 : undefined,
-              insertText: (text) => !native_input
-                ? client.cagePasteContent(Promise.resolve({ text }), undefined, valid)
-                : client.cageRunInput(async () => {
-                    const state = await request({ mode: "status" });
-                    if (!state.available) throw new Error("输入位置已失去焦点，请重新点击输入框");
-                    const session = crypto.randomUUID().replaceAll("-", "");
-                    const begun = await request({ mode: "begin", context: state.context, session, sequence: 0 });
-                    if (!begun.available) throw new Error("输入位置已失去焦点，请重新点击输入框");
-                    const result = await request({ mode: "commit", session, sequence: 1, text });
-                    if (!result.available) throw new Error("文字输入未完成，请重新点击输入框");
-                  }),
+              insertText: (text, { committed = false } = {}) => {
+                // A confirmed batch may finish after another pane gains focus.
+                // Both transports here belong to this account and connection.
+                const targetValid = committed ? () => live : valid;
+                if (!native_input) return client.cagePasteContent(Promise.resolve({ text }), undefined, targetValid);
+                return client.cageRunInput(async () => {
+                  if (!targetValid()) throw new Error("输入实例已切换，请重新点击输入框");
+                  const state = await connection.request({ mode: "status" });
+                  return commitDesktopText(connection.request, state, text, targetValid);
+                });
+              },
               pasteContent: (content) => client.cagePasteContent(
                 content,
                 (payload) => {
