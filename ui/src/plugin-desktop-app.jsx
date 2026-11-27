@@ -7,6 +7,7 @@ import { ProjectDialog } from "./project-dialog";
 import { SafetyMessage } from "./safety-message";
 import { useWindowVisibility } from "./window-visibility";
 import { useTranslation } from "./interface-language.mjs";
+import { derivePluginDesktopAppState } from "./plugin-desktop-app-state.mjs";
 import "./claude-desktop.css";
 
 export const desktopAppPath = (plugin, app) =>
@@ -24,10 +25,32 @@ export function PluginDesktopApp({ plugin, app, titleId, sidebarButton, status, 
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [jobID, setJobID] = useState("");
+  const [pollRevision, setPollRevision] = useState(0);
   const [closedChooser, setClosedChooser] = useState("");
   const opened = useRef(false);
-  const busy = submitting || Boolean(status?.job?.running) || Boolean(jobID);
-  const ownJob = status?.job?.kind?.startsWith("desktop-app-");
+  const seenJob = useRef(false);
+  const {
+    ownJob,
+    ownGlobalJobRunning,
+    otherGlobalJobRunning,
+    sessionBlockedByGlobalJob,
+    sessionBusy,
+    maintenanceBusy,
+    canPollStatus,
+    progressMessage,
+    progressHasDetails,
+    refreshDisabled,
+  } = derivePluginDesktopAppState({
+    plugin,
+    appID: app.id,
+    status,
+    state,
+    submitting,
+    jobID,
+    visible,
+    windowVisible,
+  });
+  const maintenanceHint = otherGlobalJobRunning ? tr("另一个操作仍在进行，请稍候") : undefined;
   const refresh = async (valid = () => true) => {
     try {
       const value = await api(path + "/status");
@@ -43,7 +66,15 @@ export function PluginDesktopApp({ plugin, app, titleId, sidebarButton, status, 
     setError("");
     try {
       const job = await api(`${path}/${action}`, {});
-      setJobID(job.id);
+      if (job?.local) {
+        setState((prev) => prev
+          ? { ...prev, busy: true, action, message: job.message || prev.message, error: "" }
+          : prev);
+        setPollRevision((n) => n + 1);
+      } else if (job?.id) {
+        seenJob.current = false;
+        setJobID(job.id);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -52,33 +83,56 @@ export function PluginDesktopApp({ plugin, app, titleId, sidebarButton, status, 
   };
   useEffect(() => {
     opened.current = false;
+    seenJob.current = false;
+    setJobID("");
+    setError("");
     setState(null);
   }, [path]);
   useEffect(() => {
-    if (!visible || !windowVisible || !status?.vm_running || status?.job?.running) return;
+    if (ownJob && status?.job?.running && status.job.id && jobID !== status.job.id) {
+      seenJob.current = true;
+      setJobID(status.job.id);
+    }
+  }, [ownJob, status?.job?.id, status?.job?.running, jobID]);
+  useEffect(() => {
+    if (!canPollStatus) return;
     let disposed = false, timer;
     const poll = async () => {
       const value = await refresh(() => !disposed);
       if (disposed) return;
       if (value && !opened.current) {
-        opened.current = true;
-        if (value.installed && !value.running && !value.failed && !jobID) await run("start");
+        if (value.installed && !value.running && !value.failed && !value.busy && !sessionBlockedByGlobalJob && !ownGlobalJobRunning && !jobID) {
+          opened.current = true;
+          await run("start");
+        } else if (value.running || value.busy || value.failed || !value.installed) {
+          opened.current = true;
+        }
       }
-      if (!disposed) timer = setTimeout(poll, 5000);
+      if (!disposed) timer = setTimeout(poll, value?.busy ? 800 : 5000);
     };
     poll();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [visible, windowVisible, status?.vm_running, status?.job?.running, path]);
+  }, [canPollStatus, path, sessionBlockedByGlobalJob, ownGlobalJobRunning, pollRevision]);
   useEffect(() => {
-    if (!jobID || status?.job?.id !== jobID || status.job.running) return;
-    setJobID("");
-    if (status.job.error) {
-      setError(status.job.error);
+    if (!jobID) return;
+    if (status?.job?.id === jobID) {
+      seenJob.current = true;
+      if (status.job.running) return;
+      setJobID("");
+      if (status.job.error) {
+        setError(status.job.error);
+        return;
+      }
+      if (["desktop-app-install", "desktop-app-update"].includes(status.job.kind)) run("start");
+      else refresh();
       return;
     }
-    if (["desktop-app-install", "desktop-app-update"].includes(status.job.kind)) run("start");
-    else refresh();
-  }, [status?.job]);
+    if (seenJob.current && status?.job?.id && status.job.id !== jobID) {
+      seenJob.current = false;
+      setJobID("");
+      void refresh();
+    }
+  }, [status?.job, jobID]);
   const appUploads = uploads.filter((item) => state?.id && item.desktop === state.id);
   const directoryRequest = appUploads.find((item) => item.directory && item.id !== closedChooser);
   const update = async () => {
@@ -89,6 +143,7 @@ export function PluginDesktopApp({ plugin, app, titleId, sidebarButton, status, 
     if (!await onConfirm({ title: tr("卸载 {0}？", app.title), body: tr("卸载会删除应用文件。登录、设置和项目留在环境中，重新安装后继续使用。"), confirm: tr("卸载应用") })) return;
     run("remove");
   };
+  const visibleError = error || state?.error || "";
   return (
     <section className="claude-desktop-view plugin-desktop-app" aria-label={app.title}>
       {!nativeAvailable() && <BrowserUploads requests={appUploads} onStatus={onStatus} />}
@@ -111,28 +166,28 @@ export function PluginDesktopApp({ plugin, app, titleId, sidebarButton, status, 
         <h1 id={titleId} tabIndex={-1}>{app.title}</h1>
         <span className="desktop-version">{state?.version ? `v${state.version}` : tr("官方最新版")}</span>
         <span className="desktop-toolbar-spacer" />
-        {state?.installed && <button className="quiet-button" disabled={busy} onClick={update}>{tr("更新应用")}</button>}
-        {state?.installed && !state.running && <button className="quiet-button" disabled={busy} onClick={remove}><Trash2 size={14} />{tr("卸载")}</button>}
-        {state?.running && <button className="quiet-button" disabled={busy} onClick={async () => {
+        {state?.installed && <button className="quiet-button" disabled={maintenanceBusy} title={maintenanceHint} onClick={update}>{tr("更新应用")}</button>}
+        {state?.installed && !state.running && <button className="quiet-button" disabled={maintenanceBusy} title={maintenanceHint} onClick={remove}><Trash2 size={14} />{tr("卸载")}</button>}
+        {state?.running && <button className="quiet-button" disabled={sessionBusy} onClick={async () => {
           if (await onConfirm({ title: tr("关闭 {0}？", app.title), body: tr("请先保存应用内的工作。浏览器和终端会继续运行。"), confirm: tr("关闭应用") })) run("stop");
         }}><Power size={14} />{tr("关闭应用")}</button>}
-        <button className="icon-button" aria-label={tr("刷新") + " " + app.title + " " + tr("状态")} title={tr("刷新")} disabled={busy} onClick={() => refresh()}>
+        <button className="icon-button" aria-label={tr("刷新") + " " + app.title + " " + tr("状态")} title={tr("刷新")} disabled={refreshDisabled} onClick={() => refresh()}>
           <RefreshCw size={15} />
         </button>
       </header>
-      {(error || state?.failed) && (
+      {(visibleError || state?.failed) && (
         <div className="connection-banner" role="alert">
-          <SafetyMessage message={error || (state?.failure_reason === "oom-kill"
+          <SafetyMessage message={visibleError || (state?.failure_reason === "oom-kill"
             ? tr("环境内存不足，{0} 已被系统关闭。请在设置中检查计算资源后重新打开。", app.title)
             : tr("{0} 未能启动。可重新打开，或点“更新应用”安装官方最新版本；仍失败时可能需要升级插件。", app.title))} />
           {onDetails && <button onClick={onDetails}>{tr("操作详情")}</button>}
         </div>
       )}
-      {busy && ownJob && status?.job?.message && (
+      {progressMessage && (
         <div className="desktop-progress" role="status">
           <RefreshCw size={16} className="spin" />
-          {status.job.message}
-          {onDetails && <button className="text-button" onClick={onDetails}>{tr("查看进度")}</button>}
+          {progressMessage}
+          {progressHasDetails && onDetails && <button className="text-button" onClick={onDetails}>{tr("查看进度")}</button>}
         </div>
       )}
       <div className="desktop-screen">
@@ -154,7 +209,7 @@ export function PluginDesktopApp({ plugin, app, titleId, sidebarButton, status, 
               onStatus={onStatus}
               onFallback={onFallback}
               onControl={() => {}}
-              busy={busy}
+              busy={sessionBusy}
               close={() => run("stop")}
             />
           </div>
@@ -164,15 +219,25 @@ export function PluginDesktopApp({ plugin, app, titleId, sidebarButton, status, 
             <h2>{app.title}</h2>
             <p>{tr("在环境中运行官方应用。应用从官方渠道安装，默认使用最新版本，登录与数据保留在环境里。")}</p>
             <div className="desktop-actions">
-              {!state?.installed ? (
-                <button className="primary" disabled={busy || !status?.vm_running} onClick={() => run("install")}>
+              {state ? (
+                !state.installed ? (
+                  <button className="primary" disabled={maintenanceBusy || !status?.vm_running} title={maintenanceHint} onClick={() => run("install")}>
+                    <Download size={16} />{tr("下载并安装")}
+                  </button>
+                ) : (
+                  <button className="primary" disabled={sessionBusy || !status?.vm_running} onClick={() => run("start")}>
+                    <Monitor size={16} />{tr("打开应用")}
+                  </button>
+                )
+              ) : !status?.vm_running ? (
+                <button className="primary" disabled>
                   <Download size={16} />{tr("下载并安装")}
                 </button>
-              ) : (
-                <button className="primary" disabled={busy || !status?.vm_running} onClick={() => run("start")}>
-                  <Monitor size={16} />{tr("打开应用")}
+              ) : error ? (
+                <button className="quiet-button" disabled={refreshDisabled} onClick={() => refresh()}>
+                  {tr("重新读取状态")}
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         )}

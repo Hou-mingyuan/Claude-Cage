@@ -601,6 +601,7 @@ func (s *Server) stopEnvironment() (returned error) {
 	s.mu.Unlock()
 	s.terminals.closeAll()
 	s.mobileCLI.stopAll()
+	s.desktopAppOps.cancelAll()
 	s.closeProjectShares()
 	s.closeHostTools()
 	s.notifications.stopWatcher()

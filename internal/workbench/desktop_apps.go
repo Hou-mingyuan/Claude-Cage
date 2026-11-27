@@ -14,11 +14,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/sylvinus/agent-vm/internal/cage"
+	"github.com/sylvinus/agent-vm/internal/diagnostics"
 	"github.com/sylvinus/agent-vm/internal/hostbridge"
+	"github.com/sylvinus/agent-vm/internal/usererror"
 )
 
 //go:embed linux-app-desktop.sh
@@ -132,6 +135,216 @@ func desktopAppRemoveScript(t desktopAppTarget) string {
 	return "set -euo pipefail\napp_id=" + t.id + "\n" + linuxAppRemove
 }
 
+func desktopAppTargetKey(t desktopAppTarget) string {
+	return t.plugin + "/" + t.app.ID
+}
+
+// desktopAppSessionAllowedDuringJob reports whether starting or stopping a
+// plugin desktop application may run alongside the active global workbench job.
+// Package installation, updates and removals still serialize globally, while
+// opening or closing another already-installed app only touches its own display
+// service.
+func desktopAppSessionAllowedDuringJob(job Job, targetKey string) bool {
+	if !job.Running {
+		return true
+	}
+	switch job.Kind {
+	case "desktop-app-install", "desktop-app-update", "desktop-app-remove":
+		return job.Target != "" && job.Target != targetKey
+	case "claude-desktop-install", "claude-desktop-update", "claude-desktop-start", "claude-desktop-stop",
+		"desktop-instance-start", "desktop-instance-stop",
+		"environment-tools", "tailscale-install",
+		"safety", "network-recovery", "proxy", "proxy-update", "proxy-network", "project":
+		return true
+	default:
+		return false
+	}
+}
+
+type desktopAppOp struct {
+	id      string
+	action  string
+	running bool
+	message string
+	err     string
+	cancel  context.CancelFunc
+	done    chan struct{}
+}
+
+type desktopAppOpReply struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Target  string `json:"target"`
+	Running bool   `json:"running"`
+	Message string `json:"message"`
+	Local   bool   `json:"local"`
+}
+
+type desktopAppOpManager struct {
+	mu     sync.Mutex
+	ops    map[string]*desktopAppOp
+	closed bool
+}
+
+func (m *desktopAppOpManager) snapshot(appID string) (busy bool, action, message, errText string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	op := m.ops[appID]
+	if op == nil {
+		return false, "", "", ""
+	}
+	if op.running {
+		return true, op.action, op.message, ""
+	}
+	return false, "", "", op.err
+}
+
+func (m *desktopAppOpManager) clearError(appID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if op := m.ops[appID]; op != nil && !op.running {
+		op.err = ""
+	}
+}
+
+func (m *desktopAppOpManager) cancelAndWait(appID string) {
+	m.mu.Lock()
+	op := m.ops[appID]
+	var done chan struct{}
+	if op != nil {
+		if op.running && op.cancel != nil {
+			op.cancel()
+		}
+		if op.running {
+			done = op.done
+		} else {
+			op.err = ""
+		}
+	}
+	m.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	m.clearError(appID)
+}
+
+func (m *desktopAppOpManager) cancelAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, op := range m.ops {
+		if op.running && op.cancel != nil {
+			op.cancel()
+		}
+		if !op.running {
+			op.err = ""
+		}
+	}
+}
+
+func (m *desktopAppOpManager) close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
+	for _, op := range m.ops {
+		if op.running && op.cancel != nil {
+			op.cancel()
+		}
+	}
+}
+
+func (m *desktopAppOpManager) start(s *Server, target desktopAppTarget, action string, run func(context.Context) error) (desktopAppOpReply, int, error) {
+	targetKey := desktopAppTargetKey(target)
+	job := s.jobs.snapshot()
+	if !desktopAppSessionAllowedDuringJob(job, targetKey) {
+		if job.Target == targetKey && strings.HasPrefix(job.Kind, "desktop-app-") {
+			return desktopAppOpReply{}, http.StatusConflict, fmt.Errorf("%s 正在进行维护操作，请稍候", target.app.Title)
+		}
+		return desktopAppOpReply{}, http.StatusConflict, fmt.Errorf("%w：当前正在%s。请等待完成，或先停止当前操作。", errJobBusy, jobName(job.Kind))
+	}
+	activityCtx, finish, err := s.beginActivity(context.Background())
+	if err != nil {
+		return desktopAppOpReply{}, http.StatusServiceUnavailable, err
+	}
+	message := "正在关闭 " + target.app.Title + "…"
+	if action == "start" {
+		message = "正在打开 " + target.app.Title + "…"
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		finish()
+		return desktopAppOpReply{}, http.StatusServiceUnavailable, errJobsClosed
+	}
+	if existing := m.ops[target.id]; existing != nil && existing.running {
+		if existing.action == action {
+			reply := desktopAppOpReply{
+				ID:      existing.id,
+				Kind:    "desktop-app-" + existing.action,
+				Target:  targetKey,
+				Running: true,
+				Message: existing.message,
+				Local:   true,
+			}
+			m.mu.Unlock()
+			finish()
+			return reply, http.StatusOK, nil
+		}
+		busyMessage := target.app.Title + " 正在打开，请稍候"
+		if existing.action == "stop" {
+			busyMessage = target.app.Title + " 正在关闭，请稍候"
+		}
+		m.mu.Unlock()
+		finish()
+		return desktopAppOpReply{}, http.StatusConflict, errors.New(busyMessage)
+	}
+	if m.ops == nil {
+		m.ops = make(map[string]*desktopAppOp)
+	}
+	opCtx, cancel := context.WithCancel(activityCtx)
+	op := &desktopAppOp{
+		id:      randomToken()[:12],
+		action:  action,
+		running: true,
+		message: message,
+		cancel:  cancel,
+		done:    make(chan struct{}),
+	}
+	m.ops[target.id] = op
+	reply := desktopAppOpReply{
+		ID:      op.id,
+		Kind:    "desktop-app-" + action,
+		Target:  targetKey,
+		Running: true,
+		Message: message,
+		Local:   true,
+	}
+	m.mu.Unlock()
+
+	go func() {
+		defer func() {
+			cancel()
+			close(op.done)
+			finish()
+		}()
+		runErr := run(opCtx)
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.ops[target.id] != op {
+			return
+		}
+		op.running = false
+		op.cancel = nil
+		op.message = ""
+		if runErr != nil && !errors.Is(runErr, context.Canceled) {
+			op.err = usererror.Display(jobName("desktop-app-"+action), runErr, "仍无法处理时，"+failureHelp).Error()
+			diagnostics.Log("error", "desktop-app", fmt.Sprintf("%s %s: %v", target.id, action, runErr))
+		} else {
+			op.err = ""
+		}
+	}()
+	return reply, http.StatusOK, nil
+}
+
 type desktopAppState struct {
 	ID        string `json:"id"`
 	Installed bool   `json:"installed"`
@@ -141,6 +354,12 @@ type desktopAppState struct {
 	Failed    bool   `json:"failed"`
 	// FailureReason is oom-kill when the system ended the application to free memory.
 	FailureReason string `json:"failure_reason,omitempty"`
+	// Busy, Action, Message and Error report an in-flight or failed per-app
+	// start/stop operation independently of global maintenance jobs.
+	Busy    bool   `json:"busy,omitempty"`
+	Action  string `json:"action,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 const desktopAppSnapshot = `python3 -I - %s <<'APP_STATE'
@@ -208,6 +427,10 @@ func (s *Server) desktopApp(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "读取应用状态失败，请确认环境仍在运行", http.StatusBadGateway)
 			return
 		}
+		if state.Running {
+			s.desktopAppOps.clearError(target.id)
+		}
+		state.Busy, state.Action, state.Message, state.Error = s.desktopAppOps.snapshot(target.id)
 		jsonReply(w, state)
 		return
 	case "vnc":
@@ -247,13 +470,24 @@ func (s *Server) desktopApp(w http.ResponseWriter, r *http.Request) {
 		}
 		displayResizeReply(w, size, scale, output)
 		return
+	case "start", "stop":
+		reply, code, err := s.desktopAppOps.start(s, target, action, func(ctx context.Context) error {
+			return s.runDesktopAppSession(ctx, target, action)
+		})
+		if err != nil {
+			http.Error(w, err.Error(), code)
+			return
+		}
+		jsonReply(w, reply)
+		return
 	}
-	s.launchRequest(w, r, "desktop-app-"+action, func() error {
+	s.launchRequestWithTarget(w, r, "desktop-app-"+action, desktopAppTargetKey(target), func() error {
 		return s.changeDesktopApp(target, action)
 	})
 }
 
 func (s *Server) changeDesktopApp(t desktopAppTarget, action string) error {
+	s.desktopAppOps.cancelAndWait(t.id)
 	title := t.app.Title
 	switch action {
 	case "install", "update":
@@ -264,6 +498,8 @@ func (s *Server) changeDesktopApp(t desktopAppTarget, action string) error {
 		if !allowed {
 			return errors.New("工作台正在退出，请稍后重试安装")
 		}
+		stopMonitor := s.keepNetworkAliveDuringInstall(s.operationContext())
+		defer stopMonitor()
 		plan, err := prepareDesktopAppInstall(t, reviewedDesktopApps[t.plugin])
 		if err != nil {
 			return err
@@ -288,9 +524,17 @@ func (s *Server) changeDesktopApp(t desktopAppTarget, action string) error {
 	case "remove":
 		s.setMessage("正在卸载 " + title + "…")
 		return s.runDesktopScript(desktopAppRemoveScript(t), 5*time.Minute)
-	case "start":
-		s.setMessage("正在打开 " + title + "…")
-		if err := s.runDesktopScript(cage.DesktopAppSupportScript(), 30*time.Second); err != nil {
+	default:
+		return s.runDesktopAppSession(s.operationContext(), t, action)
+	}
+}
+
+func (s *Server) runDesktopAppSession(ctx context.Context, t desktopAppTarget, action string) error {
+	if s.desktopAppOpRunner != nil {
+		return s.desktopAppOpRunner(ctx, t, action)
+	}
+	if action == "start" {
+		if err := s.runDesktopAppSupport(ctx, t); err != nil {
 			return err
 		}
 		key, err := s.account.desktopKey()
@@ -298,15 +542,43 @@ func (s *Server) changeDesktopApp(t desktopAppTarget, action string) error {
 			return err
 		}
 		defer clear(key)
-		return s.runDesktopApp(t, "start", key)
-	default:
-		s.setMessage("正在关闭 " + title + "…")
-		return s.runDesktopApp(t, "stop", nil)
+		return s.runDesktopApp(ctx, t, "start", key)
 	}
+	return s.runDesktopApp(ctx, t, "stop", nil)
 }
 
-func (s *Server) runDesktopApp(t desktopAppTarget, action string, key []byte) error {
-	ctx, cancel := context.WithTimeout(s.operationContext(), 100*time.Second)
+func (s *Server) runDesktopAppSupport(ctx context.Context, t desktopAppTarget) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	unit := "desktop-app-support-" + t.id
+	command := fmt.Sprintf("sudo systemd-run --quiet --pipe --wait --collect --unit=%s --property=User=cage --property=RuntimeMaxSec=30 --property=KillMode=control-group --setenv=HOME=/home/cage --working-directory=/home/cage /bin/bash -se", unit)
+	var err error
+	command, err = s.linuxTemplate(command)
+	if err != nil {
+		return err
+	}
+	script, err := s.linuxTemplate(cage.DesktopAppSupportScript())
+	if err != nil {
+		return err
+	}
+	cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", command)
+	cmd.Stdin = strings.NewReader(script)
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			cleanup, finish := context.WithTimeout(context.Background(), 5*time.Second)
+			defer finish()
+			_, _ = s.guest(cleanup, "sudo systemctl stop "+unit+".service")
+			return ctx.Err()
+		}
+		return executionFailure("准备 "+t.app.Title, err, output.String())
+	}
+	return nil
+}
+
+func (s *Server) runDesktopApp(ctx context.Context, t desktopAppTarget, action string, key []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Second)
 	defer cancel()
 	command := fmt.Sprintf("exec /bin/bash -c %s -- %s %s", shellescape.Quote(linuxAppDesktop), t.id, action)
 	cmd := s.sshCommand(ctx, "-T", s.sshTarget(), "--", command)
@@ -314,14 +586,16 @@ func (s *Server) runDesktopApp(t desktopAppTarget, action string, key []byte) er
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Run(); err != nil {
-		_, _ = s.jobs.execution().Write(output.Bytes())
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if bytes.Contains(output.Bytes(), []byte("应用尚未安装")) {
 			return errors.New("请先安装 " + t.app.Title)
 		}
 		if bytes.Contains(output.Bytes(), []byte("应用程序缺失")) {
 			return errors.New(t.app.Title + " 的程序缺失，请点击“更新 / 修复安装”")
 		}
-		return executionFailure("操作 "+t.app.Title, errors.Join(ctx.Err(), err), s.jobs.snapshot().Log)
+		return executionFailure("操作 "+t.app.Title, errors.Join(ctx.Err(), err), output.String())
 	}
 	return nil
 }

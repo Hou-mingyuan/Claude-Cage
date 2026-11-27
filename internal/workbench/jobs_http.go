@@ -32,8 +32,16 @@ func (s *Server) launchRequest(w http.ResponseWriter, r *http.Request, kind stri
 	s.launchFrom(w, requestInitiator(r), kind, run)
 }
 
+func (s *Server) launchRequestWithTarget(w http.ResponseWriter, r *http.Request, kind, target string, run func() error) {
+	s.launchFromTarget(w, requestInitiator(r), kind, target, run)
+}
+
 func (s *Server) launchFrom(w http.ResponseWriter, initiator, kind string, run func() error) {
-	job, err := s.submitJobWithInitiator(initiator, kind, run)
+	s.launchFromTarget(w, initiator, kind, "", run)
+}
+
+func (s *Server) launchFromTarget(w http.ResponseWriter, initiator, kind, target string, run func() error) {
+	job, err := s.submitJobWithInitiatorTarget(initiator, kind, target, run)
 	switch {
 	case errors.Is(err, errJobsClosed):
 		http.Error(w, "后台正在更新，请重新打开 Cage。", http.StatusServiceUnavailable)
