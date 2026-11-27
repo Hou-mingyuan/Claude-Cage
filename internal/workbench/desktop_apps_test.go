@@ -212,6 +212,9 @@ func TestDesktopAppSessionUsesHiDPIAndDynamicScaling(t *testing.T) {
 		`Xft/DPI %s\nGdk/WindowScalingFactor 1\nGdk/UnscaledDPI %s\n`,
 		`printf '%s\n' "$!" > "$XDG_RUNTIME_DIR/xsettings.pid"`,
 		`theme-variant`,
+		`_NET_WM_STATE_MAXIMIZED_HORZ`,
+		`_NET_WM_STATE_MAXIMIZED_VERT`,
+		`WM_TRANSIENT_FOR`,
 	} {
 		if !strings.Contains(linuxAppDesktop, want) {
 			t.Fatalf("linux-app-desktop.sh missing HiDPI/desktop alignment piece %q", want)

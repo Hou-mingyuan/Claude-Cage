@@ -108,6 +108,81 @@ cat > "$XDG_RUNTIME_DIR/windows.xml" <<'XML'
 <openbox_config xmlns="http://openbox.org/3.4/rc"><desktops><number>1</number></desktops><applications><application type="normal"><decor>no</decor><maximized>yes</maximized></application></applications></openbox_config>
 XML
 openbox --config-file "$XDG_RUNTIME_DIR/windows.xml" >/dev/null 2>&1 &
+# Some desktop apps (for example Electron onboarding windows) call setBounds
+# right after mapping, which unmaximizes them in Openbox and exposes the black
+# X11 root window around the edges. Keep top-level normal windows maximized
+# without touching dialogs, transient popups or fullscreen windows.
+python3 -I - <<'PYMAX' >/dev/null 2>&1 &
+from Xlib import X, display, protocol
+
+conn = display.Display()
+root = conn.screen().root
+a_clients = conn.intern_atom('_NET_CLIENT_LIST')
+a_state = conn.intern_atom('_NET_WM_STATE')
+a_max_h = conn.intern_atom('_NET_WM_STATE_MAXIMIZED_HORZ')
+a_max_v = conn.intern_atom('_NET_WM_STATE_MAXIMIZED_VERT')
+a_full = conn.intern_atom('_NET_WM_STATE_FULLSCREEN')
+a_hidden = conn.intern_atom('_NET_WM_STATE_HIDDEN')
+a_type = conn.intern_atom('_NET_WM_WINDOW_TYPE')
+a_normal = conn.intern_atom('_NET_WM_WINDOW_TYPE_NORMAL')
+a_transient = conn.intern_atom('WM_TRANSIENT_FOR')
+
+root.change_attributes(event_mask=X.PropertyChangeMask)
+watched = set()
+attempts = {}
+
+def ensure(wid):
+    if attempts.get(wid, 0) >= 8:
+        return
+    try:
+        win = conn.create_resource_object('window', wid)
+        if win.get_full_property(a_transient, X.AnyPropertyType):
+            return
+        wtype = win.get_full_property(a_type, X.AnyPropertyType)
+        if wtype and wtype.value and a_normal not in wtype.value:
+            return
+        if wid not in watched:
+            win.change_attributes(event_mask=X.PropertyChangeMask | X.StructureNotifyMask)
+            watched.add(wid)
+        st = win.get_full_property(a_state, X.AnyPropertyType)
+        vals = set(st.value) if st and st.value else set()
+        if a_full in vals or a_hidden in vals or (a_max_h in vals and a_max_v in vals):
+            return
+        attempts[wid] = attempts.get(wid, 0) + 1
+        ev = protocol.event.ClientMessage(
+            window=win,
+            client_type=a_state,
+            data=(32, [1, a_max_h, a_max_v, 2, 0]),
+        )
+        root.send_event(ev, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+        conn.flush()
+    except Exception:
+        pass
+
+def sync_clients():
+    prop = root.get_full_property(a_clients, X.AnyPropertyType)
+    wids = list(prop.value) if prop and prop.value else []
+    for wid in wids:
+        ensure(wid)
+    stale = watched - set(wids)
+    watched.difference_update(stale)
+    for wid in stale:
+        attempts.pop(wid, None)
+
+sync_clients()
+while True:
+    ev = conn.next_event()
+    if ev.type == X.PropertyNotify:
+        if ev.window == root and ev.atom == a_clients:
+            sync_clients()
+        elif ev.atom == a_state and ev.window.id in watched:
+            ensure(ev.window.id)
+    elif ev.type == X.ConfigureNotify and ev.window.id in watched:
+        ensure(ev.window.id)
+    elif ev.type == X.DestroyNotify:
+        watched.discard(ev.window.id)
+        attempts.pop(ev.window.id, None)
+PYMAX
 # Pace this instance's display independently of the other Desktop sessions.
 if [ -x /usr/local/bin/cage-display-governor ]; then
   /usr/local/bin/cage-display-governor &
